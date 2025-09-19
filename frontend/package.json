@@ -10,6 +10,12 @@
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^7.0.1",
+    "@fullcalendar/core": "^6.1.19",
+    "@fullcalendar/daygrid": "^6.1.19",
+    "@fullcalendar/interaction": "^6.1.19",
+    "@fullcalendar/timegrid": "^6.1.19",
+    "@fullcalendar/vue3": "^6.1.19",
+    "apexcharts": "^5.3.5",
     "axios": "^1.12.2",
     "dayjs": "^1.11.18",
     "jwt-decode": "^4.0.0",
@@ -20,6 +26,7 @@
     "vite-plugin-vuetify": "^2.1.2",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1",
+    "vue3-apexcharts": "^1.8.0",
     "vuetify": "^3.10.1"
   },
   "devDependencies": {

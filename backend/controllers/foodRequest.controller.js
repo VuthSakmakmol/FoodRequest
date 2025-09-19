@@ -185,3 +185,54 @@ exports.deleteRequest = async (req, res, next) => {
     res.json({ ok: true });
   } catch (err) { next(err); }
 };
+
+
+exports.dashboard = async (req, res, next) => {
+  try {
+    // ✅ Counts by status
+    const countsAgg = await FoodRequest.aggregate([
+      { $group: { _id: "$status", count: { $sum: 1 } } }
+    ])
+    const counts = countsAgg.reduce((a, x) => {
+      a[x._id] = x.count
+      return a
+    }, {})
+
+    // ✅ Per day (group by serveDate as YYYY-MM-DD)
+    const perDay = await FoodRequest.aggregate([
+      { $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$serveDate" } },
+          count: { $sum: 1 }
+      }},
+      { $sort: { _id: 1 } }
+    ])
+
+    // ✅ Meals breakdown
+    const meals = await FoodRequest.aggregate([
+      { $unwind: "$meals" },
+      { $group: { _id: "$meals", count: { $sum: "$quantity" } } },
+      { $sort: { count: -1 } }
+    ])
+
+    // ✅ Menu Types
+    const menuTypes = await FoodRequest.aggregate([
+      { $group: { _id: "$menuType", count: { $sum: "$quantity" } } }
+    ])
+
+    // ✅ Recent requests
+    const recent = await FoodRequest.find({})
+      .sort({ createdAt: -1 })
+      .limit(10)
+
+    res.json({
+      counts,
+      perDay,
+      meals,
+      menuTypes,
+      recent
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+

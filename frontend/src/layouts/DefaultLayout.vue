@@ -1,4 +1,3 @@
-<!-- src/layouts/DefaultLayout.vue -->
 <script setup>
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -8,8 +7,8 @@ const router = useRouter()
 const route  = useRoute()
 const auth   = useAuth()
 
-const drawer = ref(true)          // sidebar open/close
-const rail   = ref(false)         // mini-variant (icon-only)
+const drawer = ref(true)
+const rail   = ref(false)
 const appTitle = 'Food Request'
 
 // nav items
@@ -18,11 +17,15 @@ const employeeItems = [
   { label: 'My Requests',    icon: 'mdi-history',               to: { name:'employee-requests' } },
 ]
 
+// 🔹 Added Calendar into admin items
+// nav items
 const adminItems = [
   { header: 'Admin' },
-  { label: 'Food Request',      icon: 'mdi-view-dashboard-outline', to: { name:'admin-requests' } },
-  // add more admin pages later…
+  { label: 'Dashboard',    icon: 'mdi-view-dashboard',        to: { name:'admin-dashboard' } },
+  { label: 'Food Request', icon: 'mdi-view-list-outline',     to: { name:'admin-requests' } },
+  { label: 'Food Calendar',icon: 'mdi-calendar-month-outline',to: { name:'admin-food-calendar' } },
 ]
+
 
 const canManage = computed(() => ['ADMIN','CHEF'].includes(auth.user?.role))
 const initials = computed(() => (auth.user?.name || auth.user?.loginId || 'U').slice(0,2).toUpperCase())
@@ -45,13 +48,11 @@ function toggleAuth() {
   <v-app>
     <!-- TOP BAR -->
     <v-app-bar density="comfortable" color="primary" dark elevation="1">
-        <v-btn icon class="mr-2" @click="drawer = !drawer">
-          <i class="fas fa-bars" style="color:black; font-size:20px;"></i>
-        </v-btn>
+      <v-btn icon class="mr-2" @click="drawer = !drawer">
+        <i class="fas fa-bars" style="color:black; font-size:20px;"></i>
+      </v-btn>
       <v-app-bar-title>{{ appTitle }}</v-app-bar-title>
       <v-spacer />
-
-      <!-- quick employee actions -->
 
       <v-divider vertical class="mx-2 d-none d-md-flex" />
 
@@ -65,7 +66,7 @@ function toggleAuth() {
       </v-chip>
 
       <v-btn size="small" color="white" variant="text" @click="toggleAuth">
-        {{ auth.user ? 'Logout' : ';' }}
+        {{ auth.user ? 'Logout' : 'Login' }}
       </v-btn>
     </v-app-bar>
 
@@ -107,7 +108,6 @@ function toggleAuth() {
       <!-- Admin/Chef section -->
       <v-list v-if="canManage" density="comfortable" nav class="mt-2">
         <v-divider class="mb-1"></v-divider>
-        <v-list-subheader>Admin / Chef</v-list-subheader>
 
         <template v-for="it in adminItems" :key="it.label || it.header">
           <v-list-subheader v-if="it.header">{{ it.header }}</v-list-subheader>
@@ -135,7 +135,6 @@ function toggleAuth() {
 </template>
 
 <style scoped>
-/* subtle card-like main bg */
 .v-main {
   background:
     linear-gradient(180deg, rgba(99,102,241,0.04), rgba(16,185,129,0.03) 60%),

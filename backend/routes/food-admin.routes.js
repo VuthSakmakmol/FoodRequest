@@ -178,4 +178,14 @@ router.delete(
   ctrl.deleteRequest
 );
 
+
+router.get(
+  '/dashboard',
+  requireAuth,
+  requireRole('ADMIN','CHEF'),
+  ctrl.dashboard
+)
+
+
+
 module.exports = router;
