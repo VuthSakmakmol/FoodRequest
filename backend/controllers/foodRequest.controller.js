@@ -1,4 +1,3 @@
-// backend/controllers/foodRequest.controller.js
 const mongoose = require('mongoose');
 const FoodRequest = require('../models/FoodRequest');
 const EmployeeDirectory = require('../models/EmployeeDirectory');
@@ -24,30 +23,46 @@ exports.createRequest = async (req, res, next) => {
     if (!Array.isArray(body.meals) || body.meals.length === 0)
       return res.status(400).json({ message: 'At least one meal is required' });
 
-    const serveDate = normDate(body.serveDate);
-    if (!serveDate) return res.status(400).json({ message: 'Serve date is required/invalid' });
+    const eatDate = normDate(body.eatDate);
+    if (!eatDate) return res.status(400).json({ message: 'Eat date is required/invalid' });
 
-    if (!body.menuType) return res.status(400).json({ message: 'Menu type is required' });
+    if (!Array.isArray(body.menuChoices) || body.menuChoices.length === 0)
+      return res.status(400).json({ message: 'At least one menu choice is required' });
+
     if (!body?.location?.kind) return res.status(400).json({ message: 'Location.kind is required' });
 
     const payload = {
-      ...body,
-      serveDate,
+      orderDate: new Date(),
+      eatDate,
+      eatTimeStart: body.eatTimeStart || null,
+      eatTimeEnd: body.eatTimeEnd || null,
+
       employee: { employeeId: emp.employeeId, name: emp.name, department: emp.department },
+      orderType: body.orderType,
+      meals: body.meals,
+      quantity: body.quantity,
+      location: body.location,
+
+      // 🔹 New structured fields
+      menuChoices: body.menuChoices,
+      menuCounts: Array.isArray(body.menuCounts) ? body.menuCounts : [],
+
+      dietary: Array.isArray(body.dietary) ? body.dietary : [],
+      dietaryCounts: Array.isArray(body.dietaryCounts) ? body.dietaryCounts : [],
+      dietaryOther: body.dietaryOther || '',
+
+      specialInstructions: body.specialInstructions || '',
+      recurring: body.recurring || {},
+
       status: 'NEW',
       statusHistory: [{ status: 'NEW', at: new Date() }],
-      // Guard field to mark that "delivered" was already notified
       notified: { deliveredAt: null },
     };
 
     const doc = await FoodRequest.create(payload);
 
-    // 🔔 Telegram: New request
-    try {
-      await sendToAll(newRequestMsg(doc));
-    } catch (e) {
-      console.warn('[Telegram] new request notify failed:', e?.message);
-    }
+    try { await sendToAll(newRequestMsg(doc)); } 
+    catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
 
     emitCounterpart(req.io, 'foodRequest:created', doc);
     return res.status(201).json(doc);
@@ -64,7 +79,7 @@ exports.listRequests = async (req, res, next) => {
       const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       q.$or = [
         { orderType: rx },
-        { menuType: rx },
+        { 'menuChoices': rx },
         { 'location.kind': rx },
         { specialInstructions: rx }
       ];
@@ -86,14 +101,12 @@ exports.listRequests = async (req, res, next) => {
 exports.updateStatus = async (req, res, next) => {
   try {
     const { id } = req.params;
-    console.log('[PATCH status] id =', id);
     if (!isObjectId(id)) return res.status(400).json({ message: 'Invalid ID' });
 
     const { status, reason } = req.body || {};
     const allowed = ['NEW', 'ACCEPTED', 'COOKING', 'READY', 'DELIVERED', 'CANCELED'];
     if (!allowed.includes(status)) return res.status(400).json({ message: 'Invalid status' });
 
-    // Update status and push to history
     let doc = await FoodRequest.findByIdAndUpdate(
       id,
       {
@@ -104,9 +117,15 @@ exports.updateStatus = async (req, res, next) => {
     );
     if (!doc) return res.status(404).json({ message: 'Not found' });
 
-    console.log('[PATCH status] updated:', id, '=>', status);
-
     // 🔔 Notify depending on status
+    if (status === 'ACCEPTED') {
+      try {
+        await sendToAll(acceptedMsg(doc));
+      } catch (e) {
+        console.warn('[Telegram] accepted notify failed:', e?.message);
+      }
+    }
+
     if (status === 'DELIVERED') {
       const alreadyNotified = !!doc?.notified?.deliveredAt;
       if (!alreadyNotified) {
@@ -115,7 +134,6 @@ exports.updateStatus = async (req, res, next) => {
         } catch (e) {
           console.warn('[Telegram] delivered notify failed:', e?.message);
         }
-
         doc.notified = doc.notified || {};
         doc.notified.deliveredAt = new Date();
         await doc.save();
@@ -125,7 +143,6 @@ exports.updateStatus = async (req, res, next) => {
     if (status === 'CANCELED') {
       doc.cancelReason = reason || '';
       await doc.save();
-
       try {
         await sendToAll(cancelMsg(doc));
       } catch (e) {
@@ -145,21 +162,28 @@ exports.updateRequest = async (req, res, next) => {
     if (!isObjectId(id)) return res.status(400).json({ message: 'Invalid ID' });
 
     const {
-      orderType, meals, serveDate, timeStart, timeEnd,
-      quantity, location, menuType, dietary, dietaryOther,
+      orderType, meals, eatDate, eatTimeStart, eatTimeEnd,
+      quantity, location,
+      menuChoices, menuCounts,
+      dietary, dietaryCounts, dietaryOther,
       specialInstructions, recurring
     } = req.body || {};
 
     const $set = {};
     if (orderType !== undefined)       $set.orderType = orderType;
     if (Array.isArray(meals))          $set.meals = meals;
-    if (serveDate !== undefined)       $set.serveDate = normDate(serveDate);
-    if (timeStart !== undefined)       $set.timeStart = timeStart;
-    if (timeEnd !== undefined)         $set.timeEnd = timeEnd;
+    if (eatDate !== undefined)         $set.eatDate = normDate(eatDate);
+    if (eatTimeStart !== undefined)    $set.eatTimeStart = eatTimeStart;
+    if (eatTimeEnd !== undefined)      $set.eatTimeEnd = eatTimeEnd;
     if (quantity !== undefined)        $set.quantity = quantity;
     if (location !== undefined)        $set.location = location;
-    if (menuType !== undefined)        $set.menuType = menuType;
+
+    // 🔹 Structured updates
+    if (Array.isArray(menuChoices))    $set.menuChoices = menuChoices;
+    if (Array.isArray(menuCounts))     $set.menuCounts = menuCounts;
     if (Array.isArray(dietary))        $set.dietary = dietary;
+    if (Array.isArray(dietaryCounts))  $set.dietaryCounts = dietaryCounts;
+
     if (dietaryOther !== undefined)    $set.dietaryOther = dietaryOther;
     if (specialInstructions !== undefined) $set.specialInstructions = specialInstructions;
     if (recurring !== undefined)       $set.recurring = recurring;
@@ -186,53 +210,35 @@ exports.deleteRequest = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-
+/* ───────── DASHBOARD ───────── */
 exports.dashboard = async (req, res, next) => {
   try {
-    // ✅ Counts by status
     const countsAgg = await FoodRequest.aggregate([
       { $group: { _id: "$status", count: { $sum: 1 } } }
-    ])
-    const counts = countsAgg.reduce((a, x) => {
-      a[x._id] = x.count
-      return a
-    }, {})
+    ]);
+    const counts = countsAgg.reduce((a, x) => { a[x._id] = x.count; return a }, {});
 
-    // ✅ Per day (group by serveDate as YYYY-MM-DD)
     const perDay = await FoodRequest.aggregate([
       { $group: {
-          _id: { $dateToString: { format: "%Y-%m-%d", date: "$serveDate" } },
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$eatDate" } },
           count: { $sum: 1 }
       }},
       { $sort: { _id: 1 } }
-    ])
+    ]);
 
-    // ✅ Meals breakdown
     const meals = await FoodRequest.aggregate([
       { $unwind: "$meals" },
       { $group: { _id: "$meals", count: { $sum: "$quantity" } } },
       { $sort: { count: -1 } }
-    ])
+    ]);
 
-    // ✅ Menu Types
     const menuTypes = await FoodRequest.aggregate([
-      { $group: { _id: "$menuType", count: { $sum: "$quantity" } } }
-    ])
+      { $unwind: "$menuCounts" },
+      { $group: { _id: "$menuCounts.choice", count: { $sum: "$menuCounts.count" } } }
+    ]);
 
-    // ✅ Recent requests
-    const recent = await FoodRequest.find({})
-      .sort({ createdAt: -1 })
-      .limit(10)
+    const recent = await FoodRequest.find({}).sort({ createdAt: -1 }).limit(10);
 
-    res.json({
-      counts,
-      perDay,
-      meals,
-      menuTypes,
-      recent
-    })
-  } catch (err) {
-    next(err)
-  }
-}
-
+    res.json({ counts, perDay, meals, menuTypes, recent });
+  } catch (err) { next(err); }
+};
