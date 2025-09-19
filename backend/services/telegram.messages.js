@@ -1,3 +1,4 @@
+// backend/services/telegram.messages.js
 const dayjs = require('dayjs');
 
 /* ───────── helpers ───────── */
@@ -30,7 +31,6 @@ function linesForRecurring(recurring = {}) {
     out.push(`• Frequency: ${esc(r.frequency || '—')}`);
     out.push(`• End date: ${fmtDate(r.endDate)}`);
     out.push(`• Skip holidays: ${fmtBool(!!r.skipHolidays)}`);
-    // parentId is internal; omit in user-facing message
   }
   return out;
 }
@@ -76,27 +76,19 @@ function newRequestMsg(doc) {
   const parts = [
     '🍽️ <b>New Food Request</b>',
     '----------------------------',
-    // IDs
     `Employee ID: <code>${esc(emp.employeeId || '')}</code>`,
     `Request ID: <code>${esc(d.requestId || d._id || '')}</code>`,
-    // Employee
     `From: <b>${esc(emp.name || '')}</b> (${esc(emp.department || '')})`,
-    // Core
     `Type: ${esc(d.orderType || '')} | Menu: ${esc(d.menuType || '')}`,
     `Meals: ${esc(joinOrDash(d.meals))}`,
     `Qty: ${esc(d.quantity ?? '')} | Serve: ${esc(serve)}`,
-    // Location
     `Location: ${esc(loc.kind || '')}${loc.kind === 'Other' && loc.other ? ` (${esc(loc.other)})` : ''}`,
-    // Dietary
     `Dietary: ${esc(joinOrDash(d.dietary))}`,
     d.dietaryOther ? `Dietary other: ${esc(d.dietaryOther)}` : null,
-    // Notes
     note ? `Note: ${esc(note)}` : null,
     '------------------------------ ',
-    // Recurring block
     ...linesForRecurring(d.recurring || {}),
     '------------------------------ ',
-    // Status + status history + step dates
     `Status: <b>${esc(d.status || 'NEW')}</b>`,
     ...linesForStatusHistory(d.statusHistory, 4),
     ...linesForStepDates(d.stepDates),
@@ -112,12 +104,9 @@ function deliveredMsg(doc) {
 
   const parts = [
     '✅ <b>Request Delivered</b>',
-    // IDs
     `Employee ID: <code>${esc(emp.employeeId || '')}</code>`,
     `Request ID: <code>${esc(d.requestId || d._id || '')}</code>`,
-    // Employee
     `To: <b>${esc(emp.name || '')}</b> (${esc(emp.department || '')})`,
-    // Core
     `Serve: ${esc(serve)}`,
     `Meals: ${esc(joinOrDash(d.meals))}`,
     '',
@@ -129,7 +118,30 @@ function deliveredMsg(doc) {
   return parts.join('\n');
 }
 
+function cancelMsg(doc) {
+  const d = doc || {};
+  const emp = d.employee || {};
+  const serve = timeRange(d.serveDate, d.timeStart, d.timeEnd);
+
+  const parts = [
+    '❌ <b>Request Canceled</b>',
+    `Employee ID: <code>${esc(emp.employeeId || '')}</code>`,
+    `Request ID: <code>${esc(d.requestId || d._id || '')}</code>`,
+    `From: <b>${esc(emp.name || '')}</b> (${esc(emp.department || '')})`,
+    `Serve: ${esc(serve)}`,
+    `Meals: ${esc(joinOrDash(d.meals))}`,
+    d.cancelReason ? `Reason: ${esc(d.cancelReason)}` : 'Reason: —',
+    '',
+    'Final status: <b>CANCELED</b>',
+    ...linesForStatusHistory(d.statusHistory, 6),
+    ...linesForStepDates(d.stepDates),
+  ].filter(Boolean);
+
+  return parts.join('\n');
+}
+
 module.exports = {
   newRequestMsg,
   deliveredMsg,
+  cancelMsg,
 };

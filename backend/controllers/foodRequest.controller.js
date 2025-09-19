@@ -6,7 +6,7 @@ const { emitCounterpart } = require('../utils/realtime');
 
 // 🔔 Telegram notify
 const { sendToAll } = require('../services/telegram.service');
-const { newRequestMsg, deliveredMsg } = require('../services/telegram.messages');
+const { newRequestMsg, deliveredMsg, cancelMsg } = require('../services/telegram.messages');
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(v);
 const normDate = (d) => { const v = new Date(d); return isNaN(v.getTime()) ? null : v };
@@ -89,7 +89,7 @@ exports.updateStatus = async (req, res, next) => {
     console.log('[PATCH status] id =', id);
     if (!isObjectId(id)) return res.status(400).json({ message: 'Invalid ID' });
 
-    const { status } = req.body || {};
+    const { status, reason } = req.body || {};
     const allowed = ['NEW', 'ACCEPTED', 'COOKING', 'READY', 'DELIVERED', 'CANCELED'];
     if (!allowed.includes(status)) return res.status(400).json({ message: 'Invalid status' });
 
@@ -106,7 +106,7 @@ exports.updateStatus = async (req, res, next) => {
 
     console.log('[PATCH status] updated:', id, '=>', status);
 
-    // 🔔 Only notify when FIRST reaching DELIVERED
+    // 🔔 Notify depending on status
     if (status === 'DELIVERED') {
       const alreadyNotified = !!doc?.notified?.deliveredAt;
       if (!alreadyNotified) {
@@ -116,10 +116,20 @@ exports.updateStatus = async (req, res, next) => {
           console.warn('[Telegram] delivered notify failed:', e?.message);
         }
 
-        // Mark as notified
         doc.notified = doc.notified || {};
         doc.notified.deliveredAt = new Date();
         await doc.save();
+      }
+    }
+
+    if (status === 'CANCELED') {
+      doc.cancelReason = reason || '';
+      await doc.save();
+
+      try {
+        await sendToAll(cancelMsg(doc));
+      } catch (e) {
+        console.warn('[Telegram] cancel notify failed:', e?.message);
       }
     }
 

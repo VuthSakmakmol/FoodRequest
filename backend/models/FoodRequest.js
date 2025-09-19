@@ -47,6 +47,7 @@ const FoodRequestSchema = new mongoose.Schema(
     dietary:   [{ type: String, enum: ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Others'] }],
     dietaryOther: { type: String, default: '' },
     specialInstructions: { type: String, default: '' },
+    cancelReason: { type: String, default: '' },
 
     recurring: {
       enabled:      { type: Boolean, default: false },

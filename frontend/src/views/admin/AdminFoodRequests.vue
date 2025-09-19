@@ -3,6 +3,7 @@
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Swal from 'sweetalert2'
+import * as XLSX from 'xlsx'
 import api from '@/utils/api'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
@@ -12,11 +13,15 @@ const auth = useAuth()
 const loading = ref(false)
 const rows = ref([])
 const q = ref('')
-const status = ref('ACTIVE')
+const status = ref('ALL')
+
+// 🔹 new filters
+const fromDate = ref('')
+const toDate = ref('')
 
 const page = ref(1)
-const perPage = ref(10)
-const perPageOptions = [10, 25, 50, 100]
+const perPage = ref(20)
+const perPageOptions = [20, 50, 100, 'All']
 
 const statuses = ['ACTIVE','ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED','CANCELED']
 const COLOR = { NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }
@@ -45,6 +50,9 @@ async function load() {
     const params = new URLSearchParams()
     if (q.value.trim()) params.set('q', q.value.trim())
     if (status.value && status.value !== 'ALL' && status.value !== 'ACTIVE') params.set('status', status.value)
+    if (fromDate.value) params.set('from', fromDate.value)
+    if (toDate.value) params.set('to', toDate.value)
+
     const { data } = await api.get(`/admin/food-requests?${params.toString()}`)
     let list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
     if (status.value === 'ACTIVE') list = list.filter(r => !['DELIVERED','CANCELED'].includes(r.status))
@@ -74,11 +82,15 @@ onBeforeUnmount(() => {
   socket.off('foodRequest:deleted')
 })
 
-watch([q, status], () => { page.value = 1; load() })
+watch([q, status, fromDate, toDate], () => { page.value = 1; load() })
 
 const totalItems = computed(() => rows.value.length)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalItems.value / perPage.value)))
+const totalPages = computed(() => {
+  if (perPage.value === 'All') return 1
+  return Math.max(1, Math.ceil(totalItems.value / perPage.value))
+})
 const pagedRows = computed(() => {
+  if (perPage.value === 'All') return rows.value
   const start = (page.value - 1) * perPage.value
   return rows.value.slice(start, start + perPage.value)
 })
@@ -99,26 +111,62 @@ async function updateStatus(row, target) {
     return
   }
 
-  const ok = await Swal.fire({
-    icon: 'question',
-    title: `Set status: ${target}?`,
-    text: `Request by ${row.employee?.name} on ${fmtDate(row.serveDate)}.`,
-    showCancelButton: true,
-    confirmButtonText: 'Yes, update',
-    cancelButtonText: 'No',
-  })
-  if (!ok.isConfirmed) return
+  let reason = ''
+  if (target === 'CANCELED') {
+    const { value } = await Swal.fire({
+      icon: 'warning',
+      title: 'Cancel Request',
+      input: 'select',
+      inputOptions: {
+        'not_have': 'Not have',
+        'not_enough': 'Not enough',
+        'direct_message': 'Please directly message instead',
+        'out_of_stock': 'Out of stock',
+        'off_hours': 'Not work hour',
+        'other': 'Other'
+      },
+      inputPlaceholder: 'Select a reason',
+      showCancelButton: true,
+      confirmButtonText: 'Submit',
+      cancelButtonText: 'Back',
+      inputValidator: (v) => !v && 'Reason required'
+    })
+    if (!value) return
+    reason = value
+  }
 
   const before = { ...row }
   try {
     const url = `/admin/food-requests/${encodeURIComponent(row._id)}/status`
-    const { data: updated } = await api.patch(url, { status: target })
+    const { data: updated } = await api.patch(url, { status: target, reason })
     upsertRow(updated)
     await Swal.fire({ icon:'success', title:'Updated', timer:900, showConfirmButton:false })
   } catch (e) {
     upsertRow(before)
     await Swal.fire({ icon:'error', title:'Failed', text: e?.response?.data?.message || e.message || 'Request failed' })
   }
+}
+
+/* 🔹 Excel export */
+function exportExcel() {
+  const data = rows.value.map(r => ({
+    'Serve Date': fmtDate(r.serveDate),
+    'Employee ID': r.employee?.employeeId,
+    'Employee Name': r.employee?.name,
+    'Department': r.employee?.department,
+    'Order Type': r.orderType,
+    'Meals': (r.meals || []).join(', '),
+    'Quantity': r.quantity,
+    'Location': r?.location?.kind + (r?.location?.other ? ` - ${r.location.other}` : ''),
+    'Menu': r.menuType,
+    'Recurring': r.recurring?.enabled ? r.recurring?.frequency : '—',
+    'Status': r.status,
+    'Cancel Reason': r.cancelReason || ''
+  }))
+  const ws = XLSX.utils.json_to_sheet(data)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'FoodRequests')
+  XLSX.writeFile(wb, `FoodRequests_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`)
 }
 </script>
 
@@ -128,9 +176,13 @@ async function updateStatus(row, target) {
       <v-toolbar flat density="comfortable">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">Food Requests (Admin/Chef)</v-toolbar-title>
         <v-spacer />
-        <v-text-field v-model="q" density="compact" placeholder="Search (type, location, note)" hide-details variant="outlined" class="mr-2" @keyup.enter="load" />
+        <!-- 🔹 filters -->
+        <v-text-field v-model="q" density="compact" placeholder="Search" hide-details variant="outlined" class="mr-2" @keyup.enter="load" />
         <v-select v-model="status" :items="statuses" density="compact" label="Status" hide-details variant="outlined" class="mr-2" style="max-width: 160px" />
+        <v-text-field v-model="fromDate" type="date" density="compact" label="From" hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
+        <v-text-field v-model="toDate" type="date" density="compact" label="To" hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
         <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows" hide-details variant="outlined" style="max-width: 120px" class="mr-2" />
+        <v-btn color="success" class="mr-2" @click="exportExcel">Export Excel</v-btn>
         <v-btn :loading="loading" color="primary" @click="load">Refresh</v-btn>
       </v-toolbar>
 
@@ -193,12 +245,12 @@ async function updateStatus(row, target) {
       <div class="d-flex align-center justify-space-between px-4 py-3">
         <div class="text-caption text-medium-emphasis">
           Showing
-          <b>{{ Math.min((page - 1) * perPage + 1, totalItems) }}</b>
+          <b>{{ perPage === 'All' ? 1 : Math.min((page - 1) * perPage + 1, totalItems) }}</b>
           -
-          <b>{{ Math.min(page * perPage, totalItems) }}</b>
+          <b>{{ perPage === 'All' ? totalItems : Math.min(page * perPage, totalItems) }}</b>
           of <b>{{ totalItems }}</b>
         </div>
-        <v-pagination v-model="page" :length="totalPages" :total-visible="7" density="comfortable" />
+        <v-pagination v-if="perPage !== 'All'" v-model="page" :length="totalPages" :total-visible="7" density="comfortable" />
       </div>
     </v-card>
   </v-container>

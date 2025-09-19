@@ -274,12 +274,7 @@ function onHotkey(e) {
 <template>
   <v-container fluid class="pa-2">
     <v-card class="rounded-lg slim-card" elevation="1">
-      <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Employee Food Request</v-toolbar-title>
-        <v-spacer />
-        <v-btn :loading="loading" color="primary" size="small" class="px-4" @click="submit">Submit</v-btn>
-        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()">Reset</v-btn>
-      </v-toolbar>
+
 
       <v-alert v-if="error" type="error" class="mx-2 mt-2" density="compact" variant="tonal" border="start">{{ error }}</v-alert>
       <v-alert v-if="success" type="success" class="mx-2 mt-2" density="compact" variant="tonal" border="start">{{ success }}</v-alert>
@@ -582,6 +577,12 @@ function onHotkey(e) {
           </v-row>
         </v-form>
       </v-card-text>
+            <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
+        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Employee Food Request</v-toolbar-title>
+        <v-spacer />
+        <v-btn :loading="loading" color="primary" size="small" class="px-4" @click="submit" style="background-color: green;">Submit</v-btn>
+        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color: red;">Reset</v-btn>
+      </v-toolbar>
     </v-card>
   </v-container>
 </template>

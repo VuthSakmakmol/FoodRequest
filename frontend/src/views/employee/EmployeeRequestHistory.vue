@@ -3,18 +3,60 @@
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
+import isSameOrAfter from 'dayjs/plugin/isSameOrAfter'
+import isSameOrBefore from 'dayjs/plugin/isSameOrBefore'
 import Swal from 'sweetalert2'
 import socket, { subscribeEmployeeIfNeeded } from '@/utils/socket'
+import * as XLSX from 'xlsx'
 
+// enable plugins
+dayjs.extend(isSameOrAfter)
+dayjs.extend(isSameOrBefore)
 
+/* ───────── state ───────── */
 const loading = ref(false)
 const rows = ref([])
 const q = ref('')
-const status = ref('ALL') // default ALL, avoids hide of DELIVERED/CANCELED
+const status = ref('ALL')
 const statuses = ['ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED','CANCELED']
-
 const employeeId = ref((localStorage.getItem('employeeId') || '').toString())
 
+/* date filter */
+const dateStart = ref('')
+const dateEnd = ref('')
+
+/* pagination */
+const page = ref(1)
+const itemsPerPage = ref(20)
+const itemsPerPageOptions = [20, 50, 100, 'All']
+
+/* ───────── computed ───────── */
+const filteredRows = computed(() => {
+  let list = rows.value
+  if (dateStart.value) {
+    list = list.filter(r =>
+      r.serveDate && dayjs(r.serveDate).isSameOrAfter(dayjs(dateStart.value), 'day')
+    )
+  }
+  if (dateEnd.value) {
+    list = list.filter(r =>
+      r.serveDate && dayjs(r.serveDate).isSameOrBefore(dayjs(dateEnd.value), 'day')
+    )
+  }
+  return list
+})
+
+const pagedRows = computed(() => {
+  if (itemsPerPage.value === 'All') return filteredRows.value
+  const start = (page.value - 1) * itemsPerPage.value
+  return filteredRows.value.slice(start, start + itemsPerPage.value)
+})
+const pageCount = computed(() => {
+  if (itemsPerPage.value === 'All') return 1
+  return Math.ceil(filteredRows.value.length / itemsPerPage.value) || 1
+})
+
+/* ───────── helpers ───────── */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({ ...o, _id: String(o?._id || '') })
 
@@ -24,7 +66,13 @@ function passFilters(doc) {
   if (status.value !== 'ALL' && doc.status !== status.value) return false
   if (q.value.trim()) {
     const rx = new RegExp(q.value.trim(), 'i')
-    const hay = [doc.orderType, doc.menuType, doc?.location?.kind, doc.specialInstructions].filter(Boolean).join(' ')
+    const hay = [
+      doc.orderType,
+      doc.menuType,
+      doc?.location?.kind,
+      doc?.employee?.name,
+      doc.specialInstructions,
+    ].filter(Boolean).join(' ')
     if (!rx.test(hay)) return false
   }
   return true
@@ -51,13 +99,37 @@ async function load() {
     if (employeeId.value) params.set('employeeId', employeeId.value)
     if (status.value !== 'ALL') params.set('status', status.value)
     if (q.value.trim()) params.set('q', q.value.trim())
+    if (dateStart.value) params.set('dateStart', dateStart.value)
+    if (dateEnd.value) params.set('dateEnd', dateEnd.value)
     const { data } = await api.get(`/public/food-requests?${params.toString()}`)
     const list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
     rows.value = list.map(normalize)
     console.log('[emp/history] loaded', rows.value.length, 'rows')
+    page.value = 1 // reset page
   } finally { loading.value = false }
 }
 
+/* export to excel */
+function exportExcel() {
+  const exportData = filteredRows.value.map(r => ({
+    'Serve Date': fmtDate(r.serveDate),
+    'Employee ID': r?.employee?.employeeId,
+    'Employee Name': r?.employee?.name,
+    'Type': r.orderType,
+    'Meals': (r.meals || []).join(', '),
+    'Quantity': r.quantity,
+    'Location': r?.location?.kind + (r?.location?.other ? ' — ' + r.location.other : ''),
+    'Menu': r.menuType,
+    'Recurring': r.recurring?.enabled ? r.recurring.frequency : '—',
+    'Status': r.status,
+  }))
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Requests')
+  XLSX.writeFile(wb, 'EmployeeRequests.xlsx')
+}
+
+/* sockets */
 function registerSocket() {
   socket.on('foodRequest:created', (doc) => {
     if (String(doc?.employee?.employeeId) !== String(employeeId.value)) return
@@ -93,9 +165,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => { unregisterSocket() })
 
-watch([q, status], () => load())
-const isAdmin = computed(() => false) // UI only; hidden for employees
-async function acceptRequest(row) {}
+watch([q, status, dateStart, dateEnd], () => load())
 </script>
 
 <template>
@@ -106,12 +176,16 @@ async function acceptRequest(row) {}
           My Requests <v-chip size="x-small" class="ml-2" color="teal" label>Live</v-chip>
         </v-toolbar-title>
         <v-spacer />
-        <v-text-field v-model="q" density="compact" placeholder="Search (type, location, note)"
+        <v-text-field v-model="q" density="compact" placeholder="Search (type, location, employee, note)"
           hide-details variant="outlined" class="mr-2" @keyup.enter="load" />
         <v-select v-model="status" :items="statuses" density="compact" label="Status"
           hide-details variant="outlined" class="mr-2" style="max-width:160px" />
-        <!-- optional manual refresh kept for safety -->
-        <v-btn :loading="loading" color="primary" @click="load">Refresh</v-btn>
+        <v-text-field v-model="dateStart" type="date" density="compact" label="From"
+          hide-details variant="outlined" class="mr-2" style="max-width:160px" />
+        <v-text-field v-model="dateEnd" type="date" density="compact" label="To"
+          hide-details variant="outlined" class="mr-2" style="max-width:160px" />
+        <v-btn :loading="loading" color="primary" @click="load" class="mr-2">Refresh</v-btn>
+        <v-btn color="success" @click="exportExcel">Export</v-btn>
       </v-toolbar>
       <v-divider />
       <v-card-text class="pa-0">
@@ -119,6 +193,7 @@ async function acceptRequest(row) {}
           <thead>
             <tr>
               <th style="width: 140px;">Serve Date</th>
+              <th>Employee</th>
               <th>Type</th>
               <th>Meal(s)</th>
               <th>Qty</th>
@@ -130,8 +205,9 @@ async function acceptRequest(row) {}
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in rows" :key="r._id">
+            <tr v-for="r in pagedRows" :key="r._id">
               <td>{{ fmtDate(r.serveDate) }}</td>
+              <td>{{ r?.employee?.name || '—' }}</td>
               <td>{{ r.orderType }}</td>
               <td>{{ (r.meals || []).join(', ') }}</td>
               <td>{{ r.quantity }}</td>
@@ -152,13 +228,18 @@ async function acceptRequest(row) {}
                   {{ r.status }}
                 </v-chip>
               </td>
-              <td>
-                <span class="text-disabled">—</span>
-              </td>
+              <td><span class="text-disabled">—</span></td>
             </tr>
-            <tr v-if="!rows.length && !loading"><td colspan="9" class="text-center py-6 text-medium-emphasis">No requests found.</td></tr>
+            <tr v-if="!rows.length && !loading"><td colspan="10" class="text-center py-6 text-medium-emphasis">No requests found.</td></tr>
           </tbody>
         </v-table>
+
+        <!-- pagination -->
+        <div class="d-flex justify-space-between align-center pa-3">
+          <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" density="compact"
+            label="Rows per page" hide-details variant="outlined" style="max-width:120px" />
+          <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
+        </div>
       </v-card-text>
     </v-card>
   </v-container>
