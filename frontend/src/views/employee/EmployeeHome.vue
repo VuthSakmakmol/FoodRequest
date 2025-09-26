@@ -1,22 +1,26 @@
+<!-- src/views/employee/EmployeeHome.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket from '@/utils/socket'
+import { useRouter } from 'vue-router'
 
-/* ───────── child sections ───────── */
+const router = useRouter()
+
+/* Sections */
 import RequesterSection from './sections/RequesterSection.vue'
 import OrderDetailSection from './sections/OrderDetailSection.vue'
 import MenuSection from './sections/MenuSection.vue'
 import RecurringBookingSection from './sections/RecurringBookingSection.vue'
 
-/* constants */
+/* Constants */
 const MEALS = ['Breakfast','Lunch','Dinner','Snack']
 const MENU_CHOICES = ['Standard','Vegetarian','Vegan','No pork','No beef']
 const ALLERGENS = ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Others']
 
-/* ───────── state ───────── */
+/* State */
 const employees = ref([])
 const loadingEmployees = ref(false)
 
@@ -35,10 +39,10 @@ const form = ref({
   location: '',
   locationOther: '',
   menuChoices: [],
-  menuCounts: {},          // ✅ initialize
+  menuCounts: {},          // object map in editor
   dietary: [],
-  dietaryCounts: {},       // ✅ initialize with { count, menu }
-  allergiesOther: '',
+  dietaryCounts: {},       // { Peanut: {count, menu}, ... }
+  dietaryOther: '',
   specialInstructions: '',
   recurring: false,
   frequency: '',
@@ -50,7 +54,7 @@ const loading = ref(false)
 const success = ref('')
 const error = ref('')
 
-/* ───────── load employees ───────── */
+/* Load employees */
 async function loadEmployees() {
   loadingEmployees.value = true
   try {
@@ -72,7 +76,7 @@ async function loadEmployees() {
 }
 loadEmployees()
 
-/* ───────── derived ───────── */
+/* Derived */
 function onEmployeeSelected(val) {
   const emp = employees.value.find(e => e.employeeId === val)
   form.value.name = emp ? emp.name : ''
@@ -82,7 +86,7 @@ const isTimedOrder = computed(() => form.value.orderType && form.value.orderType
 const needsOtherLocation = computed(() => form.value.location === 'Other')
 const showOtherAllergy = computed(() => (form.value.dietary || []).includes('Others'))
 
-/* ───────── validation + payload ───────── */
+/* Validation */
 function validateForm() {
   const f = form.value
   const errs = []
@@ -94,9 +98,8 @@ function validateForm() {
   if (f.quantity < 1) errs.push('• Quantity must be ≥ 1')
   if (!Array.isArray(f.menuChoices) || f.menuChoices.length === 0) errs.push('• Select at least one Menu option')
   if (needsOtherLocation.value && !f.locationOther) errs.push('• Please specify “Other Location”')
-  if (showOtherAllergy.value && !f.allergiesOther) errs.push('• Please specify “Other (identify)”')
+  if (showOtherAllergy.value && !f.dietaryOther) errs.push('• Please specify “Other (identify)”')
 
-  // time check
   if (isTimedOrder.value) {
     const start = f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : ''
     const end   = f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : ''
@@ -112,22 +115,50 @@ function validateForm() {
   return errs
 }
 
-function buildPayloadFromForm(f) {
-  const menuType =
-    Array.isArray(f.menuChoices) && f.menuChoices.length
-      ? f.menuChoices[0]
-      : null
+/* ---------- TRANSFORMS (object → array) ---------- */
+function buildMenuCountsArray(menuCountsObj, quantity) {
+  // send non-Standard as explicit counts, Standard auto = qty - sum(others)
+  const entries = Object.entries(menuCountsObj || {})
+    .map(([choice, cnt]) => ({ choice, count: Number(cnt || 0) }))
+    .filter(x => x.choice && x.count > 0 && x.choice !== 'Standard')
 
+  // merge duplicates
+  const map = new Map()
+  for (const it of entries) map.set(it.choice, (map.get(it.choice) || 0) + it.count)
+  const arr = Array.from(map, ([choice, count]) => ({ choice, count }))
+
+  const used = arr.reduce((s, x) => s + x.count, 0)
+  const std = Math.max(Number(quantity || 0) - used, 0)
+  if (std > 0) arr.push({ choice: 'Standard', count: std })
+
+  return arr
+}
+function buildDietaryCountsArray(dietaryCountsObj) {
+  const temp = Object.entries(dietaryCountsObj || {})
+    .map(([allergen, v]) => ({
+      allergen,
+      count: Number(v?.count || 0),
+      menu: v?.menu || 'Standard'
+    }))
+    .filter(x => x.allergen && x.count > 0)
+
+  // merge by {menu, allergen}
+  const key = (x) => `${x.menu}__${x.allergen}`
+  const map = new Map()
+  for (const it of temp) {
+    const k = key(it)
+    map.set(k, { allergen: it.allergen, menu: it.menu, count: (map.get(k)?.count || 0) + it.count })
+  }
+  return Array.from(map.values())
+}
+
+/* Payload */
+function buildPayloadFromForm(f) {
   return {
-    employee: {
-      employeeId: f.employeeId,
-      name: f.name,
-      department: f.department,
-    },
+    employeeId: f.employeeId, // controller supports employeeId OR employee.employeeId
     orderType: f.orderType,
     meals: f.meals,
-    orderDate: new Date(),   // always today
-    eatDate: f.eatDate,      // ✅ instead of serveDate
+    eatDate: f.eatDate,
     eatTimeStart: f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : null,
     eatTimeEnd:   f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : null,
     quantity: f.quantity,
@@ -136,11 +167,11 @@ function buildPayloadFromForm(f) {
       other: f.location === 'Other' ? (f.locationOther || '') : '',
     },
     menuChoices: f.menuChoices,
-    menuCounts: f.menuCounts,
-    menuType,
+    // ✅ convert objects → arrays before POST
+    menuCounts: buildMenuCountsArray(f.menuCounts, f.quantity),
     dietary: f.dietary,
-    dietaryOther: f.allergiesOther || '',
-    dietaryCounts: f.dietaryCounts,
+    dietaryOther: f.dietaryOther || '',
+    dietaryCounts: buildDietaryCountsArray(f.dietaryCounts),
     specialInstructions: f.specialInstructions || '',
     recurring: {
       enabled: !!f.recurring,
@@ -151,8 +182,7 @@ function buildPayloadFromForm(f) {
   }
 }
 
-
-/* ───────── submit ───────── */
+/* Submit */
 async function submit() {
   error.value = ''
   success.value = ''
@@ -171,10 +201,11 @@ async function submit() {
   const payload = buildPayloadFromForm(form.value)
   loading.value = true
   try {
-    const { data } = await api.post('/public/food-requests', payload)
+    await api.post('/public/food-requests', payload)
     success.value = '✅ Submitted.'
     await Swal.fire({ icon: 'success', title: 'Submitted', timer: 1400, showConfirmButton: false })
     resetForm({ keepEmployee: true })
+    router.push({ name: 'employee-request-history' })
   } catch (e) {
     const msg = e?.response?.data?.message || e?.message || 'Submission failed.'
     error.value = msg
@@ -184,6 +215,7 @@ async function submit() {
   }
 }
 
+/* Reset */
 function resetForm({ keepEmployee = false } = {}) {
   const currentEmp = form.value.employeeId
   const currentName = form.value.name
@@ -206,7 +238,7 @@ function resetForm({ keepEmployee = false } = {}) {
     menuCounts: {},
     dietary: [],
     dietaryCounts: {},
-    allergiesOther: '',
+    dietaryOther: '',
     specialInstructions: '',
     recurring: false,
     frequency: '',
@@ -215,17 +247,15 @@ function resetForm({ keepEmployee = false } = {}) {
   }
 }
 
-/* persist employee selection */
-watch(() => form.value.employeeId, (v) => {
-  if (v) localStorage.setItem('employeeId', v)
-})
+/* Persist employee selection */
+watch(() => form.value.employeeId, (v) => { if (v) localStorage.setItem('employeeId', v) })
 watch(() => form.value.location, v => { if (v !== 'Other') form.value.locationOther = '' })
-watch(() => form.value.dietary, v => { if (!(v||[]).includes('Others')) form.value.allergiesOther = '' })
+watch(() => form.value.dietary, v => { if (!(v||[]).includes('Others')) form.value.dietaryOther = '' })
 
-/* ───────── realtime ───────── */
+/* Realtime UX */
 onMounted(() => {
   socket.on('foodRequest:created', (doc) => {
-    const empId = doc?.employee?.employeeId
+    const empId = doc?.employee?.employeeId || doc?.employeeId
     if (empId && empId === (form.value.employeeId || localStorage.getItem('employeeId'))) {
       if (!success.value) {
         Swal.fire({ toast:true, icon:'success', title:'Request received', timer: 1500, position:'top', showConfirmButton:false })
@@ -238,11 +268,8 @@ onBeforeUnmount(() => {
   socket.off('foodRequest:created')
   window.removeEventListener('keydown', onHotkey)
 })
-
 function onHotkey(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) {
-    submit()
-  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit()
 }
 </script>
 

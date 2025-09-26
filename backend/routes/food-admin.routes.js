@@ -18,8 +18,8 @@ const cap = (v, min, max) => Math.min(Math.max(v, min), max);
     - status=NEW|ACCEPTED|COOKING|READY|DELIVERED|CANCELED|ALL
     - employeeId=E12345
     - q=free text (orderType/menuType/location.kind/specialInstructions)
-    - from=YYYY-MM-DD (filters serveDate >= from)
-    - to=YYYY-MM-DD   (filters serveDate <= to)
+    - from=YYYY-MM-DD (filters eatDate >= from)
+    - to=YYYY-MM-DD   (filters eatDate <= to)
     - page=1..N
     - limit=1..200
 */
@@ -29,13 +29,7 @@ router.get(
   requireRole('ADMIN', 'CHEF'),
   async (req, res, next) => {
     try {
-      const {
-        status,
-        employeeId,
-        q,
-        from,
-        to,
-      } = req.query || {};
+      const { status, employeeId, q, from, to } = req.query || {};
 
       // Build filter
       const filter = {};
@@ -46,13 +40,14 @@ router.get(
         const rx = new RegExp(escapeRegExp(q.trim()), 'i');
         filter.$or = [
           { orderType: rx },
-          { menuType: rx },
+          { menuType: rx }, // harmless if you don't use menuType
           { 'location.kind': rx },
           { specialInstructions: rx },
+          { menuChoices: rx },
         ];
       }
 
-      // Date range (on serveDate)
+      // Date range (on eatDate ✅)
       if (from || to) {
         const range = {};
         if (from) {
@@ -60,29 +55,21 @@ router.get(
           if (!isNaN(d.getTime())) range.$gte = d;
         }
         if (to) {
-          // include entire day if user passes a date only
           const dt = new Date(to);
           if (!isNaN(dt.getTime())) {
             dt.setHours(23, 59, 59, 999);
             range.$lte = dt;
           }
         }
-        if (Object.keys(range).length) filter.serveDate = range;
+        if (Object.keys(range).length) filter.eatDate = range; // ← changed from serveDate to eatDate
       }
 
       const page = cap(num(req.query.page, 1), 1, 1e6);
       const limit = cap(num(req.query.limit, 50), 1, 200);
       const skip = (page - 1) * limit;
 
-      console.log('[ADMIN HIT] GET /api/admin/food-requests', {
-        status, employeeId, q, from, to, page, limit,
-      });
-
       const [rows, total] = await Promise.all([
-        FoodRequest.find(filter)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit),
+        FoodRequest.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
         FoodRequest.countDocuments(filter),
       ]);
 
@@ -107,7 +94,7 @@ router.get(
 
 /* ───────── SUMMARY (admin/chef) ─────────
    Quick counts by status for dashboard widgets.
-   Optional date filters (same as list): from, to on serveDate.
+   Optional date filters (same as list): from, to on eatDate.
 */
 router.get(
   '/food-requests:summary',
@@ -118,6 +105,7 @@ router.get(
       const { from, to } = req.query || {};
       const match = {};
 
+      // Date range (on eatDate ✅)
       if (from || to) {
         const range = {};
         if (from) {
@@ -131,7 +119,7 @@ router.get(
             range.$lte = dt;
           }
         }
-        if (Object.keys(range).length) match.serveDate = range;
+        if (Object.keys(range).length) match.eatDate = range; // ← changed from serveDate to eatDate
       }
 
       const pipeline = [
@@ -144,18 +132,14 @@ router.get(
       const byStatus = await FoodRequest.aggregate(pipeline);
 
       res.json({
-        totals: {
-          all: byStatus.reduce((s, x) => s + x.count, 0),
-        },
+        totals: { all: byStatus.reduce((s, x) => s + x.count, 0) },
         byStatus,
       });
     } catch (err) { next(err); }
   }
 );
 
-/* ───────── UPDATE status (ADMIN or CHEF) ─────────
-   Uses ctrl.updateStatus which also triggers Telegram on first DELIVERED.
-*/
+/* ───────── Mutations ───────── */
 router.patch(
   '/food-requests/:id/status',
   requireAuth,
@@ -163,7 +147,6 @@ router.patch(
   ctrl.updateStatus
 );
 
-/* ───────── OPTIONAL: general edit + delete ───────── */
 router.patch(
   '/food-requests/:id',
   requireAuth,
@@ -178,14 +161,12 @@ router.delete(
   ctrl.deleteRequest
 );
 
-
+/* ───────── Dashboard rollups ───────── */
 router.get(
   '/dashboard',
   requireAuth,
   requireRole('ADMIN','CHEF'),
   ctrl.dashboard
-)
-
-
+);
 
 module.exports = router;

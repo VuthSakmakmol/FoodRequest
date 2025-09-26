@@ -3,19 +3,17 @@
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 import Swal from 'sweetalert2'
-import * as XLSX from 'xlsx'
 import api from '@/utils/api'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 
 const auth = useAuth()
 
+/* ───────── state ───────── */
 const loading = ref(false)
 const rows = ref([])
 const q = ref('')
 const status = ref('ALL')
-
-// 🔹 new filters
 const fromDate = ref('')
 const toDate = ref('')
 
@@ -27,13 +25,98 @@ const statuses = ['ACTIVE','ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED',
 const COLOR = { NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }
 
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
-const normalize = o => ({ ...o, _id: String(o?._id || ''), requestId: String(o?.requestId || '') })
+const normalize = o => ({
+  ...o,
+  _id: String(o?._id || ''),
+  requestId: String(o?.requestId || ''),
+  orderType: o?.orderType || '',
+  quantity: Number(o?.quantity || 0),
+  menuChoices: Array.isArray(o?.menuChoices) ? o.menuChoices : [],
+  menuCounts: Array.isArray(o?.menuCounts) ? o.menuCounts : [],
+  dietary: Array.isArray(o?.dietary) ? o.dietary : [],
+  dietaryCounts: Array.isArray(o?.dietaryCounts) ? o.dietaryCounts : [],
+})
 
+/* ───────── MENU / DIETARY math (accurate to backend) ───────── */
+function sumNonStandard(r) {
+  return (r.menuCounts || [])
+    .filter(x => x?.choice && x.choice !== 'Standard')
+    .reduce((s, x) => s + Number(x.count || 0), 0)
+}
+function standardAuto(r) {
+  return Math.max(Number(r.quantity || 0) - sumNonStandard(r), 0)
+}
+// Replace the whole function in AdminFoodRequests.vue
+function menuMap(r) {
+  // Build map from persisted counts
+  const m = new Map()
+  for (const it of (r.menuCounts || [])) {
+    if (!it?.choice) continue
+    const n = Number(it.count || 0)
+    if (!n) continue
+    m.set(it.choice, (m.get(it.choice) || 0) + n)
+  }
+
+  // If DB didn't include Standard (legacy records), derive it once.
+  if (!m.has('Standard')) {
+    const nonStd = Array.from(m.entries())
+      .filter(([k]) => k !== 'Standard')
+      .reduce((s, [, v]) => s + v, 0)
+    const std = Math.max(Number(r.quantity || 0) - nonStd, 0)
+    if (std > 0) m.set('Standard', std)
+  }
+
+  // Drop any zeroes
+  for (const [k, v] of m.entries()) if (!v) m.delete(k)
+  return m
+}
+
+function dietaryByMenu(r) {
+  // Group dietary under the declared menu; default to 'Standard'
+  const g = new Map()
+  for (const d of (r.dietaryCounts || [])) {
+    const menu = d?.menu || 'Standard'
+    const allergen = d?.allergen
+    const cnt = Number(d?.count || 0)
+    if (!allergen || !cnt) continue
+    if (!g.has(menu)) g.set(menu, new Map())
+    const inner = g.get(menu)
+    inner.set(allergen, (inner.get(allergen) || 0) + cnt)
+  }
+  return g // Map(menu -> Map(allergen -> count))
+}
+
+/* ───────── derived validations (shown inside details) ───────── */
+function totals(r) {
+  const m = menuMap(r)
+  const totalMenus = Array.from(m.values()).reduce((a, b) => a + b, 0)
+  const leftoverMenus = Number(r.quantity || 0) - totalMenus
+  // For each menu, check dietary sum <= that menu count
+  const g = dietaryByMenu(r)
+  const perMenuDietaryLeft = new Map()
+  for (const [menu, cnt] of m.entries()) {
+    const sumDiet = Array.from((g.get(menu) || new Map()).values()).reduce((a, b) => a + b, 0)
+    perMenuDietaryLeft.set(menu, cnt - sumDiet)
+  }
+  return { totalMenus, leftoverMenus, perMenuDietaryLeft }
+}
+
+/* ───────── expand/collapse ───────── */
+const expanded = ref(new Set())
+const isExpanded = id => expanded.value.has(id)
+function toggleExpanded(id) {
+  const s = new Set(expanded.value)
+  s.has(id) ? s.delete(id) : s.add(id)
+  expanded.value = s
+}
+
+/* ───────── CRUD / data load ───────── */
 function upsertRow(doc) {
   const d = normalize(doc)
   const i = rows.value.findIndex(r => r._id === d._id)
   if (status.value === 'ACTIVE' && ['DELIVERED','CANCELED'].includes(d.status)) {
     if (i !== -1) rows.value.splice(i, 1)
+    expanded.value.delete(d._id)
     return
   }
   if (i === -1) rows.value.unshift(d)
@@ -42,6 +125,7 @@ function upsertRow(doc) {
 function removeRowById(id) {
   const i = rows.value.findIndex(r => r._id === id)
   if (i !== -1) rows.value.splice(i, 1)
+  expanded.value.delete(id)
 }
 
 async function load() {
@@ -58,43 +142,39 @@ async function load() {
     if (status.value === 'ACTIVE') list = list.filter(r => !['DELIVERED','CANCELED'].includes(r.status))
     rows.value = list.map(normalize)
     page.value = 1
-    console.log('[adm/requests] loaded', rows.value.length, 'rows')
   } finally { loading.value = false }
 }
 
+/* ───────── lifecycle ───────── */
 onMounted(async () => {
   if (!auth.user) await auth.fetchMe()
   localStorage.setItem('authRole', auth.user?.role || '')
   subscribeRoleIfNeeded()
 
   await load()
-
   socket.on('foodRequest:created', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:updated', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:statusChanged', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:deleted', ({ _id }) => removeRowById(String(_id||'')))
 })
-
 onBeforeUnmount(() => {
   socket.off('foodRequest:created')
   socket.off('foodRequest:updated')
   socket.off('foodRequest:statusChanged')
   socket.off('foodRequest:deleted')
 })
-
 watch([q, status, fromDate, toDate], () => { page.value = 1; load() })
 
+/* ───────── paging ───────── */
 const totalItems = computed(() => rows.value.length)
-const totalPages = computed(() => {
-  if (perPage.value === 'All') return 1
-  return Math.max(1, Math.ceil(totalItems.value / perPage.value))
-})
+const totalPages = computed(() => perPage.value === 'All' ? 1 : Math.max(1, Math.ceil(totalItems.value / perPage.value)))
 const pagedRows = computed(() => {
   if (perPage.value === 'All') return rows.value
   const start = (page.value - 1) * perPage.value
   return rows.value.slice(start, start + perPage.value)
 })
 
+/* ───────── workflow ───────── */
 const nextSteps = (s) => {
   switch (s) {
     case 'NEW': return ['ACCEPTED','CANCELED']
@@ -104,13 +184,11 @@ const nextSteps = (s) => {
     default: return []
   }
 }
-
 async function updateStatus(row, target) {
   if (!row?._id) {
     await Swal.fire({ icon:'error', title:'Missing _id', text:'This row has no Mongo _id. Cannot update.' })
     return
   }
-
   let reason = ''
   if (target === 'CANCELED') {
     const { value } = await Swal.fire({
@@ -134,7 +212,6 @@ async function updateStatus(row, target) {
     if (!value) return
     reason = value
   }
-
   const before = { ...row }
   try {
     const url = `/admin/food-requests/${encodeURIComponent(row._id)}/status`
@@ -146,99 +223,159 @@ async function updateStatus(row, target) {
     await Swal.fire({ icon:'error', title:'Failed', text: e?.response?.data?.message || e.message || 'Request failed' })
   }
 }
-
-/* 🔹 Excel export */
-function exportExcel() {
-  const data = rows.value.map(r => ({
-    'Serve Date': fmtDate(r.serveDate),
-    'Employee ID': r.employee?.employeeId,
-    'Employee Name': r.employee?.name,
-    'Department': r.employee?.department,
-    'Order Type': r.orderType,
-    'Meals': (r.meals || []).join(', '),
-    'Quantity': r.quantity,
-    'Location': r?.location?.kind + (r?.location?.other ? ` - ${r.location.other}` : ''),
-    'Menu': r.menuType,
-    'Recurring': r.recurring?.enabled ? r.recurring?.frequency : '—',
-    'Status': r.status,
-    'Cancel Reason': r.cancelReason || ''
-  }))
-  const ws = XLSX.utils.json_to_sheet(data)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'FoodRequests')
-  XLSX.writeFile(wb, `FoodRequests_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`)
-}
 </script>
 
 <template>
   <v-container fluid class="pa-2">
     <v-card elevation="1" class="rounded-lg">
+      <!-- Toolbar / filters -->
       <v-toolbar flat density="comfortable">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Food Requests (Admin/Chef)</v-toolbar-title>
+        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Food Requests</v-toolbar-title>
         <v-spacer />
-        <!-- 🔹 filters -->
         <v-text-field v-model="q" density="compact" placeholder="Search" hide-details variant="outlined" class="mr-2" @keyup.enter="load" />
         <v-select v-model="status" :items="statuses" density="compact" label="Status" hide-details variant="outlined" class="mr-2" style="max-width: 160px" />
         <v-text-field v-model="fromDate" type="date" density="compact" label="From" hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
         <v-text-field v-model="toDate" type="date" density="compact" label="To" hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
         <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows" hide-details variant="outlined" style="max-width: 120px" class="mr-2" />
-        <v-btn color="success" class="mr-2" @click="exportExcel">Export Excel</v-btn>
         <v-btn :loading="loading" color="primary" @click="load">Refresh</v-btn>
       </v-toolbar>
 
       <v-divider />
       <v-card-text class="pa-0">
-        <v-table density="comfortable">
-          <thead>
-            <tr>
-              <th style="width: 140px;">Serve Date</th>
-              <th>Employee</th>
-              <th>Type</th>
-              <th>Meals</th>
-              <th>Qty</th>
-              <th>Location</th>
-              <th>Menu</th>
-              <th>Recurring</th>
-              <th>Status</th>
-              <th style="width: 280px;">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in pagedRows" :key="r._id">
-              <td>{{ fmtDate(r.serveDate) }}</td>
-              <td>{{ r.employee?.employeeId }} — {{ r.employee?.name }}</td>
-              <td>{{ r.orderType }}</td>
-              <td>{{ (r.meals || []).join(', ') }}</td>
-              <td>{{ r.quantity }}</td>
-              <td>{{ r?.location?.kind }}<span v-if="r?.location?.other">— {{ r.location.other }}</span></td>
-              <td>{{ r.menuType }}</td>
-              <td>
-                <template v-if="r.recurring?.enabled">
-                  <v-chip color="teal" size="small" label class="mb-1">{{ r.recurring?.frequency }}</v-chip>
-                  <div class="text-caption">
-                    <span v-if="r.recurring?.endDate">until {{ fmtDate(r.recurring?.endDate) }}</span>
-                    <span v-if="r.recurring?.skipHolidays" class="ml-1">(skip holidays)</span>
-                  </div>
-                </template>
-                <span v-else>—</span>
-              </td>
-              <td><v-chip :color="COLOR[r.status]" size="small" label>{{ r.status }}</v-chip></td>
-              <td>
-                <v-btn
-                  v-for="s in nextSteps(r.status)" :key="s"
-                  size="small" class="mr-1 mb-1"
-                  :color="s==='CANCELED' ? 'red' : (s==='DELIVERED' ? 'green' : 'primary')"
-                  variant="tonal"
-                  :disabled="!r._id"
-                  @click="updateStatus(r, s)"
-                >{{ s }}</v-btn>
-              </td>
-            </tr>
-            <tr v-if="!pagedRows.length">
-              <td colspan="10" class="text-center py-6 text-medium-emphasis">No requests found.</td>
-            </tr>
-          </tbody>
-        </v-table>
+        <div style="overflow-x:auto;">
+          <v-table density="comfortable" class="min-width-table">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th style="width: 320px;">Actions</th>
+                <th>Req ID</th>
+                <th>Order Date</th>
+                <th>Eat Date</th>
+                <th>Time</th>
+                <th>Employee</th>
+                <th>Dept</th>
+                <th>Type</th>
+                <th>Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="r in pagedRows" :key="r._id">
+                <!-- Main concise row -->
+                <tr>
+                  <td><v-chip :color="COLOR[r.status]" size="small" label>{{ r.status }}</v-chip></td>
+                  <td>
+                    <div class="mb-2">
+                      <v-btn
+                        v-for="s in nextSteps(r.status)" :key="s"
+                        size="small" class="mr-1 mb-1"
+                        :color="s==='CANCELED' ? 'red' : (s==='DELIVERED' ? 'green' : 'primary')"
+                        variant="tonal"
+                        :disabled="!r._id"
+                        @click="updateStatus(r, s)"
+                      >{{ s }}</v-btn>
+                    </div>
+                    <v-btn size="small" variant="text" color="secondary" @click="toggleExpanded(r._id)">
+                      {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
+                    </v-btn>
+                  </td>
+                  <td>{{ r.requestId }}</td>
+                  <td>{{ fmtDate(r.orderDate) }}</td>
+                  <td>{{ fmtDate(r.eatDate) }}</td>
+                  <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
+                  <td>{{ r.employee?.employeeId }} — {{ r.employee?.name }}</td>
+                  <td>{{ r.employee?.department }}</td>
+                  <td>{{ r.orderType }}</td>
+                  <td>{{ r.quantity }}</td>
+                </tr>
+
+                <!-- Details row: Menu & Dietary arrow logic -->
+                <tr v-if="isExpanded(r._id)" class="details-row">
+                  <td colspan="10">
+                    <v-expand-transition>
+                      <div class="px-3 py-2">
+                        <!-- Arrow/Tree structure -->
+                        <div class="tree">
+                          <!-- root -->
+                          <div class="tree-node root">
+                            <div class="node-label">
+                              <strong>Quantity</strong> {{ r.quantity }}
+                            </div>
+                            <div class="children">
+                              <!-- menu branches -->
+                              <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
+                                <div class="tree-node">
+                                  <div class="node-label">
+                                    <span class="arrow">→</span>
+                                    <strong>{{ menuName }}</strong> ×{{ menuCnt }}
+                                  </div>
+
+                                  <!-- dietary children -->
+                                  <div
+                                    class="children"
+                                    v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length"
+                                  >
+                                    <div
+                                      class="tree-node leaf"
+                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                      :key="menuName + '_' + allergen"
+                                    >
+                                      <div class="node-label">
+                                        <span class="arrow small">↳</span>
+                                        {{ allergen }} ×{{ aCnt }}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </template>
+                            </div>
+                          </div>
+
+                          <!-- quick checks -->
+                          <div class="mt-2 text-caption">
+                            <template v-if="totals(r).leftoverMenus === 0">
+                              <span class="ok">✔ Menu totals match quantity</span>
+                            </template>
+                            <template v-else>
+                              <span class="warn">⚠ Menu totals {{ totals(r).totalMenus }} differ from quantity {{ r.quantity }} (Δ {{ totals(r).leftoverMenus }})</span>
+                            </template>
+                          </div>
+                          <div class="mt-1 text-caption">
+                            <span
+                              v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()"
+                              :key="'chk_'+menuName"
+                              class="mr-3"
+                              :class="left >= 0 ? 'ok' : 'warn'"
+                            >
+                              {{ menuName }}: dietary Δ {{ left }}
+                            </span>
+                          </div>
+
+                          <!-- optional meta -->
+                          <div class="mt-2 text-caption text-medium-emphasis" v-if="r.menuChoices?.length">
+                            Selected menus: {{ r.menuChoices.join(', ') }}
+                          </div>
+                          <div class="mt-1 text-caption" v-if="r.dietaryOther">
+                            Other dietary note: {{ r.dietaryOther }}
+                          </div>
+                          <div class="mt-1 text-caption" v-if="r.specialInstructions">
+                            Special instruction: {{ r.specialInstructions }}
+                          </div>
+                          <div class="mt-1 text-caption" v-if="r.recurring?.enabled">
+                            Recurring: {{ r.recurring.frequency }}<span v-if="r.recurring.endDate"> until {{ fmtDate(r.recurring.endDate) }}</span><span v-if="r.recurring.skipHolidays"> (skip holidays)</span>
+                          </div>
+                        </div>
+                      </div>
+                    </v-expand-transition>
+                  </td>
+                </tr>
+              </template>
+
+              <tr v-if="!pagedRows.length">
+                <td colspan="10" class="text-center py-6 text-medium-emphasis">No requests found.</td>
+              </tr>
+            </tbody>
+          </v-table>
+        </div>
       </v-card-text>
 
       <v-divider />
@@ -255,3 +392,16 @@ function exportExcel() {
     </v-card>
   </v-container>
 </template>
+
+<style scoped>
+.min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
+.details-row{ background: rgba(0,0,0,0.02); }
+.tree{ font-size:.96rem; line-height:1.4; }
+.tree .node-label{ display:inline-flex; align-items:center; gap:.4rem; padding:.2rem .5rem; border-radius:.5rem; }
+.tree .root>.node-label{ background: rgba(16,185,129,.12); }
+.tree .tree-node .node-label{ background: rgba(59,130,246,.10); }
+.tree .leaf .node-label{ background: rgba(234,179,8,.12); }
+.arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
+.children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
+.ok{ color:#16a34a; } .warn{ color:#dc2626; }
+</style>

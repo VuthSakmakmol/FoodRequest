@@ -40,7 +40,7 @@ function onEmployeeSelected(val) {
       @update:model-value="onEmployeeSelected"
     />
 
-    <v-row dense class="mt-1">
+    <v-row dense class="mt-3">
       <v-col cols="6">
         <v-text-field v-model="form.name" label="Name" readonly variant="outlined" density="compact" hide-details />
       </v-col>

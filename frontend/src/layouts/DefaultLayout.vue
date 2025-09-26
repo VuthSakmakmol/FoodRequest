@@ -14,7 +14,7 @@ const appTitle = 'Food Request'
 // nav items
 const employeeItems = [
   { label: 'Request Meal',   icon: 'mdi-silverware-fork-knife', to: { name:'employee-request' } },
-  { label: 'My Requests',    icon: 'mdi-history',               to: { name:'employee-requests' } },
+  { label: 'My Requests',    icon: 'mdi-history',               to: { name:'employee-request-history' } },
 ]
 
 // 🔹 Added Calendar into admin items

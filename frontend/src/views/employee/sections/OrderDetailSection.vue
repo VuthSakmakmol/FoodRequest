@@ -92,7 +92,7 @@ const timeError = computed(() => {
       <!-- Start time -->
       <v-col cols="12" sm="6">
         <div class="mini-title">Eat Start</div>
-        <v-row dense>
+        <v-row dense class="mt-1">
           <v-col cols="6">
             <v-select
               v-model="form.eatStartHour"
@@ -119,7 +119,7 @@ const timeError = computed(() => {
       <!-- End time -->
       <v-col cols="12" sm="6">
         <div class="mini-title">Eat End</div>
-        <v-row dense>
+        <v-row dense class="mt-1">
           <v-col cols="6">
             <v-select
               v-model="form.eatEndHour"
@@ -162,7 +162,7 @@ const timeError = computed(() => {
 
     <!-- Meals as big buttons -->
     <div class="mt-2">
-      <div class="mini-title">Meal</div>
+      <div class="mini-title"><strong>Meal</strong></div>
       <v-row dense class="mt-1">
         <v-col cols="6" v-for="m in MEALS" :key="m">
           <v-btn
