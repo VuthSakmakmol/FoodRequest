@@ -67,7 +67,7 @@ function onDietaryCountInput(item) {
 <template>
   <v-sheet class="section pa-2 sticky-panel" rounded="lg">
     <div class="hdr">
-      <span class="n">3</span>
+      <span class="n"><strong>3. </strong></span>
       <span class="t"><strong>Menu Section</strong></span>
     </div>
 
