@@ -20,30 +20,39 @@ const MEALS = ['Breakfast','Lunch','Dinner','Snack']
 const MENU_CHOICES = ['Standard','Vegetarian','Vegan','No pork','No beef']
 const ALLERGENS = ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Others']
 
-/* State */
+/* Directory state */
 const employees = ref([])
 const loadingEmployees = ref(false)
 
+/* Form state */
 const form = ref({
   employeeId: '',
   name: '',
   department: '',
-  orderType: '',
+
+  orderType: 'Daily meal',
   meals: [],
   eatDate: dayjs().format('YYYY-MM-DD'),
   eatStartHour: '',
   eatStartMinute: '',
   eatEndHour: '',
   eatEndMinute: '',
+
   quantity: 1,
+
   location: '',
   locationOther: '',
-  menuChoices: [],
-  menuCounts: {},          // object map in editor
+
+  // menus & dietary
+  menuChoices: ['Standard'],   // keep Standard selected; counts for specials only
+  menuCounts: {},              // { 'No beef': 2, 'Vegan': 1 } — never store 'Standard' here
   dietary: [],
-  dietaryCounts: {},       // { Peanut: {count, menu}, ... }
+  dietaryCounts: {},           // { Peanut: { count, menu }, ... }
   dietaryOther: '',
+
   specialInstructions: '',
+
+  // recurring
   recurring: false,
   frequency: '',
   endDate: '',
@@ -54,7 +63,7 @@ const loading = ref(false)
 const success = ref('')
 const error = ref('')
 
-/* Load employees */
+/* Load employees (and restore last selected) */
 async function loadEmployees() {
   loadingEmployees.value = true
   try {
@@ -62,7 +71,7 @@ async function loadEmployees() {
     employees.value = Array.isArray(data) ? data : []
     const savedId = localStorage.getItem('employeeId') || ''
     if (savedId && !form.value.employeeId) {
-      const exists = employees.value.some(e => e.employeeId === savedId)
+      const exists = employees.value.some(e => String(e.employeeId) === String(savedId))
       if (exists) {
         form.value.employeeId = savedId
         onEmployeeSelected(savedId)
@@ -76,12 +85,13 @@ async function loadEmployees() {
 }
 loadEmployees()
 
-/* Derived */
+/* Derived & helpers */
 function onEmployeeSelected(val) {
-  const emp = employees.value.find(e => e.employeeId === val)
+  const emp = employees.value.find(e => String(e.employeeId) === String(val))
   form.value.name = emp ? emp.name : ''
   form.value.department = emp ? emp.department : ''
 }
+
 const isTimedOrder = computed(() => form.value.orderType && form.value.orderType !== 'Daily meal')
 const needsOtherLocation = computed(() => form.value.location === 'Other')
 const showOtherAllergy = computed(() => (form.value.dietary || []).includes('Others'))
@@ -95,7 +105,7 @@ function validateForm() {
   if (!f.eatDate) errs.push('• Eat Date is required')
   if (!f.location) errs.push('• Location is required')
   if (!Array.isArray(f.meals) || f.meals.length === 0) errs.push('• Select at least one Meal')
-  if (f.quantity < 1) errs.push('• Quantity must be ≥ 1')
+  if (Number(f.quantity) < 1) errs.push('• Quantity must be ≥ 1')
   if (!Array.isArray(f.menuChoices) || f.menuChoices.length === 0) errs.push('• Select at least one Menu option')
   if (needsOtherLocation.value && !f.locationOther) errs.push('• Please specify “Other Location”')
   if (showOtherAllergy.value && !f.dietaryOther) errs.push('• Please specify “Other (identify)”')
@@ -112,27 +122,24 @@ function validateForm() {
     if (!f.frequency) errs.push('• Frequency is required when Recurring = Yes')
     if (!f.endDate) errs.push('• End Date is required when Recurring = Yes')
   }
+
   return errs
 }
 
-/* ---------- TRANSFORMS (object → array) ---------- */
-function buildMenuCountsArray(menuCountsObj, quantity) {
-  // send non-Standard as explicit counts, Standard auto = qty - sum(others)
+/* ---------- Transform helpers (object → array) ---------- */
+/* Send specials explicitly; do NOT include Standard (backend derives it).
+   This avoids the “Standard stays 4” problem entirely. */
+function buildMenuCountsArray(menuCountsObj) {
   const entries = Object.entries(menuCountsObj || {})
     .map(([choice, cnt]) => ({ choice, count: Number(cnt || 0) }))
     .filter(x => x.choice && x.count > 0 && x.choice !== 'Standard')
 
-  // merge duplicates
+  // merge duplicates (safety)
   const map = new Map()
   for (const it of entries) map.set(it.choice, (map.get(it.choice) || 0) + it.count)
-  const arr = Array.from(map, ([choice, count]) => ({ choice, count }))
-
-  const used = arr.reduce((s, x) => s + x.count, 0)
-  const std = Math.max(Number(quantity || 0) - used, 0)
-  if (std > 0) arr.push({ choice: 'Standard', count: std })
-
-  return arr
+  return Array.from(map, ([choice, count]) => ({ choice, count }))
 }
+
 function buildDietaryCountsArray(dietaryCountsObj) {
   const temp = Object.entries(dietaryCountsObj || {})
     .map(([allergen, v]) => ({
@@ -152,26 +159,29 @@ function buildDietaryCountsArray(dietaryCountsObj) {
   return Array.from(map.values())
 }
 
-/* Payload */
+/* Build API payload */
 function buildPayloadFromForm(f) {
   return {
-    employeeId: f.employeeId, // controller supports employeeId OR employee.employeeId
+    employeeId: f.employeeId, // backend accepts employeeId or employee.employeeId
     orderType: f.orderType,
     meals: f.meals,
     eatDate: f.eatDate,
     eatTimeStart: f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : null,
     eatTimeEnd:   f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : null,
-    quantity: f.quantity,
+    quantity: Number(f.quantity),
     location: {
       kind: f.location,
       other: f.location === 'Other' ? (f.locationOther || '') : '',
     },
     menuChoices: f.menuChoices,
-    // ✅ convert objects → arrays before POST
-    menuCounts: buildMenuCountsArray(f.menuCounts, f.quantity),
+
+    // ✅ send specials only; server will compute Standard = quantity − sum(specials)
+    menuCounts: buildMenuCountsArray(f.menuCounts),
+
     dietary: f.dietary,
     dietaryOther: f.dietaryOther || '',
     dietaryCounts: buildDietaryCountsArray(f.dietaryCounts),
+
     specialInstructions: f.specialInstructions || '',
     recurring: {
       enabled: !!f.recurring,
@@ -199,6 +209,7 @@ async function submit() {
   }
 
   const payload = buildPayloadFromForm(form.value)
+
   loading.value = true
   try {
     await api.post('/public/food-requests', payload)
@@ -224,7 +235,8 @@ function resetForm({ keepEmployee = false } = {}) {
     employeeId: keepEmployee ? currentEmp : '',
     name: keepEmployee ? currentName : '',
     department: keepEmployee ? currentDept : '',
-    orderType: '',
+
+    orderType: 'Daily meal',
     meals: [],
     eatDate: dayjs().format('YYYY-MM-DD'),
     eatStartHour: '',
@@ -232,14 +244,17 @@ function resetForm({ keepEmployee = false } = {}) {
     eatEndHour: '',
     eatEndMinute: '',
     quantity: 1,
+
     location: '',
     locationOther: '',
-    menuChoices: [],
-    menuCounts: {},
+
+    menuChoices: ['Standard'],
+    menuCounts: {}, // specials only
     dietary: [],
     dietaryCounts: {},
     dietaryOther: '',
     specialInstructions: '',
+
     recurring: false,
     frequency: '',
     endDate: '',
@@ -252,7 +267,7 @@ watch(() => form.value.employeeId, (v) => { if (v) localStorage.setItem('employe
 watch(() => form.value.location, v => { if (v !== 'Other') form.value.locationOther = '' })
 watch(() => form.value.dietary, v => { if (!(v||[]).includes('Others')) form.value.dietaryOther = '' })
 
-/* Realtime UX */
+/* Realtime UX: toast when server echoes creation */
 onMounted(() => {
   socket.on('foodRequest:created', (doc) => {
     const empId = doc?.employee?.employeeId || doc?.employeeId
@@ -276,8 +291,12 @@ function onHotkey(e) {
 <template>
   <v-container fluid class="pa-2">
     <v-card class="rounded-lg slim-card" elevation="1">
-      <v-alert v-if="error" type="error" class="mx-2 mt-2" density="compact" variant="tonal" border="start">{{ error }}</v-alert>
-      <v-alert v-if="success" type="success" class="mx-2 mt-2" density="compact" variant="tonal" border="start">{{ success }}</v-alert>
+      <v-alert v-if="error" type="error" class="mx-2 mt-2" density="compact" variant="tonal" border="start">
+        {{ error }}
+      </v-alert>
+      <v-alert v-if="success" type="success" class="mx-2 mt-2" density="compact" variant="tonal" border="start">
+        {{ success }}
+      </v-alert>
 
       <v-divider class="my-1" />
 
@@ -285,14 +304,32 @@ function onHotkey(e) {
         <v-form @submit.prevent="submit">
           <v-row dense>
             <v-col cols="12" md="4">
-              <RequesterSection :form="form" :employees="employees" :loading-employees="loadingEmployees" @updateEmployee="onEmployeeSelected" />
+              <RequesterSection
+                :form="form"
+                :employees="employees"
+                :loading-employees="loadingEmployees"
+                @updateEmployee="onEmployeeSelected"
+              />
             </v-col>
+
             <v-col cols="12" md="5">
-              <OrderDetailSection :form="form" :is-timed-order="isTimedOrder" :needs-other-location="needsOtherLocation" :MEALS="MEALS" />
+              <OrderDetailSection
+                :form="form"
+                :is-timed-order="isTimedOrder"
+                :needs-other-location="needsOtherLocation"
+                :MEALS="MEALS"
+              />
             </v-col>
+
             <v-col cols="12" md="3" class="sticky-col">
-              <MenuSection :form="form" :MENU_CHOICES="MENU_CHOICES" :ALLERGENS="ALLERGENS" :show-other-allergy="showOtherAllergy" />
+              <MenuSection
+                :form="form"
+                :MENU_CHOICES="MENU_CHOICES"
+                :ALLERGENS="ALLERGENS"
+                :show-other-allergy="showOtherAllergy"
+              />
             </v-col>
+
             <v-col cols="12">
               <RecurringBookingSection :form="form" />
             </v-col>
@@ -327,4 +364,5 @@ function onHotkey(e) {
 @media (max-width: 959.98px) {
   .sticky-panel { position: static; max-height: none; overflow: visible; }
 }
+.text-error{ color:#dc2626; }
 </style>

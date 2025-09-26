@@ -187,9 +187,12 @@ onMounted(async () => {
 onBeforeUnmount(() => { unregisterSocket() })
 watch([q, status, dateStart, dateEnd], () => load())
 
-/* ───────── MENU/DIETARY math (same as Admin) ───────── */
+/* ───────── MENU/DIETARY math (reads normalized backend data) ───────── */
+/** Build a Map of menu -> count from persisted counts.
+ *  If Standard is missing (legacy docs), derive it as qty - sum(specials).
+ *  Never *add* to an existing Standard; treat backend value as source of truth.
+ */
 function menuMap(r) {
-  // Build from persisted counts; DO NOT re-add Standard if already present
   const m = new Map()
   for (const it of (r.menuCounts || [])) {
     if (!it?.choice) continue
@@ -197,6 +200,7 @@ function menuMap(r) {
     if (!n) continue
     m.set(it.choice, (m.get(it.choice) || 0) + n)
   }
+  // Backward-compat: reconstruct Standard only if absent
   if (!m.has('Standard')) {
     const nonStd = Array.from(m.entries())
       .filter(([k]) => k !== 'Standard')
@@ -207,6 +211,7 @@ function menuMap(r) {
   for (const [k, v] of m.entries()) if (!v) m.delete(k)
   return m
 }
+
 function dietaryByMenu(r) {
   const g = new Map()
   for (const d of (r.dietaryCounts || [])) {
@@ -220,6 +225,7 @@ function dietaryByMenu(r) {
   }
   return g
 }
+
 function totals(r) {
   const m = menuMap(r)
   const totalMenus = Array.from(m.values()).reduce((a, b) => a + b, 0)
@@ -296,7 +302,7 @@ function totals(r) {
                   <td>{{ r?.location?.kind }}<span v-if="r?.location?.other"> — {{ r.location.other }}</span></td>
                 </tr>
 
-                <!-- details row (same tree/arrow logic as Admin) -->
+                <!-- details row -->
                 <tr v-if="isExpanded(r._id)" class="details-row">
                   <td colspan="10">
                     <v-expand-transition>
