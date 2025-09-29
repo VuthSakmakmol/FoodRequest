@@ -8,9 +8,12 @@ import isSameOrBefore from 'dayjs/plugin/isSameOrBefore'
 import Swal from 'sweetalert2'
 import socket, { subscribeEmployeeIfNeeded } from '@/utils/socket'
 import * as XLSX from 'xlsx'
+import { useDisplay } from 'vuetify'
 
 dayjs.extend(isSameOrAfter)
 dayjs.extend(isSameOrBefore)
+
+const { mdAndUp } = useDisplay()
 
 /* ───────── state ───────── */
 const loading = ref(false)
@@ -36,6 +39,17 @@ function toggleExpanded(id) {
   const s = new Set(expanded.value)
   s.has(id) ? s.delete(id) : s.add(id)
   expanded.value = s
+}
+
+/* mobile filter dialog */
+const showFilterDialog = ref(false)
+function resetFilters() {
+  q.value = ''
+  status.value = 'ALL'
+  dateStart.value = ''
+  dateEnd.value = ''
+  page.value = 1
+  load()
 }
 
 /* ───────── computed ───────── */
@@ -187,11 +201,7 @@ onMounted(async () => {
 onBeforeUnmount(() => { unregisterSocket() })
 watch([q, status, dateStart, dateEnd], () => load())
 
-/* ───────── MENU/DIETARY math (reads normalized backend data) ───────── */
-/** Build a Map of menu -> count from persisted counts.
- *  If Standard is missing (legacy docs), derive it as qty - sum(specials).
- *  Never *add* to an existing Standard; treat backend value as source of truth.
- */
+/* ───────── MENU/DIETARY helpers ───────── */
 function menuMap(r) {
   const m = new Map()
   for (const it of (r.menuCounts || [])) {
@@ -200,7 +210,6 @@ function menuMap(r) {
     if (!n) continue
     m.set(it.choice, (m.get(it.choice) || 0) + n)
   }
-  // Backward-compat: reconstruct Standard only if absent
   if (!m.has('Standard')) {
     const nonStd = Array.from(m.entries())
       .filter(([k]) => k !== 'Standard')
@@ -211,7 +220,6 @@ function menuMap(r) {
   for (const [k, v] of m.entries()) if (!v) m.delete(k)
   return m
 }
-
 function dietaryByMenu(r) {
   const g = new Map()
   for (const d of (r.dietaryCounts || [])) {
@@ -225,7 +233,6 @@ function dietaryByMenu(r) {
   }
   return g
 }
-
 function totals(r) {
   const m = menuMap(r)
   const totalMenus = Array.from(m.values()).reduce((a, b) => a + b, 0)
@@ -243,32 +250,121 @@ function totals(r) {
 <template>
   <v-container fluid class="pa-2">
     <v-card class="rounded-lg" elevation="1">
-      <v-toolbar flat density="comfortable">
+      <!-- Desktop / Tablet toolbar -->
+      <v-toolbar v-if="mdAndUp" flat density="comfortable" class="py-2">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">
           My Requests <v-chip size="x-small" class="ml-2" color="teal" label>Live</v-chip>
         </v-toolbar-title>
         <v-spacer />
-        <v-text-field v-model="q" density="compact" placeholder="Search (req id, type, menu, note)"
-          hide-details variant="outlined" class="mr-2" @keyup.enter="load" />
-        <v-select v-model="status" :items="statuses" density="compact" label="Status"
-          hide-details variant="outlined" class="mr-2" style="max-width:160px" />
-        <v-text-field v-model="dateStart" type="date" density="compact" label="From"
-          hide-details variant="outlined" class="mr-2" style="max-width:160px" />
-        <v-text-field v-model="dateEnd" type="date" density="compact" label="To"
-          hide-details variant="outlined" class="mr-2" style="max-width:160px" />
-        <v-btn :loading="loading" color="primary" @click="load" class="mr-2">Refresh</v-btn>
-        <v-btn color="success" @click="exportExcel">Export</v-btn>
+        <v-text-field
+          v-model="q" density="compact" placeholder="Search (type, menu, note, requester)"
+          clearable hide-details variant="outlined" class="mr-2" style="max-width:260px"
+          @keyup.enter="load"
+        />
+        <v-select
+          v-model="status" :items="statuses" density="compact" label="Status"
+          hide-details variant="outlined" class="mr-2" style="max-width:160px"
+        />
+        <v-text-field
+          v-model="dateStart" type="date" density="compact" label="From"
+          hide-details variant="outlined" class="mr-2" style="max-width:160px"
+        />
+        <v-text-field
+          v-model="dateEnd" type="date" density="compact" label="To"
+          hide-details variant="outlined" class="mr-2" style="max-width:160px"
+        />
+        <v-btn :loading="loading" color="primary" @click="load" class="mr-2" prepend-icon="mdi-refresh">Refresh</v-btn>
+        <v-btn color="success" @click="exportExcel" prepend-icon="mdi-file-excel">Export</v-btn>
+      </v-toolbar>
+
+      <!-- Mobile toolbar -->
+      <v-toolbar v-else flat density="comfortable" class="py-2">
+        <v-toolbar-title class="text-subtitle-2 font-weight-bold">
+          My Requests 
+        </v-toolbar-title>
+        <v-spacer />
+        <v-btn icon variant="text" @click="exportExcel" :title="'Export'">
+          <v-icon>mdi-file-excel</v-icon>
+        </v-btn>
       </v-toolbar>
 
       <v-divider />
+
+      <!-- Mobile search + Refresh + Filters -->
+      <v-sheet v-if="!mdAndUp" class="px-3 pt-3 pb-1 bg-transparent">
+        <div class="d-flex align-center gap-2">
+          <v-text-field
+            v-model="q" density="compact" placeholder="Search"
+            clearable hide-details variant="outlined" class="flex-grow-1"
+            @keyup.enter="load"
+          />
+          <v-btn color="grey" variant="tonal" @click="load">
+            Refresh
+          </v-btn>
+          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">
+            Filters
+          </v-btn>
+        </div>
+      </v-sheet>
+
+      <!-- Filters dialog for mobile -->
+      <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
+        <v-card>
+          <v-toolbar density="comfortable" color="primary" class="text-white">
+            <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false"><v-icon>mdi-close</v-icon></v-btn>
+            <v-toolbar-title>Filters</v-toolbar-title>
+            <v-spacer />
+            <v-btn variant="text" class="text-white" @click="resetFilters">
+              <v-icon start>mdi-restore</v-icon> Reset
+            </v-btn>
+          </v-toolbar>
+
+          <v-card-text>
+            <v-row dense>
+              <v-col cols="12">
+                <v-select
+                  v-model="status" :items="statuses" label="Status"
+                  variant="outlined" density="comfortable" hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model="dateStart" type="date" label="From"
+                  variant="outlined" density="comfortable" hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-text-field
+                  v-model="dateEnd" type="date" label="To"
+                  variant="outlined" density="comfortable" hide-details
+                />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-select
+                  v-model="itemsPerPage" :items="itemsPerPageOptions" label="Rows per page"
+                  variant="outlined" density="comfortable" hide-details
+                />
+              </v-col>
+            </v-row>
+          </v-card-text>
+
+          <v-card-actions class="px-4 pb-4">
+            <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">Close</v-btn>
+            <v-spacer />
+            <v-btn color="primary" @click="showFilterDialog=false; load()">Apply</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
       <v-card-text class="pa-0">
-        <div style="overflow-x:auto;">
+        <div class="table-wrap">
           <v-table density="comfortable" class="min-width-table">
             <thead>
               <tr>
                 <th>Status</th>
                 <th style="width: 120px;">Details</th>
-                <th>Req ID</th>
+                <!-- Changed: “Req ID” -> “Requester (ID & Name)” -->
+                <th>Requester (ID &amp; Name)</th>
                 <th>Order Date</th>
                 <th>Eat Date</th>
                 <th>Time</th>
@@ -280,7 +376,6 @@ function totals(r) {
             </thead>
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
-                <!-- concise row -->
                 <tr>
                   <td>
                     <v-chip :color="{ NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }[r.status]" size="small" label>
@@ -292,7 +387,8 @@ function totals(r) {
                       {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
                     </v-btn>
                   </td>
-                  <td>{{ r.requestId }}</td>
+                  <!-- Changed cell: show Employee ID — Name -->
+                  <td>{{ r?.employee?.employeeId || '—' }}<span v-if="r?.employee?.name"> — {{ r.employee.name }}</span></td>
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
                   <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
@@ -302,7 +398,6 @@ function totals(r) {
                   <td>{{ r?.location?.kind }}<span v-if="r?.location?.other"> — {{ r.location.other }}</span></td>
                 </tr>
 
-                <!-- details row -->
                 <tr v-if="isExpanded(r._id)" class="details-row">
                   <td colspan="10">
                     <v-expand-transition>
@@ -339,7 +434,6 @@ function totals(r) {
                             </div>
                           </div>
 
-                          <!-- checks -->
                           <div class="mt-2 text-caption">
                             <template v-if="totals(r).leftoverMenus === 0">
                               <span class="ok">✔ Menu totals match quantity</span>
@@ -359,7 +453,6 @@ function totals(r) {
                             </span>
                           </div>
 
-                          <!-- meta -->
                           <div class="mt-2 text-caption text-medium-emphasis" v-if="r.menuChoices?.length">
                             Selected menus: {{ r.menuChoices.join(', ') }}
                           </div>
@@ -390,9 +483,11 @@ function totals(r) {
         </div>
 
         <!-- pagination -->
-        <div class="d-flex justify-space-between align-center pa-3">
-          <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" density="compact"
-            label="Rows per page" hide-details variant="outlined" style="max-width:120px" />
+        <div class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3">
+          <v-select
+            v-model="itemsPerPage" :items="itemsPerPageOptions" density="compact"
+            label="Rows per page" hide-details variant="outlined" style="max-width:140px"
+          />
           <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
         </div>
       </v-card-text>
@@ -401,7 +496,14 @@ function totals(r) {
 </template>
 
 <style scoped>
+.table-wrap{ overflow-x:auto; display:block; }
+
+/* Inputs a bit tighter */
+:deep(.v-field__input){ min-height: 36px; }
+
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
+
+/* details */
 .details-row{ background: rgba(0,0,0,0.02); }
 .tree{ font-size:.96rem; line-height:1.4; }
 .tree .node-label{ display:inline-flex; align-items:center; gap:.4rem; padding:.2rem .5rem; border-radius:.5rem; }
@@ -411,4 +513,11 @@ function totals(r) {
 .arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
 .ok{ color:#16a34a; } .warn{ color:#dc2626; }
+
+/* phone tweaks */
+@media (max-width: 600px){
+  .min-width-table th,.min-width-table td{ min-width: 90px; }
+  .table-wrap{ -webkit-overflow-scrolling: touch; }
+  .v-toolbar{ padding-left: .5rem; padding-right: .5rem; }
+}
 </style>

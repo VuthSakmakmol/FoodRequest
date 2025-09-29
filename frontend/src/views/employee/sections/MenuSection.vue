@@ -4,9 +4,39 @@ import { computed, watch } from 'vue'
 
 const props = defineProps({
   form: { type: Object, required: true },
-  MENU_CHOICES: { type: Array, default: () => ['Standard','Vegetarian','Vegan','No pork','No beef'] },
-  ALLERGENS: { type: Array, default: () => ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Others'] },
+  MENU_CHOICES: {
+    type: Array,
+    default: () => ['Standard','Vegetarian','Vegan','No pork','No beef']
+  },
+  ALLERGENS: {
+    type: Array,
+    default: () => ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Others']
+  },
   showOtherAllergy: { type: Boolean, default: true }
+})
+
+/* ───────── Khmer display labels (values stay English) ───────── */
+const MENU_KM = {
+  Standard: 'ញាំទូទៅ',
+  Vegetarian: 'មិនញាំសាច់',
+  Vegan: 'ញាំបួស',
+  'No pork': 'តមសាច់ជ្រូក',
+  'No beef': 'តមសាច់គោ'
+}
+const ALLERGEN_KM = {
+  Peanut: 'សណ្តែកដី',
+  Shellfish: 'សត្វសំបកសមុទ្រ',
+  Egg: 'ស៊ុត',
+  Gluten: 'គ្លុយតែន',
+  'Dairy/Lactose': 'ទឹកដោះគោ/ឡាក់តូស',
+  Soy: 'សណ្តែកសៀង',
+  Others: 'ផ្សេងទៀត'
+}
+
+/* v-select items for dietary menu source; value stays English */
+const dietaryMenuItems = computed(() => {
+  const src = (props.form.menuChoices?.length ? props.form.menuChoices : ['Standard'])
+  return src.map(v => ({ value: v, title: v }))
 })
 
 /* toggle helper */
@@ -90,15 +120,20 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
     <v-row dense class="mt-1">
       <v-col cols="6" v-for="mc in MENU_CHOICES" :key="mc">
         <v-btn
-          block variant="tonal" class="choice-btn"
+          block variant="tonal" class="choice-btn two-line"
           :class="{ active: props.form.menuChoices.includes(mc) }"
           @click="
             props.form.menuChoices = toggleArrayValue(props.form.menuChoices, mc);
             if (mc !== 'Standard') ensureMenuCountKey(mc);
           "
         >
-          {{ mc }}
-          <span v-if="mc === 'Standard'">({{ standardCount }})</span>
+          <div class="label">
+            <div class="en">
+              {{ mc }}
+              <span v-if="mc === 'Standard'" class="std-count">({{ standardCount }})</span>
+            </div>
+            <div class="km">{{ MENU_KM[mc] }}</div>
+          </div>
         </v-btn>
 
         <!-- Inputs only for specials -->
@@ -119,18 +154,21 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
     </v-row>
 
     <!-- Allergies -->
-    <div class="mini-title mt-3 mb-1">Dietary & Allergies</div>
+    <div class="mini-title mt-3 mb-1">Dietary &amp; Allergies</div>
     <v-row dense class="mt-1">
       <v-col cols="12" v-for="item in ALLERGENS" :key="item">
         <v-btn
-          block variant="tonal" class="choice-btn"
+          block variant="tonal" class="choice-btn two-line"
           :class="{ active: props.form.dietary.includes(item) }"
           @click="
             props.form.dietary = toggleArrayValue(props.form.dietary, item);
             ensureDietaryKey(item);
           "
         >
-          {{ item }}
+          <div class="label">
+            <div class="en">{{ item }}</div>
+            <div class="km">{{ ALLERGEN_KM[item] }}</div>
+          </div>
         </v-btn>
 
         <div v-if="props.form.dietary.includes(item)" class="mt-3">
@@ -138,12 +176,27 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
             <v-col cols="8">
               <v-select
                 v-model="props.form.dietaryCounts[item].menu"
-                :items="props.form.menuChoices.length ? props.form.menuChoices : ['Standard']"
+                :items="dietaryMenuItems"
+                item-title="title"
+                item-value="value"
                 density="compact"
                 variant="outlined"
                 label="From menu"
                 hide-details
-              />
+              >
+                <!-- Two-line rendering in dropdown items -->
+                <template #item="{ props: slotProps, item }">
+                  <v-list-item v-bind="slotProps">
+                    <v-list-item-title class="en">{{ item.title }}</v-list-item-title>
+                    <v-list-item-subtitle class="km">{{ MENU_KM[item.value] }}</v-list-item-subtitle>
+                  </v-list-item>
+                </template>
+                <!-- Two-line rendering for selected chip/value -->
+                <template #selection="{ item }">
+                  <span class="en">{{ item.title }}</span>
+                  <span class="km d-block">{{ MENU_KM[item.value] }}</span>
+                </template>
+              </v-select>
             </v-col>
             <v-col cols="4">
               <v-text-field
@@ -198,7 +251,32 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
 </template>
 
 <style scoped>
-.choice-btn{ font-weight:600; min-height:48px; text-transform:none; background-color:aliceblue; }
+.choice-btn{
+  font-weight:600;
+  min-height:56px;
+  text-transform:none;
+  background-color:aliceblue;
+  justify-content:flex-start;
+  text-align:left;
+}
+.choice-btn.two-line .label{
+  display:flex;
+  flex-direction:column;
+  line-height:1.1;
+}
+.label .en{
+  font-size:0.98rem;
+}
+.label .km{
+  font-size:0.86rem;
+  opacity:0.9;
+  margin-top:2px;
+}
+.std-count{
+  font-weight:500;
+  margin-left:.25rem;
+  opacity:.85;
+}
 .choice-btn.active{ background-color:#16a34a !important; color:#fff !important; }
 .text-error{ color:#dc2626 !important; }
 .text-success{ color:#16a34a !important; }

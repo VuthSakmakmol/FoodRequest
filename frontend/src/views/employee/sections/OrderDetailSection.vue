@@ -1,12 +1,13 @@
+<!-- OrderDetailSection.vue -->
 <script setup>
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
 
 const props = defineProps({
-  form: Object,
-  isTimedOrder: Boolean,
-  needsOtherLocation: Boolean,
-  MEALS: Array,
+  form: Object,                 // { eatDate, orderType, location, eatStartHour, eatStartMinute, eatEndHour, eatEndMinute, meals:[], quantity, locationOther? }
+  isTimedOrder: Boolean,        // show time pickers
+  needsOtherLocation: Boolean,  // show "Other Location" field
+  MEALS: Array,                 // ['Breakfast','Lunch','Dinner','Snack']
   r: Object
 })
 
@@ -33,6 +34,14 @@ const timeError = computed(() => {
   if (!eatStartTime.value || !eatEndTime.value) return ''
   return eatEndTime.value > eatStartTime.value ? '' : 'End time must be after start time'
 })
+
+/* ───────── Khmer labels (display only; values remain English) ───────── */
+const MEAL_KM = {
+  Breakfast: 'អាហារពេលព្រឹក',
+  Lunch: 'អាហារថ្ងៃត្រង់',
+  Dinner: 'អាហារពេលល្ងាច',
+  Snack: 'អាហារពេលល្ងាច'
+}
 </script>
 
 <template>
@@ -46,9 +55,9 @@ const timeError = computed(() => {
     <v-row dense class="mt-3">
       <v-col cols="12" sm="6">
         <v-menu v-model="eatDateMenu" :close-on-content-click="false">
-          <template #activator="{ props }">
+          <template #activator="{ props: act }">
             <v-text-field
-              v-bind="props"
+              v-bind="act"
               :model-value="fmtDate(form.eatDate)"
               label="Eat Date"
               variant="outlined"
@@ -160,7 +169,7 @@ const timeError = computed(() => {
       density="compact"
     />
 
-    <!-- Meals as big buttons -->
+    <!-- Meals as big buttons (two-line English / Khmer) -->
     <div class="mt-2">
       <div class="mini-title"><strong>Meal</strong></div>
       <v-row dense class="mt-1">
@@ -168,13 +177,15 @@ const timeError = computed(() => {
           <v-btn
             block
             variant="tonal"
-            class="choice-btn"
+            class="choice-btn two-line"
             style="background-color:aliceblue;"
-            :value="m"
             :class="{ active: form.meals.includes(m) }"
             @click="form.meals = form.meals.includes(m) ? form.meals.filter(x => x !== m) : [...form.meals, m]"
           >
-            {{ m }}
+            <div class="label">
+              <div class="en">{{ m }}</div>
+              <div class="km">{{ MEAL_KM[m] }}</div>
+            </div>
           </v-btn>
         </v-col>
       </v-row>
@@ -202,8 +213,24 @@ const timeError = computed(() => {
 <style scoped>
 .choice-btn {
   font-weight: 600;
-  min-height: 48px;
+  min-height: 56px;
   text-transform: none;
+  background-color: aliceblue;
+  justify-content: flex-start;
+  text-align: left;
+}
+.choice-btn.two-line .label{
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+.label .en{
+  font-size: 0.98rem;
+}
+.label .km{
+  font-size: 0.86rem;
+  opacity: 0.9;
+  margin-top: 2px;
 }
 .choice-btn.active {
   background-color: #16a34a !important;
