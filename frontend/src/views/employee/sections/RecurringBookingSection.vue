@@ -13,9 +13,9 @@ const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
 
 <template>
   <v-sheet class="section pa-2" rounded="lg">
-    <div class="hdr"><span class="n">4</span><span class="t">Recurring Booking</span></div>
+    <div class="hdr"><span class="n"><strong>4. </strong></span><span class="t"><strong>Recurring Booking</strong></span></div>
 
-    <v-row dense class="align-center">
+    <v-row dense class="align-center mt-3">
       <v-col cols="12" sm="3">
         <v-btn-toggle v-model="form.recurring" rounded="lg" divided density="compact">
           <v-btn :value="true" size="small">YES</v-btn>
@@ -24,7 +24,7 @@ const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
       </v-col>
 
       <template v-if="form.recurring">
-        <v-col cols="12" sm="3">
+        <v-col cols="12" sm="3" class="mt-6">
           <v-select
             v-model="form.frequency"
             :items="['Daily','Weekly','Monthly']"
@@ -34,7 +34,7 @@ const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
           />
         </v-col>
 
-        <v-col cols="12" sm="3">
+        <v-col cols="12" sm="3" class="mt-6">
           <v-menu v-model="endDateMenu" :close-on-content-click="false">
             <template #activator="{ props }">
               <v-text-field
@@ -50,7 +50,7 @@ const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
           </v-menu>
         </v-col>
 
-        <v-col cols="12" sm="3" class="d-flex align-center mb-7">
+        <v-col cols="12" sm="3" class="d-flex align-center">
           <!-- Native checkbox -->
           <label for="skipHolidays" class="chk-wrap">
             <input
