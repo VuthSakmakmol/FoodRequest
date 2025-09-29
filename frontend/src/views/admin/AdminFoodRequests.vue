@@ -6,7 +6,9 @@ import Swal from 'sweetalert2'
 import api from '@/utils/api'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
+import { useDisplay } from 'vuetify'
 
+const { mdAndUp } = useDisplay()
 const auth = useAuth()
 
 /* ───────── state ───────── */
@@ -16,6 +18,7 @@ const q = ref('')
 const status = ref('ALL')
 const fromDate = ref('')
 const toDate = ref('')
+const showFilterDialog = ref(false)
 
 const page = ref(1)
 const perPage = ref(20)
@@ -28,7 +31,7 @@ const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({
   ...o,
   _id: String(o?._id || ''),
-  requestId: String(o?.requestId || ''),
+  requestId: String(o?.requestId || ''), // kept in data; no longer shown
   orderType: o?.orderType || '',
   quantity: Number(o?.quantity || 0),
   menuChoices: Array.isArray(o?.menuChoices) ? o.menuChoices : [],
@@ -37,7 +40,7 @@ const normalize = o => ({
   dietaryCounts: Array.isArray(o?.dietaryCounts) ? o.dietaryCounts : [],
 })
 
-/* ───────── MENU / DIETARY math (accurate to backend) ───────── */
+/* ───────── MENU / DIETARY math ───────── */
 function sumNonStandard(r) {
   return (r.menuCounts || [])
     .filter(x => x?.choice && x.choice !== 'Standard')
@@ -46,9 +49,7 @@ function sumNonStandard(r) {
 function standardAuto(r) {
   return Math.max(Number(r.quantity || 0) - sumNonStandard(r), 0)
 }
-// Replace the whole function in AdminFoodRequests.vue
 function menuMap(r) {
-  // Build map from persisted counts
   const m = new Map()
   for (const it of (r.menuCounts || [])) {
     if (!it?.choice) continue
@@ -56,8 +57,6 @@ function menuMap(r) {
     if (!n) continue
     m.set(it.choice, (m.get(it.choice) || 0) + n)
   }
-
-  // If DB didn't include Standard (legacy records), derive it once.
   if (!m.has('Standard')) {
     const nonStd = Array.from(m.entries())
       .filter(([k]) => k !== 'Standard')
@@ -65,14 +64,10 @@ function menuMap(r) {
     const std = Math.max(Number(r.quantity || 0) - nonStd, 0)
     if (std > 0) m.set('Standard', std)
   }
-
-  // Drop any zeroes
   for (const [k, v] of m.entries()) if (!v) m.delete(k)
   return m
 }
-
 function dietaryByMenu(r) {
-  // Group dietary under the declared menu; default to 'Standard'
   const g = new Map()
   for (const d of (r.dietaryCounts || [])) {
     const menu = d?.menu || 'Standard'
@@ -83,15 +78,14 @@ function dietaryByMenu(r) {
     const inner = g.get(menu)
     inner.set(allergen, (inner.get(allergen) || 0) + cnt)
   }
-  return g // Map(menu -> Map(allergen -> count))
+  return g
 }
 
-/* ───────── derived validations (shown inside details) ───────── */
+/* ───────── derived validations ───────── */
 function totals(r) {
   const m = menuMap(r)
   const totalMenus = Array.from(m.values()).reduce((a, b) => a + b, 0)
   const leftoverMenus = Number(r.quantity || 0) - totalMenus
-  // For each menu, check dietary sum <= that menu count
   const g = dietaryByMenu(r)
   const perMenuDietaryLeft = new Map()
   for (const [menu, cnt] of m.entries()) {
@@ -223,46 +217,120 @@ async function updateStatus(row, target) {
     await Swal.fire({ icon:'error', title:'Failed', text: e?.response?.data?.message || e.message || 'Request failed' })
   }
 }
+
+/* ───────── mobile helpers ───────── */
+function resetFilters() {
+  q.value = ''
+  status.value = 'ALL'
+  fromDate.value = ''
+  toDate.value = ''
+  page.value = 1
+  load()
+}
 </script>
 
 <template>
   <v-container fluid class="pa-2">
     <v-card elevation="1" class="rounded-lg">
-      <!-- Toolbar / filters -->
-      <v-toolbar flat density="comfortable">
+      <!-- Toolbar -->
+      <v-toolbar flat density="comfortable" class="px-2">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">Food Requests</v-toolbar-title>
         <v-spacer />
-        <v-text-field v-model="q" density="compact" placeholder="Search" hide-details variant="outlined" class="mr-2" @keyup.enter="load" />
-        <v-select v-model="status" :items="statuses" density="compact" label="Status" hide-details variant="outlined" class="mr-2" style="max-width: 160px" />
-        <v-text-field v-model="fromDate" type="date" density="compact" label="From" hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
-        <v-text-field v-model="toDate" type="date" density="compact" label="To" hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
-        <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows" hide-details variant="outlined" style="max-width: 120px" class="mr-2" />
-        <v-btn :loading="loading" color="primary" @click="load">Refresh</v-btn>
+
+        <!-- Desktop/tablet inline filters -->
+        <template v-if="mdAndUp">
+          <v-text-field v-model="q" density="compact" placeholder="Search"
+                        hide-details variant="outlined" class="mr-2" @keyup.enter="load" style="max-width: 220px" />
+          <v-select v-model="status" :items="statuses" density="compact" label="Status"
+                    hide-details variant="outlined" class="mr-2" style="max-width: 160px" />
+          <v-text-field v-model="fromDate" type="date" density="compact" label="From"
+                        hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
+          <v-text-field v-model="toDate" type="date" density="compact" label="To"
+                        hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
+          <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows"
+                    hide-details variant="outlined" style="max-width: 120px" class="mr-2" />
+          <v-btn :loading="loading" color="primary" @click="load">Refresh</v-btn>
+        </template>
+
+        <!-- Mobile: compact controls -->
+        <template v-else>
+          <v-text-field v-model="q" density="compact" placeholder="Search"
+                        hide-details variant="outlined" class="mr-2" style="max-width: 50vw" @keyup.enter="load" />
+          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">
+            Filters
+          </v-btn>
+        </template>
       </v-toolbar>
 
+      <!-- Mobile Filters dialog -->
+      <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
+        <v-card>
+          <v-toolbar density="comfortable" color="primary" class="text-white">
+            <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+            <v-toolbar-title>Filters</v-toolbar-title>
+            <v-spacer />
+            <v-btn variant="text" class="text-white" @click="resetFilters">
+              <v-icon start>mdi-restore</v-icon> Reset
+            </v-btn>
+          </v-toolbar>
+
+          <v-card-text>
+            <v-row dense>
+              <v-col cols="12">
+                <v-select v-model="status" :items="statuses" label="Status"
+                          variant="outlined" density="comfortable" hide-details />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-text-field v-model="fromDate" type="date" label="From"
+                              variant="outlined" density="comfortable" hide-details />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-text-field v-model="toDate" type="date" label="To"
+                              variant="outlined" density="comfortable" hide-details />
+              </v-col>
+              <v-col cols="12" sm="6">
+                <v-select v-model="perPage" :items="perPageOptions" label="Rows per page"
+                          variant="outlined" density="comfortable" hide-details />
+              </v-col>
+            </v-row>
+          </v-card-text>
+
+          <v-card-actions class="px-4 pb-4">
+            <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">Close</v-btn>
+            <v-spacer />
+            <v-btn color="primary" @click="showFilterDialog=false; load()">Apply</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
       <v-divider />
+
       <v-card-text class="pa-0">
-        <div style="overflow-x:auto;">
+        <div class="table-wrap">
           <v-table density="comfortable" class="min-width-table">
             <thead>
               <tr>
                 <th>Status</th>
                 <th style="width: 320px;">Actions</th>
-                <th>Req ID</th>
+                <!-- Requester column (replacing old Req ID) -->
+                <th>Requester (ID &amp; Name)</th>
                 <th>Order Date</th>
                 <th>Eat Date</th>
                 <th>Time</th>
-                <th>Employee</th>
-                <th>Dept</th>
-                <th>Type</th>
+                <!-- Hide on very small screens to reduce clutter -->
+                <th class="d-none d-sm-table-cell">Dept</th>
+                <th class="d-none d-md-table-cell">Type</th>
                 <th>Qty</th>
               </tr>
             </thead>
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
-                <!-- Main concise row -->
                 <tr>
-                  <td><v-chip :color="COLOR[r.status]" size="small" label>{{ r.status }}</v-chip></td>
+                  <td>
+                    <v-chip :color="COLOR[r.status]" size="small" label>{{ r.status }}</v-chip>
+                  </td>
                   <td>
                     <div class="mb-2">
                       <v-btn
@@ -278,51 +346,32 @@ async function updateStatus(row, target) {
                       {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
                     </v-btn>
                   </td>
-                  <td>{{ r.requestId }}</td>
+                  <td>{{ r.employee?.employeeId || '—' }} — {{ r.employee?.name || '—' }}</td>
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
                   <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
-                  <td>{{ r.employee?.employeeId }} — {{ r.employee?.name }}</td>
-                  <td>{{ r.employee?.department }}</td>
-                  <td>{{ r.orderType }}</td>
+                  <td class="d-none d-sm-table-cell">{{ r.employee?.department || '—' }}</td>
+                  <td class="d-none d-md-table-cell">{{ r.orderType }}</td>
                   <td>{{ r.quantity }}</td>
                 </tr>
 
-                <!-- Details row: Menu & Dietary arrow logic -->
+                <!-- Details row -->
                 <tr v-if="isExpanded(r._id)" class="details-row">
-                  <td colspan="10">
+                  <td colspan="9">
                     <v-expand-transition>
                       <div class="px-3 py-2">
-                        <!-- Arrow/Tree structure -->
                         <div class="tree">
-                          <!-- root -->
                           <div class="tree-node root">
-                            <div class="node-label">
-                              <strong>Quantity</strong> {{ r.quantity }}
-                            </div>
+                            <div class="node-label"><strong>Quantity</strong> {{ r.quantity }}</div>
                             <div class="children">
-                              <!-- menu branches -->
                               <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                                 <div class="tree-node">
-                                  <div class="node-label">
-                                    <span class="arrow">→</span>
-                                    <strong>{{ menuName }}</strong> ×{{ menuCnt }}
-                                  </div>
-
-                                  <!-- dietary children -->
-                                  <div
-                                    class="children"
-                                    v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length"
-                                  >
-                                    <div
-                                      class="tree-node leaf"
-                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
-                                      :key="menuName + '_' + allergen"
-                                    >
-                                      <div class="node-label">
-                                        <span class="arrow small">↳</span>
-                                        {{ allergen }} ×{{ aCnt }}
-                                      </div>
+                                  <div class="node-label"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                  <div class="children" v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length">
+                                    <div class="tree-node leaf"
+                                         v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                         :key="menuName + '_' + allergen">
+                                      <div class="node-label"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
                                     </div>
                                   </div>
                                 </div>
@@ -330,7 +379,6 @@ async function updateStatus(row, target) {
                             </div>
                           </div>
 
-                          <!-- quick checks -->
                           <div class="mt-2 text-caption">
                             <template v-if="totals(r).leftoverMenus === 0">
                               <span class="ok">✔ Menu totals match quantity</span>
@@ -340,17 +388,14 @@ async function updateStatus(row, target) {
                             </template>
                           </div>
                           <div class="mt-1 text-caption">
-                            <span
-                              v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()"
-                              :key="'chk_'+menuName"
-                              class="mr-3"
-                              :class="left >= 0 ? 'ok' : 'warn'"
-                            >
+                            <span v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()"
+                                  :key="'chk_'+menuName"
+                                  class="mr-3"
+                                  :class="left >= 0 ? 'ok' : 'warn'">
                               {{ menuName }}: dietary Δ {{ left }}
                             </span>
                           </div>
 
-                          <!-- optional meta -->
                           <div class="mt-2 text-caption text-medium-emphasis" v-if="r.menuChoices?.length">
                             Selected menus: {{ r.menuChoices.join(', ') }}
                           </div>
@@ -371,7 +416,7 @@ async function updateStatus(row, target) {
               </template>
 
               <tr v-if="!pagedRows.length">
-                <td colspan="10" class="text-center py-6 text-medium-emphasis">No requests found.</td>
+                <td colspan="9" class="text-center py-6 text-medium-emphasis">No requests found.</td>
               </tr>
             </tbody>
           </v-table>
@@ -379,7 +424,7 @@ async function updateStatus(row, target) {
       </v-card-text>
 
       <v-divider />
-      <div class="d-flex align-center justify-space-between px-4 py-3">
+      <div class="d-flex flex-wrap align-center justify-space-between px-4 py-3 gap-2">
         <div class="text-caption text-medium-emphasis">
           Showing
           <b>{{ perPage === 'All' ? 1 : Math.min((page - 1) * perPage + 1, totalItems) }}</b>
@@ -387,6 +432,8 @@ async function updateStatus(row, target) {
           <b>{{ perPage === 'All' ? totalItems : Math.min(page * perPage, totalItems) }}</b>
           of <b>{{ totalItems }}</b>
         </div>
+        <v-select v-if="!mdAndUp" v-model="perPage" :items="perPageOptions" density="compact"
+                  label="Rows" hide-details variant="outlined" style="max-width: 140px" />
         <v-pagination v-if="perPage !== 'All'" v-model="page" :length="totalPages" :total-visible="7" density="comfortable" />
       </div>
     </v-card>
@@ -394,7 +441,19 @@ async function updateStatus(row, target) {
 </template>
 
 <style scoped>
+.table-wrap{ overflow-x:auto; display:block; }
+
+/* Make inputs a bit tighter */
+:deep(.v-field__input){ min-height: 36px; }
+
+/* Table min widths; shrink a bit on phones */
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
+@media (max-width: 600px){
+  .min-width-table th,.min-width-table td{ min-width: 90px; }
+  .v-toolbar{ padding-left: .5rem; padding-right: .5rem; }
+}
+
+/* Details tree */
 .details-row{ background: rgba(0,0,0,0.02); }
 .tree{ font-size:.96rem; line-height:1.4; }
 .tree .node-label{ display:inline-flex; align-items:center; gap:.4rem; padding:.2rem .5rem; border-radius:.5rem; }
@@ -404,4 +463,9 @@ async function updateStatus(row, target) {
 .arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
 .ok{ color:#16a34a; } .warn{ color:#dc2626; }
+
+/* Display utility for table cells on small screens */
+.d-none{ display:none !important; }
+@media (min-width: 600px){ .d-sm-table-cell{ display: table-cell !important; } }
+@media (min-width: 960px){ .d-md-table-cell{ display: table-cell !important; } }
 </style>

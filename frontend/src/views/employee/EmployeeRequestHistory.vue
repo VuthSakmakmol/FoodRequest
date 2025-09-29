@@ -52,34 +52,13 @@ function resetFilters() {
   load()
 }
 
-/* ───────── computed ───────── */
-const filteredRows = computed(() => {
-  let list = rows.value
-  if (dateStart.value) {
-    list = list.filter(r =>
-      r.eatDate && dayjs(r.eatDate).isSameOrAfter(dayjs(dateStart.value), 'day')
-    )
-  }
-  if (dateEnd.value) {
-    list = list.filter(r =>
-      r.eatDate && dayjs(r.eatDate).isSameOrBefore(dayjs(dateEnd.value), 'day')
-    )
-  }
-  return list
-})
-const pagedRows = computed(() => {
-  if (itemsPerPage.value === 'All') return filteredRows.value
-  const start = (page.value - 1) * itemsPerPage.value
-  return filteredRows.value.slice(start, start + itemsPerPage.value)
-})
-const pageCount = computed(() => {
-  if (itemsPerPage.value === 'All') return 1
-  return Math.ceil(filteredRows.value.length / itemsPerPage.value) || 1
-})
-
 /* ───────── helpers ───────── */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({ ...o, _id: String(o?._id || '') })
+
+// newest-first sort key: orderDate > createdAt > eatDate
+const dateVal = d => (d ? dayjs(d).valueOf() : 0)
+const sortKey = r => Math.max(dateVal(r.orderDate), dateVal(r.createdAt), dateVal(r.eatDate))
 
 function passFilters(doc) {
   if (!doc) return false
@@ -106,6 +85,8 @@ function upsertRow(doc) {
   if (passFilters(d)) {
     if (i === -1) rows.value.unshift(d)
     else rows.value[i] = d
+    // keep list sorted newest-first after insert/update
+    rows.value = rows.value.slice().sort((a, b) => sortKey(b) - sortKey(a))
   } else if (i !== -1) {
     rows.value.splice(i, 1)
     expanded.value.delete(String(d._id))
@@ -128,10 +109,37 @@ async function load() {
     if (dateEnd.value) params.set('to', dateEnd.value)
     const { data } = await api.get(`/public/food-requests?${params.toString()}`)
     const list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
-    rows.value = list.map(normalize)
+    rows.value = list.map(normalize).sort((a, b) => sortKey(b) - sortKey(a)) // ⬅️ newest first
     page.value = 1
   } finally { loading.value = false }
 }
+
+/* ───────── computed ───────── */
+const filteredRows = computed(() => {
+  // copy → filter → sort newest-first
+  let list = rows.value.slice()
+  if (dateStart.value) {
+    list = list.filter(r =>
+      r.eatDate && dayjs(r.eatDate).isSameOrAfter(dayjs(dateStart.value), 'day')
+    )
+  }
+  if (dateEnd.value) {
+    list = list.filter(r =>
+      r.eatDate && dayjs(r.eatDate).isSameOrBefore(dayjs(dateEnd.value), 'day')
+    )
+  }
+  // (text/status/employee filters are already handled upstream via passFilters in upsertRow/load)
+  return list.sort((a, b) => sortKey(b) - sortKey(a))
+})
+const pagedRows = computed(() => {
+  if (itemsPerPage.value === 'All') return filteredRows.value
+  const start = (page.value - 1) * itemsPerPage.value
+  return filteredRows.value.slice(start, start + itemsPerPage.value)
+})
+const pageCount = computed(() => {
+  if (itemsPerPage.value === 'All') return 1
+  return Math.ceil(filteredRows.value.length / itemsPerPage.value) || 1
+})
 
 /* ───────── Excel ───────── */
 function exportExcel() {
@@ -279,9 +287,7 @@ function totals(r) {
 
       <!-- Mobile toolbar -->
       <v-toolbar v-else flat density="comfortable" class="py-2">
-        <v-toolbar-title class="text-subtitle-2 font-weight-bold">
-          My Requests 
-        </v-toolbar-title>
+        <v-toolbar-title class="text-subtitle-2 font-weight-bold">My Requests</v-toolbar-title>
         <v-spacer />
         <v-btn icon variant="text" @click="exportExcel" :title="'Export'">
           <v-icon>mdi-file-excel</v-icon>
@@ -298,12 +304,8 @@ function totals(r) {
             clearable hide-details variant="outlined" class="flex-grow-1"
             @keyup.enter="load"
           />
-          <v-btn color="grey" variant="tonal" @click="load">
-            Refresh
-          </v-btn>
-          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">
-            Filters
-          </v-btn>
+          <v-btn color="grey" variant="tonal" @click="load">Refresh</v-btn>
+          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">Filters</v-btn>
         </div>
       </v-sheet>
 
@@ -322,28 +324,16 @@ function totals(r) {
           <v-card-text>
             <v-row dense>
               <v-col cols="12">
-                <v-select
-                  v-model="status" :items="statuses" label="Status"
-                  variant="outlined" density="comfortable" hide-details
-                />
+                <v-select v-model="status" :items="statuses" label="Status" variant="outlined" density="comfortable" hide-details />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="dateStart" type="date" label="From"
-                  variant="outlined" density="comfortable" hide-details
-                />
+                <v-text-field v-model="dateStart" type="date" label="From" variant="outlined" density="comfortable" hide-details />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="dateEnd" type="date" label="To"
-                  variant="outlined" density="comfortable" hide-details
-                />
+                <v-text-field v-model="dateEnd" type="date" label="To" variant="outlined" density="comfortable" hide-details />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-select
-                  v-model="itemsPerPage" :items="itemsPerPageOptions" label="Rows per page"
-                  variant="outlined" density="comfortable" hide-details
-                />
+                <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" label="Rows per page" variant="outlined" density="comfortable" hide-details />
               </v-col>
             </v-row>
           </v-card-text>
@@ -363,7 +353,6 @@ function totals(r) {
               <tr>
                 <th>Status</th>
                 <th style="width: 120px;">Details</th>
-                <!-- Changed: “Req ID” -> “Requester (ID & Name)” -->
                 <th>Requester (ID &amp; Name)</th>
                 <th>Order Date</th>
                 <th>Eat Date</th>
@@ -387,7 +376,6 @@ function totals(r) {
                       {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
                     </v-btn>
                   </td>
-                  <!-- Changed cell: show Employee ID — Name -->
                   <td>{{ r?.employee?.employeeId || '—' }}<span v-if="r?.employee?.name"> — {{ r.employee.name }}</span></td>
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
@@ -404,29 +392,14 @@ function totals(r) {
                       <div class="px-3 py-2">
                         <div class="tree">
                           <div class="tree-node root">
-                            <div class="node-label">
-                              <strong>Quantity</strong> {{ r.quantity }}
-                            </div>
+                            <div class="node-label"><strong>Quantity</strong> {{ r.quantity }}</div>
                             <div class="children">
                               <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                                 <div class="tree-node">
-                                  <div class="node-label">
-                                    <span class="arrow">→</span>
-                                    <strong>{{ menuName }}</strong> ×{{ menuCnt }}
-                                  </div>
-                                  <div
-                                    class="children"
-                                    v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length"
-                                  >
-                                    <div
-                                      class="tree-node leaf"
-                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
-                                      :key="menuName + '_' + allergen"
-                                    >
-                                      <div class="node-label">
-                                        <span class="arrow small">↳</span>
-                                        {{ allergen }} ×{{ aCnt }}
-                                      </div>
+                                  <div class="node-label"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                  <div class="children" v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length">
+                                    <div class="tree-node leaf" v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())" :key="menuName + '_' + allergen">
+                                      <div class="node-label"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
                                     </div>
                                   </div>
                                 </div>
@@ -443,12 +416,7 @@ function totals(r) {
                             </template>
                           </div>
                           <div class="mt-1 text-caption">
-                            <span
-                              v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()"
-                              :key="'chk_'+menuName"
-                              class="mr-3"
-                              :class="left >= 0 ? 'ok' : 'warn'"
-                            >
+                            <span v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()" :key="'chk_'+menuName" class="mr-3" :class="left >= 0 ? 'ok' : 'warn'">
                               {{ menuName }}: dietary Δ {{ left }}
                             </span>
                           </div>
@@ -461,9 +429,6 @@ function totals(r) {
                           </div>
                           <div class="mt-1 text-caption" v-if="r.dietaryOther">
                             Other dietary note: {{ r.dietaryOther }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.specialInstructions">
-                            Special instruction: {{ r.specialInstructions }}
                           </div>
                           <div class="mt-1 text-caption" v-if="r.recurring?.enabled">
                             Recurring: {{ r.recurring.frequency }}<span v-if="r.recurring.endDate"> until {{ fmtDate(r.recurring.endDate) }}</span><span v-if="r.recurring.skipHolidays"> (skip holidays)</span>
@@ -484,10 +449,7 @@ function totals(r) {
 
         <!-- pagination -->
         <div class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3">
-          <v-select
-            v-model="itemsPerPage" :items="itemsPerPageOptions" density="compact"
-            label="Rows per page" hide-details variant="outlined" style="max-width:140px"
-          />
+          <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" density="compact" label="Rows per page" hide-details variant="outlined" style="max-width:140px" />
           <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
         </div>
       </v-card-text>
