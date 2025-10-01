@@ -15,7 +15,7 @@ const props = defineProps({
   showOtherAllergy: { type: Boolean, default: true }
 })
 
-/* ───────── Khmer display labels (values stay English) ───────── */
+/* Khmer display labels (values stay English) */
 const MENU_KM = {
   Standard: 'ញាំទូទៅ',
   Vegetarian: 'មិនញាំសាច់',
@@ -33,10 +33,12 @@ const ALLERGEN_KM = {
   Others: 'ផ្សេងទៀត'
 }
 
-/* v-select items for dietary menu source; value stays English */
+/* ---- From-menu items (DEDUPE + guarantee Standard exactly once) ---- */
 const dietaryMenuItems = computed(() => {
-  const src = (props.form.menuChoices?.length ? props.form.menuChoices : ['Standard'])
-  return src.map(v => ({ value: v, title: v }))
+  const base = (props.form.menuChoices?.length ? props.form.menuChoices : [])
+  const withStd = ['Standard', ...base]               // ensure Standard available
+  const uniq = Array.from(new Set(withStd))           // remove duplicates
+  return uniq.map(v => ({ value: v, title: v }))      // unified object shape
 })
 
 /* toggle helper */
@@ -47,19 +49,17 @@ function toggleArrayValue(arr, val) {
 }
 
 /* --- Menu math --- */
-// Sum all NON-Standard counts from the object
 const assignedMenus = computed(() => {
   const map = props.form?.menuCounts || {}
   let total = 0
   for (const key in map) {
     if (!Object.prototype.hasOwnProperty.call(map, key)) continue
-    if (key === 'Standard') continue // never count Standard key
+    if (key === 'Standard') continue
     total += Number(map[key] || 0)
   }
   return total
 })
 
-// Standard is derived only
 const standardCount = computed(() => {
   const total = Number(props.form?.quantity || 0)
   const used = assignedMenus.value
@@ -79,7 +79,7 @@ function clampNonNegativeNumber(v) {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
 }
 function ensureMenuCountKey(mc) {
-  if (mc === 'Standard') return // never create Standard key
+  if (mc === 'Standard') return
   if (!props.form.menuCounts) props.form.menuCounts = {}
   if (props.form.menuCounts[mc] == null) props.form.menuCounts[mc] = 0
 }
@@ -97,7 +97,7 @@ function onDietaryCountInput(item) {
   props.form.dietaryCounts[item].count = clampNonNegativeNumber(props.form.dietaryCounts[item].count)
 }
 
-/* 🔁 if a special menu gets unselected, wipe its count so Standard rises back */
+/* cleanup if a special menu gets unselected, wipe its count so Standard rises back */
 watch(() => props.form.menuChoices.slice(), (choices) => {
   if (!props.form.menuCounts) return
   const set = new Set(choices)
@@ -136,7 +136,6 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
           </div>
         </v-btn>
 
-        <!-- Inputs only for specials -->
         <div v-if="props.form.menuChoices.includes(mc) && mc !== 'Standard'" class="mt-3">
           <v-text-field
             v-model.number="props.form.menuCounts[mc]"
@@ -179,24 +178,12 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
                 :items="dietaryMenuItems"
                 item-title="title"
                 item-value="value"
+                :item-props="(it) => ({ title: it.title, subtitle: MENU_KM[it.value] })"
                 density="compact"
                 variant="outlined"
                 label="From menu"
                 hide-details
-              >
-                <!-- Two-line rendering in dropdown items -->
-                <template #item="{ props: slotProps, item }">
-                  <v-list-item v-bind="slotProps">
-                    <v-list-item-title class="en">{{ item.title }}</v-list-item-title>
-                    <v-list-item-subtitle class="km">{{ MENU_KM[item.value] }}</v-list-item-subtitle>
-                  </v-list-item>
-                </template>
-                <!-- Two-line rendering for selected chip/value -->
-                <template #selection="{ item }">
-                  <span class="en">{{ item.title }}</span>
-                  <span class="km d-block">{{ MENU_KM[item.value] }}</span>
-                </template>
-              </v-select>
+              />
             </v-col>
             <v-col cols="4">
               <v-text-field
@@ -259,24 +246,10 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
   justify-content:flex-start;
   text-align:left;
 }
-.choice-btn.two-line .label{
-  display:flex;
-  flex-direction:column;
-  line-height:1.1;
-}
-.label .en{
-  font-size:0.98rem;
-}
-.label .km{
-  font-size:0.86rem;
-  opacity:0.9;
-  margin-top:2px;
-}
-.std-count{
-  font-weight:500;
-  margin-left:.25rem;
-  opacity:.85;
-}
+.choice-btn.two-line .label{ display:flex; flex-direction:column; line-height:1.1; }
+.label .en{ font-size:0.98rem; }
+.label .km{ font-size:0.86rem; opacity:0.9; margin-top:2px; }
+.std-count{ font-weight:500; margin-left:.25rem; opacity:.85; }
 .choice-btn.active{ background-color:#16a34a !important; color:#fff !important; }
 .text-error{ color:#dc2626 !important; }
 .text-success{ color:#16a34a !important; }

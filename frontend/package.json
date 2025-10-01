@@ -15,6 +15,7 @@
     "@fullcalendar/interaction": "^6.1.19",
     "@fullcalendar/timegrid": "^6.1.19",
     "@fullcalendar/vue3": "^6.1.19",
+    "@vuepic/vue-datepicker": "^11.0.2",
     "apexcharts": "^5.3.5",
     "axios": "^1.12.2",
     "dayjs": "^1.11.18",

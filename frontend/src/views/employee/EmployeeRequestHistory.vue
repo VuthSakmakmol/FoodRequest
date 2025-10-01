@@ -15,6 +15,78 @@ dayjs.extend(isSameOrBefore)
 
 const { mdAndUp } = useDisplay()
 
+/* ───────── Mini i18n (EN→KM display) ───────── */
+const KM = {
+  'My Requests': '',
+  'Search (type, menu, note, requester)': '',
+  Status: 'ស្ថានភាព',
+  From: 'ចាប់ពី',
+  To: 'ដល់',
+  Refresh: '',
+  Export: '',
+  Filters: '',
+  Reset: 'កំណត់ឡើងវិញ',
+  Close: 'បិទ',
+  Apply: 'អនុវត្ត',
+  'Rows per page': '',
+
+  Details: 'ព័ត៌មានលម្អិត',
+  'Requester (ID & Name)': 'អ្នកស្នើ (លេខ & ឈ្មោះ)',
+  'Order Date': 'កាលបរិច្ឆេទស្នើ',
+  'Eat Date': 'កាលបរិច្ឆេទទទួលអាហារ',
+  Time: 'ពេលវេលា',
+  'Order Type': 'ប្រភេទការបញ្ជាទិញ',
+  'Meal(s)': 'អាហារ',
+  Qty: 'ចំនួន',
+  Location: 'ទីតាំង',
+
+  NEW: 'ថ្មី',
+  ACCEPTED: 'បានទទួលយក',
+  COOKING: 'កំពុងចម្អិន',
+  READY: 'រួចរាល់',
+  DELIVERED: 'បានផ្តល់',
+  CANCELED: 'បានបោះបង់',
+
+  'New request submitted': 'បានដាក់ស្នើសំណើថ្មី',
+  'Request deleted': 'បានលុបសំណើ',
+}
+const tkm = (en) => KM[en] || en
+
+/* Khmer labels for menu/allergen in details tree */
+const MENU_KM_MAP = {
+  Standard: 'ញាំទូទៅ',
+  Vegetarian: 'មិនញាំសាច់',
+  Vegan: 'ញាំបួស',
+  'No pork': 'តមសាច់ជ្រូក',
+  'No beef': 'តមសាច់គោ',
+}
+const ALLERGEN_KM_MAP = {
+  Peanut: 'សណ្តែកដី',
+  Shellfish: 'សត្វសំបកសមុទ្រ',
+  Egg: 'ស៊ុត',
+  Gluten: 'គ្លុយតែន',
+  'Dairy/Lactose': 'ទឹកដោះគោ/ឡាក់តូស',
+  Soy: 'សណ្តែកសៀង',
+  Others: 'ផ្សេងទៀត',
+}
+const menuKM = (en) => MENU_KM_MAP[en] || en
+const allergenKM = (en) => ALLERGEN_KM_MAP[en] || en
+
+/* NEW: OrderType & Meals bilingual maps for table cells */
+const ORDER_TYPE_KM_MAP = {
+  'Daily meal': 'អាហារប្រចាំថ្ងៃ',
+  'Meeting catering': 'អាហារប្រជុំ',
+  'Visitor meal': 'អាហារភ្ញៀវ',
+}
+const MEAL_KM_MAP_ROW = {
+  Breakfast: 'អាហារពេលព្រឹក',
+  Lunch: 'អាហារថ្ងៃត្រង់',
+  Dinner: 'អាហារពេលល្ងាច',
+  Snack: 'អាហារសម្រន់',
+}
+const orderTypeKM = (en) => ORDER_TYPE_KM_MAP[en] || en
+const mealListKM = (arr = []) => arr.map(m => MEAL_KM_MAP_ROW[m] || m).join(', ')
+
 /* ───────── state ───────── */
 const loading = ref(false)
 const rows = ref([])
@@ -55,8 +127,6 @@ function resetFilters() {
 /* ───────── helpers ───────── */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({ ...o, _id: String(o?._id || '') })
-
-// newest-first sort key: orderDate > createdAt > eatDate
 const dateVal = d => (d ? dayjs(d).valueOf() : 0)
 const sortKey = r => Math.max(dateVal(r.orderDate), dateVal(r.createdAt), dateVal(r.eatDate))
 
@@ -85,7 +155,6 @@ function upsertRow(doc) {
   if (passFilters(d)) {
     if (i === -1) rows.value.unshift(d)
     else rows.value[i] = d
-    // keep list sorted newest-first after insert/update
     rows.value = rows.value.slice().sort((a, b) => sortKey(b) - sortKey(a))
   } else if (i !== -1) {
     rows.value.splice(i, 1)
@@ -109,14 +178,13 @@ async function load() {
     if (dateEnd.value) params.set('to', dateEnd.value)
     const { data } = await api.get(`/public/food-requests?${params.toString()}`)
     const list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
-    rows.value = list.map(normalize).sort((a, b) => sortKey(b) - sortKey(a)) // ⬅️ newest first
+    rows.value = list.map(normalize).sort((a, b) => sortKey(b) - sortKey(a))
     page.value = 1
   } finally { loading.value = false }
 }
 
 /* ───────── computed ───────── */
 const filteredRows = computed(() => {
-  // copy → filter → sort newest-first
   let list = rows.value.slice()
   if (dateStart.value) {
     list = list.filter(r =>
@@ -128,7 +196,6 @@ const filteredRows = computed(() => {
       r.eatDate && dayjs(r.eatDate).isSameOrBefore(dayjs(dateEnd.value), 'day')
     )
   }
-  // (text/status/employee filters are already handled upstream via passFilters in upsertRow/load)
   return list.sort((a, b) => sortKey(b) - sortKey(a))
 })
 const pagedRows = computed(() => {
@@ -144,19 +211,19 @@ const pageCount = computed(() => {
 /* ───────── Excel ───────── */
 function exportExcel() {
   const exportData = filteredRows.value.map(r => ({
-    'Status': r.status,
+    'Status / ស្ថានភាព': r.status,
     'Request ID': r.requestId,
-    'Order Date': fmtDate(r.orderDate),
-    'Eat Date': fmtDate(r.eatDate),
-    'Time Start': r.eatTimeStart || '—',
-    'Time End': r.eatTimeEnd || '—',
+    'Order Date / កាលបរិច្ឆេទស្នើ': fmtDate(r.orderDate),
+    'Eat Date / កាលបរិច្ឆេទទទួលអាហារ': fmtDate(r.eatDate),
+    'Time Start / ពេលចាប់ផ្តើម': r.eatTimeStart || '—',
+    'Time End / ពេលបញ្ចប់': r.eatTimeEnd || '—',
     'Employee ID': r?.employee?.employeeId,
     'Employee Name': r?.employee?.name,
     'Department': r?.employee?.department,
-    'Order Type': r.orderType,
-    'Meals': (r.meals || []).join(', '),
-    'Quantity': r.quantity,
-    'Location': r?.location?.kind + (r?.location?.other ? ' — ' + r.location.other : ''),
+    'Order Type / ប្រភេទ': r.orderType,
+    'Meals / អាហារ': (r.meals || []).join(', '),
+    'Quantity / ចំនួន': r.quantity,
+    'Location / ទីតាំង': r?.location?.kind + (r?.location?.other ? ' — ' + r.location.other : ''),
     'Menu Choices': (r.menuChoices || []).join(', '),
     'Menu Counts': JSON.stringify(r.menuCounts || []),
     'Dietary': (r.dietary || []).join(', '),
@@ -165,7 +232,7 @@ function exportExcel() {
     'Special Instructions': r.specialInstructions || '',
     'Recurring': r.recurring?.enabled ? r.recurring.frequency : '—',
     'Recurring End Date': fmtDate(r.recurring?.endDate),
-    'Skip Holidays': r.recurring?.skipHolidays ? 'Yes' : 'No'
+    'Skip Holidays': r.recurring?.skipHolidays ? 'Yes' : 'No',
   }))
   const ws = XLSX.utils.json_to_sheet(exportData)
   const wb = XLSX.utils.book_new()
@@ -178,7 +245,7 @@ function registerSocket() {
   socket.on('foodRequest:created', (doc) => {
     if (String(doc?.employee?.employeeId) !== String(employeeId.value)) return
     upsertRow(doc)
-    Swal.fire({ toast:true, icon:'success', title:'New request submitted', position:'top', timer:1200, showConfirmButton:false })
+    Swal.fire({ toast:true, icon:'success', title:tkm('New request submitted'), position:'top', timer:1200, showConfirmButton:false })
   })
   socket.on('foodRequest:updated', (doc) => {
     if (String(doc?.employee?.employeeId) !== String(employeeId.value)) return
@@ -187,11 +254,11 @@ function registerSocket() {
   socket.on('foodRequest:statusChanged', (doc) => {
     if (String(doc?.employee?.employeeId) !== String(employeeId.value)) return
     upsertRow(doc)
-    Swal.fire({ toast:true, icon:'info', title:`Status: ${doc.status}`, position:'top', timer:1200, showConfirmButton:false })
+    Swal.fire({ toast:true, icon:'info', title:`${tkm('Status')} : ${tkm(doc.status)}`, position:'top', timer:1200, showConfirmButton:false })
   })
   socket.on('foodRequest:deleted', ({ _id }) => {
     removeRowById(String(_id || ''))
-    Swal.fire({ toast:true, icon:'warning', title:'Request deleted', position:'top', timer:1200, showConfirmButton:false })
+    Swal.fire({ toast:true, icon:'warning', title:tkm('Request deleted'), position:'top', timer:1200, showConfirmButton:false })
   })
 }
 function unregisterSocket() {
@@ -261,35 +328,49 @@ function totals(r) {
       <!-- Desktop / Tablet toolbar -->
       <v-toolbar v-if="mdAndUp" flat density="comfortable" class="py-2">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">
-          My Requests <v-chip size="x-small" class="ml-2" color="teal" label>Live</v-chip>
+          {{ 'My Requests' }} <span class="km ml-2">({{ tkm('My Requests') }})</span>
+          <v-chip size="x-small" class="ml-2" color="teal" label>Live</v-chip>
         </v-toolbar-title>
         <v-spacer />
         <v-text-field
-          v-model="q" density="compact" placeholder="Search (type, menu, note, requester)"
+          v-model="q" density="compact"
+          :placeholder="tkm('Search (type, menu, note, requester)')"
           clearable hide-details variant="outlined" class="mr-2" style="max-width:260px"
           @keyup.enter="load"
         />
         <v-select
-          v-model="status" :items="statuses" density="compact" label="Status"
+          v-model="status" :items="statuses" density="compact"
+          :label="tkm('Status')" hide-details variant="outlined" class="mr-2" style="max-width:160px">
+          <template #selection="{ item }">
+            <span>{{ item.title || item.value || item }}</span>
+            <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
+          </template>
+          <template #item="{ props: sp, item }">
+            <v-list-item v-bind="sp">
+              <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
+              <v-list-item-subtitle class="km">{{ tkm(item.title || item.value || item) }}</v-list-item-subtitle>
+            </v-list-item>
+          </template>
+        </v-select>
+        <v-text-field
+          v-model="dateStart" type="date" density="compact" :label="tkm('From')"
           hide-details variant="outlined" class="mr-2" style="max-width:160px"
         />
         <v-text-field
-          v-model="dateStart" type="date" density="compact" label="From"
+          v-model="dateEnd" type="date" density="compact" :label="tkm('To')"
           hide-details variant="outlined" class="mr-2" style="max-width:160px"
         />
-        <v-text-field
-          v-model="dateEnd" type="date" density="compact" label="To"
-          hide-details variant="outlined" class="mr-2" style="max-width:160px"
-        />
-        <v-btn :loading="loading" color="primary" @click="load" class="mr-2" prepend-icon="mdi-refresh">Refresh</v-btn>
-        <v-btn color="success" @click="exportExcel" prepend-icon="mdi-file-excel">Export</v-btn>
+        <v-btn :loading="loading" color="primary" @click="load" class="mr-2" prepend-icon="mdi-refresh">{{ tkm('Refresh') }}</v-btn>
+        <v-btn color="success" @click="exportExcel" prepend-icon="mdi-file-excel">{{ tkm('Export') }}</v-btn>
       </v-toolbar>
 
       <!-- Mobile toolbar -->
       <v-toolbar v-else flat density="comfortable" class="py-2">
-        <v-toolbar-title class="text-subtitle-2 font-weight-bold">My Requests</v-toolbar-title>
+        <v-toolbar-title class="text-subtitle-2 font-weight-bold">
+          {{ tkm('My Requests') }}
+        </v-toolbar-title>
         <v-spacer />
-        <v-btn icon variant="text" @click="exportExcel" :title="'Export'">
+        <v-btn icon variant="text" @click="exportExcel" :title="tkm('Export')">
           <v-icon>mdi-file-excel</v-icon>
         </v-btn>
       </v-toolbar>
@@ -300,12 +381,12 @@ function totals(r) {
       <v-sheet v-if="!mdAndUp" class="px-3 pt-3 pb-1 bg-transparent">
         <div class="d-flex align-center gap-2">
           <v-text-field
-            v-model="q" density="compact" placeholder="Search"
+            v-model="q" density="compact" :placeholder="tkm('Search (type, menu, note, requester)')"
             clearable hide-details variant="outlined" class="flex-grow-1"
             @keyup.enter="load"
           />
-          <v-btn color="grey" variant="tonal" @click="load">Refresh</v-btn>
-          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">Filters</v-btn>
+          <v-btn color="grey" variant="tonal" @click="load">{{ tkm('Refresh') }}</v-btn>
+          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">{{ tkm('Filters') }}</v-btn>
         </div>
       </v-sheet>
 
@@ -314,34 +395,45 @@ function totals(r) {
         <v-card>
           <v-toolbar density="comfortable" color="primary" class="text-white">
             <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false"><v-icon>mdi-close</v-icon></v-btn>
-            <v-toolbar-title>Filters</v-toolbar-title>
+            <v-toolbar-title>{{ tkm('Filters') }}</v-toolbar-title>
             <v-spacer />
             <v-btn variant="text" class="text-white" @click="resetFilters">
-              <v-icon start>mdi-restore</v-icon> Reset
+              <v-icon start>mdi-restore</v-icon> {{ tkm('Reset') }}
             </v-btn>
           </v-toolbar>
 
           <v-card-text>
             <v-row dense>
               <v-col cols="12">
-                <v-select v-model="status" :items="statuses" label="Status" variant="outlined" density="comfortable" hide-details />
+                <v-select v-model="status" :items="statuses" :label="tkm('Status')" variant="outlined" density="comfortable" hide-details>
+                  <template #selection="{ item }">
+                    <span>{{ item.title || item.value || item }}</span>
+                    <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
+                  </template>
+                  <template #item="{ props: sp, item }">
+                    <v-list-item v-bind="sp">
+                      <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
+                      <v-list-item-subtitle class="km">{{ tkm(item.title || item.value || item) }}</v-list-item-subtitle>
+                    </v-list-item>
+                  </template>
+                </v-select>
               </v-col>
               <v-col cols="12" sm="6">
-                <v-text-field v-model="dateStart" type="date" label="From" variant="outlined" density="comfortable" hide-details />
+                <v-text-field v-model="dateStart" type="date" :label="tkm('From')" variant="outlined" density="comfortable" hide-details />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-text-field v-model="dateEnd" type="date" label="To" variant="outlined" density="comfortable" hide-details />
+                <v-text-field v-model="dateEnd" type="date" :label="tkm('To')" variant="outlined" density="comfortable" hide-details />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" label="Rows per page" variant="outlined" density="comfortable" hide-details />
+                <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" :label="tkm('Rows per page')" variant="outlined" density="comfortable" hide-details />
               </v-col>
             </v-row>
           </v-card-text>
 
           <v-card-actions class="px-4 pb-4">
-            <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">Close</v-btn>
+            <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">{{ tkm('Close') }}</v-btn>
             <v-spacer />
-            <v-btn color="primary" @click="showFilterDialog=false; load()">Apply</v-btn>
+            <v-btn color="primary" @click="showFilterDialog=false; load()">{{ tkm('Apply') }}</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -351,16 +443,16 @@ function totals(r) {
           <v-table density="comfortable" class="min-width-table">
             <thead>
               <tr>
-                <th>Status</th>
-                <th style="width: 120px;">Details</th>
-                <th>Requester (ID &amp; Name)</th>
-                <th>Order Date</th>
-                <th>Eat Date</th>
-                <th>Time</th>
-                <th>Order Type</th>
-                <th>Meal(s)</th>
-                <th>Qty</th>
-                <th>Location</th>
+                <th><div class="hdr-2l"><div class="en">{{ tkm('Status') }}</div><div class="km">{{ tkm('Status') }}</div></div></th>
+                <th style="width: 120px;"><div class="hdr-2l"><div class="en">Details</div><div class="km">{{ tkm('Details') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Requester (ID & Name)</div><div class="km">{{ tkm('Requester (ID & Name)') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Order Date</div><div class="km">{{ tkm('Order Date') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Eat Date</div><div class="km">{{ tkm('Eat Date') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Time</div><div class="km">{{ tkm('Time') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Order Type</div><div class="km">{{ tkm('Order Type') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Meal(s)</div><div class="km">{{ tkm('Meal(s)') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Qty</div><div class="km">{{ tkm('Qty') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Location</div><div class="km">{{ tkm('Location') }}</div></div></th>
               </tr>
             </thead>
             <tbody>
@@ -368,70 +460,76 @@ function totals(r) {
                 <tr>
                   <td>
                     <v-chip :color="{ NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }[r.status]" size="small" label>
-                      {{ r.status }}
+                      <div class="chip-2l">
+                        <div class="en">{{ r.status }}</div>
+                        <div class="km">{{ tkm(r.status) }}</div>
+                      </div>
                     </v-chip>
                   </td>
                   <td>
                     <v-btn size="small" variant="text" color="secondary" @click="toggleExpanded(r._id)">
                       {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
+                      <span class="km ml-1">({{ isExpanded(r._id) ? 'លាក់' : tkm('Details') }})</span>
                     </v-btn>
                   </td>
                   <td>{{ r?.employee?.employeeId || '—' }}<span v-if="r?.employee?.name"> — {{ r.employee.name }}</span></td>
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
                   <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
-                  <td>{{ r.orderType }}</td>
-                  <td>{{ (r.meals || []).join(', ') }}</td>
+
+                  <!-- Order Type (EN + KM) -->
+                  <td>
+                    <div class="cell-2l">
+                      <div class="en">{{ r.orderType }}</div>
+                      <div class="km">{{ orderTypeKM(r.orderType) }}</div>
+                    </div>
+                  </td>
+
+                  <!-- Meal(s) (EN + KM) -->
+                  <td>
+                    <div class="cell-2l">
+                      <div class="en">{{ (r.meals || []).join(', ') }}</div>
+                      <div class="km">{{ mealListKM(r.meals) }}</div>
+                    </div>
+                  </td>
+
                   <td>{{ r.quantity }}</td>
                   <td>{{ r?.location?.kind }}<span v-if="r?.location?.other"> — {{ r.location.other }}</span></td>
                 </tr>
 
+                <!-- Bilingual details tree -->
                 <tr v-if="isExpanded(r._id)" class="details-row">
                   <td colspan="10">
                     <v-expand-transition>
                       <div class="px-3 py-2">
                         <div class="tree">
                           <div class="tree-node root">
-                            <div class="node-label"><strong>Quantity</strong> {{ r.quantity }}</div>
+                            <div class="node-label two-lines">
+                              <div class="en"><strong>{{ tkm('Qty') }}</strong> {{ r.quantity }}</div>
+                              <div class="km">{{ tkm('Qty') }}</div>
+                            </div>
                             <div class="children">
                               <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                                 <div class="tree-node">
-                                  <div class="node-label"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                  <div class="node-label two-lines">
+                                    <div class="en"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                    <div class="km">{{ menuKM(menuName) }}</div>
+                                  </div>
                                   <div class="children" v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length">
-                                    <div class="tree-node leaf" v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())" :key="menuName + '_' + allergen">
-                                      <div class="node-label"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
+                                    <div
+                                      class="tree-node leaf"
+                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                      :key="menuName + '_' + allergen"
+                                    >
+                                      <div class="node-label two-lines">
+                                        <div class="en"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
+                                        <div class="km">{{ allergenKM(allergen) }}</div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               </template>
                             </div>
-                          </div>
-
-                          <div class="mt-2 text-caption">
-                            <template v-if="totals(r).leftoverMenus === 0">
-                              <span class="ok">✔ Menu totals match quantity</span>
-                            </template>
-                            <template v-else>
-                              <span class="warn">⚠ Menu totals {{ totals(r).totalMenus }} differ from quantity {{ r.quantity }} (Δ {{ totals(r).leftoverMenus }})</span>
-                            </template>
-                          </div>
-                          <div class="mt-1 text-caption">
-                            <span v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()" :key="'chk_'+menuName" class="mr-3" :class="left >= 0 ? 'ok' : 'warn'">
-                              {{ menuName }}: dietary Δ {{ left }}
-                            </span>
-                          </div>
-
-                          <div class="mt-2 text-caption text-medium-emphasis" v-if="r.menuChoices?.length">
-                            Selected menus: {{ r.menuChoices.join(', ') }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.dietary?.length">
-                            Dietary selected: {{ r.dietary.join(', ') }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.dietaryOther">
-                            Other dietary note: {{ r.dietaryOther }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.recurring?.enabled">
-                            Recurring: {{ r.recurring.frequency }}<span v-if="r.recurring.endDate"> until {{ fmtDate(r.recurring.endDate) }}</span><span v-if="r.recurring.skipHolidays"> (skip holidays)</span>
                           </div>
                         </div>
                       </div>
@@ -449,7 +547,13 @@ function totals(r) {
 
         <!-- pagination -->
         <div class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3">
-          <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" density="compact" label="Rows per page" hide-details variant="outlined" style="max-width:140px" />
+          <v-select
+            v-model="itemsPerPage"
+            :items="itemsPerPageOptions"
+            density="compact"
+            :label="tkm('Rows per page')"
+            hide-details variant="outlined" style="max-width:140px"
+          />
           <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
         </div>
       </v-card-text>
@@ -465,6 +569,18 @@ function totals(r) {
 
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
 
+/* bilingual headers */
+.hdr-2l .en{ font-weight:600; }
+.hdr-2l .km{ font-size:.82rem; opacity:.85; }
+
+/* two-line table cells */
+.cell-2l{ display:flex; flex-direction:column; line-height:1.1; }
+.cell-2l .km{ font-size:.86rem; opacity:.9; }
+
+/* status chip two-line */
+.chip-2l{ display:flex; flex-direction:column; line-height:1; }
+.chip-2l .km{ font-size:.78em; opacity:.9; }
+
 /* details */
 .details-row{ background: rgba(0,0,0,0.02); }
 .tree{ font-size:.96rem; line-height:1.4; }
@@ -474,7 +590,17 @@ function totals(r) {
 .tree .leaf .node-label{ background: rgba(234,179,8,.12); }
 .arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
-.ok{ color:#16a34a; } .warn{ color:#dc2626; }
+
+/* two-line labels in details tree */
+.node-label.two-lines{ display:flex; flex-direction:column; line-height:1.1; }
+.node-label.two-lines .en{ font-weight:500; }
+.node-label.two-lines .km{ font-size:.86rem; opacity:.9; }
+
+/* Khmer font helper */
+.km{
+  font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
+               'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
+}
 
 /* phone tweaks */
 @media (max-width: 600px){

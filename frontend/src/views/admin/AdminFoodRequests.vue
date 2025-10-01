@@ -7,6 +7,7 @@ import api from '@/utils/api'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useDisplay } from 'vuetify'
+import * as XLSX from 'xlsx'            // ← NEW: Excel export
 
 const { mdAndUp } = useDisplay()
 const auth = useAuth()
@@ -227,6 +228,116 @@ function resetFilters() {
   page.value = 1
   load()
 }
+
+/* ───────── Export to Excel ───────── */
+const exporting = ref(false)
+
+function toMainRow(r) {
+  return {
+    _id: r._id,
+    RequestID: r.requestId || '',
+    Status: r.status || '',
+    OrderType: r.orderType || '',
+    Quantity: r.quantity || 0,
+    EmployeeID: r.employee?.employeeId || '',
+    Name: r.employee?.name || '',
+    Department: r.employee?.department || '',
+    OrderDate: fmtDate(r.orderDate),
+    EatDate: fmtDate(r.eatDate),
+    Time: [r.eatTimeStart, r.eatTimeEnd].filter(Boolean).join(' – '),
+    MenuChoices: Array.isArray(r.menuChoices) ? r.menuChoices.join(', ') : '',
+    DietarySelected: Array.isArray(r.dietary) ? r.dietary.join(', ') : '',
+    DietaryOther: r.dietaryOther || '',
+    SpecialInstructions: r.specialInstructions || '',
+    Recurring: r?.recurring?.enabled
+      ? `${r.recurring.frequency}${r.recurring.endDate ? ' until ' + fmtDate(r.recurring.endDate) : ''}${r.recurring.skipHolidays ? ' (skip holidays)' : ''}`
+      : ''
+  }
+}
+
+function buildMenuRows(list) {
+  const out = []
+  for (const r of list) {
+    const m = menuMap(r)
+    for (const [menuName, count] of m.entries()) {
+      out.push({
+        RequestID: r.requestId || '',
+        Status: r.status || '',
+        EatDate: fmtDate(r.eatDate),
+        Menu: menuName,
+        Count: count
+      })
+    }
+  }
+  return out
+}
+
+function buildDietaryRows(list) {
+  const out = []
+  for (const r of list) {
+    const g = dietaryByMenu(r)
+    for (const [menuName, inner] of g.entries()) {
+      for (const [allergen, count] of inner.entries()) {
+        out.push({
+          RequestID: r.requestId || '',
+          Status: r.status || '',
+          EatDate: fmtDate(r.eatDate),
+          Menu: menuName,
+          Allergen: allergen,
+          Count: count
+        })
+      }
+    }
+  }
+  return out
+}
+
+async function exportExcel() {
+  try {
+    exporting.value = true
+    const list = rows.value // export all filtered rows currently loaded
+    const wb = XLSX.utils.book_new()
+
+    // Sheet 1: Requests
+    const main = list.map(toMainRow)
+    const wsMain = XLSX.utils.json_to_sheet(main)
+    XLSX.utils.book_append_sheet(wb, wsMain, 'Requests')
+
+    // Sheet 2: Menus
+    const menuRows = buildMenuRows(list)
+    const wsMenus = XLSX.utils.json_to_sheet(menuRows)
+    XLSX.utils.book_append_sheet(wb, wsMenus, 'Menus')
+
+    // Sheet 3: Dietary
+    const dietRows = buildDietaryRows(list)
+    const wsDiet = XLSX.utils.json_to_sheet(dietRows)
+    XLSX.utils.book_append_sheet(wb, wsDiet, 'Dietary')
+
+    // Auto-width columns (simple heuristic)
+    for (const ws of [wsMain, wsMenus, wsDiet]) {
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1 })
+      const colWidths = data[0]?.map((_, c) =>
+        ({ wch: Math.min(50, Math.max(...data.map(row => String(row?.[c] ?? '').length), 8)) })
+      ) || []
+      ws['!cols'] = colWidths
+    }
+
+    const rangeText = [
+      fromDate.value ? `from_${fromDate.value}` : '',
+      toDate.value ? `to_${toDate.value}` : '',
+      status.value && status.value !== 'ALL' ? `status_${status.value}` : ''
+    ].filter(Boolean).join('_')
+    const stamp = dayjs().format('YYYYMMDD_HHmmss')
+    const fname = `FoodRequests_${rangeText || 'all'}_${stamp}.xlsx`
+
+    XLSX.writeFile(wb, fname)
+  } catch (err) {
+    console.error(err)
+    await Swal.fire({ icon: 'error', title: 'Export failed', text: err?.message || 'Unknown error' })
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -249,15 +360,24 @@ function resetFilters() {
                         hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
           <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows"
                     hide-details variant="outlined" style="max-width: 120px" class="mr-2" />
-          <v-btn :loading="loading" color="primary" @click="load">Refresh</v-btn>
+          <v-btn :loading="loading" color="primary" class="mr-2" @click="load">Refresh</v-btn>
+
+          <!-- NEW: Export button -->
+          <v-btn :loading="exporting" color="success" variant="flat" @click="exportExcel">
+            <v-icon start>mdi-file-excel</v-icon> Export Excel
+          </v-btn>
         </template>
 
         <!-- Mobile: compact controls -->
         <template v-else>
           <v-text-field v-model="q" density="compact" placeholder="Search"
                         hide-details variant="outlined" class="mr-2" style="max-width: 50vw" @keyup.enter="load" />
-          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">
+          <v-btn color="primary" variant="flat" class="mr-2" @click="showFilterDialog = true">
             Filters
+          </v-btn>
+          <!-- Mobile export -->
+          <v-btn :loading="exporting" color="success" variant="flat" @click="exportExcel">
+            <v-icon start>mdi-file-excel</v-icon> Export
           </v-btn>
         </template>
       </v-toolbar>
