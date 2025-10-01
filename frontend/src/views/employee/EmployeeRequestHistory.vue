@@ -308,18 +308,6 @@ function dietaryByMenu(r) {
   }
   return g
 }
-function totals(r) {
-  const m = menuMap(r)
-  const totalMenus = Array.from(m.values()).reduce((a, b) => a + b, 0)
-  const leftoverMenus = Number(r.quantity || 0) - totalMenus
-  const g = dietaryByMenu(r)
-  const perMenuDietaryLeft = new Map()
-  for (const [menu, cnt] of m.entries()) {
-    const sumDiet = Array.from((g.get(menu) || new Map()).values()).reduce((a, b) => a + b, 0)
-    perMenuDietaryLeft.set(menu, cnt - sumDiet)
-  }
-  return { totalMenus, leftoverMenus, perMenuDietaryLeft }
-}
 </script>
 
 <template>
@@ -360,7 +348,6 @@ function totals(r) {
           hide-details variant="outlined" class="mr-2" style="max-width:160px"
         />
 
-        <!-- Refresh (FA icon) -->
         <v-tooltip text="Refresh" location="bottom">
           <template #activator="{ props }">
             <v-btn
@@ -378,7 +365,6 @@ function totals(r) {
           </template>
         </v-tooltip>
 
-        <!-- Export (FA icon) — removed :loading since 'exporting' isn't defined here -->
         <v-tooltip text="Export Excel" location="bottom">
           <template #activator="{ props }">
             <v-btn
@@ -395,7 +381,6 @@ function totals(r) {
           </template>
         </v-tooltip>
 
-        <!-- NEW: Filter (FA icon) opens the dialog -->
         <v-tooltip text="Filters" location="bottom">
           <template #activator="{ props }">
             <v-btn
@@ -414,7 +399,6 @@ function totals(r) {
         </v-tooltip>
       </v-toolbar>
 
-
       <v-divider />
 
       <!-- Mobile search + Refresh + Filters -->
@@ -425,7 +409,6 @@ function totals(r) {
             clearable hide-details variant="outlined" class="flex-grow-1"
             @keyup.enter="load"
           />
-
           <v-tooltip text="Refresh" location="bottom">
             <template #activator="{ props }">
               <v-btn
@@ -495,7 +478,8 @@ function totals(r) {
 
       <v-card-text class="pa-0">
         <div class="table-wrap">
-          <v-table density="comfortable" class="min-width-table">
+          <!-- MATCH ADMIN: align-left + comfy-cells + row-hover -->
+          <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
             <thead>
               <tr>
                 <th><div class="hdr-2l"><div class="en">{{ tkm('Status') }}</div><div class="km">{{ tkm('Status') }}</div></div></th>
@@ -532,7 +516,6 @@ function totals(r) {
                   <td>{{ fmtDate(r.eatDate) }}</td>
                   <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
 
-                  <!-- Order Type (EN + KM) -->
                   <td>
                     <div class="cell-2l">
                       <div class="en">{{ r.orderType }}</div>
@@ -540,7 +523,6 @@ function totals(r) {
                     </div>
                   </td>
 
-                  <!-- Meal(s) (EN + KM) -->
                   <td>
                     <div class="cell-2l">
                       <div class="en">{{ (r.meals || []).join(', ') }}</div>
@@ -552,7 +534,7 @@ function totals(r) {
                   <td>{{ r?.location?.kind }}<span v-if="r?.location?.other"> — {{ r.location.other }}</span></td>
                 </tr>
 
-                <!-- Bilingual details tree -->
+                <!-- Details row -->
                 <tr v-if="isExpanded(r._id)" class="details-row">
                   <td colspan="10">
                     <v-expand-transition>
@@ -646,15 +628,43 @@ function totals(r) {
 .arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
 
-/* two-line labels in details tree */
-.node-label.two-lines{ display:flex; flex-direction:column; line-height:1.1; }
-.node-label.two-lines .en{ font-weight:500; }
-.node-label.two-lines .km{ font-size:.86rem; opacity:.9; }
-
 /* Khmer font helper */
 .km{
   font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
+}
+
+/* ---------- MATCH ADMIN: Left alignment + comfy spacing + hover ---------- */
+
+/* Force left alignment for headers/cells */
+.align-left :deep(table thead th),
+.align-left :deep(table tbody td){
+  text-align: left !important;
+}
+
+/* Top/bottom breathing room for each td */
+.comfy-cells :deep(table tbody td){
+  vertical-align: top;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+
+/* Also pad headers for balance */
+.comfy-cells :deep(table thead th){
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+
+/* Hover color for normal rows (exclude expanded details row) */
+.row-hover :deep(table tbody tr:not(.details-row):hover){
+  background: rgba(59,130,246,0.08);
+  transition: background 120ms ease;
+}
+
+/* Keep inner components from centering inside cells */
+.min-width-table :deep(td > *){
+  justify-content: flex-start !important;
+  text-align: left !important;
 }
 
 /* phone tweaks */

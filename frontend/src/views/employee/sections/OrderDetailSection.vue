@@ -1,13 +1,13 @@
-<!-- OrderDetailSection.vue -->
+<!-- src/components/OrderDetailSection.vue -->
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 
 const props = defineProps({
-  form: Object,                 // { eatDate, orderType, location, eatStartHour, eatStartMinute, eatEndHour, eatEndMinute, meals:[], quantity, locationOther? }
+  form: Object,
   isTimedOrder: Boolean,
   needsOtherLocation: Boolean,
-  MEALS: Array,                 // ['Breakfast','Lunch','Dinner','Snack']
+  MEALS: Array,
   r: Object
 })
 
@@ -36,11 +36,11 @@ const MEAL_KM = {
   Snack: 'អាហារសម្រន់'
 }
 
-/* ---- Select data (value is EN; subtitle is KM) ---- */
+/* Select data (value is EN; subtitle is KM) */
 const ORDER_TYPES = [
-  { value: 'Daily meal',      title: 'Daily meal',      subtitle: 'អាហារប្រចាំថ្ងៃ' },
-  { value: 'Meeting catering',title: 'Meeting catering',subtitle: 'អាហារប្រជុំ' },
-  { value: 'Visitor meal',    title: 'Visitor meal',    subtitle: 'អាហារភ្ញៀវ' }
+  { value: 'Daily meal',       title: 'Daily meal',       subtitle: 'អាហារប្រចាំថ្ងៃ' },
+  { value: 'Meeting catering', title: 'Meeting catering', subtitle: 'អាហារប្រជុំ' },
+  { value: 'Visitor meal',     title: 'Visitor meal',     subtitle: 'អាហារភ្ញៀវ' }
 ]
 const LOCATIONS = [
   { value: 'Meeting Room', title: 'Meeting Room', subtitle: 'បន្ទប់ប្រជុំ' },
@@ -69,9 +69,8 @@ watch(showOtherLocation, (visible) => {
   if (!visible) props.form.locationOther = ''
 })
 
-/* --- Normalize any legacy bilingual strings already in the form --- */
+/* Normalize legacy bilingual values like "X - ខ្មែរ" -> "X" */
 function stripBilingual(v) {
-  // e.g. "Meeting Room - បន្ទប់ប្រជុំ" -> "Meeting Room"
   if (typeof v === 'string' && v.includes(' - ')) return v.split(' - ')[0].trim()
   return v
 }
@@ -79,8 +78,8 @@ onMounted(() => {
   props.form.orderType = stripBilingual(props.form.orderType)
   props.form.location  = stripBilingual(props.form.location)
 })
-watch(() => props.form.orderType, (v, o) => { props.form.orderType = stripBilingual(v) })
-watch(() => props.form.location,  (v, o) => { props.form.location  = stripBilingual(v) })
+watch(() => props.form.orderType, (v) => { props.form.orderType = stripBilingual(v) })
+watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual(v) })
 </script>
 
 <template>
@@ -120,7 +119,15 @@ watch(() => props.form.location,  (v, o) => { props.form.location  = stripBiling
           variant="outlined"
           density="compact"
           hide-details="auto"
-        />
+        >
+          <!-- EN + KM in the field (no duplication) -->
+          <template #selection="{ item }">
+            <div class="two-line">
+              <div class="en">{{ item?.title }}</div>
+              <div class="km">{{ item?.raw?.subtitle }}</div>
+            </div>
+          </template>
+        </v-select>
       </v-col>
     </v-row>
 
@@ -137,7 +144,14 @@ watch(() => props.form.location,  (v, o) => { props.form.location  = stripBiling
           variant="outlined"
           density="compact"
           hide-details="auto"
-        />
+        >
+          <template #selection="{ item }">
+            <div class="two-line">
+              <div class="en">{{ item?.title }}</div>
+              <div class="km">{{ item?.raw?.subtitle }}</div>
+            </div>
+          </template>
+        </v-select>
       </v-col>
     </v-row>
 
@@ -155,7 +169,6 @@ watch(() => props.form.location,  (v, o) => { props.form.location  = stripBiling
 
     <!-- Eat Time pickers -->
     <v-row dense class="mt-1" v-if="isTimedOrder">
-      <!-- Start -->
       <v-col cols="12" sm="6">
         <div class="mini-title">Eat Start</div>
         <v-row dense class="mt-1">
@@ -168,7 +181,6 @@ watch(() => props.form.location,  (v, o) => { props.form.location  = stripBiling
         </v-row>
       </v-col>
 
-      <!-- End -->
       <v-col cols="12" sm="6">
         <div class="mini-title">Eat End</div>
         <v-row dense class="mt-1">
@@ -192,7 +204,7 @@ watch(() => props.form.location,  (v, o) => { props.form.location  = stripBiling
             :class="{ active: form.meals.includes(m) }"
             @click="form.meals = form.meals.includes(m) ? form.meals.filter(x => x !== m) : [...form.meals, m]"
           >
-            <div class="label">
+            <div class="label mt-2">
               <div class="en">{{ m }}</div>
               <div class="km">{{ MEAL_KM[m] }}</div>
             </div>
@@ -211,9 +223,27 @@ watch(() => props.form.location,  (v, o) => { props.form.location  = stripBiling
 </template>
 
 <style scoped>
-.choice-btn{ font-weight:600; min-height:56px; text-transform:none; background-color:aliceblue; justify-content:flex-start; text-align:left; }
+.km{
+  font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
+               'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
+}
+.two-line{ display:flex; flex-direction:column; line-height:1.1; }
+.two-line .km{ font-size:.86rem; opacity:.9; margin-top:2px; }
+
+/* Choice buttons (meals) */
+.choice-btn{
+  font-weight:600;
+  min-height:56px;
+  text-transform:none;
+  background-color:aliceblue;
+  justify-content:flex-start;
+  text-align:left;
+}
 .choice-btn.two-line .label{ display:flex; flex-direction:column; line-height:1.1; }
 .label .en{ font-size:.98rem; }
 .label .km{ font-size:.86rem; opacity:.9; margin-top:2px; }
 .choice-btn.active{ background-color:#16a34a !important; color:#fff !important; }
+
+/* Make list subtitles compact */
+:deep(.v-list-item-subtitle){ line-height:1.1; }
 </style>

@@ -36,9 +36,9 @@ const ALLERGEN_KM = {
 /* ---- From-menu items (DEDUPE + guarantee Standard exactly once) ---- */
 const dietaryMenuItems = computed(() => {
   const base = (props.form.menuChoices?.length ? props.form.menuChoices : [])
-  const withStd = ['Standard', ...base]               // ensure Standard available
-  const uniq = Array.from(new Set(withStd))           // remove duplicates
-  return uniq.map(v => ({ value: v, title: v }))      // unified object shape
+  const withStd = ['Standard', ...base]
+  const uniq = Array.from(new Set(withStd))
+  return uniq.map(v => ({ value: v, title: v, subtitle: MENU_KM[v] }))
 })
 
 /* toggle helper */
@@ -127,7 +127,7 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
             if (mc !== 'Standard') ensureMenuCountKey(mc);
           "
         >
-          <div class="label">
+          <div class="label mt-2">
             <div class="en">
               {{ mc }}
               <span v-if="mc === 'Standard'" class="std-count">({{ standardCount }})</span>
@@ -164,7 +164,7 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
             ensureDietaryKey(item);
           "
         >
-          <div class="label">
+          <div class="label mt-2">
             <div class="en">{{ item }}</div>
             <div class="km">{{ ALLERGEN_KM[item] }}</div>
           </div>
@@ -178,12 +178,26 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
                 :items="dietaryMenuItems"
                 item-title="title"
                 item-value="value"
-                :item-props="(it) => ({ title: it.title, subtitle: MENU_KM[it.value] })"
                 density="compact"
                 variant="outlined"
                 label="From menu"
                 hide-details
-              />
+              >
+                <!-- Selection (EN + KM) -->
+                <template #selection="{ item }">
+                  <div class="two-line">
+                    <div class="en">{{ item?.title }}</div>
+                    <div class="km">{{ item?.raw?.subtitle }}</div>
+                  </div>
+                </template>
+                <!-- Items (EN + KM) -->
+                <template #item="{ props: iprops, item }">
+                  <v-list-item v-bind="iprops">
+                    <v-list-item-title>{{ item?.title }}</v-list-item-title>
+                    <v-list-item-subtitle class="km">{{ item?.raw?.subtitle }}</v-list-item-subtitle>
+                  </v-list-item>
+                </template>
+              </v-select>
             </v-col>
             <v-col cols="4">
               <v-text-field
@@ -238,6 +252,17 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
 </template>
 
 <style scoped>
+/* Khmer font helper to match other screens */
+.km{
+  font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
+               'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
+}
+
+/* Two-line pattern for EN (top) + KM (bottom) */
+.two-line{ display:flex; flex-direction:column; line-height:1.1; }
+.two-line .km{ font-size:.86rem; opacity:.9; margin-top:2px; }
+
+/* Choice buttons */
 .choice-btn{
   font-weight:600;
   min-height:56px;
@@ -251,6 +276,12 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
 .label .km{ font-size:0.86rem; opacity:0.9; margin-top:2px; }
 .std-count{ font-weight:500; margin-left:.25rem; opacity:.85; }
 .choice-btn.active{ background-color:#16a34a !important; color:#fff !important; }
+
 .text-error{ color:#dc2626 !important; }
 .text-success{ color:#16a34a !important; }
+
+/* Make list subtitles compact & consistent for KM lines */
+:deep(.v-list-item-subtitle){
+  line-height:1.1;
+}
 </style>
