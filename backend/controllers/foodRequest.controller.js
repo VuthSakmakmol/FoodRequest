@@ -6,7 +6,7 @@ const { emitCounterpart } = require('../utils/realtime');
 
 // 🔔 Telegram notify (optional; keep if wired)
 const { sendToAll } = require('../services/telegram.service');
-const { newRequestMsg, acceptedMsg, deliveredMsg, cancelMsg } = require('../services/telegram.messages');
+const { newRequestMsg, acceptedMsg, cookingMsg, readyMsg, deliveredMsg, cancelMsg } = require('../services/telegram.messages');
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(v);
 const normDate = (d) => { const v = new Date(d); return isNaN(v.getTime()) ? null : v };
@@ -267,6 +267,19 @@ exports.updateStatus = async (req, res, next) => {
     if (status === 'ACCEPTED') {
       try { await sendToAll(acceptedMsg(doc)); }
       catch (e) { console.warn('[Telegram] accepted notify failed:', e?.message); }
+    }
+
+    if (status === 'COOKING') {
+      try { await sendToAll(cookingMsg(doc)); }
+      catch (e) { console.warn('[Telegram] cooking notify failed:' , e?.message); }
+    }
+
+    if (status === 'READY') {
+      try {
+        await sendToAll(readyMsg(doc));
+      } catch (e) {
+        console.warn('[Telegram] ready notify failed:', e?.message);
+      }
     }
 
     if (status === 'DELIVERED') {

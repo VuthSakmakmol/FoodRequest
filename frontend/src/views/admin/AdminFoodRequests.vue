@@ -7,10 +7,75 @@ import api from '@/utils/api'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useDisplay } from 'vuetify'
-import * as XLSX from 'xlsx'            // ← NEW: Excel export
+import * as XLSX from 'xlsx'
 
 const { mdAndUp } = useDisplay()
 const auth = useAuth()
+
+/* ───────── Mini i18n (EN→KM for table/details only) ───────── */
+const KM = {
+  Status: 'ស្ថានភាព',
+  'Requester (ID & Name)': 'អ្នកស្នើ (លេខ & ឈ្មោះ)',
+  'Order Date': 'កាលបរិច្ឆេទស្នើ',
+  'Eat Date': 'កាលបរិច្ឆេទទទួលអាហារ',
+  Time: 'ពេលវេលា',
+  Dept: 'នាយកដ្ឋាន',
+  Type: 'ប្រភេទ',
+  Qty: 'ចំនួន',
+  Actions: 'សកម្មភាព',
+  Details: 'ព័ត៌មានលម្អិត',
+  'Hide details': 'លាក់ព័ត៌មាន',
+  'No requests found.': 'រកមិនឃើញទិន្នន័យទេ។',
+  Quantity: 'បរិមាណ',
+  'Selected menus': 'ម៉ឺនុយដែលបានជ្រើសរើស',
+  'Other dietary note': 'សម្គាល់អាហារូបត្ថម្ភផ្សេងទៀត',
+  'Special instruction': 'សេចក្តីណែនាំពិសេស',
+  Recurring: 'កំណត់ម្ដងហើយកើតឡើងថេរ',
+  'Menu totals match quantity': 'ចំនួនម៉ឺនុយត្រូវនឹងបរិមាណ',
+  'Menu totals differ from quantity': 'ចំនួនម៉ឺនុយមិនត្រូវនឹងបរិមាណ',
+
+  // statuses
+  ACTIVE: 'សកម្ម',
+  ALL: 'ទាំងអស់',
+  NEW: 'ថ្មី',
+  ACCEPTED: 'បានទទួលយក',
+  COOKING: 'កំពុងចម្អិន',
+  READY: 'រួចរាល់',
+  DELIVERED: 'បានផ្តល់',
+  CANCELED: 'បានបោះបង់',
+}
+const tkm = (en) => KM[en] || en
+
+/* Khmer labels for menu/allergen (details tree) */
+const MENU_KM_MAP = {
+  Standard: 'ញាំទូទៅ',
+  Vegetarian: 'មិនញាំសាច់',
+  Vegan: 'ញាំបួស',
+  'No pork': 'មិនញាំសាច់ជ្រូក',
+  'No beef': 'មិនញាំសាច់គោ',
+}
+
+/* Khmer labels for meals (table cell) */
+const MEAL_KM_MAP_ROW = {
+  Breakfast: 'អាហារពេលព្រឹក',
+  Lunch: 'អាហារថ្ងៃត្រង់',
+  Dinner: 'អាហារពេលល្ងាច',
+  Snack: 'អាហារសម្រន់',
+}
+const mealListKM = (arr = []) => arr.map(m => MEAL_KM_MAP_ROW[m] || m).join(', ')
+
+
+const ALLERGEN_KM_MAP = {
+  Peanut: 'មិនញាំសណ្តែកដី',
+  Shellfish: 'មិនញាំសត្វសំបកសមុទ្រ',
+  Egg: 'មិនញាំស៊ុត',
+  Gluten: 'គ្លុយតែន',
+  'Dairy/Lactose': 'មិនញាំទឹកដោះគោ/ឡាក់តូស',
+  Soy: 'មិនញាំសណ្តែកសៀង',
+  Others: 'ផ្សេងទៀត',
+}
+const menuKM = (en) => MENU_KM_MAP[en] || en
+const allergenKM = (en) => ALLERGEN_KM_MAP[en] || en
 
 /* ───────── state ───────── */
 const loading = ref(false)
@@ -32,9 +97,10 @@ const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({
   ...o,
   _id: String(o?._id || ''),
-  requestId: String(o?.requestId || ''), // kept in data; no longer shown
+  requestId: String(o?.requestId || ''),
   orderType: o?.orderType || '',
   quantity: Number(o?.quantity || 0),
+  meals: Array.isArray(o?.meals) ? o.meals : [],  
   menuChoices: Array.isArray(o?.menuChoices) ? o.menuChoices : [],
   menuCounts: Array.isArray(o?.menuCounts) ? o.menuCounts : [],
   dietary: Array.isArray(o?.dietary) ? o.dietary : [],
@@ -42,14 +108,6 @@ const normalize = o => ({
 })
 
 /* ───────── MENU / DIETARY math ───────── */
-function sumNonStandard(r) {
-  return (r.menuCounts || [])
-    .filter(x => x?.choice && x.choice !== 'Standard')
-    .reduce((s, x) => s + Number(x.count || 0), 0)
-}
-function standardAuto(r) {
-  return Math.max(Number(r.quantity || 0) - sumNonStandard(r), 0)
-}
 function menuMap(r) {
   const m = new Map()
   for (const it of (r.menuCounts || [])) {
@@ -81,8 +139,6 @@ function dietaryByMenu(r) {
   }
   return g
 }
-
-/* ───────── derived validations ───────── */
 function totals(r) {
   const m = menuMap(r)
   const totalMenus = Array.from(m.values()).reduce((a, b) => a + b, 0)
@@ -229,7 +285,7 @@ function resetFilters() {
   load()
 }
 
-/* ───────── Export to Excel ───────── */
+/* ───────── Export to Excel (3 sheets) ───────── */
 const exporting = ref(false)
 
 function toMainRow(r) {
@@ -254,7 +310,6 @@ function toMainRow(r) {
       : ''
   }
 }
-
 function buildMenuRows(list) {
   const out = []
   for (const r of list) {
@@ -271,7 +326,6 @@ function buildMenuRows(list) {
   }
   return out
 }
-
 function buildDietaryRows(list) {
   const out = []
   for (const r of list) {
@@ -295,25 +349,21 @@ function buildDietaryRows(list) {
 async function exportExcel() {
   try {
     exporting.value = true
-    const list = rows.value // export all filtered rows currently loaded
+    const list = rows.value
     const wb = XLSX.utils.book_new()
 
-    // Sheet 1: Requests
     const main = list.map(toMainRow)
     const wsMain = XLSX.utils.json_to_sheet(main)
     XLSX.utils.book_append_sheet(wb, wsMain, 'Requests')
 
-    // Sheet 2: Menus
     const menuRows = buildMenuRows(list)
     const wsMenus = XLSX.utils.json_to_sheet(menuRows)
     XLSX.utils.book_append_sheet(wb, wsMenus, 'Menus')
 
-    // Sheet 3: Dietary
     const dietRows = buildDietaryRows(list)
     const wsDiet = XLSX.utils.json_to_sheet(dietRows)
     XLSX.utils.book_append_sheet(wb, wsDiet, 'Dietary')
 
-    // Auto-width columns (simple heuristic)
     for (const ws of [wsMain, wsMenus, wsDiet]) {
       const data = XLSX.utils.sheet_to_json(ws, { header: 1 })
       const colWidths = data[0]?.map((_, c) =>
@@ -345,44 +395,112 @@ async function exportExcel() {
     <v-card elevation="1" class="rounded-lg">
       <!-- Toolbar -->
       <v-toolbar flat density="comfortable" class="px-2">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Food Requests</v-toolbar-title>
+        <v-toolbar-title class="text-subtitle-1 font-weight-bold title-clamp">
+          <span>Food Requests</span>
+        </v-toolbar-title>
         <v-spacer />
 
-        <!-- Desktop/tablet inline filters -->
+        <!-- Desktop/tablet inline filters (EN-only labels) -->
         <template v-if="mdAndUp">
           <v-text-field v-model="q" density="compact" placeholder="Search"
-                        hide-details variant="outlined" class="mr-2" @keyup.enter="load" style="max-width: 220px" />
+                        hide-details variant="outlined" class="mr-2"
+                        @keyup.enter="load" style="max-width: 220px" />
+
           <v-select v-model="status" :items="statuses" density="compact" label="Status"
                     hide-details variant="outlined" class="mr-2" style="max-width: 160px" />
+
           <v-text-field v-model="fromDate" type="date" density="compact" label="From"
                         hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
           <v-text-field v-model="toDate" type="date" density="compact" label="To"
                         hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
+
           <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows"
-                    hide-details variant="outlined" style="max-width: 120px" class="mr-2" />
-          <v-btn :loading="loading" color="primary" class="mr-2" @click="load">Refresh</v-btn>
+                    hide-details variant="outlined" style="max-width: 110px" class="mr-2" />
 
-          <!-- NEW: Export button -->
-          <v-btn :loading="exporting" color="success" variant="flat" @click="exportExcel">
-            <v-icon start>mdi-file-excel</v-icon> Export Excel
-          </v-btn>
+          <v-tooltip text="Refresh" location="bottom">
+            <template #activator="{ props }">
+              <v-btn 
+                v-bind="props"
+                :loading="loading"
+                icon
+                color="primary"
+                class="mr-2"
+                @click="load"
+                aria-label="Refresh"
+                title="Refresh">
+                <i class="fa-solid fa-rotate-right"></i>
+              </v-btn>
+            </template>
+          </v-tooltip>
+          <!-- ICON-ONLY: Filters -->
+          <v-tooltip text="Filters" location="bottom">
+            <template #activator="{ props }">
+              <v-btn v-bind="props" icon variant="flat" class="mr-1"
+                     @click="showFilterDialog = true" aria-label="Filters" title="Filters">
+                <i class="fa-solid fa-filter"></i>
+              </v-btn>
+            </template>
+          </v-tooltip>
+
+          <!-- ICON-ONLY: Export -->
+          <v-tooltip text="Export Excel" location="bottom">
+            <template #activator="{ props }">
+              <v-btn v-bind="props" :loading="exporting" icon color="success" variant="flat"
+                     @click="exportExcel" aria-label="Export Excel" title="Export Excel">
+                <i class="fa-regular fa-file-excel"></i>
+              </v-btn>
+            </template>
+          </v-tooltip>
         </template>
 
-        <!-- Mobile: compact controls -->
-        <template v-else>
-          <v-text-field v-model="q" density="compact" placeholder="Search"
-                        hide-details variant="outlined" class="mr-2" style="max-width: 50vw" @keyup.enter="load" />
-          <v-btn color="primary" variant="flat" class="mr-2" @click="showFilterDialog = true">
-            Filters
-          </v-btn>
-          <!-- Mobile export -->
-          <v-btn :loading="exporting" color="success" variant="flat" @click="exportExcel">
-            <v-icon start>mdi-file-excel</v-icon> Export
-          </v-btn>
-        </template>
+        <!-- Mobile search + Refresh + Filters -->
+        <v-sheet v-if="!mdAndUp" class="px-3 pt-3 pb-1 bg-transparent">
+          <div class="d-flex align-center gap-2">
+            <v-text-field
+              v-model="q" density="compact" :placeholder="tkm('Search (type, menu, note, requester)')"
+              clearable hide-details variant="outlined" class="flex-grow-1"
+              @keyup.enter="load"
+            />
+
+            <!-- Refresh (FA icon) -->
+            <v-tooltip text="Refresh" location="bottom">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  :loading="loading"
+                  icon
+                  variant="tonal"
+                  @click="load"
+                  aria-label="Refresh"
+                  title="Refresh"
+                >
+                  <i class="fa-solid fa-rotate-right"></i>
+                </v-btn>
+              </template>
+            </v-tooltip>
+
+            <!-- NEW: Filters (FA icon) -->
+            <v-tooltip text="Filters" location="bottom">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  icon
+                  color="primary"
+                  variant="flat"
+                  @click="showFilterDialog = true"
+                  aria-label="Filters"
+                  title="Filters"
+                >
+                  <i class="fa-solid fa-filter"></i>
+                </v-btn>
+              </template>
+            </v-tooltip>
+          </div>
+        </v-sheet>
+
       </v-toolbar>
 
-      <!-- Mobile Filters dialog -->
+      <!-- Mobile Filters dialog (English labels) -->
       <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
         <v-card>
           <v-toolbar density="comfortable" color="primary" class="text-white">
@@ -432,24 +550,29 @@ async function exportExcel() {
           <v-table density="comfortable" class="min-width-table">
             <thead>
               <tr>
-                <th>Status</th>
-                <th style="width: 320px;">Actions</th>
-                <!-- Requester column (replacing old Req ID) -->
-                <th>Requester (ID &amp; Name)</th>
-                <th>Order Date</th>
-                <th>Eat Date</th>
-                <th>Time</th>
-                <!-- Hide on very small screens to reduce clutter -->
-                <th class="d-none d-sm-table-cell">Dept</th>
-                <th class="d-none d-md-table-cell">Type</th>
-                <th>Qty</th>
+                <th><div class="hdr-2l"><div class="en">{{ tkm('Status') }}</div><div class="km">{{ tkm('Status') }}</div></div></th>
+                <th style="width:320px;"><div class="hdr-2l"><div class="en">Actions</div><div class="km">{{ tkm('Actions') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Requester (ID & Name)</div><div class="km">{{ tkm('Requester (ID & Name)') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Order Date</div><div class="km">{{ tkm('Order Date') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Eat Date</div><div class="km">{{ tkm('Eat Date') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Time</div><div class="km">{{ tkm('Time') }}</div></div></th>
+                <th class="d-none d-sm-table-cell"><div class="hdr-2l"><div class="en">Dept</div><div class="km">{{ tkm('Dept') }}</div></div></th>
+                <th class="d-none d-md-table-cell"><div class="hdr-2l"><div class="en">Order Type</div><div class="km">{{ tkm('Type') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Meals</div><div class="km">អាហារ</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Qty</div><div class="km">{{ tkm('Qty') }}</div></div></th>
               </tr>
             </thead>
+
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
                 <tr>
                   <td>
-                    <v-chip :color="COLOR[r.status]" size="small" label>{{ r.status }}</v-chip>
+                    <v-chip :color="COLOR[r.status]" size="small" label>
+                      <div class="chip-2l">
+                        <div class="en">{{ r.status }}</div>
+                        <div class="km">{{ tkm(r.status) }}</div>
+                      </div>
+                    </v-chip>
                   </td>
                   <td>
                     <div class="mb-2">
@@ -460,18 +583,44 @@ async function exportExcel() {
                         variant="tonal"
                         :disabled="!r._id"
                         @click="updateStatus(r, s)"
-                      >{{ s }}</v-btn>
+                      >
+                        <div class="cell-2l">
+                          <div class="en">{{ s }}</div>
+                          <div class="km">{{ tkm(s) }}</div>
+                        </div>
+                      </v-btn>
                     </div>
                     <v-btn size="small" variant="text" color="secondary" @click="toggleExpanded(r._id)">
-                      {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
+                      <span class="en">{{ isExpanded(r._id) ? 'Hide details' : 'Details' }}</span>
+                      <span class="km ml-1">({{ isExpanded(r._id) ? tkm('Hide details') : tkm('Details') }})</span>
                     </v-btn>
                   </td>
-                  <td>{{ r.employee?.employeeId || '—' }} — {{ r.employee?.name || '—' }}</td>
+
+                  <td>
+                    <div class="cell-2l">
+                      <div class="en">{{ r.employee?.employeeId || '—' }} — {{ r.employee?.name || '—' }}</div>
+                      <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
+                    </div>
+                  </td>
+
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
-                  <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
+
+                  <td>
+                    <div class="cell-2l">
+                      <div class="en">{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></div>
+                      <div class="km">{{ tkm('Time') }}</div>
+                    </div>
+                  </td>
+
                   <td class="d-none d-sm-table-cell">{{ r.employee?.department || '—' }}</td>
                   <td class="d-none d-md-table-cell">{{ r.orderType }}</td>
+                  <td>
+                    <div class="cell-2l">
+                      <div class="en">{{ (r.meals || []).join(', ') || '—' }}</div>
+                      <div class="km">{{ mealListKM(r.meals) }}</div>
+                    </div>
+                  </td>
                   <td>{{ r.quantity }}</td>
                 </tr>
 
@@ -482,51 +631,32 @@ async function exportExcel() {
                       <div class="px-3 py-2">
                         <div class="tree">
                           <div class="tree-node root">
-                            <div class="node-label"><strong>Quantity</strong> {{ r.quantity }}</div>
+                            <div class="node-label two-lines">
+                              <div class="en"><strong>{{ tkm('Quantity') }}</strong> {{ r.quantity }}</div>
+                              <div class="km">{{ tkm('Quantity') }}</div>
+                            </div>
                             <div class="children">
                               <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                                 <div class="tree-node">
-                                  <div class="node-label"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                  <div class="node-label two-lines">
+                                    <div class="en"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                    <div class="km">{{ menuKM(menuName) }}</div>
+                                  </div>
                                   <div class="children" v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length">
-                                    <div class="tree-node leaf"
-                                         v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
-                                         :key="menuName + '_' + allergen">
-                                      <div class="node-label"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
+                                    <div
+                                      class="tree-node leaf"
+                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                      :key="menuName + '_' + allergen"
+                                    >
+                                      <div class="node-label two-lines">
+                                        <div class="en"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
+                                        <div class="km">{{ allergenKM(allergen) }}</div>
+                                      </div>
                                     </div>
                                   </div>
                                 </div>
                               </template>
                             </div>
-                          </div>
-
-                          <div class="mt-2 text-caption">
-                            <template v-if="totals(r).leftoverMenus === 0">
-                              <span class="ok">✔ Menu totals match quantity</span>
-                            </template>
-                            <template v-else>
-                              <span class="warn">⚠ Menu totals {{ totals(r).totalMenus }} differ from quantity {{ r.quantity }} (Δ {{ totals(r).leftoverMenus }})</span>
-                            </template>
-                          </div>
-                          <div class="mt-1 text-caption">
-                            <span v-for="[menuName, left] in totals(r).perMenuDietaryLeft.entries()"
-                                  :key="'chk_'+menuName"
-                                  class="mr-3"
-                                  :class="left >= 0 ? 'ok' : 'warn'">
-                              {{ menuName }}: dietary Δ {{ left }}
-                            </span>
-                          </div>
-
-                          <div class="mt-2 text-caption text-medium-emphasis" v-if="r.menuChoices?.length">
-                            Selected menus: {{ r.menuChoices.join(', ') }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.dietaryOther">
-                            Other dietary note: {{ r.dietaryOther }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.specialInstructions">
-                            Special instruction: {{ r.specialInstructions }}
-                          </div>
-                          <div class="mt-1 text-caption" v-if="r.recurring?.enabled">
-                            Recurring: {{ r.recurring.frequency }}<span v-if="r.recurring.endDate"> until {{ fmtDate(r.recurring.endDate) }}</span><span v-if="r.recurring.skipHolidays"> (skip holidays)</span>
                           </div>
                         </div>
                       </div>
@@ -535,8 +665,10 @@ async function exportExcel() {
                 </tr>
               </template>
 
-              <tr v-if="!pagedRows.length">
-                <td colspan="9" class="text-center py-6 text-medium-emphasis">No requests found.</td>
+              <tr v-if="!pagedRows.length && !loading">
+                <td colspan="9" class="text-center py-6 text-medium-emphasis">
+                  {{ tkm('No requests found.') }}
+                </td>
               </tr>
             </tbody>
           </v-table>
@@ -563,15 +695,36 @@ async function exportExcel() {
 <style scoped>
 .table-wrap{ overflow-x:auto; display:block; }
 
-/* Make inputs a bit tighter */
+/* Tighter inputs */
 :deep(.v-field__input){ min-height: 36px; }
 
-/* Table min widths; shrink a bit on phones */
+/* Title clamp so controls stay visible */
+.title-clamp {
+  max-width: 38vw;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+@media (max-width: 420px){
+  .title-clamp { max-width: 48vw; }
+}
+
+/* Table min widths; shrink on phones */
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
 @media (max-width: 600px){
   .min-width-table th,.min-width-table td{ min-width: 90px; }
   .v-toolbar{ padding-left: .5rem; padding-right: .5rem; }
 }
+
+/* bilingual headers */
+.hdr-2l .en{ font-weight:600; }
+.hdr-2l .km{ font-size:.82rem; opacity:.85; }
+
+/* two-line cells/chips */
+.cell-2l{ display:flex; flex-direction:column; line-height:1.1; }
+.cell-2l .km{ font-size:.86rem; opacity:.9; }
+.chip-2l{ display:flex; flex-direction:column; line-height:1; }
+.chip-2l .km{ font-size:.78em; opacity:.9; }
 
 /* Details tree */
 .details-row{ background: rgba(0,0,0,0.02); }
@@ -584,8 +737,21 @@ async function exportExcel() {
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
 .ok{ color:#16a34a; } .warn{ color:#dc2626; }
 
-/* Display utility for table cells on small screens */
+/* Display utility for small screens */
 .d-none{ display:none !important; }
 @media (min-width: 600px){ .d-sm-table-cell{ display: table-cell !important; } }
 @media (min-width: 960px){ .d-md-table-cell{ display: table-cell !important; } }
+
+/* Khmer font helper (for KM spans) */
+.km{
+  font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
+               'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
+}
+
+/* Font Awesome icons inside Vuetify icon buttons */
+:deep(.v-btn--icon i.fa-solid),
+:deep(.v-btn--icon i.fa-regular){
+  font-size: 1.05rem;
+  line-height: 1;
+}
 </style>

@@ -328,8 +328,7 @@ function totals(r) {
       <!-- Desktop / Tablet toolbar -->
       <v-toolbar v-if="mdAndUp" flat density="comfortable" class="py-2">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">
-          {{ 'My Requests' }} <span class="km ml-2">({{ tkm('My Requests') }})</span>
-          <v-chip size="x-small" class="ml-2" color="teal" label>Live</v-chip>
+          {{ 'My Requests' }}
         </v-toolbar-title>
         <v-spacer />
         <v-text-field
@@ -360,20 +359,61 @@ function totals(r) {
           v-model="dateEnd" type="date" density="compact" :label="tkm('To')"
           hide-details variant="outlined" class="mr-2" style="max-width:160px"
         />
-        <v-btn :loading="loading" color="primary" @click="load" class="mr-2" prepend-icon="mdi-refresh">{{ tkm('Refresh') }}</v-btn>
-        <v-btn color="success" @click="exportExcel" prepend-icon="mdi-file-excel">{{ tkm('Export') }}</v-btn>
+
+        <!-- Refresh (FA icon) -->
+        <v-tooltip text="Refresh" location="bottom">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              :loading="loading"
+              icon
+              color="primary"
+              class="mr-2"
+              @click="load"
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <i class="fa-solid fa-rotate-right"></i>
+            </v-btn>
+          </template>
+        </v-tooltip>
+
+        <!-- Export (FA icon) — removed :loading since 'exporting' isn't defined here -->
+        <v-tooltip text="Export Excel" location="bottom">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              icon
+              color="success"
+              variant="flat"
+              @click="exportExcel"
+              aria-label="Export Excel"
+              title="Export Excel"
+            >
+              <i class="fa-regular fa-file-excel"></i>
+            </v-btn>
+          </template>
+        </v-tooltip>
+
+        <!-- NEW: Filter (FA icon) opens the dialog -->
+        <v-tooltip text="Filters" location="bottom">
+          <template #activator="{ props }">
+            <v-btn
+              v-bind="props"
+              icon
+              variant="flat"
+              color="secondary"
+              class="ml-1"
+              @click="showFilterDialog = true"
+              aria-label="Filters"
+              title="Filters"
+            >
+              <i class="fa-solid fa-filter"></i>
+            </v-btn>
+          </template>
+        </v-tooltip>
       </v-toolbar>
 
-      <!-- Mobile toolbar -->
-      <v-toolbar v-else flat density="comfortable" class="py-2">
-        <v-toolbar-title class="text-subtitle-2 font-weight-bold">
-          {{ tkm('My Requests') }}
-        </v-toolbar-title>
-        <v-spacer />
-        <v-btn icon variant="text" @click="exportExcel" :title="tkm('Export')">
-          <v-icon>mdi-file-excel</v-icon>
-        </v-btn>
-      </v-toolbar>
 
       <v-divider />
 
@@ -385,7 +425,22 @@ function totals(r) {
             clearable hide-details variant="outlined" class="flex-grow-1"
             @keyup.enter="load"
           />
-          <v-btn color="grey" variant="tonal" @click="load">{{ tkm('Refresh') }}</v-btn>
+
+          <v-tooltip text="Refresh" location="bottom">
+            <template #activator="{ props }">
+              <v-btn
+                v-bind="props"
+                :loading="loading"
+                icon
+                variant="tonal"
+                @click="load"
+                aria-label="Refresh"
+                title="Refresh"
+              >
+                <i class="fa-solid fa-rotate-right"></i>
+              </v-btn>
+            </template>
+          </v-tooltip>
           <v-btn color="primary" variant="flat" @click="showFilterDialog = true">{{ tkm('Filters') }}</v-btn>
         </div>
       </v-sheet>

@@ -4,17 +4,16 @@ const dayjs = require('dayjs')
 /* ───────── helpers ───────── */
 function esc(s = '') { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
+// kept in case used by history; remove if you later decide to strip times from history too
 const fmtDateTime = d => (d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '—')
 const fmtBool = v => (v ? 'Yes' : 'No')
 const joinOrDash = arr => (Array.isArray(arr) && arr.length ? arr.join(', ') : '—')
-const arrify = v => (Array.isArray(v) ? v : [])
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v)
 const toInt = v => (v == null ? 0 : Number(v) || 0)
 
 function safeNote(s, max = 600) { if (!s) return null; const t = String(s); return t.length > max ? `${t.slice(0, max - 1)}…` : t }
 
 /* ───────── counts logic (supports array OR object) ───────── */
-/** Build Map(choice -> count). Also derive Standard if missing. */
 function menuMap(doc) {
   const out = new Map()
   const src = doc?.menuCounts
@@ -34,7 +33,7 @@ function menuMap(doc) {
     }
   }
 
-  // derive Standard if not present (legacy records)
+  // derive Standard if not present (legacy)
   if (!out.has('Standard')) {
     const nonStd = Array.from(out.values()).reduce((s, v) => s + toInt(v), 0)
     const std = Math.max(toInt(doc?.quantity) - nonStd, 0)
@@ -45,7 +44,6 @@ function menuMap(doc) {
   return out
 }
 
-/** Group dietary by menu: Map(menu -> Map(allergen -> count)) */
 function dietaryByMenu(doc) {
   const out = new Map()
   const src = doc?.dietaryCounts
@@ -61,7 +59,6 @@ function dietaryByMenu(doc) {
       inner.set(allergen, (inner.get(allergen) || 0) + cnt)
     }
   } else if (isObj(src)) {
-    // shape: { "Standard": {"Peanut":2}, "No beef":{"Shellfish":2} }
     for (const [menu, innerObj] of Object.entries(src)) {
       if (!isObj(innerObj)) continue
       for (const [allergen, val] of Object.entries(innerObj)) {
@@ -84,17 +81,16 @@ function linesForMenuCounts(doc) {
   const m = menuMap(doc)
   if (!m.size) return ['🍱 Menu Counts: —']
   const lines = ['🍱 Menu Counts:']
-  const ordered = Array.from(m.entries()).sort((a, b) => (a[0] === 'Standard' ? -1 : b[0] === 'Standard' ? 1 : a[0].localeCompare(b[0])))
+  const ordered = Array.from(m.entries()).sort(
+    (a, b) => (a[0] === 'Standard' ? -1 : b[0] === 'Standard' ? 1 : a[0].localeCompare(b[0]))
+  )
   let total = 0
   for (const [choice, cnt] of ordered) {
     total += toInt(cnt)
     lines.push(`• ${esc(choice)} × <b>${toInt(cnt)}</b>`)
   }
   lines.push(`• <i>Total menus</i>: <b>${total}</b>`)
-  if (doc?.quantity != null) {
-    const delta = toInt(doc.quantity) - total
-    lines.push(`• <i>Δ vs quantity</i>: <b>${delta}</b>`)
-  }
+  // NOTE: "Δ vs quantity" intentionally removed
   return lines
 }
 
@@ -107,7 +103,9 @@ function linesForDietaryCounts(doc) {
     return base
   }
   const lines = ['⚠️ Dietary Counts (by menu):']
-  const orderedMenus = Array.from(g.keys()).sort((a, b) => (a === 'Standard' ? -1 : b === 'Standard' ? 1 : a.localeCompare(b)))
+  const orderedMenus = Array.from(g.keys()).sort(
+    (a, b) => (a === 'Standard' ? -1 : b === 'Standard' ? 1 : a.localeCompare(b))
+  )
   for (const menu of orderedMenus) {
     const inner = g.get(menu)
     const parts = Array.from(inner.entries())
@@ -139,20 +137,6 @@ function linesForStatusHistory(list = [], limit = 6) {
   return ['📜 History:', ...rows]
 }
 
-function linesForStepDates(stepDates = {}) {
-  if (!stepDates) return []
-  const map = [
-    ['newAt', 'NEW'],
-    ['acceptedAt', 'ACCEPTED'],
-    ['cookingAt', 'COOKING'],
-    ['readyAt', 'READY'],
-    ['deliveredAt', 'DELIVERED'],
-    ['canceledAt', 'CANCELED'],
-  ]
-  const rows = map.filter(([k]) => stepDates[k]).map(([k, label]) => `• ${label}: ${fmtDateTime(stepDates[k])}`)
-  return rows.length ? ['⏱️ Timestamps:', ...rows] : []
-}
-
 /* ───────── base info + builders ───────── */
 function baseInfo(doc) {
   const d = doc || {}
@@ -182,6 +166,7 @@ function baseInfo(doc) {
   return lines
 }
 
+/* ───────── per-step messages (all steps covered) ───────── */
 function newRequestMsg(doc) {
   return [
     '🍽️ <b>New Food Request</b>',
@@ -192,7 +177,6 @@ function newRequestMsg(doc) {
     '-----------------------------',
     `📊 Status: <b>${esc(doc.status || 'NEW')}</b>`,
     ...linesForStatusHistory(doc.statusHistory, 6),
-    ...linesForStepDates(doc.stepDates),
   ].filter(Boolean).join('\n')
 }
 
@@ -202,9 +186,30 @@ function acceptedMsg(doc) {
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    `📊 Status: <b>ACCEPTED</b>`,
+    '📊 Status: <b>ACCEPTED</b>',
     ...linesForStatusHistory(doc.statusHistory, 8),
-    ...linesForStepDates(doc.stepDates),
+  ].filter(Boolean).join('\n')
+}
+
+function cookingMsg(doc) {
+  return [
+    '👨‍🍳 <b>Cooking Started</b>',
+    '=============================',
+    ...baseInfo(doc),
+    '-----------------------------',
+    '📊 Status: <b>COOKING</b>',
+    ...linesForStatusHistory(doc.statusHistory, 8),
+  ].filter(Boolean).join('\n')
+}
+
+function readyMsg(doc) {
+  return [
+    '🟢 <b>Order Ready</b>',
+    '=============================',
+    ...baseInfo(doc),
+    '-----------------------------',
+    '📊 Status: <b>READY</b>',
+    ...linesForStatusHistory(doc.statusHistory, 8),
   ].filter(Boolean).join('\n')
 }
 
@@ -214,9 +219,8 @@ function deliveredMsg(doc) {
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    `📊 Final status: <b>DELIVERED</b>`,
+    '📊 Final status: <b>DELIVERED</b>',
     ...linesForStatusHistory(doc.statusHistory, 8),
-    ...linesForStepDates(doc.stepDates),
   ].filter(Boolean).join('\n')
 }
 
@@ -226,10 +230,38 @@ function cancelMsg(doc) {
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    `📊 Final status: <b>CANCELED</b>`,
+    '📊 Final status: <b>CANCELED</b>',
     ...linesForStatusHistory(doc.statusHistory, 8),
-    ...linesForStepDates(doc.stepDates),
   ].filter(Boolean).join('\n')
 }
 
-module.exports = { newRequestMsg, acceptedMsg, deliveredMsg, cancelMsg }
+/* ───────── dispatcher (use this to alert “all steps”) ───────── */
+function statusUpdateMsg(doc) {
+  const s = (doc?.status || 'NEW').toUpperCase()
+  switch (s) {
+    case 'NEW': return newRequestMsg(doc)
+    case 'ACCEPTED': return acceptedMsg(doc)
+    case 'COOKING': return cookingMsg(doc)
+    case 'READY': return readyMsg(doc)
+    case 'DELIVERED': return deliveredMsg(doc)
+    case 'CANCELED': return cancelMsg(doc)
+    default: return [
+      `ℹ️ <b>Status Updated</b> → <b>${esc(s)}</b>`,
+      '=============================',
+      ...baseInfo(doc),
+      '-----------------------------',
+      `📊 Status: <b>${esc(s)}</b>`,
+      ...linesForStatusHistory(doc.statusHistory, 6),
+    ].filter(Boolean).join('\n')
+  }
+}
+
+module.exports = {
+  newRequestMsg,
+  acceptedMsg,
+  cookingMsg,
+  readyMsg,
+  deliveredMsg,
+  cancelMsg,
+  statusUpdateMsg,
+}
