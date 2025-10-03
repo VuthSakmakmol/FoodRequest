@@ -11,18 +11,33 @@ const signToken = (user) =>
     { expiresIn: '7d' }
   )
 
+// controllers/auth.controller.js
 exports.login = async (req, res, next) => {
   try {
-    const { loginId, password } = req.body || {}
-    if (!loginId || !password) return res.status(400).json({ message: 'loginId and password required' })
-    const user = await User.findOne({ loginId, isActive: true })
+    const rawId = req.body?.loginId ?? ''
+    const password = req.body?.password ?? ''
+
+    const loginId = String(rawId).trim()   // ✅ trim spaces
+    if (!loginId || !password) {
+      return res.status(400).json({ message: 'loginId and password required' })
+    }
+
+    // If you want to allow suspended users to be rejected with a clearer message, do two-step:
+    const user = await User.findOne({ loginId }) // ← remove isActive:true to disambiguate OR keep it, see below
     if (!user) return res.status(401).json({ message: 'Invalid credentials' })
+
+    if (user.isActive === false) {
+      return res.status(403).json({ message: 'Account disabled' })
+    }
+
     const ok = await user.verifyPassword(password)
     if (!ok) return res.status(401).json({ message: 'Invalid credentials' })
+
     const token = signToken(user)
     res.json({ token, user: { id: user.loginId, name: user.name, role: user.role } })
   } catch (e) { next(e) }
 }
+
 
 exports.createUser = async (req, res, next) => {
   try {

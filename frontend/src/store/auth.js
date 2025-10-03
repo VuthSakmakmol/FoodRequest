@@ -11,8 +11,17 @@ export const useAuth = defineStore('auth', {
   }),
 
   actions: {
+    _applyTokenHeader(token) {
+      if (token) {
+        api.defaults.headers.common.Authorization = `Bearer ${token}`
+      } else {
+        delete api.defaults.headers.common.Authorization
+      }
+    },
+
     async login(loginId, password) {
       const { data } = await api.post('/auth/login', { loginId, password })
+
       this.user  = data.user
       this.token = data.token
 
@@ -20,10 +29,14 @@ export const useAuth = defineStore('auth', {
       localStorage.setItem('token', this.token)
       localStorage.setItem('user', JSON.stringify(this.user))
 
-      // join role room now (admins/chefs only)
+      // attach token for subsequent requests
+      this._applyTokenHeader(this.token)
+
+      // join a role room for realtime updates (ADMIN, CHEF, DRIVER, MESSENGER)
       if (this.user?.role) {
         subscribeRole(this.user.role)
       }
+
       return data.user
     },
 
@@ -34,6 +47,7 @@ export const useAuth = defineStore('auth', {
         return null
       }
       try {
+        this._applyTokenHeader(this.token)
         const { data } = await api.get('/auth/me')
         this.user = data
 
@@ -52,6 +66,13 @@ export const useAuth = defineStore('auth', {
 
     restore() {
       const storedUser = localStorage.getItem('user')
+      const storedToken = localStorage.getItem('token')
+
+      if (storedToken) {
+        this.token = storedToken
+        this._applyTokenHeader(this.token)
+      }
+
       if (storedUser) {
         this.user = JSON.parse(storedUser)
         if (this.user?.role) subscribeRole(this.user.role)
@@ -59,18 +80,26 @@ export const useAuth = defineStore('auth', {
     },
 
     logout() {
-      if (this.user?.role) unsubscribeRole(this.user.role)
+      if (this.user?.role) {
+        try { unsubscribeRole(this.user.role) } catch {}
+      }
+
       this.user = null
       this.token = ''
       this.ready = false
+
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      localStorage.removeItem('authRole')
 
-      try {
-        socket.emit('unsubscribe', { role: 'ADMIN' })
-        socket.emit('unsubscribe', { role: 'CHEF' })
-      } catch {}
+      this._applyTokenHeader('')
+
+      // Optional: if you kept manual emits, make them exhaustive, or remove entirely
+      // try {
+      //   socket.emit('unsubscribe', { role: 'ADMIN' })
+      //   socket.emit('unsubscribe', { role: 'CHEF' })
+      //   socket.emit('unsubscribe', { role: 'DRIVER' })
+      //   socket.emit('unsubscribe', { role: 'MESSENGER' })
+      // } catch {}
     }
   }
 })
