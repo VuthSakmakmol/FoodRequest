@@ -10,6 +10,9 @@ const MessengerLayout  = () => import('@/layouts/MessengerLayout.vue')
 // Employee pages
 const EmployeeHome         = () => import('@/views/employee/EmployeeHome.vue')
 const EmployeeRequestHist  = () => import('@/views/employee/EmployeeRequestHistory.vue')
+// Car Booking Employee
+const EmployeeCarBooking = () => import('@/views/employee/carbooking/EmployeeCarBooking.vue')
+const EmployeeCarHistory = () => import('@/views/employee/carbooking/EmployeeCarHistory.vue')
 
 // Admin pages
 const AdminLogin           = () => import('@/views/admin/AdminLogin.vue')
@@ -20,6 +23,7 @@ const AdminDashboard       = () => import('@/views/admin/AdminDashboard.vue')
 // Driver/Messenger pages
 const DriverHome           = () => import('@/modules/driver/Home.vue')
 const MessengerHome        = () => import('@/modules/messenger/Home.vue')
+
 
 function homeByRole(role) {
   switch (role) {
@@ -45,6 +49,10 @@ const router = createRouter({
         { path: '', redirect: { name: 'employee-request' } },
         { name: 'employee-request',          path: 'employee/request',  component: EmployeeHome },
         { name: 'employee-request-history',  path: 'employee/history',  component: EmployeeRequestHist },
+
+        // Employee carbooking
+        { name: 'employee-car-booking',      path: 'employee/car-booking', component: EmployeeCarBooking }, // ✅ new
+        { name: 'employee-car-history',     path: 'employee/car-history',   component: EmployeeCarHistory }, // ✅ add this
       ]
     },
 
@@ -57,6 +65,9 @@ const router = createRouter({
         { name: 'admin-dashboard',     path: 'dashboard',     component: AdminDashboard },
         { name: 'admin-requests',      path: 'requests',      component: AdminFoodRequests },
         { name: 'admin-food-calendar', path: 'food-calendar', component: AdminFoodCalendar },
+
+        //car booking
+        
       ]
     },
 

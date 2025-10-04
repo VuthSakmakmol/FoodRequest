@@ -79,8 +79,17 @@ app.use('/api/public', require('./routes/food-public.routes'));
 app.use('/api/admin',  require('./routes/food-admin.routes'));
 
 
-// car booking
+// Car booking routes
+// expose uploads (so /uploads/… works)
+app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || 'uploads')))
+
+// car-booking routes (public + admin)
 app.use('/api/car-bookings', require('./routes/carBooking.routes'))
+app.use('/api/admin/car-bookings', require('./routes/carBooking-admin.routes'))
+
+// optional compatibility alias if some frontend still calls /api/public/…
+app.use('/api/public/car-bookings', require('./routes/carBooking.routes'))
+
 
 
 /* ───────────── 404 for API (before error handler) ───────────── */

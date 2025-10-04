@@ -1,4 +1,3 @@
-<!-- src/views/employee/EmployeeHome.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Swal from 'sweetalert2'
@@ -7,28 +6,27 @@ import api from '@/utils/api'
 import socket from '@/utils/socket'
 import { useRouter } from 'vue-router'
 
+const DEBUG = true
 const router = useRouter()
 
-/* Sections */
 import RequesterSection from './sections/RequesterSection.vue'
 import OrderDetailSection from './sections/OrderDetailSection.vue'
 import MenuSection from './sections/MenuSection.vue'
 import RecurringBookingSection from './sections/RecurringBookingSection.vue'
 
-/* Constants */
 const MEALS = ['Breakfast','Lunch','Dinner','Snack']
 const MENU_CHOICES = ['Standard','Vegetarian','Vegan','No pork','No beef']
 const ALLERGENS = ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Others']
 
-/* Directory state */
 const employees = ref([])
 const loadingEmployees = ref(false)
 
-/* Form state */
+/* ✅ include contactNumber in the form state */
 const form = ref({
   employeeId: '',
   name: '',
   department: '',
+  contactNumber: '',
 
   orderType: 'Daily meal',
   meals: [],
@@ -37,22 +35,15 @@ const form = ref({
   eatStartMinute: '',
   eatEndHour: '',
   eatEndMinute: '',
-
   quantity: 1,
-
   location: '',
   locationOther: '',
-
-  // menus & dietary
-  menuChoices: ['Standard'],   // keep Standard selected; counts for specials only
-  menuCounts: {},              // { 'No beef': 2, 'Vegan': 1 } — never store 'Standard' here
+  menuChoices: ['Standard'],
+  menuCounts: {},
   dietary: [],
-  dietaryCounts: {},           // { Peanut: { count, menu }, ... }
+  dietaryCounts: {},
   dietaryOther: '',
-
   specialInstructions: '',
-
-  // recurring
   recurring: false,
   frequency: '',
   endDate: '',
@@ -63,12 +54,27 @@ const loading = ref(false)
 const success = ref('')
 const error = ref('')
 
-/* Load employees (and restore last selected) */
+/* Fetch directory from /public/employees and preserve contactNumber */
 async function loadEmployees() {
   loadingEmployees.value = true
   try {
-    const { data } = await api.get('/public/employees?activeOnly=true')
-    employees.value = Array.isArray(data) ? data : []
+    const { data } = await api.get('/public/employees', { params: { activeOnly: true } })
+    if (DEBUG) console.log('🔎 /public/employees raw[0]:', Array.isArray(data) ? data[0] : data)
+
+    // preserve contactNumber explicitly
+    employees.value = (Array.isArray(data) ? data : []).map(e => ({
+      employeeId: String(e.employeeId || ''),
+      name: String(e.name || ''),
+      department: String(e.department || ''),
+      contactNumber: String(e.contactNumber || ''),
+      isActive: !!e.isActive,
+    }))
+    if (DEBUG) {
+      const withPhone = employees.value.filter(e => e.contactNumber).length
+      console.log(`🧮 loaded employees: ${employees.value.length} | with contactNumber: ${withPhone}`)
+    }
+
+    // restore last selection
     const savedId = localStorage.getItem('employeeId') || ''
     if (savedId && !form.value.employeeId) {
       const exists = employees.value.some(e => String(e.employeeId) === String(savedId))
@@ -76,6 +82,8 @@ async function loadEmployees() {
         form.value.employeeId = savedId
         onEmployeeSelected(savedId)
       }
+    } else if (form.value.employeeId) {
+      onEmployeeSelected(form.value.employeeId) // fill after async load
     }
   } catch (e) {
     console.error('Failed to load directory', e)
@@ -85,18 +93,19 @@ async function loadEmployees() {
 }
 loadEmployees()
 
-/* Derived & helpers */
 function onEmployeeSelected(val) {
   const emp = employees.value.find(e => String(e.employeeId) === String(val))
+  if (DEBUG) console.log('👆 selected id:', val, '→ emp:', emp)
   form.value.name = emp ? emp.name : ''
   form.value.department = emp ? emp.department : ''
+  form.value.contactNumber = emp ? (emp.contactNumber || '') : ''
+  if (DEBUG) console.log('📝 form.contactNumber set to:', form.value.contactNumber)
 }
 
 const isTimedOrder = computed(() => form.value.orderType && form.value.orderType !== 'Daily meal')
 const needsOtherLocation = computed(() => form.value.location === 'Other')
 const showOtherAllergy = computed(() => (form.value.dietary || []).includes('Others'))
 
-/* Validation */
 function validateForm() {
   const f = form.value
   const errs = []
@@ -109,7 +118,6 @@ function validateForm() {
   if (!Array.isArray(f.menuChoices) || f.menuChoices.length === 0) errs.push('• Select at least one Menu option')
   if (needsOtherLocation.value && !f.locationOther) errs.push('• Please specify “Other Location”')
   if (showOtherAllergy.value && !f.dietaryOther) errs.push('• Please specify “Other (identify)”')
-
   if (isTimedOrder.value) {
     const start = f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : ''
     const end   = f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : ''
@@ -117,39 +125,26 @@ function validateForm() {
     if (!end) errs.push('• End time is required for non-daily orders')
     if (start && end && end <= start) errs.push('• End time must be after Start')
   }
-
   if (f.recurring) {
     if (!f.frequency) errs.push('• Frequency is required when Recurring = Yes')
     if (!f.endDate) errs.push('• End Date is required when Recurring = Yes')
   }
-
   return errs
 }
 
-/* ---------- Transform helpers (object → array) ---------- */
-/* Send specials explicitly; do NOT include Standard (backend derives it).
-   This avoids the “Standard stays 4” problem entirely. */
+/* (unchanged) payload builders, submit, reset ... */
 function buildMenuCountsArray(menuCountsObj) {
   const entries = Object.entries(menuCountsObj || {})
     .map(([choice, cnt]) => ({ choice, count: Number(cnt || 0) }))
     .filter(x => x.choice && x.count > 0 && x.choice !== 'Standard')
-
-  // merge duplicates (safety)
   const map = new Map()
   for (const it of entries) map.set(it.choice, (map.get(it.choice) || 0) + it.count)
   return Array.from(map, ([choice, count]) => ({ choice, count }))
 }
-
 function buildDietaryCountsArray(dietaryCountsObj) {
   const temp = Object.entries(dietaryCountsObj || {})
-    .map(([allergen, v]) => ({
-      allergen,
-      count: Number(v?.count || 0),
-      menu: v?.menu || 'Standard'
-    }))
+    .map(([allergen, v]) => ({ allergen, count: Number(v?.count || 0), menu: v?.menu || 'Standard' }))
     .filter(x => x.allergen && x.count > 0)
-
-  // merge by {menu, allergen}
   const key = (x) => `${x.menu}__${x.allergen}`
   const map = new Map()
   for (const it of temp) {
@@ -158,148 +153,89 @@ function buildDietaryCountsArray(dietaryCountsObj) {
   }
   return Array.from(map.values())
 }
-
-/* Build API payload */
 function buildPayloadFromForm(f) {
   return {
-    employeeId: f.employeeId, // backend accepts employeeId or employee.employeeId
+    employeeId: f.employeeId,
     orderType: f.orderType,
     meals: f.meals,
     eatDate: f.eatDate,
     eatTimeStart: f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : null,
     eatTimeEnd:   f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : null,
     quantity: Number(f.quantity),
-    location: {
-      kind: f.location,
-      other: f.location === 'Other' ? (f.locationOther || '') : '',
-    },
+    location: { kind: f.location, other: f.location === 'Other' ? (f.locationOther || '') : '' },
     menuChoices: f.menuChoices,
-
-    // ✅ send specials only; server will compute Standard = quantity − sum(specials)
     menuCounts: buildMenuCountsArray(f.menuCounts),
-
     dietary: f.dietary,
     dietaryOther: f.dietaryOther || '',
     dietaryCounts: buildDietaryCountsArray(f.dietaryCounts),
-
     specialInstructions: f.specialInstructions || '',
-    recurring: {
-      enabled: !!f.recurring,
-      frequency: f.recurring ? (f.frequency || null) : null,
-      endDate:   f.recurring ? (f.endDate   || null) : null,
-      skipHolidays: f.recurring ? !!f.skipHolidays : false,
-    },
+    recurring: { enabled: !!f.recurring, frequency: f.recurring ? (f.frequency || null) : null, endDate: f.recurring ? (f.endDate || null) : null, skipHolidays: f.recurring ? !!f.skipHolidays : false },
   }
 }
-
-/* Submit */
 async function submit() {
-  error.value = ''
-  success.value = ''
-
+  error.value = ''; success.value = ''
   const errs = validateForm()
-  if (errs.length) {
-    await Swal.fire({
-      icon: 'warning',
-      title: 'Please fix the following',
-      html: errs.join('<br>'),
-      confirmButtonText: 'OK'
-    })
-    return
-  }
-
+  if (errs.length) { await Swal.fire({ icon:'warning', title:'Please fix the following', html:errs.join('<br>') }); return }
   const payload = buildPayloadFromForm(form.value)
-
   loading.value = true
   try {
     await api.post('/public/food-requests', payload)
     success.value = '✅ Submitted.'
-    await Swal.fire({ icon: 'success', title: 'Submitted', timer: 1400, showConfirmButton: false })
+    await Swal.fire({ icon:'success', title:'Submitted', timer:1400, showConfirmButton:false })
     resetForm({ keepEmployee: true })
     router.push({ name: 'employee-request-history' })
   } catch (e) {
     const msg = e?.response?.data?.message || e?.message || 'Submission failed.'
     error.value = msg
-    await Swal.fire({ icon: 'error', title: 'Submission failed', text: msg })
-  } finally {
-    loading.value = false
-  }
+    await Swal.fire({ icon:'error', title:'Submission failed', text: msg })
+  } finally { loading.value = false }
 }
-
-/* Reset */
 function resetForm({ keepEmployee = false } = {}) {
-  const currentEmp = form.value.employeeId
-  const currentName = form.value.name
-  const currentDept = form.value.department
+  const cur = { id: form.value.employeeId, name: form.value.name, dept: form.value.department, phone: form.value.contactNumber }
   form.value = {
-    employeeId: keepEmployee ? currentEmp : '',
-    name: keepEmployee ? currentName : '',
-    department: keepEmployee ? currentDept : '',
-
-    orderType: 'Daily meal',
-    meals: [],
-    eatDate: dayjs().format('YYYY-MM-DD'),
-    eatStartHour: '',
-    eatStartMinute: '',
-    eatEndHour: '',
-    eatEndMinute: '',
-    quantity: 1,
-
-    location: '',
-    locationOther: '',
-
-    menuChoices: ['Standard'],
-    menuCounts: {}, // specials only
-    dietary: [],
-    dietaryCounts: {},
-    dietaryOther: '',
-    specialInstructions: '',
-
-    recurring: false,
-    frequency: '',
-    endDate: '',
-    skipHolidays: false
+    employeeId: keepEmployee ? cur.id : '',
+    name: keepEmployee ? cur.name : '',
+    department: keepEmployee ? cur.dept : '',
+    contactNumber: keepEmployee ? cur.phone : '',
+    orderType: 'Daily meal', meals: [], eatDate: dayjs().format('YYYY-MM-DD'),
+    eatStartHour:'', eatStartMinute:'', eatEndHour:'', eatEndMinute:'',
+    quantity: 1, location: '', locationOther: '',
+    menuChoices: ['Standard'], menuCounts: {}, dietary: [], dietaryCounts: {}, dietaryOther: '',
+    specialInstructions: '', recurring: false, frequency: '', endDate: '', skipHolidays: false
   }
 }
 
-/* Persist employee selection */
+/* Persist employee selection + small housekeeping */
 watch(() => form.value.employeeId, (v) => { if (v) localStorage.setItem('employeeId', v) })
 watch(() => form.value.location, v => { if (v !== 'Other') form.value.locationOther = '' })
 watch(() => form.value.dietary, v => { if (!(v||[]).includes('Others')) form.value.dietaryOther = '' })
 
-/* Realtime UX: toast when server echoes creation */
+/* Realtime toast (unchanged) */
 onMounted(() => {
   socket.on('foodRequest:created', (doc) => {
     const empId = doc?.employee?.employeeId || doc?.employeeId
     if (empId && empId === (form.value.employeeId || localStorage.getItem('employeeId'))) {
-      if (!success.value) {
-        Swal.fire({ toast:true, icon:'success', title:'Request received', timer: 1500, position:'top', showConfirmButton:false })
-      }
+      if (!success.value) Swal.fire({ toast:true, icon:'success', title:'Request received', timer:1500, position:'top', showConfirmButton:false })
     }
   })
   window.addEventListener('keydown', onHotkey)
 })
-onBeforeUnmount(() => {
-  socket.off('foodRequest:created')
-  window.removeEventListener('keydown', onHotkey)
-})
-function onHotkey(e) {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit()
-}
+onBeforeUnmount(() => { socket.off('foodRequest:created'); window.removeEventListener('keydown', onHotkey) })
+function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit() }
 </script>
 
 <template>
+  <!-- Debug panel (turn on by changing v-if to true) -->
+  <pre v-if="false" style="font-size:11px; background:#0b1020; color:#d2e3ff; padding:.5rem; border-radius:8px;">
+    EMP[0]: {{ employees[0] }}
+    FORM: {{ form }}
+  </pre>
+
   <v-container fluid class="pa-2">
     <v-card class="rounded-lg slim-card" elevation="1">
-      <v-alert v-if="error" type="error" class="mx-2 mt-2" density="compact" variant="tonal" border="start">
-        {{ error }}
-      </v-alert>
-      <v-alert v-if="success" type="success" class="mx-2 mt-2" density="compact" variant="tonal" border="start">
-        {{ success }}
-      </v-alert>
-
+      <v-alert v-if="error" type="error" class="mx-2 mt-2" density="compact" variant="tonal" border="start">{{ error }}</v-alert>
+      <v-alert v-if="success" type="success" class="mx-2 mt-2" density="compact" variant="tonal" border="start">{{ success }}</v-alert>
       <v-divider class="my-1" />
-
       <v-card-text class="pa-3">
         <v-form @submit.prevent="submit">
           <v-row dense>
@@ -354,15 +290,7 @@ function onHotkey(e) {
 .hdr { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .hdr .t { font-weight: 600; font-size: .95rem; }
 .n { width:18px; height:18px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#6b7280; color:#fff; font-size:11px; font-weight:700; }
-.mini-title { font-size:.8rem; font-weight:600; opacity:.85; }
-:deep(.v-input) { margin-bottom: 6px !important; }
-:deep(.v-field__input) { padding-top: 6px; padding-bottom: 6px; }
-.sticky-col { align-self: flex-start; }
-.sticky-panel { position: sticky; top: 72px; max-height: calc(70vh - 72px); overflow: auto; scrollbar-width: thin; }
-.sticky-panel::-webkit-scrollbar { width: 8px; }
-.sticky-panel::-webkit-scrollbar-thumb { background: rgba(100,116,139,.35); border-radius: 8px; }
-@media (max-width: 959.98px) {
-  .sticky-panel { position: static; max-height: none; overflow: visible; }
-}
-.text-error{ color:#dc2626; }
+:deep(.v-input){ margin-bottom:6px !important; }
+:deep(.v-field__input){ padding-top:6px; padding-bottom:6px; }
+.sticky-col { align-self:flex-start; }
 </style>
