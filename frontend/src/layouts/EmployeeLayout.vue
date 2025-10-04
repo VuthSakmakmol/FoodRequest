@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer = ref(true)
 const rail   = ref(false)
-const appTitle = 'Food Request — Employee'
+const appTitle = 'Admin System'
 
 /* ───────── Menu groups ───────── */
 const groups = [

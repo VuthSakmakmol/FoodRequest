@@ -197,27 +197,45 @@ function buildPayloadFromForm(f) {
 
 /* ───────── submit/reset (frontend only; backend later) ───────── */
 async function submit() {
-  error.value = ''; success.value = ''
-  const errs = validateForm()
+  error.value = ''; success.value = '';
+
+  const errs = validateForm();
   if (errs.length) {
-    await Swal.fire({ icon:'warning', title:'Please fix the following', html: errs.join('<br>') })
-    return
+    await Swal.fire({ icon:'warning', title:'Please fix the following', html: errs.join('<br>') });
+    return;
   }
 
-  const payload = buildPayloadFromForm(form.value)
-  loading.value = true
+  const payload = buildPayloadFromForm(form.value); // your existing builder
+  const hasAirport = (form.value.stops || []).some(s => s.destination === 'Airport');
+
   try {
-    await api.post('/public/car-bookings', payload) // backend to implement later
-    success.value = '✅ Booking submitted (waiting for Admin accept).'
-    await Swal.fire({ icon:'success', title:'Submitted', timer:1400, showConfirmButton:false })
-    resetForm({ keepEmployee: true })
-    router.push({ name:'employee-car-booking-history' })
+    loading.value = true;
+
+    const fd = new FormData();
+    fd.append('data', JSON.stringify(payload));     // booking JSON
+    if (hasAirport) {
+      const file = form.value.ticketFile;           // v-file-input v-model
+      if (!file) throw new Error('Airplane ticket is required for Airport destination.');
+      fd.append('ticket', file);                    // *** must be 'ticket' ***
+    }
+
+    // IMPORTANT: do not set Content-Type manually if using axios; let the browser set the boundary.
+    await api.post('/public/car-bookings', fd, {
+      headers: { /* leave empty so axios sets multipart boundary */ }
+    });
+
+    await Swal.fire({ icon:'success', title:'Submitted', timer:1400, showConfirmButton:false });
+    resetForm({ keepEmployee: true });
+    router.push({ name: 'employee-car-history' });
   } catch (e) {
-    const msg = e?.response?.data?.message || e?.message || 'Submission failed.'
-    error.value = msg
-    await Swal.fire({ icon:'error', title:'Submission failed', text: msg })
-  } finally { loading.value = false }
+    const msg = e?.response?.data?.message || e?.message || 'Submission failed.';
+    error.value = msg;
+    await Swal.fire({ icon:'error', title:'Submission failed', text: msg });
+  } finally {
+    loading.value = false;
+  }
 }
+
 
 function resetForm({ keepEmployee = false } = {}) {
   const cur = { id: form.value.employeeId, name: form.value.name, dept: form.value.department, phone: form.value.contactNumber }
