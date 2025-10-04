@@ -78,6 +78,11 @@ app.use('/api/public', require('./routes/public-directory.routes'));
 app.use('/api/public', require('./routes/food-public.routes'));
 app.use('/api/admin',  require('./routes/food-admin.routes'));
 
+
+// car booking
+app.use('/api/car-bookings', require('./routes/carBooking.routes'))
+
+
 /* ───────────── 404 for API (before error handler) ───────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));
 

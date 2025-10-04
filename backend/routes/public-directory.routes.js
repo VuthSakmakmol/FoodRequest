@@ -1,7 +1,10 @@
 // backend/routes/public-directory.routes.js
 const express = require('express')
 const router = express.Router()
-const controller = require('../controllers/employeeDirectory.controller')
 
-router.get('/employees', controller.getEmployees)
+const ctrl = require('../controllers/public.controller') // ✅ correct controller
+
+router.get('/employees', ctrl.publicEmployees)
+
 module.exports = router
+
