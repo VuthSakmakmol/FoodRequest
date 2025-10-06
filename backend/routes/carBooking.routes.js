@@ -13,3 +13,5 @@ router.post('/', upload.single('ticket'), ctrl.createBooking)
 router.get('/mine', ctrl.listMyBookings)
 
 module.exports = router
+
+// for public booking

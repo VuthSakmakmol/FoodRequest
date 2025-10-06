@@ -12,8 +12,19 @@ try { Employee = require('../models/Employee') } catch (e) {
 
 const { toMinutes, overlaps, isValidDate } = require('../utils/time')
 
-const MAX_CAR = 3
+const MAX_CAR  = 3
 const MAX_MSGR = 1
+
+// Forward-only workflow guard (server-side)
+const FORWARD = {
+  PENDING:   new Set(['ACCEPTED','CANCELLED']),
+  ACCEPTED:  new Set(['ON_ROAD','DELAYED','CANCELLED']),
+  ON_ROAD:   new Set(['ARRIVING','DELAYED','CANCELLED']),
+  ARRIVING:  new Set(['COMPLETED','DELAYED','CANCELLED']),
+  DELAYED:   new Set(['ON_ROAD','ARRIVING','CANCELLED']),
+  COMPLETED: new Set([]),
+  CANCELLED: new Set([]),
+}
 
 function parsePayload(req) {
   if (req.file) {
@@ -78,7 +89,9 @@ async function createBooking(req, res, next) {
     let employeeSnapshot = { employeeId, name:'', department:'', contactNumber:'' }
     if (Employee) {
       const emp = await Employee.findOne({ employeeId }).lean()
-      if (emp) employeeSnapshot = { employeeId: emp.employeeId, name: emp.name || '', department: emp.department || '', contactNumber: emp.contactNumber || '' }
+      if (emp) employeeSnapshot = {
+        employeeId: emp.employeeId, name: emp.name || '', department: emp.department || '', contactNumber: emp.contactNumber || ''
+      }
     }
 
     const doc = await CarBooking.create({
@@ -91,7 +104,9 @@ async function createBooking(req, res, next) {
       ticketUrl
     })
 
-    req.io?.emit('carBooking:created', { _id: String(doc._id), employeeId, category, tripDate, timeStart, timeEnd, status: doc.status })
+    req.io?.emit('carBooking:created', {
+      _id: String(doc._id), employeeId, category, tripDate, timeStart, timeEnd, status: doc.status
+    })
     res.status(201).json(doc)
   } catch (err) { next(err) }
 }
@@ -111,9 +126,20 @@ async function updateStatus(req, res, next) {
     const { status } = req.body || {}
     const allowed = ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']
     if (!allowed.includes(status)) throw createError(400, 'Invalid status.')
-    const doc = await CarBooking.findByIdAndUpdate(id, { status }, { new: true })
+
+    const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
-    req.io?.emit('carBooking:status', { bookingId: String(doc._id), status, message: `Status updated: ${status}` })
+
+    // forward-only guard
+    const from = doc.status || 'PENDING'
+    if (!FORWARD[from] || !FORWARD[from].has(status)) {
+      throw createError(400, `Cannot change from ${from} to ${status}`)
+    }
+
+    doc.status = status
+    await doc.save()
+
+    req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status, message: `Status updated: ${doc.status}` })
     res.json(doc)
   } catch (err) { next(err) }
 }
@@ -121,16 +147,36 @@ async function updateStatus(req, res, next) {
 async function assignBooking(req, res, next) {
   try {
     const { id } = req.params
-    const { driverId='', driverName='', vehicleId='', vehicleName='', notes='', assignedById='', assignedByName='', autoAccept=true } = req.body || {}
+    const {
+      driverId='', driverName='', vehicleId='', vehicleName='', notes='',
+      assignedById='', assignedByName='', autoAccept=true
+    } = req.body || {}
 
-    const update = {
-      assignment: { driverId, driverName, vehicleId, vehicleName, notes, assignedById, assignedByName, assignedAt: new Date() }
-    }
-    if (autoAccept) update.status = 'ACCEPTED'
-
-    const doc = await CarBooking.findByIdAndUpdate(id, update, { new: true })
+    const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
-    req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status, message: `Assigned to ${driverName || 'driver'}${vehicleName ? ` / ${vehicleName}` : ''}` })
+
+    // Write assignment snapshot
+    doc.assignment = {
+      driverId, driverName, vehicleId, vehicleName, notes,
+      assignedById, assignedByName, assignedAt: new Date()
+    }
+
+    // Accept on assign (optional)
+    if (autoAccept) {
+      const from = doc.status || 'PENDING'
+      if (!FORWARD[from] || !FORWARD[from].has('ACCEPTED')) {
+        throw createError(400, `Cannot change from ${from} to ACCEPTED`)
+      }
+      doc.status = 'ACCEPTED'
+    }
+
+    await doc.save()
+
+    req.io?.emit('carBooking:status', {
+      bookingId: String(doc._id),
+      status: doc.status,
+      message: `Assigned to ${driverName || 'driver'}${vehicleName ? ` / ${vehicleName}` : ''}`
+    })
     res.json(doc)
   } catch (err) { next(err) }
 }
@@ -146,4 +192,11 @@ async function listAdmin(req, res, next) {
   } catch (err) { next(err) }
 }
 
-module.exports = { checkAvailability, createBooking, listMyBookings, updateStatus, assignBooking, listAdmin }
+module.exports = {
+  checkAvailability,
+  createBooking,
+  listMyBookings,
+  updateStatus,
+  assignBooking,
+  listAdmin
+}
