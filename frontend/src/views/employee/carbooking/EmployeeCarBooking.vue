@@ -205,24 +205,24 @@ async function submit() {
     return;
   }
 
-  const payload = buildPayloadFromForm(form.value); // your existing builder
-  const hasAirport = (form.value.stops || []).some(s => s.destination === 'Airport');
+  const payload = buildPayloadFromForm(form.value);
+  const needsTicket = (form.value.stops || []).some(s => s.destination === 'Airport');
 
   try {
     loading.value = true;
 
-    const fd = new FormData();
-    fd.append('data', JSON.stringify(payload));     // booking JSON
-    if (hasAirport) {
-      const file = form.value.ticketFile;           // v-file-input v-model
+    if (needsTicket) {
+      // multipart only when a file must be sent
+      const fd = new FormData();
+      fd.append('data', JSON.stringify(payload));
+      const file = form.value.ticketFile;
       if (!file) throw new Error('Airplane ticket is required for Airport destination.');
-      fd.append('ticket', file);                    // *** must be 'ticket' ***
+      fd.append('ticket', file);
+      await api.post('/public/car-bookings', fd); // let axios set the boundary
+    } else {
+      // pure JSON when no file
+      await api.post('/public/car-bookings', payload);
     }
-
-    // IMPORTANT: do not set Content-Type manually if using axios; let the browser set the boundary.
-    await api.post('/public/car-bookings', fd, {
-      headers: { /* leave empty so axios sets multipart boundary */ }
-    });
 
     await Swal.fire({ icon:'success', title:'Submitted', timer:1400, showConfirmButton:false });
     resetForm({ keepEmployee: true });
@@ -235,6 +235,7 @@ async function submit() {
     loading.value = false;
   }
 }
+
 
 
 function resetForm({ keepEmployee = false } = {}) {

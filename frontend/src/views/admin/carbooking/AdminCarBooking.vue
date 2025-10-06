@@ -4,6 +4,9 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 
+/* =========================
+   Reactive state
+========================= */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
@@ -13,10 +16,11 @@ const statusFilter   = ref('ALL')
 const categoryFilter = ref('ALL')
 const qSearch        = ref('')
 
-// Per-row update state
-const updating = ref({})   // { [bookingId]: boolean }
+const updating = ref({}) // { [bookingId]: boolean }
 
-// Allowed forward transitions (no going back)
+/* =========================
+   Workflow (forward-only)
+========================= */
 const ALLOWED_NEXT = {
   PENDING:   ['ACCEPTED','CANCELLED'],
   ACCEPTED:  ['ON_ROAD','DELAYED','CANCELLED'],
@@ -28,32 +32,26 @@ const ALLOWED_NEXT = {
 }
 const nextStatuses = (from) => ALLOWED_NEXT[from] || []
 
-// Build absolute URL to API origin for /uploads links
-const API_ORIGIN = (api.defaults.baseURL || '')
-  .replace(/\/api\/?$/, '')
-  .replace(/\/$/, '')
-function absUrl(u) {
-  if (!u) return ''
-  if (/^https?:\/\//i.test(u)) return u
-  return `${API_ORIGIN}${u.startsWith('/') ? '' : '/'}${u}`
-}
-function openTicket(u) {
-  const url = absUrl(u)
-  if (url) window.open(url, '_blank', 'noopener,noreferrer')
-}
+/* =========================
+   Helpers
+========================= */
+const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
+const absUrl = (u) => !u ? '' : (/^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u.startsWith('/')?'':'/'}${u}`)
+const openTicket = (u) => { const url = absUrl(u); if (url) window.open(url, '_blank', 'noopener,noreferrer') }
 
-// Data table headers
+/* Table headers (Purpose wider; Notes removed from table) */
 const headers = [
-  { title: 'Time',        key: 'time',       sortable: true,  width: 140 },
+  { title: 'Time',        key: 'time',       sortable: true,  width: 240 },
   { title: 'Category',    key: 'category',   sortable: true,  width: 120 },
-  { title: 'Requester',   key: 'requester',  sortable: true,  width: 220 },
-  { title: 'Itinerary',   key: 'itinerary',  sortable: false },
-  { title: 'Pax',         key: 'passengers', sortable: true,  width: 70, align: 'center' },
+  { title: 'Requester',   key: 'requester',  sortable: true,  width: 360 },
+  { title: 'Itinerary',   key: 'itinerary',  sortable: false, width: 350 },
+  { title: 'Pax',         key: 'passengers', sortable: true,  width: 70,  align: 'center' },
+  { title: 'Purpose',     key: 'purpose',    sortable: false, width: 260 },
+  { title: 'Assigned',    key: 'assigned',   sortable: false, width: 130 },
   { title: 'Status',      key: 'status',     sortable: true,  width: 150, align: 'end' },
-  { title: '',            key: 'actions',    sortable: false, width: 200, align: 'end' }
+  { title: '',            key: 'actions',    sortable: false, width: 120, align: 'end' }
 ]
 
-// Load schedule (all requests for admins)
 async function loadSchedule() {
   loading.value = true
   error.value = ''
@@ -61,6 +59,7 @@ async function loadSchedule() {
     const params = {}
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
+    if (categoryFilter.value !== 'ALL') params.category = categoryFilter.value
     const { data } = await api.get('/admin/car-bookings', { params })
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
@@ -74,9 +73,7 @@ async function loadSchedule() {
 
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
-  return stops
-    .map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination)
-    .join(' → ')
+  return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
 }
 
 const statusColor = s => ({
@@ -89,6 +86,12 @@ const statusIcon = s => ({
   DELAYED:'mdi-alert', CANCELLED:'mdi-cancel'
 }[s] || 'mdi-timer-sand')
 
+/* Assigned chip helpers */
+const assigneeName  = (it) => it?.assignment?.driverName || it?.assignment?.driverId || ''
+const assigneeColor = (it) => (it?.category === 'Messenger' ? 'deep-orange' : 'indigo')
+const assigneeIconFA = (it) => (it?.category === 'Messenger' ? 'fa-motorcycle' : 'fa-car')
+
+/* Search/filter/sort */
 const filtered = computed(() => {
   const term = qSearch.value.trim().toLowerCase()
   return (rows.value || [])
@@ -97,21 +100,22 @@ const filtered = computed(() => {
       if (!term) return true
       const hay = [
         r.employee?.name, r.employee?.department, r.employeeId,
-        r.purpose, r.notes, prettyStops(r.stops)
+        r.purpose, /* notes intentionally NOT in table search to reduce noise */ prettyStops(r.stops),
+        assigneeName(r)
       ].join(' ').toLowerCase()
       return hay.includes(term)
     })
     .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
-// Socket event handlers
+/* =========================
+   Sockets
+========================= */
 function onCreated(doc) {
   if (!doc?.tripDate) return
   if (selectedDate.value && doc.tripDate !== selectedDate.value) return
   const exists = rows.value.some(x => String(x._id) === String(doc._id))
-  if (!exists) {
-    rows.value.push({ ...doc, stops: doc.stops || [], assignment: doc.assignment || {} })
-  }
+  if (!exists) rows.value.push({ ...doc, stops: doc.stops || [], assignment: doc.assignment || {} })
 }
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
@@ -123,66 +127,74 @@ onMounted(() => {
   loadSchedule()
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
+  socket.on('carBooking:assigned', (p) => {
+    const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+    if (it) {
+      it.assignment = { ...(it.assignment||{}), driverId: p.driverId, driverName: p.driverName }
+      if (it.status === 'PENDING') it.status = 'ACCEPTED'
+    }
+  })
 })
 onBeforeUnmount(() => {
   socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
+  socket.off('carBooking:assigned')
 })
 
-watch([selectedDate, statusFilter], loadSchedule)
+watch([selectedDate, statusFilter, categoryFilter], loadSchedule)
 
-// Details dialog
+/* =========================
+   Details dialog (fixed)
+========================= */
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 
-/* ============================
-   Assign via CARD (select 1 by ID)
-   - When clicking "ACCEPTED", show people cards.
-   - Bookings with category "Car" => role DRIVER
-   - Category "Messenger"       => role MESSENGER
-   - Submit payload: { driverId: <loginId>, status:'ACCEPTED' }
-=============================== */
+/* =========================
+   Assign via CARD (with busy)
+========================= */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
 const assignLoading = ref(false)
 const assignError = ref('')
-
-const people = ref([])            // [{_id, loginId, name}]
-const selectedLoginId = ref('')   // the chosen person's loginId
 const loadingPeople = ref(false)
 
-function roleFromItem(item){
-  return item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
-}
+const people = ref([])            // [{_id, loginId, name}]
+const selectedLoginId = ref('')   // exactly one
+const busyLoginIds = ref(new Set())
+const roleFromItem = (item) => (item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER')
 
 async function fetchFirstOk(requests) {
   for (const r of requests) {
-    try {
-      const res = await r()
-      if (Array.isArray(res?.data)) return res.data
-    } catch (_) { /* try next */ }
+    try { const res = await r(); if (Array.isArray(res?.data)) return res.data } catch {}
   }
   return []
 }
+const isBusy = (loginId) => busyLoginIds.value.has(String(loginId))
 
 async function loadPeopleFor(item) {
   loadingPeople.value = true
   people.value = []
-  selectedLoginId.value = item?.assignment?.driverId || '' // preselect if exists
+  busyLoginIds.value = new Set()
+  selectedLoginId.value = item?.assignment?.driverId || ''
 
   const role = roleFromItem(item)
   const list = await fetchFirstOk([
     () => api.get(role === 'DRIVER' ? '/admin/drivers' : '/admin/messengers'),
     () => api.get('/admin/users', { params: { role } })
   ])
-
-  // normalize to {_id, loginId, name}
   people.value = list.map(u => ({
     _id: String(u._id || u.id || u.loginId),
     loginId: String(u.loginId || ''),
     name: u.name || u.fullName || u.loginId || '—'
   }))
+
+  try {
+    const { data } = await api.get('/admin/availability/assignees', {
+      params: { role, date: item.tripDate, start: item.timeStart, end: item.timeEnd }
+    })
+    busyLoginIds.value = new Set((data?.busy || []).map(String))
+  } catch { busyLoginIds.value = new Set() }
 
   loadingPeople.value = false
 }
@@ -195,20 +207,14 @@ function openAssignDialog(item) {
 }
 
 function handleStatusSelection(item, nextStatus) {
-  if (nextStatus === 'ACCEPTED') {
-    openAssignDialog(item)
-    return
-  }
+  if (nextStatus === 'ACCEPTED') { openAssignDialog(item); return }
   updateStatus(item, nextStatus)
-}
-
-function chooseOne(loginId){
-  selectedLoginId.value = loginId
 }
 
 async function submitAssign() {
   if (!assignTarget.value?._id) return
-  if (!selectedLoginId.value) { assignError.value = 'Please select one Driver/Messenger card'; return }
+  if (!selectedLoginId.value) { assignError.value = 'Please select exactly one Driver/Messenger card'; return }
+  if (isBusy(selectedLoginId.value)) { assignError.value = 'This person is busy in this window.'; return }
   assignLoading.value = true
   assignError.value = ''
   try {
@@ -216,14 +222,11 @@ async function submitAssign() {
       driverId: selectedLoginId.value,
       status: 'ACCEPTED'
     })
-
-    // Optimistic local update
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
     if (it) {
       it.assignment = { ...(it.assignment || {}), driverId: selectedLoginId.value }
       it.status = 'ACCEPTED'
     }
-
     assignOpen.value = false
   } catch (e) {
     assignError.value = e?.response?.data?.message || e?.message || 'Failed to assign'
@@ -232,20 +235,15 @@ async function submitAssign() {
   }
 }
 
-// ---- Admin: update status (forward-only). Intercept ACCEPTED -> open assignment dialog
+/* =========================
+   Status update (forward-only)
+========================= */
 async function updateStatus(item, nextStatus){
   if (!item?._id || !nextStatus) return
   const allowed = nextStatuses(item.status)
-  if (!allowed.includes(nextStatus)) {
-    error.value = `Cannot change from ${item.status} to ${nextStatus}`
-    return
-  }
-
-  if (nextStatus === 'ACCEPTED') { openAssignDialog(item); return }
-
+  if (!allowed.includes(nextStatus)) { error.value = `Cannot change from ${item.status} to ${nextStatus}`; return }
   updating.value[item._id] = true
   try {
-    const prev = item.status
     item.status = nextStatus // optimistic
     await api.patch(`/admin/car-bookings/${item._id}/status`, { status: nextStatus })
   } catch (e) {
@@ -291,7 +289,7 @@ async function updateStatus(item, nextStatus){
                           v-model="categoryFilter" label="Category" variant="outlined" density="compact" hide-details />
               </v-col>
               <v-col cols="12" md="3">
-                <v-text-field v-model="qSearch" label="Search requester / purpose / destination"
+                <v-text-field v-model="qSearch" label="Search requester / purpose / destination / assignee"
                               prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable />
               </v-col>
             </v-row>
@@ -302,17 +300,17 @@ async function updateStatus(item, nextStatus){
           <v-card-text>
             <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
 
-            <v-data-table
-              :headers="headers" :items="filtered" :loading="loading"
-              item-key="_id" density="comfortable" class="elevated"
-            >
+            <v-data-table :headers="headers" :items="filtered" :loading="loading"
+                          item-key="_id" density="comfortable" class="elevated">
+
               <template #loading><v-skeleton-loader type="table-row@6" /></template>
 
               <template #item.time="{ item }"><div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div></template>
 
               <template #item.category="{ item }">
-                <v-chip :color="item.category === 'Car' ? 'primary' : 'orange'" size="small" label>
-                  <v-icon start :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" /> {{ item.category }}
+                <v-chip :color="item.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
+                  <i class="fa-solid" :class="item.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"></i>
+                  <span class="ml-2">{{ item.category }}</span>
                 </v-chip>
               </template>
 
@@ -321,10 +319,6 @@ async function updateStatus(item, nextStatus){
                   <div>
                     <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
                     <div class="text-caption text-medium-emphasis">{{ item.employee?.department || '—' }} • ID {{ item.employeeId }}</div>
-                    <div v-if="item.assignment?.driverId || item.assignment?.driverName" class="text-caption mt-1">
-                      <v-icon size="14" icon="mdi-steering" class="mr-1" /> Driver/Messenger:
-                      <strong>{{ item.assignment?.driverName || item.assignment?.driverId }}</strong>
-                    </div>
                   </div>
                 </div>
               </template>
@@ -334,16 +328,36 @@ async function updateStatus(item, nextStatus){
                   {{ prettyStops(item.stops) }}
                   <v-btn v-if="item.ticketUrl" size="x-small" color="indigo" variant="tonal" class="ml-2"
                          @click.stop="openTicket(item.ticketUrl)">
-                    <v-icon start icon="mdi-paperclip" /> Ticket
+                    <i class="fa-solid fa-paperclip mr-1"></i> Ticket
                   </v-btn>
-                </div>
-                <div class="text-caption mt-1" v-if="item.purpose || item.notes">
-                  <span class="text-medium-emphasis">Purpose:</span> {{ item.purpose || '—' }}
-                  <span v-if="item.notes"> • <span class="text-medium-emphasis">Notes:</span> {{ item.notes }}</span>
                 </div>
               </template>
 
               <template #item.passengers="{ item }"><div class="text-center">{{ item.passengers ?? 1 }}</div></template>
+
+              <!-- Bigger, clearer purpose (notes removed from table) -->
+              <template #item.purpose="{ item }">
+                <div class="purpose-pill">
+                  <i class="fa-regular fa-lightbulb mr-2"></i>
+                  <span class="purpose-text">{{ item.purpose || '—' }}</span>
+                </div>
+              </template>
+
+              <template #item.assigned="{ item }">
+                <div class="d-flex align-center">
+                  <template v-if="assigneeName(item)">
+                    <v-chip :color="assigneeColor(item)" size="small" class="assignee-chip" label>
+                      <i class="fa-solid mr-2" :class="assigneeIconFA(item)"></i>
+                      {{ assigneeName(item) }}
+                    </v-chip>
+                  </template>
+                  <template v-else>
+                    <v-chip color="grey" size="small" variant="tonal" class="assignee-chip" label>
+                      <i class="fa-solid fa-user-slash mr-2"></i> Unassigned
+                    </v-chip>
+                  </template>
+                </div>
+              </template>
 
               <template #item.status="{ item }">
                 <v-chip :color="statusColor(item.status)" size="small" label>
@@ -355,25 +369,19 @@ async function updateStatus(item, nextStatus){
                 <v-menu location="bottom end">
                   <template #activator="{ props }">
                     <v-btn v-bind="props" size="small" variant="tonal" color="primary" :loading="!!updating[item._id]">
-                      <v-icon start icon="mdi-swap-horizontal" /> Update
+                      <i class="fa-solid fa-arrows-rotate mr-2"></i> Update
                     </v-btn>
                   </template>
-
-                  <v-list density="compact" min-width="220">
+                  <v-list density="compact" min-width="240">
                     <v-list-subheader>Next status</v-list-subheader>
-
                     <template v-if="nextStatuses(item.status).length">
-                      <v-list-item
-                        v-for="s in nextStatuses(item.status)" :key="s"
-                        @click.stop="handleStatusSelection(item, s)"
-                      >
+                      <v-list-item v-for="s in nextStatuses(item.status)" :key="s" @click.stop="handleStatusSelection(item, s)">
                         <template #prepend><v-icon :icon="statusIcon(s)" /></template>
                         <v-list-item-title>
-                          {{ s }}<span v-if="s==='ACCEPTED'" class="text-caption text-medium-emphasis"> — requires selection</span>
+                          {{ s }}<span v-if="s==='ACCEPTED'" class="text-caption text-medium-emphasis"> — requires driver</span>
                         </v-list-item-title>
                       </v-list-item>
                     </template>
-
                     <v-list-item v-else disabled>
                       <template #prepend><v-icon icon="mdi-lock" /></template>
                       <v-list-item-title>No further changes</v-list-item-title>
@@ -381,6 +389,11 @@ async function updateStatus(item, nextStatus){
                   </v-list>
                 </v-menu>
 
+                <v-btn size="small" variant="text" color="secondary" class="ml-1" @click.stop="openAssignDialog(item)">
+                  <i class="fa-solid fa-id-badge mr-2"></i> Assign
+                </v-btn>
+
+                <!-- FIXED: Details button now opens dialog -->
                 <v-btn size="small" variant="text" color="secondary" class="ml-1" @click.stop="showDetails(item)">
                   <v-icon start icon="mdi-information-outline" /> Details
                 </v-btn>
@@ -397,13 +410,14 @@ async function updateStatus(item, nextStatus){
       </div>
     </v-sheet>
 
-    <!-- Details dialog (unchanged) -->
-    <v-dialog v-model="detailOpen" max-width="820">
+    <!-- Details dialog (Notes shown here, larger) -->
+    <v-dialog v-model="detailOpen" max-width="860">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <v-chip :color="detailItem?.category === 'Car' ? 'primary' : 'orange'" size="small" label>
-              <v-icon start :icon="detailItem?.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" /> {{ detailItem?.category || '—' }}
+            <v-chip :color="detailItem?.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
+              <i class="fa-solid" :class="detailItem?.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"></i>
+              <span class="ml-2">{{ detailItem?.category || '—' }}</span>
             </v-chip>
             <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
           </div>
@@ -462,43 +476,50 @@ async function updateStatus(item, nextStatus){
               <div class="val">
                 <a :href="absUrl(detailItem.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
                   <v-btn size="small" color="indigo" variant="tonal">
-                    <v-icon start icon="mdi-paperclip" /> VIEW TICKET
+                    <i class="fa-solid fa-paperclip mr-2"></i> VIEW TICKET
                   </v-btn>
                 </a>
               </div>
             </v-col>
 
-            <v-col cols="12" v-if="detailItem?.assignment?.driverId || detailItem?.assignment?.driverName">
+            <v-col cols="12" v-if="assigneeName(detailItem)">
               <div class="lbl">Assignment</div>
               <div class="val">
-                <div>
-                  Driver/Messenger: {{ detailItem?.assignment?.driverName || detailItem?.assignment?.driverId }}
-                </div>
+                <v-chip :color="assigneeColor(detailItem)" size="small" label>
+                  <i class="fa-solid mr-2" :class="assigneeIconFA(detailItem)"></i>
+                  {{ assigneeName(detailItem) }}
+                </v-chip>
               </div>
             </v-col>
 
-            <v-col cols="12" v-if="detailItem?.purpose || detailItem?.notes" class="mt-1">
-              <div class="lbl">Purpose & Notes</div>
-              <div class="val">
-                <div><span class="text-medium-emphasis">Purpose:</span> {{ detailItem?.purpose || '—' }}</div>
-                <div v-if="detailItem?.notes"><span class="text-medium-emphasis">Notes:</span> {{ detailItem?.notes }}</div>
+            <v-col cols="12" v-if="detailItem?.purpose">
+              <div class="lbl">Purpose</div>
+              <div class="val purpose-detail">{{ detailItem?.purpose }}</div>
+            </v-col>
+
+            <v-col cols="12" v-if="detailItem?.notes">
+              <div class="lbl">Notes</div>
+              <div class="notes-block">
+                {{ detailItem?.notes }}
               </div>
             </v-col>
           </v-row>
         </v-card-text>
 
         <v-divider />
-        <v-card-actions class="justify-end"><v-btn variant="text" @click="detailOpen = false">Close</v-btn></v-card-actions>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="detailOpen = false">Close</v-btn>
+        </v-card-actions>
       </v-card>
     </v-dialog>
 
-    <!-- Assign via CARD (select exactly 1) -->
-    <v-dialog v-model="assignOpen" max-width="820">
+    <!-- Assign via CARD -->
+    <v-dialog v-model="assignOpen" max-width="860">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <v-icon icon="mdi-account-badge" class="mr-1" />
-            <span>Select Driver/Messenger • ជ្រើសរើសអ្នកបើកបរ/អ្នកដឹកសារ</span>
+            <i class="fa-solid fa-id-badge"></i>
+            <span class="ml-2">Select Driver/Messenger</span>
           </div>
           <v-btn icon="mdi-close" variant="text" @click="assignOpen = false" />
         </v-card-title>
@@ -507,31 +528,30 @@ async function updateStatus(item, nextStatus){
 
         <v-card-text>
           <v-alert v-if="assignError" type="error" variant="tonal" border="start" class="mb-3">{{ assignError }}</v-alert>
-
           <v-skeleton-loader v-if="loadingPeople" type="card, card, card" />
-
           <template v-else>
             <div v-if="!people.length" class="text-medium-emphasis">
-              No users found for this role. Make sure your seeds/endpoint return users.
+              No users found for this role.
             </div>
-
             <v-row dense>
-              <v-col v-for="p in people" :key="p._id" cols="12" sm="6" md="4">
+              <v-col v-for="p in people" :key="p._id" cols="12" sm="6" md="4" lg="3">
                 <v-card
                   class="person-card"
-                  :class="{ selected: selectedLoginId === p.loginId }"
+                  :class="{ selected: selectedLoginId === p.loginId, busy: isBusy(p.loginId) }"
+                  :disabled="isBusy(p.loginId)"
                   variant="outlined"
                   rounded="lg"
-                  @click="chooseOne(p.loginId)"
+                  @click="!isBusy(p.loginId) && (selectedLoginId = p.loginId)"
                 >
                   <v-card-text class="py-4">
                     <div class="d-flex align-center" style="gap:10px;">
-                      <v-avatar size="40">
-                        <v-icon icon="mdi-account" />
-                      </v-avatar>
+                      <v-avatar size="44"><i class="fa-solid fa-user"></i></v-avatar>
                       <div>
                         <div class="font-weight-700">{{ p.name }}</div>
                         <div class="text-caption text-medium-emphasis mono">ID: {{ p.loginId }}</div>
+                        <div v-if="isBusy(p.loginId)" class="text-caption text-error mt-1">
+                          <i class="fa-solid fa-circle-exclamation mr-1"></i> Busy in this window
+                        </div>
                       </div>
                     </div>
                   </v-card-text>
@@ -544,8 +564,8 @@ async function updateStatus(item, nextStatus){
         <v-divider />
         <v-card-actions class="justify-end">
           <v-btn variant="text" @click="assignOpen = false">Cancel</v-btn>
-          <v-btn color="primary" :loading="assignLoading" :disabled="!selectedLoginId" @click="submitAssign">
-            <v-icon start icon="mdi-check" /> Assign & Accept
+          <v-btn color="primary" :disabled="!selectedLoginId" :loading="assignLoading" @click="submitAssign">
+            <i class="fa-solid fa-check mr-2"></i> Assign & Accept
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -554,32 +574,51 @@ async function updateStatus(item, nextStatus){
 </template>
 
 <style scoped>
-/* Professional, minimal palette to match the app */
+/* Layout + chrome */
 .section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
-.hero {
-  display:flex; align-items:center; justify-content:space-between;
-  padding: 14px 18px; background: var(--surface, #f5f7fb); border-bottom: 1px solid #e6e8ee;
-}
+.hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background:#f5f7fb; border-bottom: 1px solid #e6e8ee; }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
-.hero-title { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
+.hero-title { display:flex; align-items:center; gap:10px; font-weight:800; color:#1f2a44; }
 .hero-sub { color:#64748b; font-size:.9rem; }
 
 .soft-card { border: 1px solid #e9ecf3; border-radius: 12px; background:#fff; }
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:800; color:#1f2a44; }
 
 .elevated { border: 1px solid #e9ecf3; border-radius: 12px; }
-
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 .truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
+/* Purpose styling in table */
+.purpose-pill {
+  display:flex; align-items:center;
+  background: #eef2ff; border: 1px solid #dfe3fb;
+  padding: 6px 10px; border-radius: 10px; min-height: 32px;
+}
+.purpose-text { font-weight: 700; font-size: .98rem; color:#30336b; }
+
 .lbl { font-size:.78rem; color:#64748b; }
 .val { font-weight:600; }
+.purpose-detail { font-weight:700; font-size:1.05rem; }
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .text-caption .text-medium-emphasis { color:#64748b; }
 
-/* Card selection styling */
+/* Notes block only in details */
+.notes-block {
+  border: 1px dashed #cbd5e1; background:#f8fafc;
+  padding: 10px 12px; border-radius: 10px; white-space: pre-wrap;
+}
+
+/* Person card selection */
 .person-card { cursor: pointer; transition: transform .06s ease, box-shadow .06s ease, border-color .06s ease; }
 .person-card:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.06); }
-.person-card.selected { border-color: var(--brand, #1f2a44); box-shadow: 0 0 0 2px rgba(31,42,68,0.15) inset; }
+.person-card.selected { border-color:#1f2a44; box-shadow: 0 0 0 2px rgba(31,42,68,0.15) inset; }
+.person-card.busy { opacity:.55; border-color:#ef4444; cursor:not-allowed; }
+
+/* Small spacing helpers for FA icons */
+i.fa-solid, i.fa-regular { line-height: 1; }
+.mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
+.ml-2 { margin-left: .5rem; }
+
+.assignee-chip { font-weight: 600; }
 </style>

@@ -1,13 +1,12 @@
 // backend/controllers/carBooking.controller.js
 const createError = require('http-errors')
 const CarBooking = require('../models/CarBooking')
+const User = require('../models/User')
 
 // Try both names; fall back to null if none found.
 let Employee = null
 try { Employee = require('../models/Employee') } catch (e) {
-  try { Employee = require('../models/EmployeeDirectory') } catch (_) {
-    Employee = null
-  }
+  try { Employee = require('../models/EmployeeDirectory') } catch (_) { Employee = null }
 }
 
 const { toMinutes, overlaps, isValidDate } = require('../utils/time')
@@ -15,7 +14,7 @@ const { toMinutes, overlaps, isValidDate } = require('../utils/time')
 const MAX_CAR  = 3
 const MAX_MSGR = 1
 
-// Forward-only workflow guard (server-side)
+// Forward-only workflow guard
 const FORWARD = {
   PENDING:   new Set(['ACCEPTED','CANCELLED']),
   ACCEPTED:  new Set(['ON_ROAD','DELAYED','CANCELLED']),
@@ -26,9 +25,17 @@ const FORWARD = {
   CANCELLED: new Set([]),
 }
 
+// Driver is busy until they “come back” → any of these states
+const BUSY_STATUSES = new Set(['ACCEPTED','ON_ROAD','ARRIVING','DELAYED'])
+
 function parsePayload(req) {
+  // multipart + file => expect JSON in "data"
   if (req.file) {
     if (!req.body?.data) throw createError(400, 'Missing "data" field in multipart form.')
+    try { return JSON.parse(req.body.data) } catch { throw createError(400, 'Invalid JSON in "data".') }
+  }
+  // multipart without file but still "data"
+  if (typeof req.body?.data === 'string') {
     try { return JSON.parse(req.body.data) } catch { throw createError(400, 'Invalid JSON in "data".') }
   }
   return req.body || {}
@@ -53,6 +60,13 @@ async function checkAvailability(req, res, next) {
 async function createBooking(req, res, next) {
   try {
     const payload = parsePayload(req)
+
+    // Accept employeeId from session as backup (optional)
+    if (!payload.employeeId) {
+      const idFromUser = req.user?.employeeId || req.user?.loginId
+      if (idFromUser) payload.employeeId = String(idFromUser)
+    }
+
     const { employeeId, category, tripDate, timeStart, timeEnd, passengers, customerContact, stops, purpose, notes } = payload
 
     if (!employeeId) throw createError(400, 'employeeId is required.')
@@ -79,6 +93,7 @@ async function createBooking(req, res, next) {
       ticketUrl = `/uploads/${req.file.filename}`
     }
 
+    // capacity guard
     const active = await CarBooking.find({ tripDate, category, status: { $nin: ['CANCELLED'] } }).lean()
     const overlapping = active.filter(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))).length
     const max = category === 'Car' ? MAX_CAR : MAX_MSGR
@@ -144,49 +159,77 @@ async function updateStatus(req, res, next) {
   } catch (err) { next(err) }
 }
 
+/** Prevent duplicate assignment to overlapping trips */
 async function assignBooking(req, res, next) {
   try {
     const { id } = req.params
-    const {
-      driverId='', driverName='', vehicleId='', vehicleName='', notes='',
-      assignedById='', assignedByName='', autoAccept=true
-    } = req.body || {}
+    const { driverId = '' } = req.body || {}
+    if (!driverId) throw createError(400, 'driverId (loginId) is required')
 
     const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
-    // Write assignment snapshot
+    // role must match category
+    const roleNeeded = (doc.category === 'Messenger') ? 'MESSENGER' : 'DRIVER'
+    const person = await User.findOne({ loginId: driverId, role: roleNeeded, isActive: true })
+      .select('loginId name role')
+    if (!person) throw createError(404, `No active ${roleNeeded.toLowerCase()} with loginId "${driverId}"`)
+
+    // conflict guard (same date, overlapping time, busy statuses)
+    const [sA, eA] = [toMinutes(doc.timeStart), toMinutes(doc.timeEnd)]
+    const conflicts = await CarBooking.find({
+      _id: { $ne: doc._id },
+      tripDate: doc.tripDate,
+      'assignment.driverId': person.loginId,
+      status: { $in: Array.from(BUSY_STATUSES) }
+    }).select('timeStart timeEnd')
+
+    const hasOverlap = conflicts.some(b => overlaps(sA, eA, toMinutes(b.timeStart), toMinutes(b.timeEnd)))
+    if (hasOverlap) {
+      return res.status(409).json({
+        message: `${person.name} (${person.loginId}) is already assigned during ${doc.tripDate} ${doc.timeStart}-${doc.timeEnd}. Choose another person or time.`
+      })
+    }
+
+    // write assignment snapshot
     doc.assignment = {
-      driverId, driverName, vehicleId, vehicleName, notes,
-      assignedById, assignedByName, assignedAt: new Date()
+      ...(doc.assignment || {}),
+      driverId: person.loginId,
+      driverName: person.name,
+      vehicleId: '',
+      vehicleName: '',
+      notes: '',
+      assignedById:  req.user?.loginId || 'ADMIN',
+      assignedByName: req.user?.name || 'Admin',
+      assignedAt: new Date()
     }
 
-    // Accept on assign (optional)
-    if (autoAccept) {
-      const from = doc.status || 'PENDING'
-      if (!FORWARD[from] || !FORWARD[from].has('ACCEPTED')) {
-        throw createError(400, `Cannot change from ${from} to ACCEPTED`)
-      }
-      doc.status = 'ACCEPTED'
+    // move to ACCEPTED (forward only)
+    const from = doc.status || 'PENDING'
+    if (!FORWARD[from] || !FORWARD[from].has('ACCEPTED')) {
+      throw createError(400, `Cannot change from ${from} to ACCEPTED`)
     }
-
+    doc.status = 'ACCEPTED'
     await doc.save()
 
     req.io?.emit('carBooking:status', {
-      bookingId: String(doc._id),
-      status: doc.status,
-      message: `Assigned to ${driverName || 'driver'}${vehicleName ? ` / ${vehicleName}` : ''}`
+      bookingId: String(doc._id), status: doc.status, message: `Assigned to ${person.name}`
     })
+    req.io?.emit('carBooking:assigned', {
+      bookingId: String(doc._id), driverId: person.loginId, driverName: person.name
+    })
+
     res.json(doc)
   } catch (err) { next(err) }
 }
 
 async function listAdmin(req, res, next) {
   try {
-    const { date, status } = req.query
+    const { date, status, category } = req.query
     const filter = {}
     if (date) { if (!isValidDate(date)) throw createError(400, 'Invalid date.'); filter.tripDate = date }
     if (status) filter.status = status
+    if (category) filter.category = category
     const list = await CarBooking.find(filter).sort({ tripDate: 1, timeStart: 1 }).lean()
     res.json(list)
   } catch (err) { next(err) }
