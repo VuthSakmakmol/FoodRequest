@@ -1,4 +1,4 @@
-<!-- src/views/admin/carbooking/AdminCarBooking.vue -->
+﻿<!-- src/views/admin/carbooking/AdminCarBooking.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
@@ -74,7 +74,9 @@ async function loadSchedule() {
 
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
-  return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
+  return stops
+    .map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination)
+    .join(' → ')
 }
 
 const statusColor = s => ({
@@ -129,93 +131,102 @@ onBeforeUnmount(() => {
 
 watch([selectedDate, statusFilter], loadSchedule)
 
-// Details dialog (open only via button)
+// Details dialog
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 
 /* ============================
-   Assign Driver flow (NEW)
-   - Clicking "ACCEPTED" opens this dialog and requires assignment
-   - Submits to /admin/car-bookings/:id/assign with payload
-   ============================ */
+   Assign via CARD (select 1 by ID)
+   - When clicking "ACCEPTED", show people cards.
+   - Bookings with category "Car" => role DRIVER
+   - Category "Messenger"       => role MESSENGER
+   - Submit payload: { driverId: <loginId>, status:'ACCEPTED' }
+=============================== */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
-const drivers = ref([])
-const vehicles = ref([])
 const assignLoading = ref(false)
 const assignError = ref('')
-const assignForm = ref({
-  driverId: '',
-  vehicleId: '',
-  notes: ''
-})
 
-async function loadDriversAndVehicles() {
-  // Adjust endpoints to your backend. Examples:
-  // GET /admin/drivers  -> [{id,name}, ...]
-  // GET /admin/vehicles -> [{id,name}, ...]
-  try {
-    const [dRes, vRes] = await Promise.all([
-      api.get('/admin/drivers'),
-      api.get('/admin/vehicles')
-    ])
-    drivers.value  = Array.isArray(dRes.data) ? dRes.data : []
-    vehicles.value = Array.isArray(vRes.data) ? vRes.data : []
-  } catch (e) {
-    // If you don't have endpoints yet, keep empty lists but allow manual text fallback
-    drivers.value  = drivers.value || []
-    vehicles.value = vehicles.value || []
+const people = ref([])            // [{_id, loginId, name}]
+const selectedLoginId = ref('')   // the chosen person's loginId
+const loadingPeople = ref(false)
+
+function roleFromItem(item){
+  return item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
+}
+
+async function fetchFirstOk(requests) {
+  for (const r of requests) {
+    try {
+      const res = await r()
+      if (Array.isArray(res?.data)) return res.data
+    } catch (_) { /* try next */ }
   }
+  return []
+}
+
+async function loadPeopleFor(item) {
+  loadingPeople.value = true
+  people.value = []
+  selectedLoginId.value = item?.assignment?.driverId || '' // preselect if exists
+
+  const role = roleFromItem(item)
+  const list = await fetchFirstOk([
+    () => api.get(role === 'DRIVER' ? '/admin/drivers' : '/admin/messengers'),
+    () => api.get('/admin/users', { params: { role } })
+  ])
+
+  // normalize to {_id, loginId, name}
+  people.value = list.map(u => ({
+    _id: String(u._id || u.id || u.loginId),
+    loginId: String(u.loginId || ''),
+    name: u.name || u.fullName || u.loginId || '—'
+  }))
+
+  loadingPeople.value = false
 }
 
 function openAssignDialog(item) {
   assignTarget.value = item
   assignError.value = ''
-  assignForm.value = {
-    driverId: item?.assignment?.driverId || '',
-    vehicleId: item?.assignment?.vehicleId || '',
-    notes: item?.assignment?.notes || ''
-  }
   assignOpen.value = true
-  loadDriversAndVehicles()
+  loadPeopleFor(item)
+}
+
+function handleStatusSelection(item, nextStatus) {
+  if (nextStatus === 'ACCEPTED') {
+    openAssignDialog(item)
+    return
+  }
+  updateStatus(item, nextStatus)
+}
+
+function chooseOne(loginId){
+  selectedLoginId.value = loginId
 }
 
 async function submitAssign() {
   if (!assignTarget.value?._id) return
-  if (!assignForm.value.driverId) { assignError.value = 'Please select a driver'; return }
+  if (!selectedLoginId.value) { assignError.value = 'Please select one Driver/Messenger card'; return }
   assignLoading.value = true
   assignError.value = ''
   try {
-    // Call your assign endpoint (recommended) — includes desired status
-    // Backend should:
-    // 1) Save assignment (driverId/vehicleId/notes + assignedBy* + assignedAt)
-    // 2) Set status to ACCEPTED
-    // 3) Emit socket updates for admin/driver
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
-      driverId: assignForm.value.driverId,
-      vehicleId: assignForm.value.vehicleId || '',
-      notes: assignForm.value.notes || '',
+      driverId: selectedLoginId.value,
       status: 'ACCEPTED'
     })
 
     // Optimistic local update
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
     if (it) {
-      it.assignment = {
-        ...(it.assignment || {}),
-        driverId: assignForm.value.driverId,
-        driverName: (drivers.value.find(d => (d.id||d._id)===assignForm.value.driverId)?.name) || it.assignment?.driverName || '',
-        vehicleId: assignForm.value.vehicleId || '',
-        vehicleName: (vehicles.value.find(v => (v.id||v._id)===assignForm.value.vehicleId)?.name) || it.assignment?.vehicleName || '',
-        notes: assignForm.value.notes || '',
-      }
+      it.assignment = { ...(it.assignment || {}), driverId: selectedLoginId.value }
       it.status = 'ACCEPTED'
     }
 
     assignOpen.value = false
   } catch (e) {
-    assignError.value = e?.response?.data?.message || e?.message || 'Failed to assign driver'
+    assignError.value = e?.response?.data?.message || e?.message || 'Failed to assign'
   } finally {
     assignLoading.value = false
   }
@@ -230,11 +241,7 @@ async function updateStatus(item, nextStatus){
     return
   }
 
-  // If target status is ACCEPTED, require assignment instead of direct PATCH
-  if (nextStatus === 'ACCEPTED') {
-    openAssignDialog(item)
-    return
-  }
+  if (nextStatus === 'ACCEPTED') { openAssignDialog(item); return }
 
   updating.value[item._id] = true
   try {
@@ -314,10 +321,9 @@ async function updateStatus(item, nextStatus){
                   <div>
                     <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
                     <div class="text-caption text-medium-emphasis">{{ item.employee?.department || '—' }} • ID {{ item.employeeId }}</div>
-                    <div v-if="item.assignment?.driverName" class="text-caption mt-1">
-                      <v-icon size="14" icon="mdi-steering" class="mr-1" /> Driver:
-                      <strong>{{ item.assignment.driverName }}</strong>
-                      <span v-if="item.assignment.vehicleName" class="ml-1">• {{ item.assignment.vehicleName }}</span>
+                    <div v-if="item.assignment?.driverId || item.assignment?.driverName" class="text-caption mt-1">
+                      <v-icon size="14" icon="mdi-steering" class="mr-1" /> Driver/Messenger:
+                      <strong>{{ item.assignment?.driverName || item.assignment?.driverId }}</strong>
                     </div>
                   </div>
                 </div>
@@ -359,11 +365,11 @@ async function updateStatus(item, nextStatus){
                     <template v-if="nextStatuses(item.status).length">
                       <v-list-item
                         v-for="s in nextStatuses(item.status)" :key="s"
-                        @click.stop="updateStatus(item, s)"
+                        @click.stop="handleStatusSelection(item, s)"
                       >
                         <template #prepend><v-icon :icon="statusIcon(s)" /></template>
                         <v-list-item-title>
-                          {{ s }}<span v-if="s==='ACCEPTED'" class="text-caption text-medium-emphasis"> — requires driver</span>
+                          {{ s }}<span v-if="s==='ACCEPTED'" class="text-caption text-medium-emphasis"> — requires selection</span>
                         </v-list-item-title>
                       </v-list-item>
                     </template>
@@ -391,7 +397,7 @@ async function updateStatus(item, nextStatus){
       </div>
     </v-sheet>
 
-    <!-- Details dialog -->
+    <!-- Details dialog (unchanged) -->
     <v-dialog v-model="detailOpen" max-width="820">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
@@ -462,17 +468,11 @@ async function updateStatus(item, nextStatus){
               </div>
             </v-col>
 
-            <v-col cols="12" v-if="detailItem?.assignment?.driverName || detailItem?.assignment?.vehicleName">
+            <v-col cols="12" v-if="detailItem?.assignment?.driverId || detailItem?.assignment?.driverName">
               <div class="lbl">Assignment</div>
               <div class="val">
-                <div v-if="detailItem?.assignment?.driverName">
-                  Driver: {{ detailItem.assignment.driverName }}
-                </div>
-                <div v-if="detailItem?.assignment?.vehicleName">
-                  Vehicle: {{ detailItem.assignment.vehicleName }}
-                </div>
-                <div v-if="detailItem?.assignment?.notes" class="text-caption mt-1">
-                  Notes: {{ detailItem.assignment.notes }}
+                <div>
+                  Driver/Messenger: {{ detailItem?.assignment?.driverName || detailItem?.assignment?.driverId }}
                 </div>
               </div>
             </v-col>
@@ -492,13 +492,13 @@ async function updateStatus(item, nextStatus){
       </v-card>
     </v-dialog>
 
-    <!-- Assign Driver dialog (NEW) -->
-    <v-dialog v-model="assignOpen" max-width="560">
+    <!-- Assign via CARD (select exactly 1) -->
+    <v-dialog v-model="assignOpen" max-width="820">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <v-icon icon="mdi-account-tie" class="mr-1" />
-            <span>Assign Driver</span>
+            <v-icon icon="mdi-account-badge" class="mr-1" />
+            <span>Select Driver/Messenger • ជ្រើសរើសអ្នកបើកបរ/អ្នកដឹកសារ</span>
           </div>
           <v-btn icon="mdi-close" variant="text" @click="assignOpen = false" />
         </v-card-title>
@@ -508,49 +508,43 @@ async function updateStatus(item, nextStatus){
         <v-card-text>
           <v-alert v-if="assignError" type="error" variant="tonal" border="start" class="mb-3">{{ assignError }}</v-alert>
 
-          <v-row dense>
-            <v-col cols="12">
-              <v-select
-                :items="drivers.map(d => ({ title: d.name || d.fullName || d.loginId || d.id || d._id, value: d.id || d._id }))"
-                v-model="assignForm.driverId"
-                label="Driver"
-                variant="outlined"
-                density="compact"
-                hide-details
-                clearable
-                prepend-inner-icon="mdi-steering"
-              />
-            </v-col>
-            <v-col cols="12">
-              <v-select
-                :items="vehicles.map(v => ({ title: v.name || v.plate || v.id || v._id, value: v.id || v._id }))"
-                v-model="assignForm.vehicleId"
-                label="Vehicle (optional)"
-                variant="outlined"
-                density="compact"
-                hide-details
-                clearable
-                prepend-inner-icon="mdi-car"
-              />
-            </v-col>
-            <v-col cols="12">
-              <v-textarea
-                v-model="assignForm.notes"
-                label="Notes (optional)"
-                rows="3"
-                auto-grow
-                variant="outlined"
-                density="compact"
-                hide-details
-              />
-            </v-col>
-          </v-row>
+          <v-skeleton-loader v-if="loadingPeople" type="card, card, card" />
+
+          <template v-else>
+            <div v-if="!people.length" class="text-medium-emphasis">
+              No users found for this role. Make sure your seeds/endpoint return users.
+            </div>
+
+            <v-row dense>
+              <v-col v-for="p in people" :key="p._id" cols="12" sm="6" md="4">
+                <v-card
+                  class="person-card"
+                  :class="{ selected: selectedLoginId === p.loginId }"
+                  variant="outlined"
+                  rounded="lg"
+                  @click="chooseOne(p.loginId)"
+                >
+                  <v-card-text class="py-4">
+                    <div class="d-flex align-center" style="gap:10px;">
+                      <v-avatar size="40">
+                        <v-icon icon="mdi-account" />
+                      </v-avatar>
+                      <div>
+                        <div class="font-weight-700">{{ p.name }}</div>
+                        <div class="text-caption text-medium-emphasis mono">ID: {{ p.loginId }}</div>
+                      </div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+          </template>
         </v-card-text>
 
         <v-divider />
         <v-card-actions class="justify-end">
           <v-btn variant="text" @click="assignOpen = false">Cancel</v-btn>
-          <v-btn color="primary" :loading="assignLoading" @click="submitAssign">
+          <v-btn color="primary" :loading="assignLoading" :disabled="!selectedLoginId" @click="submitAssign">
             <v-icon start icon="mdi-check" /> Assign & Accept
           </v-btn>
         </v-card-actions>
@@ -583,4 +577,9 @@ async function updateStatus(item, nextStatus){
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .text-caption .text-medium-emphasis { color:#64748b; }
+
+/* Card selection styling */
+.person-card { cursor: pointer; transition: transform .06s ease, box-shadow .06s ease, border-color .06s ease; }
+.person-card:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,0,0,0.06); }
+.person-card.selected { border-color: var(--brand, #1f2a44); box-shadow: 0 0 0 2px rgba(31,42,68,0.15) inset; }
 </style>

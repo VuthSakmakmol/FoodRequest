@@ -12,12 +12,12 @@ const go = (name) => router.push({ name })
     <header class="hero">
       <div class="hero-content">
         <h1 class="hero-title">
-          <span class="grad-text">Welcome to Trax Services</span>
-          <small class="km">ស្វាគមន៍មកកាន់ប្រព័ន្ធសេវាកម្ម</small>
+          <span class="grad-text">Welcome to Trax Requestor System</span>
+
         </h1>
         <p class="hero-sub">
           Order meals, book transportation, and manage tasks — all in one place.
-          <span class="km">បញ្ជា​អាហារ កក់ឡាន និងគ្រប់គ្រងការងារ — នៅកន្លែងតែមួយ។</span>
+
         </p>
 
         <div class="hero-cta">
@@ -43,7 +43,7 @@ const go = (name) => router.push({ name })
       <div class="hero-image">
         <!-- You can replace this with your own asset in /public or a CDN -->
         <v-img
-          src="https://images.unsplash.com/photo-1553095066-5014bc7b7f2d?q=80&w=1600&auto=format&fit=crop"
+          src=""
           alt="Office teamwork illustration"
           cover
           class="img-mask"

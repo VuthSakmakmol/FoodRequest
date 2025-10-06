@@ -186,18 +186,21 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
                 <!-- Selection (EN + KM) -->
                 <template #selection="{ item }">
                   <div class="two-line">
-                    <div class="en">{{ item?.title }}</div>
+                    <div class="en">{{ item?.raw?.title }}</div>
                     <div class="km">{{ item?.raw?.subtitle }}</div>
                   </div>
                 </template>
-                <!-- Items (EN + KM) -->
+
+                <!-- Items (render once) -->
                 <template #item="{ props: iprops, item }">
-                  <v-list-item v-bind="iprops">
-                    <v-list-item-title>{{ item?.title }}</v-list-item-title>
-                    <v-list-item-subtitle class="km">{{ item?.raw?.subtitle }}</v-list-item-subtitle>
-                  </v-list-item>
+                  <v-list-item
+                    v-bind="iprops"
+                    :title="item.raw.title"
+                    :subtitle="item.raw.subtitle"
+                  />
                 </template>
               </v-select>
+
             </v-col>
             <v-col cols="4">
               <v-text-field
@@ -245,8 +248,6 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
         'text-success': assignedMenus <= props.form.quantity
       }"
     >
-      Assigned non-standard: {{ assignedMenus }} / Total: {{ props.form.quantity }}
-      → Standard auto = {{ standardCount }}
     </div>
   </v-sheet>
 </template>
