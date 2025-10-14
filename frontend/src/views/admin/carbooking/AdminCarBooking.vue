@@ -4,9 +4,6 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 
-/* =========================
-   Reactive state
-========================= */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
@@ -18,9 +15,7 @@ const qSearch        = ref('')
 
 const updating = ref({}) // { [bookingId]: boolean }
 
-/* =========================
-   Workflow (forward-only)
-========================= */
+/* Workflow */
 const ALLOWED_NEXT = {
   PENDING:   ['ACCEPTED','CANCELLED'],
   ACCEPTED:  ['ON_ROAD','DELAYED','CANCELLED'],
@@ -32,14 +27,12 @@ const ALLOWED_NEXT = {
 }
 const nextStatuses = (from) => ALLOWED_NEXT[from] || []
 
-/* =========================
-   Helpers
-========================= */
+/* Helpers */
 const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
 const absUrl = (u) => !u ? '' : (/^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u.startsWith('/')?'':'/'}${u}`)
 const openTicket = (u) => { const url = absUrl(u); if (url) window.open(url, '_blank', 'noopener,noreferrer') }
 
-/* Table headers (Purpose wider; Notes removed from table) */
+/* Table */
 const headers = [
   { title: 'Time',        key: 'time',       sortable: true,  width: 240 },
   { title: 'Category',    key: 'category',   sortable: true,  width: 120 },
@@ -47,9 +40,10 @@ const headers = [
   { title: 'Itinerary',   key: 'itinerary',  sortable: false, width: 350 },
   { title: 'Pax',         key: 'passengers', sortable: true,  width: 70,  align: 'center' },
   { title: 'Purpose',     key: 'purpose',    sortable: false, width: 260 },
-  { title: 'Assigned',    key: 'assigned',   sortable: false, width: 130 },
+  { title: 'Assigned',    key: 'assigned',   sortable: false, width: 160 },
+  { title: 'Driver Resp.',key: 'driverAck',  sortable: false, width: 150, align: 'end' },
   { title: 'Status',      key: 'status',     sortable: true,  width: 150, align: 'end' },
-  { title: '',            key: 'actions',    sortable: false, width: 120, align: 'end' }
+  { title: '',            key: 'actions',    sortable: false, width: 140, align: 'end' }
 ]
 
 async function loadSchedule() {
@@ -64,7 +58,7 @@ async function loadSchedule() {
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],
-      assignment: x.assignment || {}
+      assignment: x.assignment || {}   // expect driverAck here
     }))
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || 'Failed to load schedule'
@@ -76,15 +70,28 @@ function prettyStops(stops = []) {
   return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
 }
 
+/* Status + Ack colors + FA icons */
 const statusColor = s => ({
   PENDING:'grey', ACCEPTED:'primary', ON_ROAD:'info', ARRIVING:'teal',
   COMPLETED:'success', DELAYED:'warning', CANCELLED:'error'
 }[s] || 'grey')
-const statusIcon = s => ({
-  PENDING:'mdi-timer-sand', ACCEPTED:'mdi-check-circle', ON_ROAD:'mdi-truck-fast',
-  ARRIVING:'mdi-flag-checkered', COMPLETED:'mdi-check-decagram',
-  DELAYED:'mdi-alert', CANCELLED:'mdi-cancel'
-}[s] || 'mdi-timer-sand')
+
+const statusFa = s => ({
+  PENDING:'fa-solid fa-hourglass-half',
+  ACCEPTED:'fa-solid fa-circle-check',
+  ON_ROAD:'fa-solid fa-truck-fast',
+  ARRIVING:'fa-solid fa-flag-checkered',
+  COMPLETED:'fa-solid fa-check-double',
+  DELAYED:'fa-solid fa-triangle-exclamation',
+  CANCELLED:'fa-solid fa-ban'
+}[s] || 'fa-solid fa-hourglass-half')
+
+const ackColor = s => ({ PENDING:'grey', ACCEPTED:'success', DECLINED:'error' }[s] || 'grey')
+const ackFa  = s => ({
+  PENDING:'fa-solid fa-circle-question',
+  ACCEPTED:'fa-solid fa-thumbs-up',
+  DECLINED:'fa-solid fa-thumbs-down'
+}[s] || 'fa-solid fa-circle-question')
 
 /* Assigned chip helpers */
 const assigneeName  = (it) => it?.assignment?.driverName || it?.assignment?.driverId || ''
@@ -100,17 +107,14 @@ const filtered = computed(() => {
       if (!term) return true
       const hay = [
         r.employee?.name, r.employee?.department, r.employeeId,
-        r.purpose, /* notes intentionally NOT in table search to reduce noise */ prettyStops(r.stops),
-        assigneeName(r)
+        r.purpose, prettyStops(r.stops), assigneeName(r), r.assignment?.driverAck
       ].join(' ').toLowerCase()
       return hay.includes(term)
     })
     .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
-/* =========================
-   Sockets
-========================= */
+/* Sockets */
 function onCreated(doc) {
   if (!doc?.tripDate) return
   if (selectedDate.value && doc.tripDate !== selectedDate.value) return
@@ -121,46 +125,48 @@ function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
 }
+function onAssigned(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (it) {
+    it.assignment = { ...(it.assignment||{}), driverId: p.driverId, driverName: p.driverName, driverAck: 'PENDING' }
+    if (it.status === 'PENDING') it.status = 'ACCEPTED'   // admin accepted request
+  }
+}
+function onDriverAck(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
+}
 
 onMounted(() => {
   try { subscribeRoleIfNeeded() } catch {}
   loadSchedule()
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
-  socket.on('carBooking:assigned', (p) => {
-    const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-    if (it) {
-      it.assignment = { ...(it.assignment||{}), driverId: p.driverId, driverName: p.driverName }
-      if (it.status === 'PENDING') it.status = 'ACCEPTED'
-    }
-  })
+  socket.on('carBooking:assigned', onAssigned)
+  socket.on('carBooking:driverAck', onDriverAck)
 })
 onBeforeUnmount(() => {
   socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
-  socket.off('carBooking:assigned')
+  socket.off('carBooking:assigned', onAssigned)
+  socket.off('carBooking:driverAck', onDriverAck)
 })
 
 watch([selectedDate, statusFilter, categoryFilter], loadSchedule)
 
-/* =========================
-   Details dialog (fixed)
-========================= */
+/* Details dialog */
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 
-/* =========================
-   Assign via CARD (with busy)
-========================= */
+/* Assign flow */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
 const assignLoading = ref(false)
 const assignError = ref('')
 const loadingPeople = ref(false)
-
-const people = ref([])            // [{_id, loginId, name}]
-const selectedLoginId = ref('')   // exactly one
+const people = ref([])
+const selectedLoginId = ref('')
 const busyLoginIds = ref(new Set())
 const roleFromItem = (item) => (item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER')
 
@@ -206,11 +212,6 @@ function openAssignDialog(item) {
   loadPeopleFor(item)
 }
 
-function handleStatusSelection(item, nextStatus) {
-  if (nextStatus === 'ACCEPTED') { openAssignDialog(item); return }
-  updateStatus(item, nextStatus)
-}
-
 async function submitAssign() {
   if (!assignTarget.value?._id) return
   if (!selectedLoginId.value) { assignError.value = 'Please select exactly one Driver/Messenger card'; return }
@@ -224,7 +225,7 @@ async function submitAssign() {
     })
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
     if (it) {
-      it.assignment = { ...(it.assignment || {}), driverId: selectedLoginId.value }
+      it.assignment = { ...(it.assignment || {}), driverId: selectedLoginId.value, driverAck: 'PENDING' }
       it.status = 'ACCEPTED'
     }
     assignOpen.value = false
@@ -235,15 +236,14 @@ async function submitAssign() {
   }
 }
 
-/* =========================
-   Status update (forward-only)
-========================= */
+/* Status update */
 async function updateStatus(item, nextStatus){
   if (!item?._id || !nextStatus) return
   const allowed = nextStatuses(item.status)
   if (!allowed.includes(nextStatus)) { error.value = `Cannot change from ${item.status} to ${nextStatus}`; return }
   updating.value[item._id] = true
   try {
+    const prev = item.status
     item.status = nextStatus // optimistic
     await api.patch(`/admin/car-bookings/${item._id}/status`, { status: nextStatus })
   } catch (e) {
@@ -264,7 +264,7 @@ async function updateStatus(item, nextStatus){
             <i class="fa-solid fa-steering-wheel"></i>
             <span>Admin — Day Schedule (All Requests)</span>
           </div>
-          <div class="hero-sub">Browse every booking. Filter by date when needed. Live updates.</div>
+          <div class="hero-sub">Admin accepts customer → assigns driver → driver must acknowledge (Accept/Decline).</div>
         </div>
       </div>
 
@@ -273,7 +273,9 @@ async function updateStatus(item, nextStatus){
           <v-card-title class="subhdr">
             <i class="fa-solid fa-filter"></i><span>Filters</span>
             <v-spacer />
-            <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading" prepend-icon="mdi-refresh">Refresh</v-btn>
+            <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading">
+              <i class="fa-solid fa-rotate-right mr-1"></i> Refresh
+            </v-btn>
           </v-card-title>
           <v-card-text class="pt-0">
             <v-row dense>
@@ -289,8 +291,10 @@ async function updateStatus(item, nextStatus){
                           v-model="categoryFilter" label="Category" variant="outlined" density="compact" hide-details />
               </v-col>
               <v-col cols="12" md="3">
-                <v-text-field v-model="qSearch" label="Search requester / purpose / destination / assignee"
-                              prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable />
+                <v-text-field v-model="qSearch" label="Search requester / purpose / destination / assignee / driverResp"
+                              variant="outlined" density="compact" hide-details clearable>
+                  <template #prepend-inner><i class="fa-solid fa-magnifying-glass"></i></template>
+                </v-text-field>
               </v-col>
             </v-row>
           </v-card-text>
@@ -335,7 +339,6 @@ async function updateStatus(item, nextStatus){
 
               <template #item.passengers="{ item }"><div class="text-center">{{ item.passengers ?? 1 }}</div></template>
 
-              <!-- Bigger, clearer purpose (notes removed from table) -->
               <template #item.purpose="{ item }">
                 <div class="purpose-pill">
                   <i class="fa-regular fa-lightbulb mr-2"></i>
@@ -344,7 +347,7 @@ async function updateStatus(item, nextStatus){
               </template>
 
               <template #item.assigned="{ item }">
-                <div class="d-flex align-center">
+                <div class="d-flex align-center" style="gap:6px;">
                   <template v-if="assigneeName(item)">
                     <v-chip :color="assigneeColor(item)" size="small" class="assignee-chip" label>
                       <i class="fa-solid mr-2" :class="assigneeIconFA(item)"></i>
@@ -359,9 +362,17 @@ async function updateStatus(item, nextStatus){
                 </div>
               </template>
 
+              <template #item.driverAck="{ item }">
+                <v-chip :color="ackColor(item.assignment?.driverAck || 'PENDING')" size="small" label>
+                  <i :class="ackFa(item.assignment?.driverAck || 'PENDING')" class="mr-1"></i>
+                  {{ (item.assignment?.driverAck || 'PENDING') }}
+                </v-chip>
+              </template>
+
               <template #item.status="{ item }">
                 <v-chip :color="statusColor(item.status)" size="small" label>
-                  <v-icon start :icon="statusIcon(item.status)" /> {{ item.status }}
+                  <i :class="statusFa(item.status)" class="mr-1"></i>
+                  {{ item.status }}
                 </v-chip>
               </template>
 
@@ -372,18 +383,16 @@ async function updateStatus(item, nextStatus){
                       <i class="fa-solid fa-arrows-rotate mr-2"></i> Update
                     </v-btn>
                   </template>
-                  <v-list density="compact" min-width="240">
+                  <v-list density="compact" min-width="260">
                     <v-list-subheader>Next status</v-list-subheader>
                     <template v-if="nextStatuses(item.status).length">
-                      <v-list-item v-for="s in nextStatuses(item.status)" :key="s" @click.stop="handleStatusSelection(item, s)">
-                        <template #prepend><v-icon :icon="statusIcon(s)" /></template>
-                        <v-list-item-title>
-                          {{ s }}<span v-if="s==='ACCEPTED'" class="text-caption text-medium-emphasis"> — requires driver</span>
-                        </v-list-item-title>
+                      <v-list-item v-for="s in nextStatuses(item.status)" :key="s" @click.stop="updateStatus(item, s)">
+                        <template #prepend><i :class="statusFa(s)"></i></template>
+                        <v-list-item-title>{{ s }}</v-list-item-title>
                       </v-list-item>
                     </template>
                     <v-list-item v-else disabled>
-                      <template #prepend><v-icon icon="mdi-lock" /></template>
+                      <template #prepend><i class="fa-solid fa-lock"></i></template>
                       <v-list-item-title>No further changes</v-list-item-title>
                     </v-list-item>
                   </v-list>
@@ -393,9 +402,8 @@ async function updateStatus(item, nextStatus){
                   <i class="fa-solid fa-id-badge mr-2"></i> Assign
                 </v-btn>
 
-                <!-- FIXED: Details button now opens dialog -->
                 <v-btn size="small" variant="text" color="secondary" class="ml-1" @click.stop="showDetails(item)">
-                  <v-icon start icon="mdi-information-outline" /> Details
+                  <i class="fa-solid fa-circle-info mr-2"></i> Details
                 </v-btn>
               </template>
 
@@ -410,7 +418,7 @@ async function updateStatus(item, nextStatus){
       </div>
     </v-sheet>
 
-    <!-- Details dialog (Notes shown here, larger) -->
+    <!-- Details dialog -->
     <v-dialog v-model="detailOpen" max-width="860">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
@@ -421,7 +429,7 @@ async function updateStatus(item, nextStatus){
             </v-chip>
             <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
           </div>
-          <v-btn icon="mdi-close" variant="text" @click="detailOpen = false" />
+          <v-btn icon variant="text" @click="detailOpen = false"><i class="fa-solid fa-xmark"></i></v-btn>
         </v-card-title>
 
         <v-divider />
@@ -441,21 +449,14 @@ async function updateStatus(item, nextStatus){
               </div>
             </v-col>
 
-            <v-col cols="12" md="6" v-if="detailItem?.customerContact">
-              <div class="lbl">Customer Contact</div><div class="val">{{ detailItem?.customerContact }}</div>
-            </v-col>
-
             <v-col cols="12">
               <div class="lbl">Itinerary</div>
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
                   <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
-                    <v-icon size="16" :icon="s.destination === 'Airport' ? 'mdi-airplane' : 'mdi-map-marker'" class="mr-1" />
+                    <i :class="s.destination === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot'" class="mr-1"></i>
                     <strong>#{{ i+1 }}:</strong>
                     <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
-                    <a v-if="s.mapLink" :href="absUrl(s.mapLink)" target="_blank" rel="noopener" class="ml-2 text-decoration-none">
-                      <v-btn size="x-small" variant="text" color="primary"><v-icon start icon="mdi-link-variant" /> Map</v-btn>
-                    </a>
                   </div>
                 </div>
                 <div v-else>—</div>
@@ -463,10 +464,11 @@ async function updateStatus(item, nextStatus){
             </v-col>
 
             <v-col cols="12" md="6">
-              <div class="lbl">Status</div>
-              <div class="d-flex align-center" style="gap:10px;">
-                <v-chip :color="statusColor(detailItem?.status)" size="small" label>
-                  <v-icon start :icon="statusIcon(detailItem?.status)" /> {{ detailItem?.status || '—' }}
+              <div class="lbl">Driver Response</div>
+              <div class="val">
+                <v-chip :color="ackColor(detailItem?.assignment?.driverAck || 'PENDING')" size="small" label>
+                  <i :class="ackFa(detailItem?.assignment?.driverAck || 'PENDING')" class="mr-1"></i>
+                  {{ detailItem?.assignment?.driverAck || 'PENDING' }}
                 </v-chip>
               </div>
             </v-col>
@@ -479,16 +481,6 @@ async function updateStatus(item, nextStatus){
                     <i class="fa-solid fa-paperclip mr-2"></i> VIEW TICKET
                   </v-btn>
                 </a>
-              </div>
-            </v-col>
-
-            <v-col cols="12" v-if="assigneeName(detailItem)">
-              <div class="lbl">Assignment</div>
-              <div class="val">
-                <v-chip :color="assigneeColor(detailItem)" size="small" label>
-                  <i class="fa-solid mr-2" :class="assigneeIconFA(detailItem)"></i>
-                  {{ assigneeName(detailItem) }}
-                </v-chip>
               </div>
             </v-col>
 
@@ -513,7 +505,7 @@ async function updateStatus(item, nextStatus){
       </v-card>
     </v-dialog>
 
-    <!-- Assign via CARD -->
+    <!-- Assign dialog (your existing content can remain; no mdi icons used there except we already use FA elsewhere) -->
     <v-dialog v-model="assignOpen" max-width="860">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
@@ -521,7 +513,7 @@ async function updateStatus(item, nextStatus){
             <i class="fa-solid fa-id-badge"></i>
             <span class="ml-2">Select Driver/Messenger</span>
           </div>
-          <v-btn icon="mdi-close" variant="text" @click="assignOpen = false" />
+          <v-btn icon variant="text" @click="assignOpen = false"><i class="fa-solid fa-xmark"></i></v-btn>
         </v-card-title>
 
         <v-divider />
@@ -530,9 +522,7 @@ async function updateStatus(item, nextStatus){
           <v-alert v-if="assignError" type="error" variant="tonal" border="start" class="mb-3">{{ assignError }}</v-alert>
           <v-skeleton-loader v-if="loadingPeople" type="card, card, card" />
           <template v-else>
-            <div v-if="!people.length" class="text-medium-emphasis">
-              No users found for this role.
-            </div>
+            <div v-if="!people.length" class="text-medium-emphasis">No users found for this role.</div>
             <v-row dense>
               <v-col v-for="p in people" :key="p._id" cols="12" sm="6" md="4" lg="3">
                 <v-card
@@ -574,7 +564,6 @@ async function updateStatus(item, nextStatus){
 </template>
 
 <style scoped>
-/* Layout + chrome */
 .section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
 .hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background:#f5f7fb; border-bottom: 1px solid #e6e8ee; }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
@@ -594,14 +583,13 @@ async function updateStatus(item, nextStatus){
   background: #eef2ff; border: 1px solid #dfe3fb;
   padding: 6px 10px; border-radius: 10px; min-height: 32px;
 }
-.purpose-text { font-weight: 700; font-size: .98rem; color:#30336b; }
+.purpose-text { font-weight: 500; font-size: .98rem; color:#30336b; }
 
 .lbl { font-size:.78rem; color:#64748b; }
 .val { font-weight:600; }
-.purpose-detail { font-weight:700; font-size:1.05rem; }
+.purpose-detail { font-weight:500; font-size:1.05rem; }
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-.text-caption .text-medium-emphasis { color:#64748b; }
 
 /* Notes block only in details */
 .notes-block {
@@ -615,7 +603,6 @@ async function updateStatus(item, nextStatus){
 .person-card.selected { border-color:#1f2a44; box-shadow: 0 0 0 2px rgba(31,42,68,0.15) inset; }
 .person-card.busy { opacity:.55; border-color:#ef4444; cursor:not-allowed; }
 
-/* Small spacing helpers for FA icons */
 i.fa-solid, i.fa-regular { line-height: 1; }
 .mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
 .ml-2 { margin-left: .5rem; }

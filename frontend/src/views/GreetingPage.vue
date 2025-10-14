@@ -17,7 +17,6 @@ const go = (name) => router.push({ name })
         </h1>
         <p class="hero-sub">
           Order meals, book transportation, and manage tasks — all in one place.
-
         </p>
 
         <div class="hero-cta">
@@ -49,111 +48,14 @@ const go = (name) => router.push({ name })
           class="img-mask"
         />
       </div>
-
-      <!-- Decorative blobs -->
-      <div class="blob blob-1" />
-      <div class="blob blob-2" />
     </header>
 
     <!-- CARDS -->
     <main class="content">
       <v-container class="py-6">
-        <v-row class="greet-grid" align="stretch">
-          <!-- Employee -->
-          <v-col cols="12" sm="6" md="3">
-            <v-card class="greet-card" variant="elevated">
-              <div class="card-icon employee">
-                <i class="fa-solid fa-user-tie" />
-              </div>
-              <v-card-title class="card-title">
-                Employee <div class="km">បុគ្គលិក</div>
-              </v-card-title>
-              <v-card-text class="card-text">
-                Request meals and book cars quickly.
-                <div class="km">ស្នើសុំអាហារ និងកក់ឡានបានរៀបរយ។</div>
-              </v-card-text>
-              <v-card-actions class="justify-end">
-                <v-btn color="primary" variant="flat" @click="go('employee-request')">
-                  <i class="fa-solid fa-right-to-bracket mr-2" /> Enter
-                  <span class="km ml-2">ចូល</span>
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-col>
-
-          <!-- Admin -->
-          <v-col cols="12" sm="6" md="3">
-            <v-card class="greet-card" variant="elevated">
-              <div class="card-icon admin">
-                <i class="fa-solid fa-shield-heart" />
-              </div>
-              <v-card-title class="card-title">
-                Admin <div class="km">អ្នកគ្រប់គ្រង</div>
-              </v-card-title>
-              <v-card-text class="card-text">
-                Manage requests, schedules, and statuses.
-                <div class="km">គ្រប់គ្រងសំណើ កាលវិភាគ និងស្ថានភាព។</div>
-              </v-card-text>
-              <v-card-actions class="justify-end">
-                <v-btn color="deep-purple-accent-3" variant="flat" @click="go('admin-login')">
-                  <i class="fa-solid fa-door-open mr-2" /> Sign in
-                  <span class="km ml-2">ចូលប្រព័ន្ធ</span>
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-col>
-
-          <!-- Driver -->
-          <v-col cols="12" sm="6" md="3">
-            <v-card class="greet-card" variant="elevated">
-              <div class="card-icon driver">
-                <i class="fa-solid fa-steering-wheel" />
-              </div>
-              <v-card-title class="card-title">
-                Driver <div class="km">អ្នកបើកបរ</div>
-              </v-card-title>
-              <v-card-text class="card-text">
-                View trips and update progress.
-                <div class="km">មើលដំណើរ និងអាប់ដេតវឌ្ឍនា។</div>
-              </v-card-text>
-              <v-card-actions class="justify-end">
-                <v-btn color="teal" variant="flat" @click="go('driver-home')">
-                  <i class="fa-solid fa-location-arrow mr-2" /> Open
-                  <span class="km ml-2">បើក</span>
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-col>
-
-          <!-- Messenger -->
-          <v-col cols="12" sm="6" md="3">
-            <v-card class="greet-card" variant="elevated">
-              <div class="card-icon messenger">
-                <i class="fa-solid fa-motorcycle" />
-              </div>
-              <v-card-title class="card-title">
-                Messenger <div class="km">អ្នកដឹកសារ</div>
-              </v-card-title>
-              <v-card-text class="card-text">
-                Track delivery tasks and confirm arrival.
-                <div class="km">តាមដានភារកិច្ច និងបញ្ជាក់ការមកដល់។</div>
-              </v-card-text>
-              <v-card-actions class="justify-end">
-                <v-btn color="orange-darken-2" variant="flat" @click="go('messenger-home')">
-                  <i class="fa-solid fa-person-running mr-2" /> Proceed
-                  <span class="km ml-2">បន្ត</span>
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-col>
-        </v-row>
-
         <!-- Feature strip -->
         <v-sheet class="feature-strip" rounded="lg" elevation="1">
           <div class="stripe">
-            <div class="chip">
-              <i class="fa-solid fa-bell" /> Web Notifications
-            </div>
             <div class="chip">
               <i class="fa-brands fa-telegram" /> Telegram Alerts
             </div>

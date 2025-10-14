@@ -55,7 +55,7 @@ function go(it){ if (it?.to) router.push(it.to) }
 function isActive(it){ return route.name === it?.to?.name }
 function logout(){
   auth.logout()
-  router.push({ name: 'admin-login' }) // Admin logs out to Admin Login
+  router.push({ name: 'employee-request' }) // Admin logs out to Admin Login
 }
 </script>
 

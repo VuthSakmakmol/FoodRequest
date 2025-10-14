@@ -88,6 +88,8 @@ app.use('/api/car-bookings', require('./routes/carBooking.routes'))
 app.use('/api/admin/car-bookings', require('./routes/carBooking-admin.routes'))
 app.use('/api/admin', require('./routes/admin-user.routes'))
 
+// NEW (driver portal):
+app.use('/api/driver', require('./routes/carBooking-driver.routes'))
 // optional compatibility alias if some frontend still calls /api/public/…
 app.use('/api/public/car-bookings', require('./routes/carBooking.routes'))
 

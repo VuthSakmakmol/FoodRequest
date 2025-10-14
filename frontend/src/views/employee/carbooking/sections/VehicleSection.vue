@@ -62,7 +62,7 @@ const props = defineProps({
 <style scoped>
 /* Match Section 2 look & feel */
 .section { background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); border: 1px solid rgba(100,116,139,.18); }
-.hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: linear-gradient(90deg, #0ea5e9 0%, #6366f1 60%, #a78bfa 100%); color:#fff; }
+.hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: linear-gradient(90deg, #5d7884 0%, #9293d4 60%, #786e95 100%); color:#fff; }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
 .hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
 .hero-sub { opacity:.92; font-size:.9rem; }

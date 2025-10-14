@@ -8,14 +8,18 @@ const StopSchema = new mongoose.Schema({
 }, { _id: false })
 
 const AssignmentSchema = new mongoose.Schema({
-  driverId:   { type: String, default: '' },
-  driverName: { type: String, default: '' },
-  vehicleId:  { type: String, default: '' },
-  vehicleName:{ type: String, default: '' },
-  notes:      { type: String, default: '' },
+  driverId:    { type: String, default: '' },
+  driverName:  { type: String, default: '' },
+  vehicleId:   { type: String, default: '' },
+  vehicleName: { type: String, default: '' },
+  notes:       { type: String, default: '' },
   assignedById:   { type: String, default: '' },
   assignedByName: { type: String, default: '' },
-  assignedAt:     { type: Date }
+  assignedAt:     { type: Date },
+
+  // NEW: driver's own acknowledgment (second step after admin "ACCEPTED")
+  driverAck:   { type: String, enum: ['PENDING','ACCEPTED','DECLINED'], default: 'PENDING' },
+  driverAckAt: { type: Date }
 }, { _id: false })
 
 const CarBookingSchema = new mongoose.Schema({
@@ -63,9 +67,10 @@ const CarBookingSchema = new mongoose.Schema({
 
 CarBookingSchema.index({ tripDate: 1, category: 1 })
 CarBookingSchema.index({ employeeId: 1, createdAt: -1 })
+CarBookingSchema.index({ 'assignment.driverId': 1, tripDate: 1 }) // helpful for driver list
 
 CarBookingSchema.path('stops').validate(function (stops) {
-  for (const s of stops || []) {
+  for (const s of (stops || [])) {
     if (s.destination === 'Other' && !s.destinationOther) return false
   }
   return true

@@ -48,7 +48,7 @@ const router = createRouter({
   routes: [
     // Public landing + default redirect
     { name: 'greeting', path: '/greeting', component: GreetingPage, meta: { public: true } },
-    { path: '/', redirect: { name: 'greeting' }, meta: { public: true } },
+    { path: '/', redirect: { name: 'employee-request' }, meta: { public: true } },
 
     // Public admin login
     { name: 'admin-login', path: '/admin/login', component: AdminLogin, meta: { public: true } },

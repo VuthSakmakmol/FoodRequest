@@ -215,7 +215,7 @@ onMounted(refreshAvailability)
               <v-select :items="CATEGORY" v-model="props.form.category" label="Category" variant="outlined" density="compact" hide-details />
             </v-col>
             <v-col cols="12" md="4">
-              <v-text-field v-model="props.form.tripDate" type="date" label="Date" variant="outlined" density="compact" hide-details />
+              <v-text-field v-model="props.form.tripDate" type="date" label="Comfirm Date" variant="outlined" density="compact" hide-details />
             </v-col>
           </v-row>
         </v-card-text>
@@ -282,35 +282,45 @@ onMounted(refreshAvailability)
               </v-expansion-panel-title>
 
               <v-expansion-panel-text>
-                <v-row dense>
-                  <v-col cols="12" md="3">
-                    <v-select
-                      :items="destinationItems"
-                      v-model="row.destination"
-                      :label="`Destination #${idx + 1}`"
-                      variant="outlined"
-                      density="compact"
-                      hide-details
-                      @update:model-value="onDestinationChange(row)"
-                    />
-                  </v-col>
+              <v-row dense class="align-center">
+                <v-col cols="12" md="3">
+                  <v-select
+                    :items="destinationItems"
+                    v-model="row.destination"
+                    :label="`Destination #${idx + 1}`"
+                    variant="outlined"
+                    density="compact"
+                    hide-details
+                    width="300px"
+                    @update:model-value="onDestinationChange(row)"
+                  />
+                </v-col>
 
-                  <v-col v-if="row.destination === 'Other'" cols="12" md="4">
-                    <v-text-field v-model="row.destinationOther" label="Destination Name (Other)" variant="outlined" density="compact" hide-details />
-                  </v-col>
+                <v-col v-if="row.destination === 'Other'" cols="12" md="4">
+                  <v-text-field v-model="row.destinationOther" label="Destination Name (Other)" variant="outlined" density="compact" hide-details />
+                </v-col>
 
-                  <v-col v-if="row.destination === 'Other'" cols="12" md="4">
-                    <v-text-field v-model="row.mapLink" label="Google Maps Link" placeholder="https://maps.google.com/…" variant="outlined" density="compact" hide-details />
-                  </v-col>
+                <v-col v-if="row.destination === 'Other'" cols="12" md="4">
+                  <v-text-field v-model="row.mapLink" label="Google Maps Link" placeholder="https://maps.google.com/…" variant="outlined" density="compact" hide-details />
+                </v-col>
 
-                  <v-col cols="12" md="1" class="text-right">
-                    <v-btn color="error" variant="text" size="small" class="remove-btn" @click="removeStop(idx)">
-                      <i class="fa-solid fa-trash"></i>
-                      <span class="ml-1">Remove</span>
-                    </v-btn>
-                  </v-col>
-                </v-row>
-              </v-expansion-panel-text>
+                <!-- push the button to the far right -->
+                <v-spacer class="d-none d-md-flex" />
+
+                <v-col cols="12" md="auto" class="d-flex justify-end ms-auto mt-2 mt-md-0">
+                  <v-btn
+                    color="error"
+                    variant="text"
+                    size="small"
+                    class="remove-btn"
+                    @click="removeStop(idx)"
+                  >
+                    <i class="fa-solid fa-trash"></i>
+                    <span class="ml-1">Remove</span>
+                  </v-btn>
+                </v-col>
+              </v-row>
+            </v-expansion-panel-text>
             </v-expansion-panel>
           </v-expansion-panels>
 
@@ -337,7 +347,7 @@ onMounted(refreshAvailability)
 
 <style scoped>
 .section { background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); border: 1px solid rgba(100,116,139,.18); }
-.hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: linear-gradient(90deg, #0ea5e9 0%, #6366f1 60%, #a78bfa 100%); color:#fff; }
+.hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: linear-gradient(90deg, #5d7884 0%, #9293d4 60%, #786e95 100%); color:#fff; }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
 .hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
 .hero-sub { opacity:.92; font-size:.9rem; }
