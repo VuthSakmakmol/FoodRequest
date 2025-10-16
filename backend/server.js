@@ -86,6 +86,10 @@ app.use('/api/driver',              require('./routes/transportation/carBooking-
 // Optional alias for legacy callers
 app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'));
 
+// public routes (holiday)
+app.use('/api/public', require('./routes/public-holidays.routes'))
+
+
 /* ───────────── 404 for API (keep above SPA static + after all API mounts) ───────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));
 
