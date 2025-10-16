@@ -12,9 +12,9 @@ const User = require('../models/User')
     const hash = (pwd) => bcrypt.hash(pwd, 10)
 
     async function ensureAdmin() {
-      const loginId  = process.env.ADMIN_LOGIN     || 'admin'
-      const name     = process.env.ADMIN_NAME      || 'Kitchen Admin'
-      const password = process.env.ADMIN_PASSWORD  || 'Passw0rd!'
+      const loginId  = (process.env.ADMIN_LOGIN || 'admin').trim()
+      const name     = process.env.ADMIN_NAME || 'Kitchen Admin'
+      const password = process.env.ADMIN_PASSWORD || 'Passw0rd!'
 
       const exists = await User.findOne({ loginId })
       if (exists) { console.log('✅ Admin exists:', loginId); return }
@@ -27,11 +27,13 @@ const User = require('../models/User')
     async function seedUsers(role, list) {
       let created = 0, skipped = 0
       for (const u of list) {
-        const exists = await User.findOne({ loginId: u.loginId })
+        const loginId = String(u.loginId).trim()
+        if (!loginId) continue
+        const exists = await User.findOne({ loginId })
         if (exists) { skipped++; continue }
         const passwordHash = await hash(u.password)
         await User.create({
-          loginId: u.loginId,
+          loginId,
           name: u.name,
           passwordHash,
           role,
@@ -44,6 +46,14 @@ const User = require('../models/User')
 
     /* ───────── data ───────── */
     const defaultPwd = process.env.USER_DEFAULT_PASSWORD || 'Passw0rd!'
+
+    // ✅ Add your CHEFs here
+    const chefs = [
+      { loginId: 'chef01', name: 'Chef One', password: defaultPwd },
+      { loginId: 'chef02', name: 'Chef Two', password: defaultPwd },
+      // add more…
+    ]
+
     const drivers = [
       { loginId: 'driver01', name: 'Driver One',   password: defaultPwd },
       { loginId: 'driver02', name: 'Driver Two',   password: defaultPwd },
@@ -62,6 +72,7 @@ const User = require('../models/User')
 
     /* ───────── run ───────── */
     await ensureAdmin()
+    await seedUsers('CHEF', chefs)         // 👈 seed CHEFs here
     await seedUsers('DRIVER', drivers)
     await seedUsers('MESSENGER', messengers)
 

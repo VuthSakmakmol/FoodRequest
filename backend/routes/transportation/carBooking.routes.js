@@ -2,8 +2,8 @@
 const express = require('express')
 const router = express.Router()
 
-const ctrl = require('../controllers/carBooking.controller')
-const { upload } = require('../middlewares/upload') // uses .single('ticket')
+const ctrl = require('../../controllers/transportation/carBooking.controller')
+const { upload } = require('../../middlewares/upload') // uses .single('ticket')
 
 router.get('/availability', ctrl.checkAvailability)
 

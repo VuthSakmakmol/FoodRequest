@@ -1,5 +1,4 @@
-//controllers/auth.controller.js
-
+// controllers/auth.controller.js
 const jwt  = require('jsonwebtoken')
 const bcrypt = require('bcryptjs')
 const User = require('../models/User')
@@ -8,22 +7,30 @@ const signToken = (user) =>
   jwt.sign(
     { sub: String(user._id), role: user.role, id: user.loginId, name: user.name },
     process.env.JWT_SECRET,
-    { expiresIn: '7d' }
+    { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
   )
 
-// controllers/auth.controller.js
+// Map portals -> allowed roles
+const PORTAL_ROLES = {
+  chef: new Set(['CHEF', 'ADMIN']), // change to new Set(['CHEF']) if ONLY chefs may enter
+}
+
 exports.login = async (req, res, next) => {
   try {
+    const portal = (req.body?.portal || req.headers['x-portal'] || '').toString().trim().toLowerCase()
+
     const rawId = req.body?.loginId ?? ''
     const password = req.body?.password ?? ''
 
-    const loginId = String(rawId).trim()   // ✅ trim spaces
+    // normalize: trim & lower to avoid case issues
+    const loginId = String(rawId).trim()
     if (!loginId || !password) {
+      // Keep messages generic to avoid account enumeration
       return res.status(400).json({ message: 'loginId and password required' })
     }
 
-    // If you want to allow suspended users to be rejected with a clearer message, do two-step:
-    const user = await User.findOne({ loginId }) // ← remove isActive:true to disambiguate OR keep it, see below
+    // Find by loginId (exact). If you adopt case-insensitive login later, see Model patch below.
+    const user = await User.findOne({ loginId })
     if (!user) return res.status(401).json({ message: 'Invalid credentials' })
 
     if (user.isActive === false) {
@@ -33,10 +40,34 @@ exports.login = async (req, res, next) => {
     const ok = await user.verifyPassword(password)
     if (!ok) return res.status(401).json({ message: 'Invalid credentials' })
 
+    // If logging into a specific portal, enforce allowed roles
+    if (portal) {
+      const allowed = PORTAL_ROLES[portal]
+      if (!allowed) return res.status(400).json({ message: 'Unknown portal' })
+      if (!allowed.has(user.role)) {
+        return res.status(403).json({ message: 'Not allowed for this portal' })
+      }
+    }
+
     const token = signToken(user)
-    res.json({ token, user: { id: user.loginId, name: user.name, role: user.role } })
+
+    // Option A: return in JSON (current behavior)
+    return res.json({
+      token,
+      user: { id: user.loginId, name: user.name, role: user.role },
+      portal: portal || null
+    })
+
+    /* Option B (cookie-based tokens):
+    res.cookie('access_token', token, {
+      httpOnly: true, secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000
+    })
+    return res.json({ user: { id: user.loginId, name: user.name, role: user.role }, portal: portal || null })
+    */
   } catch (e) { next(e) }
 }
+
 
 
 exports.createUser = async (req, res, next) => {

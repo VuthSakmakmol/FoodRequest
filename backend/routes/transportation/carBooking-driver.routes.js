@@ -2,7 +2,7 @@
 
 const express = require('express')
 const router = express.Router()
-const ctrl = require('../controllers/carBooking.controller')
+const ctrl = require('../../controllers/transportation/carBooking.controller')
 
 // List assigned to driver
 router.get('/car-bookings', ctrl.listForAssignee)

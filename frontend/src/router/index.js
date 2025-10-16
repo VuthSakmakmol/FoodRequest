@@ -5,6 +5,7 @@ import { useAuth } from '@/store/auth'
 // Layouts
 const EmployeeLayout  = () => import('@/layouts/EmployeeLayout.vue')
 const AdminLayout     = () => import('@/layouts/AdminLayout.vue')
+const ChefLayout      = () => import('@/layouts/ChefLayout.vue')
 const DriverLayout    = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
 
@@ -26,6 +27,10 @@ const AdminDashboard    = () => import('@/views/admin/AdminDashboard.vue')
 // Admin (Transportation)
 const AdminCarBooking   = () => import('@/views/admin/carbooking/AdminCarBooking.vue')
 
+// Chef (Food only; reuse admin calendar)
+const ChefFoodRequests  = () => import('@/views/chef/ChefFoodRequests.vue')
+const ChefFoodCalendar  = AdminFoodCalendar // alias reuse
+
 // Driver
 const DriverHome        = () => import('@/modules/driver/Home.vue')
 const DriverCarBooking  = () => import('@/views/driver/DriverCarBooking.vue')
@@ -35,8 +40,8 @@ const MessengerHome     = () => import('@/modules/messenger/Home.vue')
 
 function homeByRole(role) {
   switch (role) {
-    case 'ADMIN':
-    case 'CHEF':      return { name: 'admin-requests' }
+    case 'ADMIN':     return { name: 'admin-requests' }
+    case 'CHEF':      return { name: 'chef-requests' }           // ⬅️ go straight to Chef list
     case 'DRIVER':    return { name: 'driver-home' }
     case 'MESSENGER': return { name: 'messenger-home' }
     default:          return { name: 'employee-request' }
@@ -66,11 +71,11 @@ const router = createRouter({
       ]
     },
 
-    // Admin area
+    // Admin area (ADMIN only)
     {
       path: '/admin',
       component: AdminLayout,
-      meta: { requiresRole: ['ADMIN','CHEF'] },
+      meta: { requiresRole: ['ADMIN'] },
       children: [
         { path: '', redirect: { name: 'admin-requests' } },
         { name: 'admin-dashboard',     path: 'dashboard',     component: AdminDashboard },
@@ -80,14 +85,26 @@ const router = createRouter({
       ]
     },
 
-    // Driver area (NEW: driver-car-booking)
+    // Chef area (CHEF only). Full food features, no transportation.
+    {
+      path: '/chef',
+      component: ChefLayout,
+      meta: { requiresRole: ['CHEF'] }, // use ['CHEF','ADMIN'] if you want admins to see chef UI too
+      children: [
+        { path: '', redirect: { name: 'chef-requests' } },
+        { name: 'chef-requests',      path: 'requests',      component: ChefFoodRequests },
+        { name: 'chef-food-calendar', path: 'food-calendar', component: ChefFoodCalendar },
+      ]
+    },
+
+    // Driver area
     {
       path: '/driver',
       component: DriverLayout,
       meta: { requiresRole: ['DRIVER'] },
       children: [
-        { name: 'driver-home',         path: '',             component: DriverHome },
-        { name: 'driver-car-booking',  path: 'car-booking',  component: DriverCarBooking }, // <-- links your new view
+        { name: 'driver-home',         path: '',            component: DriverHome },
+        { name: 'driver-car-booking',  path: 'car-booking', component: DriverCarBooking },
       ]
     },
 
@@ -96,7 +113,9 @@ const router = createRouter({
       path: '/messenger',
       component: MessengerLayout,
       meta: { requiresRole: ['MESSENGER'] },
-      children: [{ name: 'messenger-home', path: '', component: MessengerHome }]
+      children: [
+        { name: 'messenger-home', path: '', component: MessengerHome }
+      ]
     },
 
     // Fallback -> greeting
@@ -111,6 +130,7 @@ router.beforeEach((to) => {
   if (to.name === 'admin-login' && auth.user?.role) {
     return homeByRole(auth.user.role)
   }
+
   // Public routes pass through
   if (to.meta?.public) return true
 

@@ -1,6 +1,6 @@
 // backend/controllers/adminUser.controller.js
 const User = require('../models/User')
-const CarBooking = require('../models/CarBooking')
+const CarBooking = require('../models/transportation/CarBooking')
 const { toMinutes, overlaps } = require('../utils/time')
 
 const pick = (u) => ({ _id: String(u._id), loginId: u.loginId, name: u.name })

@@ -12,16 +12,16 @@ const rateLimit   = require('express-rate-limit');
 const { Server }  = require('socket.io');
 
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime');
+const { startRecurringEngine } = require('./services/recurring.engine');
 
 const app = express();
 
 /* ───────────── Env toggles ───────────── */
 const isProd     = process.env.NODE_ENV === 'production';
 const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true';
-// If you're behind a proxy/NGINX in prod, this helps detect https correctly.
 if (isProd) app.set('trust proxy', 1);
 
-/* ───────────── CORS (wildcard-safe) ───────────── */
+/* ───────────── CORS ───────────── */
 const rawOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map(s => s.trim())
@@ -34,32 +34,20 @@ const corsOptions = wildcard
 
 app.use(cors(corsOptions));
 
-/* ───────────── Security & Perf ─────────────
-   IMPORTANT: Do NOT enable HSTS unless you truly serve HTTPS end-to-end.
-   Also avoid CSP 'upgrade-insecure-requests' during HTTP dev.
-*/
+/* ───────────── Security & Perf ───────────── */
 app.use(helmet({
-  // Only send HSTS header when we know requests reach us via HTTPS
   hsts: forceHTTPS,
-  // Turn off default CSP; add your own later without 'upgrade-insecure-requests'
   contentSecurityPolicy: false,
-  // These two are noisy on plain HTTP; safe to disable for dev
   crossOriginEmbedderPolicy: false,
   crossOriginOpenerPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
-
-// Safety: if not forcing HTTPS, make sure no stray HSTS header leaks out.
 if (!forceHTTPS) {
-  app.use((req, res, next) => {
-    res.removeHeader('Strict-Transport-Security');
-    next();
-  });
+  app.use((req, res, next) => { res.removeHeader('Strict-Transport-Security'); next(); });
 }
-
 app.use(compression());
 
-/* ───────────── Parsers & Limits (order matters) ───────────── */
+/* ───────────── Parsers & Limits ───────────── */
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ limit: '5mb', extended: true }));
 
@@ -73,33 +61,35 @@ app.get('/api/health', (_req, res) => res.send('✅ API running'));
 app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 
 /* ───────────── Routes ───────────── */
+// Auth
 app.use('/api/auth',   require('./routes/auth.routes'));
+
+// Directory/public
 app.use('/api/public', require('./routes/public-directory.routes'));
-app.use('/api/public', require('./routes/food-public.routes'));
-app.use('/api/admin',  require('./routes/food-admin.routes'));
+app.use('/api/public', require('./routes/food/food-public.routes'));
 
+// Admin (Food)
+app.use('/api/admin',  require('./routes/food/food-admin.routes'));
 
-// Car booking routes
-// expose uploads (so /uploads/… works)
-app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || 'uploads')))
+// Chef (Food) — dedicated router that mirrors admin controllers
+// Endpoint: /api/chef/food-requests (list, get, update, status, delete)
+app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'));
 
-// car-booking routes (public + admin)
-app.use('/api/car-bookings', require('./routes/carBooking.routes'))
-app.use('/api/admin/car-bookings', require('./routes/carBooking-admin.routes'))
-app.use('/api/admin', require('./routes/admin-user.routes'))
+// Static uploads
+app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || 'uploads')));
 
-// NEW (driver portal):
-app.use('/api/driver', require('./routes/carBooking-driver.routes'))
-// optional compatibility alias if some frontend still calls /api/public/…
-app.use('/api/public/car-bookings', require('./routes/carBooking.routes'))
+// Transportation
+app.use('/api/car-bookings',        require('./routes/transportation/carBooking.routes'));
+app.use('/api/admin/car-bookings',  require('./routes/transportation/carBooking-admin.routes'));
+app.use('/api/admin',               require('./routes/admin-user.routes'));
+app.use('/api/driver',              require('./routes/transportation/carBooking-driver.routes'));
+// Optional alias for legacy callers
+app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'));
 
-
-
-
-/* ───────────── 404 for API (before error handler) ───────────── */
+/* ───────────── 404 for API (keep above SPA static + after all API mounts) ───────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));
 
-/* ───────────── Error handler (don’t leak stack in prod) ───────────── */
+/* ───────────── Error handler ───────────── */
 app.use((err, _req, res, _next) => {
   if (!isProd) console.error(err);
   res.status(err.status || 500).json({
@@ -109,13 +99,13 @@ app.use((err, _req, res, _next) => {
 });
 
 /* ───────────── Static SPA (optional) ─────────────
-   Set FRONTEND_DIR=/var/www/yourapp/frontend/dist
+   Set FRONTEND_DIR=/absolute/path/to/frontend/dist
 */
 const frontendDir = process.env.FRONTEND_DIR;
 if (frontendDir) {
   const distPath = path.resolve(frontendDir);
   app.use(express.static(distPath));
-  // keep this LAST (after API routes & error handler for /api)
+  // MUST be last (after API handlers), so it doesn't swallow /api 404
   app.get(/.*/, (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
@@ -144,9 +134,13 @@ const PORT = Number(process.env.PORT || 4333);
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`);
     });
 
-    /* Graceful shutdown */
+    // 🔁 start recurring engine after IO is ready
+    const stopRecurring = startRecurringEngine(io);
+
+    // graceful shutdown
     const shutdown = async (sig) => {
       console.log(`\n${sig} received. Shutting down...`);
+      stopRecurring && stopRecurring();
       server.close(() => console.log('HTTP server closed'));
       await mongoose.connection.close();
       process.exit(0);

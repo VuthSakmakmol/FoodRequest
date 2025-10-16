@@ -1,25 +1,23 @@
-// backend/routes/food-admin.routes.js
+// backend/routes/food/food-admin.routes.js
 const express = require('express');
 const router = express.Router();
-const FoodRequest = require('../models/FoodRequest');
-const ctrl = require('../controllers/foodRequest.controller');
-const { requireAuth, requireRole } = require('../middlewares/auth');
+
+const FoodRequest = require('../../models/food/FoodRequest'); // used only by GET-one endpoint
+const ctrl = require('../../controllers/food/foodRequest.controller');
+const { requireAuth, requireRole } = require('../../middlewares/auth');
 
 /* ───────── helpers ───────── */
 const escapeRegExp = (s = '') => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const num = (v, d) => {
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) ? n : d;
-};
+const num = (v, d) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
 const cap = (v, min, max) => Math.min(Math.max(v, min), max);
 
 /* ───────── LIST (admin/chef dashboard) ─────────
   Query params:
     - status=NEW|ACCEPTED|COOKING|READY|DELIVERED|CANCELED|ALL
     - employeeId=E12345
-    - q=free text (orderType/menuType/location.kind/specialInstructions)
-    - from=YYYY-MM-DD (filters eatDate >= from)
-    - to=YYYY-MM-DD   (filters eatDate <= to)
+    - q=free text (orderType/location.kind/specialInstructions/menuChoices)
+    - from=YYYY-MM-DD (eatDate >= from)
+    - to=YYYY-MM-DD   (eatDate <= to)
     - page=1..N
     - limit=1..200
 */
@@ -30,8 +28,6 @@ router.get(
   async (req, res, next) => {
     try {
       const { status, employeeId, q, from, to } = req.query || {};
-
-      // Build filter
       const filter = {};
       if (status && status !== 'ALL') filter.status = status;
       if (employeeId) filter['employee.employeeId'] = employeeId;
@@ -40,14 +36,14 @@ router.get(
         const rx = new RegExp(escapeRegExp(q.trim()), 'i');
         filter.$or = [
           { orderType: rx },
-          { menuType: rx }, // harmless if you don't use menuType
           { 'location.kind': rx },
           { specialInstructions: rx },
           { menuChoices: rx },
+          { requestId: rx },
         ];
       }
 
-      // Date range (on eatDate ✅)
+      // Date range on eatDate (inclusive)
       if (from || to) {
         const range = {};
         if (from) {
@@ -56,12 +52,9 @@ router.get(
         }
         if (to) {
           const dt = new Date(to);
-          if (!isNaN(dt.getTime())) {
-            dt.setHours(23, 59, 59, 999);
-            range.$lte = dt;
-          }
+          if (!isNaN(dt.getTime())) { dt.setHours(23, 59, 59, 999); range.$lte = dt; }
         }
-        if (Object.keys(range).length) filter.eatDate = range; // ← changed from serveDate to eatDate
+        if (Object.keys(range).length) filter.eatDate = range;
       }
 
       const page = cap(num(req.query.page, 1), 1, 1e6);
@@ -97,7 +90,7 @@ router.get(
    Optional date filters (same as list): from, to on eatDate.
 */
 router.get(
-  '/food-requests:summary',
+  '/food-requests/summary',
   requireAuth,
   requireRole('ADMIN', 'CHEF'),
   async (req, res, next) => {
@@ -105,7 +98,6 @@ router.get(
       const { from, to } = req.query || {};
       const match = {};
 
-      // Date range (on eatDate ✅)
       if (from || to) {
         const range = {};
         if (from) {
@@ -114,12 +106,9 @@ router.get(
         }
         if (to) {
           const dt = new Date(to);
-          if (!isNaN(dt.getTime())) {
-            dt.setHours(23, 59, 59, 999);
-            range.$lte = dt;
-          }
+          if (!isNaN(dt.getTime())) { dt.setHours(23, 59, 59, 999); range.$lte = dt; }
         }
-        if (Object.keys(range).length) match.eatDate = range; // ← changed from serveDate to eatDate
+        if (Object.keys(range).length) match.eatDate = range;
       }
 
       const pipeline = [
@@ -130,7 +119,6 @@ router.get(
       ];
 
       const byStatus = await FoodRequest.aggregate(pipeline);
-
       res.json({
         totals: { all: byStatus.reduce((s, x) => s + x.count, 0) },
         byStatus,

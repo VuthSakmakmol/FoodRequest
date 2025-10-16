@@ -21,7 +21,6 @@ const ALLERGENS = ['Peanut','Shellfish','Egg','Gluten','Dairy/Lactose','Soy','Ot
 const employees = ref([])
 const loadingEmployees = ref(false)
 
-/* ✅ include contactNumber in the form state */
 const form = ref({
   employeeId: '',
   name: '',
@@ -31,22 +30,32 @@ const form = ref({
   orderType: 'Daily meal',
   meals: [],
   eatDate: dayjs().format('YYYY-MM-DD'),
+
+  // legacy per-hour/min fields (used by OrderDetailSection for non-daily orders)
   eatStartHour: '',
   eatStartMinute: '',
   eatEndHour: '',
   eatEndMinute: '',
+
+  // optional simple time string used by RecurringBookingSection; safe to keep empty
+  eatTimeStart: '',
+
   quantity: 1,
   location: '',
   locationOther: '',
+
   menuChoices: ['Standard'],
   menuCounts: {},
+
   dietary: [],
   dietaryCounts: {},
   dietaryOther: '',
+
   specialInstructions: '',
+
+  // 🔁 recurring (daily)
   recurring: false,
-  frequency: '',
-  endDate: '',
+  endDate: '',        // 'YYYY-MM-DD'
   skipHolidays: false
 })
 
@@ -109,6 +118,7 @@ const showOtherAllergy = computed(() => (form.value.dietary || []).includes('Oth
 function validateForm() {
   const f = form.value
   const errs = []
+
   if (!f.employeeId) errs.push('• Employee is required')
   if (!f.orderType) errs.push('• Order Type is required')
   if (!f.eatDate) errs.push('• Eat Date is required')
@@ -118,17 +128,25 @@ function validateForm() {
   if (!Array.isArray(f.menuChoices) || f.menuChoices.length === 0) errs.push('• Select at least one Menu option')
   if (needsOtherLocation.value && !f.locationOther) errs.push('• Please specify “Other Location”')
   if (showOtherAllergy.value && !f.dietaryOther) errs.push('• Please specify “Other (identify)”')
+
+  // For non-daily orders, keep your start/end guard
   if (isTimedOrder.value) {
     const start = f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : ''
     const end   = f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : ''
     if (!start) errs.push('• Start time is required for non-daily orders')
-    if (!end) errs.push('• End time is required for non-daily orders')
+    if (!end)   errs.push('• End time is required for non-daily orders')
     if (start && end && end <= start) errs.push('• End time must be after Start')
   }
+
+  // 🔁 Recurring: require endDate and sanity check range
   if (f.recurring) {
-    if (!f.frequency) errs.push('• Frequency is required when Recurring = Yes')
-    if (!f.endDate) errs.push('• End Date is required when Recurring = Yes')
+    if (!f.endDate) {
+      errs.push('• End Date is required when Recurring = Yes')
+    } else if (f.eatDate && f.endDate < f.eatDate) {
+      errs.push('• End Date cannot be before Eat Date')
+    }
   }
+
   return errs
 }
 
@@ -154,24 +172,51 @@ function buildDietaryCountsArray(dietaryCountsObj) {
   return Array.from(map.values())
 }
 function buildPayloadFromForm(f) {
+  // prefer simple HH:mm if provided (used by Recurring section UI)
+  const simpleStart = f.eatTimeStart && /^\d{2}:\d{2}$/.test(f.eatTimeStart) ? f.eatTimeStart : null
+
+  const startFromParts = f.eatStartHour && f.eatStartMinute
+    ? `${String(f.eatStartHour).padStart(2,'0')}:${String(f.eatStartMinute).padStart(2,'0')}`
+    : null
+
+  const endFromParts = f.eatEndHour && f.eatEndMinute
+    ? `${String(f.eatEndHour).padStart(2,'0')}:${String(f.eatEndMinute).padStart(2,'0')}`
+    : null
+
   return {
     employeeId: f.employeeId,
     orderType: f.orderType,
     meals: f.meals,
     eatDate: f.eatDate,
-    eatTimeStart: f.eatStartHour && f.eatStartMinute ? `${f.eatStartHour}:${f.eatStartMinute}` : null,
-    eatTimeEnd:   f.eatEndHour && f.eatEndMinute ? `${f.eatEndHour}:${f.eatEndMinute}` : null,
+
+    // Start time uses simple HH:mm if set; otherwise legacy parts
+    eatTimeStart: simpleStart || startFromParts,
+    eatTimeEnd:   endFromParts,
+
     quantity: Number(f.quantity),
-    location: { kind: f.location, other: f.location === 'Other' ? (f.locationOther || '') : '' },
+    location: {
+      kind: f.location,
+      other: f.location === 'Other' ? (f.locationOther || '') : ''
+    },
+
     menuChoices: f.menuChoices,
     menuCounts: buildMenuCountsArray(f.menuCounts),
+
     dietary: f.dietary,
     dietaryOther: f.dietaryOther || '',
     dietaryCounts: buildDietaryCountsArray(f.dietaryCounts),
+
     specialInstructions: f.specialInstructions || '',
-    recurring: { enabled: !!f.recurring, frequency: f.recurring ? (f.frequency || null) : null, endDate: f.recurring ? (f.endDate || null) : null, skipHolidays: f.recurring ? !!f.skipHolidays : false },
+
+    // 🔁 new backend shape
+    recurring: {
+      enabled: !!f.recurring,
+      endDate: f.recurring ? (f.endDate || null) : null,
+      skipHolidays: f.recurring ? !!f.skipHolidays : false
+    }
   }
 }
+
 async function submit() {
   error.value = ''; success.value = ''
   const errs = validateForm()
@@ -191,17 +236,43 @@ async function submit() {
   } finally { loading.value = false }
 }
 function resetForm({ keepEmployee = false } = {}) {
-  const cur = { id: form.value.employeeId, name: form.value.name, dept: form.value.department, phone: form.value.contactNumber }
+  const cur = {
+    id:   form.value.employeeId,
+    name: form.value.name,
+    dept: form.value.department,
+    phone: form.value.contactNumber
+  }
+
   form.value = {
-    employeeId: keepEmployee ? cur.id : '',
-    name: keepEmployee ? cur.name : '',
-    department: keepEmployee ? cur.dept : '',
-    contactNumber: keepEmployee ? cur.phone : '',
-    orderType: 'Daily meal', meals: [], eatDate: dayjs().format('YYYY-MM-DD'),
-    eatStartHour:'', eatStartMinute:'', eatEndHour:'', eatEndMinute:'',
-    quantity: 1, location: '', locationOther: '',
-    menuChoices: ['Standard'], menuCounts: {}, dietary: [], dietaryCounts: {}, dietaryOther: '',
-    specialInstructions: '', recurring: false, frequency: '', endDate: '', skipHolidays: false
+    employeeId:   keepEmployee ? cur.id   : '',
+    name:         keepEmployee ? cur.name : '',
+    department:   keepEmployee ? cur.dept : '',
+    contactNumber:keepEmployee ? cur.phone: '',
+
+    orderType: 'Daily meal',
+    meals: [],
+    eatDate: dayjs().format('YYYY-MM-DD'),
+
+    eatStartHour:'', eatStartMinute:'',
+    eatEndHour:'',   eatEndMinute:'',
+    eatTimeStart: '',
+
+    quantity: 1,
+    location: '',
+    locationOther: '',
+
+    menuChoices: ['Standard'],
+    menuCounts: {},
+
+    dietary: [],
+    dietaryCounts: {},
+    dietaryOther: '',
+
+    specialInstructions: '',
+
+    recurring: false,
+    endDate: '',
+    skipHolidays: false
   }
 }
 
@@ -222,6 +293,66 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { socket.off('foodRequest:created'); window.removeEventListener('keydown', onHotkey) })
 function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit() }
+
+/* ───────── Recurring preview helpers ───────── */
+const fmtFullDate = (d) => dayjs(d).format('ddd, D MMM YYYY')
+const timeLabel = computed(() => {
+  const f = form.value
+  if (f.eatTimeStart && /^\d{2}:\d{2}$/.test(f.eatTimeStart)) return f.eatTimeStart
+  if (f.eatStartHour && f.eatStartMinute) {
+    return `${String(f.eatStartHour).padStart(2,'0')}:${String(f.eatStartMinute).padStart(2,'0')}`
+  }
+  return '—'
+})
+
+/** Build simple summary of menu splits: Standard auto = qty - sum(specials) */
+const menuSummary = computed(() => {
+  const f = form.value
+  const qty = Number(f.quantity || 0)
+  const specials = Object.entries(f.menuCounts || {})
+    .filter(([k]) => k !== 'Standard')
+    .reduce((sum, [,v]) => sum + Number(v || 0), 0)
+  const standard = Math.max(0, qty - specials)
+  const parts = []
+  if (standard > 0) parts.push(`Standard × ${standard}`)
+  for (const [k, v] of Object.entries(f.menuCounts || {})) {
+    if (k === 'Standard') continue
+    const n = Number(v || 0)
+    if (n > 0) parts.push(`${k} × ${n}`)
+  }
+  return parts.join(', ') || ('Standard × ' + qty)
+})
+
+/** Optional holiday set (string 'YYYY-MM-DD'); plug your dates here or pass down from child */
+const holidaySet = new Set([])
+
+/** Build list of every service day (inclusive) */
+const recurringList = computed(() => {
+  const f = form.value
+  if (!f.recurring || !f.eatDate || !f.endDate) return []
+  const out = []
+  let d = dayjs(f.eatDate)
+  const end = dayjs(f.endDate)
+  const meals = (f.meals || []).join(', ')
+  while (d.isSame(end) || d.isBefore(end)) {
+    const iso = d.format('YYYY-MM-DD')
+    if (!f.skipHolidays || !holidaySet.has(iso)) {
+      out.push({
+        iso,                    // 2025-10-16
+        label: fmtFullDate(iso),// Thu, 16 Oct 2025
+        time: timeLabel.value,  // HH:mm or —
+        meals,
+        qty: Number(f.quantity || 0),
+        menus: menuSummary.value,
+        location: f.location === 'Other' ? (f.locationOther || 'Other') : (f.location || '—'),
+      })
+    }
+    d = d.add(1, 'day')
+  }
+  return out
+})
+
+const recurringCount = computed(() => recurringList.value.length)
 </script>
 
 <template>
@@ -269,6 +400,53 @@ function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loa
             <v-col cols="12">
               <RecurringBookingSection :form="form" />
             </v-col>
+
+            <!-- 🔁 Recurring daily detail preview -->
+            <v-col cols="12" v-if="form.recurring">
+              <v-card class="rounded-lg mt-2" elevation="0" variant="outlined">
+                <v-toolbar flat density="compact">
+                  <v-toolbar-title class="text-subtitle-1 font-weight-bold">
+                    Recurring schedule preview
+                  </v-toolbar-title>
+                  <v-spacer />
+                  <v-chip size="small" color="primary" variant="flat">
+                    {{ recurringCount }} day{{ recurringCount === 1 ? '' : 's' }}
+                  </v-chip>
+                </v-toolbar>
+
+                <v-divider />
+
+                <v-card-text class="pa-0">
+                  <v-table density="comfortable" class="text-body-2">
+                    <thead>
+                      <tr>
+                        <th style="width: 180px;">Date</th>
+                        <th style="width: 80px;">Time</th>
+                        <th>Meals</th>
+                        <th style="width: 90px;">Qty</th>
+                        <th>Menus</th>
+                        <th style="width: 200px;">Location</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="d in recurringList" :key="d.iso">
+                        <td>{{ d.label }}</td>
+                        <td>{{ d.time }}</td>
+                        <td>{{ d.meals || '—' }}</td>
+                        <td>{{ d.qty }}</td>
+                        <td>{{ d.menus }}</td>
+                        <td>{{ d.location }}</td>
+                      </tr>
+                      <tr v-if="!recurringList.length">
+                        <td colspan="6" class="text-medium-emphasis">
+                          No days to show. Pick an End Date on the Recurring section.
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-card-text>
+              </v-card>
+            </v-col>
           </v-row>
         </v-form>
       </v-card-text>
@@ -293,4 +471,10 @@ function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loa
 :deep(.v-input){ margin-bottom:6px !important; }
 :deep(.v-field__input){ padding-top:6px; padding-bottom:6px; }
 .sticky-col { align-self:flex-start; }
+
+/* Recurring preview table */
+:deep(.v-table thead th){
+  background: #f8fafc;
+  font-weight: 600;
+}
 </style>

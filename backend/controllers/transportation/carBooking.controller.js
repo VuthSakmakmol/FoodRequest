@@ -1,16 +1,16 @@
 // backend/controllers/carBooking.controller.js
 const createError = require('http-errors')
-const CarBooking = require('../models/CarBooking')
+const CarBooking = require('../../models/transportation/CarBooking')
 
 let User = null
-try { User = require('../models/User') } catch { User = null }
+try { User = require('../../models/User') } catch { User = null }
 
 let Employee = null
 try { Employee = require('../models/Employee') } catch {
-  try { Employee = require('../models/EmployeeDirectory') } catch { Employee = null }
+  try { Employee = require('../../models/EmployeeDirectory') } catch { Employee = null }
 }
 
-const { toMinutes, overlaps, isValidDate } = require('../utils/time')
+const { toMinutes, overlaps, isValidDate } = require('../../utils/time')
 
 const MAX_CAR  = 3
 const MAX_MSGR = 1

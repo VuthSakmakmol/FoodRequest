@@ -1,4 +1,4 @@
-// backend/models/FoodRequest.js
+// backend/models/food/FoodRequest.js
 const mongoose = require('mongoose');
 
 /* ---------- Atomic counter for human IDs ---------- */
@@ -45,18 +45,19 @@ const DietaryCountSchema = new mongoose.Schema(
 /* ---------- FoodRequest ---------- */
 const FoodRequestSchema = new mongoose.Schema(
   {
-    requestId: { type: String, unique: true, required: true }, // e.g. FR-0001
+    // ⚠️ remove unique/index flags here to avoid duplicate index definitions
+    requestId: { type: String, required: true }, // e.g. FR-0001
 
     employee: {
-      employeeId: { type: String, required: true },
+      employeeId: { type: String, required: true, index: true },
       name: { type: String, required: true },
       department: { type: String, required: true },
     },
 
     // Dates/times
-    orderDate: { type: Date, default: Date.now, required: true }, // created "today"
-    eatDate: { type: Date, required: true }, // day to serve (calendar key)
-    eatTimeStart: { type: String }, // "HH:mm"
+    orderDate: { type: Date, default: Date.now, required: true },
+    eatDate: { type: Date, required: true }, // calendar key (stored as Date)
+    eatTimeStart: { type: String },          // "HH:mm"
     eatTimeEnd: { type: String },
 
     // Order info
@@ -85,13 +86,21 @@ const FoodRequestSchema = new mongoose.Schema(
     specialInstructions: { type: String, default: '' },
     cancelReason: { type: String, default: '' },
 
-    // Recurring options
+    /**
+     * Recurring metadata
+     * - Keep UX fields, add engine linkage
+     */
     recurring: {
       enabled: { type: Boolean, default: false },
       frequency: { type: String, enum: ['Daily', 'Weekly', 'Monthly'], default: null },
       endDate: { type: Date },
       skipHolidays: { type: Boolean, default: true },
-      parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRequest', default: null },
+      parentId: { type: mongoose.Schema.Types.ObjectId, ref: 'FoodRequest' },
+
+      // Engine linkage (no defaults → omit when not used)
+      source: { type: String, enum: ['RECURRING', 'MANUAL'], default: 'MANUAL' },
+      templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'RecurringTemplate' }, // no default
+      occurrenceDate: { type: String }, // 'YYYY-MM-DD' (local tz); no default
     },
 
     // Status
@@ -104,9 +113,10 @@ const FoodRequestSchema = new mongoose.Schema(
       },
     ],
 
-    // Telegram guard
+    // Telegram guards / notifications
     notified: {
       deliveredAt: { type: Date, default: null },
+      reminderSentAt: { type: Date, default: null },
     },
 
     // First-time timestamps for each step
@@ -122,15 +132,35 @@ const FoodRequestSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-/* ---------- Indexes ---------- */
+/* ---------- Indexes (single source of truth) ---------- */
 FoodRequestSchema.index(
   { requestId: 1 },
-  { unique: true, partialFilterExpression: { requestId: { $type: 'string' } } }
+  { unique: true, partialFilterExpression: { requestId: { $type: 'string' } }, name: 'uniq_requestId' }
 );
-// For calendar & admin queries by date/status
-FoodRequestSchema.index({ eatDate: 1, status: 1 });
 
-/* ---------- Auto-generate requestId before validation ---------- */
+// Calendar & admin queries by date/status
+FoodRequestSchema.index({ eatDate: 1, status: 1 }, { name: 'by_eatDate_status' });
+// Helpful for employee history
+FoodRequestSchema.index({ 'employee.employeeId': 1, eatDate: 1 }, { name: 'by_employee_eatDate' });
+
+/**
+ * Idempotency for recurring occurrences:
+ *   Unique only when BOTH keys are valid (ObjectId + non-empty string)
+ *   → avoids (null, null) duplicate conflicts.
+ */
+FoodRequestSchema.index(
+  { 'recurring.templateId': 1, 'recurring.occurrenceDate': 1 },
+  {
+    unique: true,
+    name: 'uniq_recurring_template_occurrence',
+    partialFilterExpression: {
+      'recurring.templateId': { $type: 'objectId' },
+      'recurring.occurrenceDate': { $type: 'string', $exists: true, $ne: '' }
+    }
+  }
+);
+
+/* ---------- Auto-generate requestId ---------- */
 FoodRequestSchema.pre('validate', async function (next) {
   try {
     if (!this.requestId) {
@@ -139,7 +169,7 @@ FoodRequestSchema.pre('validate', async function (next) {
         { $inc: { seq: 1 } },
         { new: true, upsert: true }
       );
-      const n = String(c.seq).padStart(4, '0'); // FR-0001, …
+      const n = String(c.seq).padStart(4, '0');
       this.requestId = `FR-${n}`;
     }
     next();
@@ -148,12 +178,31 @@ FoodRequestSchema.pre('validate', async function (next) {
   }
 });
 
-/* ---------- Initialize stepDates.newAt on creation ---------- */
+/* ---------- Normalize recurring fields (avoid null keys) ---------- */
 FoodRequestSchema.pre('save', function (next) {
+  // init step date
   if (this.isNew) {
     if (!this.stepDates) this.stepDates = {};
     if (!this.stepDates.newAt) this.stepDates.newAt = new Date();
   }
+
+  // cleanup recurring linkage
+  if (!this.recurring) return next();
+
+  const r = this.recurring;
+
+  // If not enabled or source isn't RECURRING, drop linkage fields
+  const shouldOmit = !r.enabled || r.source !== 'RECURRING';
+  if (shouldOmit) {
+    if (r && 'templateId' in r && (r.templateId === null || r.templateId === undefined)) delete r.templateId;
+    if (r && 'occurrenceDate' in r && (r.occurrenceDate === null || r.occurrenceDate === undefined || r.occurrenceDate === '')) delete r.occurrenceDate;
+    return next();
+  }
+
+  // Enabled & RECURRING → still remove null/empty
+  if (r.templateId == null) delete r.templateId;
+  if (r.occurrenceDate == null || r.occurrenceDate === '') delete r.occurrenceDate;
+
   next();
 });
 
@@ -166,7 +215,6 @@ FoodRequestSchema.pre('findOneAndUpdate', function (next) {
 
     const key = stepKey(newStatus);
     if (newStatus && key) {
-      // propose setting the step time if not set
       this.setUpdate({
         ...update,
         $set: {
@@ -179,7 +227,6 @@ FoodRequestSchema.pre('findOneAndUpdate', function (next) {
         ...(update.$push ? { $push: update.$push } : {}),
       });
 
-      // if already had a timestamp for this key, don't override it
       this.model
         .findOne(this.getQuery())
         .then((doc) => {
@@ -202,4 +249,5 @@ FoodRequestSchema.pre('findOneAndUpdate', function (next) {
   }
 });
 
-module.exports = mongoose.models.FoodRequest || mongoose.model('FoodRequest', FoodRequestSchema);
+module.exports =
+  mongoose.models.FoodRequest || mongoose.model('FoodRequest', FoodRequestSchema);

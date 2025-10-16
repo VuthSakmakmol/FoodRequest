@@ -229,8 +229,8 @@ function exportExcel() {
     'Dietary': (r.dietary || []).join(', '),
     'Dietary Counts': JSON.stringify(r.dietaryCounts || []),
     'Dietary Other': r.dietaryOther || '',
-    'Special Instructions': r.specialInstructions || '',
-    'Recurring': r.recurring?.enabled ? r.recurring.frequency : '—',
+    // 🔁 updated recurring fields (no frequency)
+    'Recurring Enabled': r.recurring?.enabled ? 'Yes' : 'No',
     'Recurring End Date': fmtDate(r.recurring?.endDate),
     'Skip Holidays': r.recurring?.skipHolidays ? 'Yes' : 'No',
   }))

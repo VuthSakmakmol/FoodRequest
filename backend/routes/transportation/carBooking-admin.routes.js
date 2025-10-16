@@ -1,7 +1,7 @@
 // backend/routes/carBooking-admin.routes.js
 const express = require('express')
 const router = express.Router()
-const ctrl = require('../controllers/carBooking.controller')
+const ctrl = require('../../controllers/transportation/carBooking.controller')
 
 // /api/admin/car-bookings
 router.get('/', ctrl.listAdmin)
