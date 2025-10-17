@@ -38,7 +38,7 @@ function go(it){ if (it?.to) router.push(it.to) }
 function isActive(it){ return route.name === it?.to?.name }
 function logout(){
   auth.logout()
-  router.push({ name: 'greeting' }) // landing page; guard will handle role routes
+  router.push({ name: 'employee-request' }) // landing page; guard will handle role routes
 }
 </script>
 

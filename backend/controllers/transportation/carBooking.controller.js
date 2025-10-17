@@ -11,6 +11,7 @@ try { Employee = require('../models/Employee') } catch {
 }
 
 const { toMinutes, overlaps, isValidDate } = require('../../utils/time')
+const { notify } = require('../../services/transport.telegram.notify')   // <-- ADD
 
 const MAX_CAR  = 3
 const MAX_MSGR = 1
@@ -121,9 +122,14 @@ async function createBooking(req, res, next) {
       ticketUrl
     })
 
+    // SOCKET
     req.io?.emit('carBooking:created', {
       _id: String(doc._id), employeeId, category, tripDate, timeStart, timeEnd, status: doc.status
     })
+
+    // TELEGRAM: employee created request (group only)
+    try { await notify('REQUEST_CREATED', { bookingId: doc._id, employeeName: employeeSnapshot?.name }) } catch {}
+
     res.status(201).json(doc)
   } catch (err) { next(err) }
 }
@@ -156,7 +162,12 @@ async function updateStatus(req, res, next) {
     doc.status = status
     await doc.save()
 
+    // SOCKET
     req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status })
+
+    // TELEGRAM: group + (if assigned) driver DM
+    try { await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name }) } catch {}
+
     res.json(doc)
   } catch (err) { next(err) }
 }
@@ -177,7 +188,7 @@ async function assignBooking(req, res, next) {
       if (u?.name) resolvedDriverName = u.name
     }
 
-    // hard clash check for the same driver/time
+    // clash check for the same driver/time
     const s = toMinutes(doc.timeStart), e = toMinutes(doc.timeEnd)
     const others = await CarBooking.find({
       _id: { $ne: doc._id },
@@ -197,7 +208,6 @@ async function assignBooking(req, res, next) {
       assignedById:   assignedById || '',
       assignedByName: assignedByName || '',
       assignedAt:     new Date(),
-      // NEW: reset driver acknowledgment on (re)assign
       driverAck: 'PENDING',
       driverAckAt: undefined
     }
@@ -212,7 +222,7 @@ async function assignBooking(req, res, next) {
 
     await doc.save()
 
-    // notify both
+    // SOCKET
     req.io?.emit('carBooking:assigned', {
       bookingId: String(doc._id),
       driverId: doc.assignment.driverId,
@@ -223,6 +233,10 @@ async function assignBooking(req, res, next) {
       status: doc.status,
     })
     req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status })
+
+    // TELEGRAM: group + DM to assigned driver
+    try { await notify('ADMIN_ACCEPTED_ASSIGNED', { bookingId: doc._id, byName: req.user?.name }) } catch {}
+
     res.json(doc)
   } catch (err) { next(err) }
 }
@@ -270,12 +284,10 @@ async function driverAcknowledge(req, res, next) {
     const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
-    // only the assigned driver can ack
     if (String(doc.assignment?.driverId || '') !== String(loginId)) {
       throw createError(403, 'Not allowed: not the assigned driver.')
     }
 
-    // idempotent: if already same response, just return
     if (doc.assignment?.driverAck === normalized) {
       return res.json(doc)
     }
@@ -297,15 +309,13 @@ async function driverAcknowledge(req, res, next) {
   } catch (err) { next(err) }
 }
 
-// backend/controllers/carBooking.controller.js (add near the bottom)
-
-/* ---------- driver can update status (forward-only) ---------- */
+/* ---------- driver forward-only status ---------- */
 async function driverUpdateStatus(req, res, next) {
   try {
     const { id } = req.params
     const { status } = req.body || {}
     const next = String(status || '').toUpperCase()
-    const allowed = ['ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED'] // driver cannot set PENDING/ACCEPTED here
+    const allowed = ['ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']
     if (!allowed.includes(next)) throw createError(400, 'Invalid status for driver.')
 
     const { loginId } = pickIdentityFrom(req)
@@ -314,12 +324,10 @@ async function driverUpdateStatus(req, res, next) {
     const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
-    // Only the assigned driver may move it
     if (String(doc.assignment?.driverId || '') !== String(loginId)) {
       throw createError(403, 'Not allowed: not the assigned driver.')
     }
 
-    // Must have accepted assignment first (your new ack step)
     if ((doc.assignment?.driverAck || 'PENDING') !== 'ACCEPTED') {
       throw createError(400, 'Please accept the assignment first.')
     }
@@ -333,6 +341,10 @@ async function driverUpdateStatus(req, res, next) {
     await doc.save()
 
     req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status })
+
+    // TELEGRAM: group + (if assigned) driver DM
+    try { await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name }) } catch {}
+
     res.json(doc)
   } catch (err) { next(err) }
 }
@@ -345,6 +357,6 @@ module.exports = {
   assignBooking,
   listAdmin,
   listForAssignee,
-  driverAcknowledge,      // from previous step
-  driverUpdateStatus,     // ← NEW export
+  driverAcknowledge,
+  driverUpdateStatus,
 }

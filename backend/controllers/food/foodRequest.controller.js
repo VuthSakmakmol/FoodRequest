@@ -2,6 +2,7 @@
 const mongoose = require('mongoose');
 const dayjs = require('dayjs');
 const FoodRequest = require('../../models/food/FoodRequest');
+const RecurringTemplate = require('../../models/food/RecurringTemplate');
 const EmployeeDirectory = require('../../models/EmployeeDirectory');
 const { emitCounterpart } = require('../../utils/realtime');
 

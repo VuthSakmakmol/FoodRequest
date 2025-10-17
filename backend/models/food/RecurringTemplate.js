@@ -1,90 +1,50 @@
 // backend/models/food/RecurringTemplate.js
 const mongoose = require('mongoose');
 
-/* ---------- Enums ---------- */
-const MENU_ENUM = ['Standard', 'Vegetarian', 'Vegan', 'No pork', 'No beef'];
-const ALLERGEN_ENUM = ['Peanut', 'Shellfish', 'Egg', 'Gluten', 'Dairy/Lactose', 'Soy', 'Others'];
-
-/* ---------- Subschemas ---------- */
-const MenuCountSchema = new mongoose.Schema(
-  {
-    choice: { type: String, enum: MENU_ENUM, required: true },
-    count: { type: Number, min: 1, required: true },
+const RecurringTemplateSchema = new mongoose.Schema({
+  owner: {
+    employeeId: { type: String, required: true, index: true },
+    name:       { type: String, required: true },
+    department: { type: String, default: '' }
   },
-  { _id: false }
-);
 
-const DietaryCountSchema = new mongoose.Schema(
-  {
-    allergen: { type: String, enum: ALLERGEN_ENUM, required: true },
-    count: { type: Number, min: 1, required: true },
-    menu: { type: String, enum: MENU_ENUM, default: 'Standard' },
+  orderType:   { type: String, required: true },      // e.g. 'Daily meal'
+  meals:       [{ type: String, required: true }],    // ['Breakfast', ...]
+  quantity:    { type: Number, required: true, min: 1 },
+
+  location: {
+    kind:  { type: String, required: true },          // 'Canteen' | 'Office' | 'Other'
+    other: { type: String, default: '' }
   },
-  { _id: false }
-);
 
-const HistorySchema = new mongoose.Schema(
-  {
-    at: { type: Date, default: Date.now },
-    action: { type: String, required: true }, // e.g., SCHEDULE_NEXT, PAUSE, RESUME, CANCEL, SKIP_TODAY
-    meta: { type: mongoose.Schema.Types.Mixed },
-  },
-  { _id: false }
-);
+  menuChoices: [{ type: String, required: true }],    // ['Standard', 'Vegan', ...]
+  menuCounts: [{
+    choice: { type: String, required: true },
+    count:  { type: Number, required: true, min: 1 }
+  }],
 
-/* ---------- RecurringTemplate ---------- */
-const RecurringTemplateSchema = new mongoose.Schema(
-  {
-    owner: {
-      employeeId: { type: String, required: true, index: true },
-      name: { type: String, default: '' },
-      department: { type: String, default: '' },
-    },
+  dietary:        [{ type: String }],
+  dietaryOther:   { type: String, default: '' },
+  dietaryCounts:  [{
+    allergen: { type: String, required: true },
+    menu:     { type: String, default: 'Standard' },
+    count:    { type: Number, required: true, min: 1 }
+  }],
 
-    // Occurrence payload
-    orderType: { type: String, enum: ['Daily meal', 'Meeting catering', 'Visitor meal'], default: 'Daily meal' },
-    meals: { type: [String], default: [] },
-    quantity: { type: Number, min: 1, required: true },
+  // schedule
+  frequency:   { type: String, default: 'Daily' },    // future-proof
+  startDate:   { type: Date,   required: true },
+  endDate:     { type: Date,   required: true },
+  skipHolidays:{ type: Boolean, default: false },
 
-    location: {
-      kind: { type: String, enum: ['Meeting Room', 'Canteen', 'Other'], default: 'Canteen' },
-      other: { type: String, default: '' },
-    },
+  eatTimeStart:{ type: String, default: null },       // 'HH:mm' or null
+  eatTimeEnd:  { type: String, default: null },
 
-    menuChoices: [{ type: String, enum: MENU_ENUM, default: 'Standard' }],
-    menuCounts: { type: [MenuCountSchema], default: [] },
+  timezone:    { type: String, default: 'Asia/Phnom_Penh' },
 
-    dietary: [{ type: String, enum: ALLERGEN_ENUM }],
-    dietaryCounts: { type: [DietaryCountSchema], default: [] },
-    dietaryOther: { type: String, default: '' },
+  status:      { type: String, default: 'ACTIVE', index: true }, // ACTIVE/PAUSED/ENDED
+  nextRunAt:   { type: Date,   default: null, index: true },
+  skipDates:   [{ type: String }]                     // ['YYYY-MM-DD']
+}, { timestamps: true });
 
-    specialInstructions: { type: String, default: '' },
-
-    // Frequency window
-    frequency: { type: String, enum: ['Daily', 'Weekly', 'Monthly'], required: true },
-    startDate: { type: Date, required: true },
-    endDate: { type: Date, required: true },
-    skipHolidays: { type: Boolean, default: true },
-
-    // Optional time window
-    eatTimeStart: { type: String, default: null }, // 'HH:mm'
-    eatTimeEnd: { type: String, default: null },
-
-    // Engine control
-    timezone: { type: String, default: 'Asia/Phnom_Penh' },
-    status: { type: String, enum: ['ACTIVE', 'PAUSED', 'CANCELED'], default: 'ACTIVE', index: true },
-    nextRunAt: { type: Date, default: null, index: true }, // UTC timestamp
-    skipDates: { type: [String], default: [] }, // 'YYYY-MM-DD'
-
-    history: { type: [HistorySchema], default: [] },
-  },
-  { timestamps: true }
-);
-
-/* ---------- Indexes ---------- */
-RecurringTemplateSchema.index({ 'owner.employeeId': 1, status: 1 });
-RecurringTemplateSchema.index({ status: 1, nextRunAt: 1 });
-
-module.exports =
-  mongoose.models.RecurringTemplate ||
-  mongoose.model('RecurringTemplate', RecurringTemplateSchema);
+module.exports = mongoose.model('RecurringTemplate', RecurringTemplateSchema);

@@ -85,6 +85,7 @@ app.use('/api/admin',               require('./routes/admin-user.routes'));
 app.use('/api/driver',              require('./routes/transportation/carBooking-driver.routes'));
 // Optional alias for legacy callers
 app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'));
+app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
 
 // public routes (holiday)
 app.use('/api/public', require('./routes/public-holidays.routes'))

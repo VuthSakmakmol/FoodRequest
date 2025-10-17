@@ -16,7 +16,7 @@ const items = [
 
 const initials = computed(() => (auth.user?.name || auth.user?.loginId || 'U').slice(0,2).toUpperCase())
 function go(it){ if(it?.to) router.push(it.to) }
-function logout(){ auth.logout(); router.push({ name:'admin-login' }) }
+function logout(){ auth.logout(); router.push({ name:'employee-request' }) }
 </script>
 
 <template>
