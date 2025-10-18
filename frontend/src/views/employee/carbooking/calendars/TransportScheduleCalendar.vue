@@ -1,3 +1,4 @@
+<!-- views/employee/carbooking/carlendars/TransportScheduleCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import dayjs from 'dayjs'
@@ -7,11 +8,11 @@ import socket from '@/utils/socket'
 /* ---------- props ---------- */
 const props = defineProps({
   modelValue: { type: String, default: () => dayjs().format('YYYY-MM-DD') },
-  startHour:  { type: String, default: '06' },  // day start (HH)
-  endHour:    { type: String, default: '22' },  // day end   (HH)
+  startHour:  { type: String, default: '06' },
+  endHour:    { type: String, default: '22' },
   minuteStep: { type: Number, default: 30 },
-  maxCar:     { type: Number, default: 3 },     // fallback if no drivers fetched
-  maxMsgr:    { type: Number, default: 1 },     // fallback if no messengers fetched
+  maxCar:     { type: Number, default: 3 },
+  maxMsgr:    { type: Number, default: 1 },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -29,57 +30,54 @@ const loading   = ref(false)
 const err       = ref('')
 const bookings  = ref([])
 
-/* fetched people for lane labels/capacity */
-const drivers    = ref([])  // [{_id, loginId, name}]
+/* fetched people for lane labels/capacity (normalized to loginId) */
+const drivers    = ref([])  // [{ _id: loginId, loginId, name }]
 const messengers = ref([])
 
 /* ---------- FILTERS ---------- */
 const STAT_LIST = ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','DELAYED','COMPLETED','CANCELLED']
 
 const filters = ref({
-  category: 'ALL',    // ALL | Car | Messenger
-  status:   'ALL',    // ALL | one of STAT_LIST
-  driverId: 'ALL',    // 'ALL' or actual driverId
-  q: '',              // search: employee/purpose/driver
-  timeStart: '',      // HH:mm
-  timeEnd:   '',      // HH:mm
+  category: 'ALL',
+  status:   'ALL',
+  driverId: 'ALL',   // always loginId
+  q: '',
+  timeStart: '',
+  timeEnd:   '',
   includeCancelled: false
 })
 
-/* set sensible time min/max and reset when date changes */
+/* min/max time */
 const dayStartHH = computed(() => String(props.startHour).padStart(2,'0'))
 const dayEndHH   = computed(()   => String(props.endHour).padStart(2,'0'))
 const timeMin = computed(() => `${dayStartHH.value}:00`)
 const timeMax = computed(() => `${dayEndHH.value}:00`)
 
-/* when date changes -> clear the time window & fetch */
 watch(selectedDate, () => {
   filters.value.timeStart = ''
   filters.value.timeEnd   = ''
   fetchDay()
 })
+watch(() => [filters.value.timeStart, filters.value.timeEnd], () => fetchDay())
 
-/* also refetch if user adjusts time window (server still returns day, but harmless) */
-watch(() => [filters.value.timeStart, filters.value.timeEnd], () => {
-  fetchDay()
-})
-
-/* ---------- driver options (from today's bookings or fetched list) ---------- */
+/* ---------- Assignee options (normalized to loginId) ---------- */
 const driverOptions = computed(() => {
-  // Prefer fetched drivers list; fall back to names in bookings for today.
-  if (drivers.value?.length) {
-    return [{ title:'ALL', value:'ALL' }, ...drivers.value.map(d => ({ title: d.name || d.loginId, value: d._id || d.loginId })) ]
-  }
   const dict = new Map()
-  for (const b of bookings.value) {
-    const id = b?.assignment?.driverId || ''
-    const nm = b?.assignment?.driverName || ''
-    if (id) dict.set(id, nm || id)
+  for (const p of drivers.value)    dict.set(p.loginId, p.name || p.loginId)
+  for (const p of messengers.value) dict.set(p.loginId, p.name || p.loginId)
+  if (dict.size === 0) {
+    for (const b of bookings.value) {
+      const id = String(b?.assignment?.driverId || '').trim()
+      const nm = String(b?.assignment?.driverName || '').trim()
+      if (id) dict.set(id, nm || id)
+    }
   }
-  return [{ title:'ALL', value:'ALL' }, ...Array.from(dict, ([value, title]) => ({ title, value })) ]
+  const opts = Array.from(dict, ([loginId, title]) => ({ title, value: loginId }))
+    .sort((a,b) => a.title.localeCompare(b.title))
+  return [{ title:'ALL', value:'ALL' }, ...opts]
 })
 
-/* ---------- apply filters (client-side) ---------- */
+/* ---------- filtered bookings ---------- */
 const filteredBookings = computed(() => {
   const f = filters.value
   const hasWindow = f.timeStart && f.timeEnd && toMin(f.timeEnd) > toMin(f.timeStart)
@@ -135,16 +133,23 @@ async function fetchDay() {
   }
 }
 async function fetchPeople() {
+  const normalize = (arr = []) => {
+    return (Array.isArray(arr) ? arr : []).map(u => {
+      const loginId = String(u.loginId || u._id || u.id || '').trim()
+      return { _id: loginId, loginId, name: u.name || u.fullName || loginId || '—' }
+    }).filter(u => !!u.loginId)
+  }
   try {
     const [drv, msg] = await Promise.all([
-      api.get('/admin/users', { params: { role: 'DRIVER', isActive: true } }),
+      api.get('/admin/users', { params: { role: 'DRIVER',    isActive: true } }),
       api.get('/admin/users', { params: { role: 'MESSENGER', isActive: true } }),
     ])
-    drivers.value    = Array.isArray(drv?.data) ? drv.data : []
-    messengers.value = Array.isArray(msg?.data) ? msg.data : []
+    drivers.value    = normalize(drv?.data)
+    messengers.value = normalize(msg?.data)
   } catch (e) {
-    // non-fatal, we keep fallbacks
     console.warn('fetchPeople failed:', e?.message || e)
+    drivers.value = []
+    messengers.value = []
   }
 }
 
@@ -168,47 +173,56 @@ onBeforeUnmount(() => {
   socket.off('carBooking:assigned',onDelta)
 })
 
-/* ---------- pack into lanes ---------- */
+/* ---------- packing (assignee-aware) ---------- */
 const STAT_COLORS = {
-  PENDING:   '#9CA3AF',
-  ACCEPTED:  '#EF4444',
-  ON_ROAD:   '#0EA5E9',
-  ARRIVING:  '#10B981',
-  COMPLETED: '#22C55E',
-  DELAYED:   '#F59E0B',
-  CANCELLED: '#94A3B8',
+  PENDING:'#9CA3AF', ACCEPTED:'#EF4444', ON_ROAD:'#0EA5E9', ARRIVING:'#10B981',
+  COMPLETED:'#22C55E', DELAYED:'#F59E0B', CANCELLED:'#94A3B8',
 }
-function pack(category, capacity) {
-  const src = filteredBookings.value.filter(b => b.category === category)
-  const items = src.map(b => ({
+
+function asJob(b) {
+  return {
     id: String(b._id),
     start: clamp(toMin(b.timeStart), startMin.value, endMin.value),
     end:   clamp(toMin(b.timeEnd),   startMin.value, endMin.value),
-    rawStart: b.timeStart, rawEnd: b.timeEnd,
-    status: b.status,
-    emp: b.employee?.name || b.employeeId || '',
-    purpose: b.purpose || '',
-  }))
-  .filter(x => x.end > x.start)
-  .sort((a,b) => a.start - b.start || a.end - b.end)
-
-  const lanes = Array.from({ length: capacity }, () => [])
-  for (const job of items) {
-    let placed = false
-    for (const lane of lanes) {
-      const clash = lane.some(x => overlaps(x.start, x.end, job.start, job.end))
-      if (!clash) { lane.push(job); placed = true; break }
-    }
-    if (!placed) lanes[lanes.length - 1].push({ ...job, overbooked: true })
+    rawStart: b.timeStart,
+    rawEnd:   b.timeEnd,
+    status:   b.status,
+    emp:      b.employee?.name || b.employeeId || '',
+    assigneeId: String(b?.assignment?.driverId || ''), // loginId
   }
-  return lanes
 }
 
-/* capacities & labels from DB (fallback to props) */
-const carCapacity  = computed(() => drivers.value?.length ? drivers.value.length : props.maxCar)
-const msgCapacity  = computed(() => messengers.value?.length ? messengers.value.length : props.maxMsgr)
-const carLanes     = computed(() => pack('Car', carCapacity.value))
-const msgLanes     = computed(() => pack('Messenger', msgCapacity.value))
+function packByAssignee(category, peopleList, fallbackCap) {
+  const src = filteredBookings.value.filter(b => b.category === category)
+  const items = src.map(asJob).filter(x => x.end > x.start)
+                   .sort((a,b) => a.start - b.start || a.end - b.end)
+
+  // If no people yet, return empty lanes sized by fallback so UI still shows rows
+  if (!peopleList || peopleList.length === 0) {
+    return {
+      lanes: Array.from({ length: fallbackCap }, () => []),
+      unassigned: items // show under Unassigned section so they’re visible
+    }
+  }
+
+  // fixed row for each person by loginId
+  const idToIdx = new Map(peopleList.map((p, i) => [String(p.loginId || p._id || ''), i]))
+  const lanes = Array.from({ length: peopleList.length }, () => [])
+  const unassigned = []
+
+  for (const job of items) {
+    const idx = idToIdx.get(job.assigneeId)
+    if (idx === undefined) unassigned.push(job)
+    else lanes[idx].push(job)
+  }
+  return { lanes, unassigned }
+}
+
+const carCapacity = computed(() => drivers.value?.length ? drivers.value.length : props.maxCar)
+const msgCapacity = computed(() => messengers.value?.length ? messengers.value.length : props.maxMsgr)
+
+const carPack = computed(() => packByAssignee('Car', drivers.value, props.maxCar))
+const msgPack = computed(() => packByAssignee('Messenger', messengers.value, props.maxMsgr))
 
 /* position helpers */
 function leftPct(mins) {
@@ -224,7 +238,7 @@ function widthPct(sMin, eMin) {
 const cardRef = ref(null)
 const headerColsRef = ref(null)
 const bodyColsRef = ref(null)
-const cellW = ref(160) // 160 / 120 / 90 based on available width
+const cellW = ref(160) // 160 / 120 / 90
 const gapW  = 8
 const gridPx = computed(() => (cols.value * cellW.value) + ((cols.value - 1) * gapW))
 
@@ -281,10 +295,9 @@ const LEGEND = [
 
 <template>
   <div ref="cardRef" class="transport-cal">
-    <!-- ================= FILTERS (fully responsive; date/time drive fetch) ================= -->
+    <!-- ================= FILTERS ================= -->
     <div class="toolbar">
       <div class="filters-grid">
-        <!-- Date -->
         <div class="fg-item fg-date">
           <label>Date</label>
           <div class="date-ctrl">
@@ -294,7 +307,6 @@ const LEGEND = [
           </div>
         </div>
 
-        <!-- Category -->
         <div class="fg-item">
           <label>Category</label>
           <select class="input tall" v-model="filters.category">
@@ -302,7 +314,6 @@ const LEGEND = [
           </select>
         </div>
 
-        <!-- Status -->
         <div class="fg-item">
           <label>Status</label>
           <select class="input tall" v-model="filters.status">
@@ -311,22 +322,19 @@ const LEGEND = [
           </select>
         </div>
 
-        <!-- Driver -->
         <div class="fg-item">
-          <label>Driver</label>
+          <label>Assignee (Driver/Messenger)</label>
           <select class="input tall" v-model="filters.driverId">
             <option :value="'ALL'">ALL</option>
             <option v-for="opt in driverOptions" :key="opt.value" :value="opt.value">{{ opt.title }}</option>
           </select>
         </div>
 
-        <!-- Search -->
         <div class="fg-item fg-span2">
           <label>Search name / purpose / driver</label>
           <input class="input tall" type="text" v-model="filters.q" placeholder="Search…" />
         </div>
 
-        <!-- Time window (follows day bounds) -->
         <div class="fg-item">
           <label>From</label>
           <input class="input tall" type="time" v-model="filters.timeStart" :min="timeMin" :max="timeMax" step="60">
@@ -369,37 +377,37 @@ const LEGEND = [
     <div v-if="filters.category === 'ALL' || filters.category === 'Car'">
       <div class="section-title">🚗 Cars ({{ carCapacity }})</div>
       <div class="grid">
+        <!-- fixed labels -->
         <div class="lane-col sticky">
           <div
             v-for="(d, i) in (drivers.length ? drivers : Array.from({length: carCapacity}, (_,k)=>({name:`Car #${k+1}`})))"
             :key="'car-lbl-'+(d._id || i)"
             class="lane-label"
-          >
-            {{ d.name || d.loginId || `Car #${i+1}` }}
-          </div>
+          >{{ d.name || d.loginId || `Car #${i+1}` }}</div>
         </div>
 
         <div class="cols body" ref="bodyColsRef">
           <div class="cols-inner" :style="{ width: gridPx + 'px' }">
-            <div v-for="i in carCapacity" :key="'car-row-'+i" class="row-bg"
-                 :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
-              <div v-for="c in cols" :key="'car-cell-'+i+'-'+c" class="cell"></div>
-            </div>
 
-            <template v-for="(lane, li) in carLanes" :key="'car-lane-'+li">
-              <div class="lane-overlay" style="height:44px">
+            <!-- ONE wrap per row: background + its overlay -->
+            <div v-for="(lane, li) in carPack.lanes" :key="'car-rowwrap-'+li" class="row-wrap">
+              <div class="row-bg"
+                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
+                <div v-for="c in cols" :key="'car-cell-'+li+'-'+c" class="cell"></div>
+              </div>
+
+              <div class="lane-overlay">
                 <div
                   v-for="b in lane"
                   :key="b.id"
                   class="block"
-                  :class="{ over: b.overbooked }"
                   :style="{
                     left: leftPct(b.start),
                     width: widthPct(b.start, b.end),
                     borderColor: STAT_COLORS[b.status] || '#888',
                     background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
                   }"
-                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}${b.overbooked?' (over capacity)':''}`"
+                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
                 >
                   <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
                   <div class="block-text">
@@ -409,9 +417,39 @@ const LEGEND = [
                   </div>
                 </div>
               </div>
-            </template>
-          </div>
-        </div>
+            </div>
+
+            <!-- optional Unassigned row -->
+            <div v-if="carPack.unassigned.length" class="row-wrap">
+              <div class="row-bg"
+                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
+                <div v-for="c in cols" :key="'car-un-cell-'+c" class="cell"></div>
+              </div>
+              <div class="lane-overlay">
+                <div
+                  v-for="b in carPack.unassigned"
+                  :key="b.id"
+                  class="block"
+                  :style="{
+                    left: leftPct(b.start),
+                    width: widthPct(b.start, b.end),
+                    borderColor: STAT_COLORS[b.status] || '#888',
+                    background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
+                  }"
+                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
+                >
+                  <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
+                  <div class="block-text">
+                    <div class="t">{{ b.rawStart }}–{{ b.rawEnd }}</div>
+                    <div class="s">{{ b.status }}</div>
+                    <div class="p" v-if="b.emp">{{ b.emp }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div> <!-- cols-inner -->
+        </div> <!-- cols body -->
       </div>
     </div>
 
@@ -424,32 +462,30 @@ const LEGEND = [
             v-for="(m, i) in (messengers.length ? messengers : Array.from({length: msgCapacity}, (_,k)=>({name:`Messenger #${k+1}`})))"
             :key="'msg-lbl-'+(m._id || i)"
             class="lane-label"
-          >
-            {{ m.name || m.loginId || `Messenger #${i+1}` }}
-          </div>
+          >{{ m.name || m.loginId || `Messenger #${i+1}` }}</div>
         </div>
 
         <div class="cols body">
           <div class="cols-inner" :style="{ width: gridPx + 'px' }">
-            <div v-for="i in msgCapacity" :key="'msg-row-'+i" class="row-bg"
-                 :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
-              <div v-for="c in cols" :key="'msg-cell-'+i+'-'+c" class="cell"></div>
-            </div>
 
-            <template v-for="(lane, li) in msgLanes" :key="'msg-lane-'+li">
-              <div class="lane-overlay" style="height:44px">
+            <div v-for="(lane, li) in msgPack.lanes" :key="'msg-rowwrap-'+li" class="row-wrap">
+              <div class="row-bg"
+                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
+                <div v-for="c in cols" :key="'msg-cell-'+li+'-'+c" class="cell"></div>
+              </div>
+
+              <div class="lane-overlay">
                 <div
                   v-for="b in lane"
                   :key="b.id"
                   class="block"
-                  :class="{ over: b.overbooked }"
                   :style="{
                     left: leftPct(b.start),
                     width: widthPct(b.start, b.end),
                     borderColor: STAT_COLORS[b.status] || '#888',
                     background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
                   }"
-                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}${b.overbooked?' (over capacity)':''}`"
+                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
                 >
                   <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
                   <div class="block-text">
@@ -459,16 +495,45 @@ const LEGEND = [
                   </div>
                 </div>
               </div>
-            </template>
-          </div>
-        </div>
+            </div>
+
+            <div v-if="msgPack.unassigned.length" class="row-wrap">
+              <div class="row-bg"
+                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
+                <div v-for="c in cols" :key="'msg-un-cell-'+c" class="cell"></div>
+              </div>
+              <div class="lane-overlay">
+                <div
+                  v-for="b in msgPack.unassigned"
+                  :key="b.id"
+                  class="block"
+                  :style="{
+                    left: leftPct(b.start),
+                    width: widthPct(b.start, b.end),
+                    borderColor: STAT_COLORS[b.status] || '#888',
+                    background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
+                  }"
+                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
+                >
+                  <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
+                  <div class="block-text">
+                    <div class="t">{{ b.rawStart }}–{{ b.rawEnd }}</div>
+                    <div class="s">{{ b.status }}</div>
+                    <div class="p" v-if="b.emp">{{ b.emp }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- cols-inner -->
+        </div><!-- cols body -->
       </div>
     </div>
 
     <!-- ================= chips ================= -->
     <div class="nowchips">
-      <span v-if="availCarNow !== null" class="chip blue">🚗 Now: {{ availCarNow }} / {{ carCapacity }} free</span>
-      <span v-if="availMsgrNow !== null" class="chip amber">🛵 Now: {{ availMsgrNow }} / {{ msgCapacity }} free</span>
+      <span v-if="availCarNow !== null" class="chip blue">🚗 Now: {{ availCarNow }}free</span>
+      <span v-if="availMsgrNow !== null" class="chip amber">🛵 Now: {{ availMsgrNow }} free</span>
     </div>
 
     <div v-if="loading" class="loader"></div>
@@ -516,23 +581,24 @@ const LEGEND = [
 .lane-col.head{ font-weight:700; color:#334155; display:flex; align-items:center; }
 .lane-label{ height:44px; display:flex; align-items:center; font-weight:600; color:#374151; padding-right:6px; }
 
-/* scroll */
+/* scroll containers */
 .cols{ position: relative; overflow-x:auto; overflow-y:hidden; padding-bottom:2px; }
 .cols::-webkit-scrollbar{ height:10px; }
 .cols::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:999px; }
 .cols-inner{ position: relative; }
 
+/* time header ticks */
 .grid.header .col{ display:inline-block; height:24px; margin-right:8px; position:relative; vertical-align:top; }
 .tick{ position:absolute; left:0; top:2px; font-size:.78rem; color:#475569; font-weight:600; }
 
-/* rows */
-.row-bg{ display:grid; gap:8px; margin-bottom:10px; }
+/* per-row wrap: background grid + overlay stacked */
+.row-wrap{ position:relative; height:44px; margin-bottom:10px; }
+.row-bg{ display:grid; gap:8px; height:44px; }
 .cell{ height:44px; border:1px dashed rgba(148,163,184,.35); background:#fff; border-radius:8px; }
 
-/* overlay blocks */
-.lane-overlay{ position: relative; margin-top: -54px; height:44px; }
+/* overlay blocks are absolutely positioned INSIDE the row-wrap */
+.lane-overlay{ position:absolute; inset:0; }
 .block{ position:absolute; top:2px; bottom:2px; border:2px solid; border-radius:10px; overflow:hidden; min-width:16px; background:#fff; }
-.block.over{ outline:2px dashed #ef4444; }
 .block-bar{ position:absolute; left:0; top:0; bottom:0; width:6px; }
 .block-text{ position:absolute; left:10px; right:6px; top:2px; bottom:2px; display:flex; align-items:center; gap:10px; font-size:.82rem; font-weight:600; color:#111827; }
 .block-text .t{ min-width:86px; }

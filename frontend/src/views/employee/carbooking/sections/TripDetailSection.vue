@@ -11,7 +11,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['capacity-change'])
 
-/* Backend capacity rules */
+/* Backend capacity rules (fallbacks for chips) */
 const MAX_CAR = 3
 const MAX_MSGR = 1
 
@@ -108,8 +108,11 @@ async function refreshAvailability() {
     const e = toMin(endTime.value)
     const sel = props.form.category
 
+    // IMPORTANT CHANGE:
+    // We now ignore both CANCELLED **and COMPLETED** bookings in the "busy" preview
+    // so employees can request again once a driver/messenger has completed a job.
     clashes.value = (Array.isArray(day) ? day : [])
-      .filter(b => b.category === sel && b.status !== 'CANCELLED')
+      .filter(b => b.category === sel && !['CANCELLED','COMPLETED'].includes(b.status))
       .filter(b => overlaps(s, e, toMin(b.timeStart), toMin(b.timeEnd)))
       .map(b => ({ id: b._id, start: b.timeStart, end: b.timeEnd }))
       .sort((a, b) => a.start.localeCompare(b.start))

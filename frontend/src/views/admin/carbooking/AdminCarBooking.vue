@@ -15,7 +15,7 @@ const qSearch        = ref('')
 
 const updating = ref({}) // { [bookingId]: boolean }
 
-/* Workflow */
+/* Workflow (unchanged) */
 const ALLOWED_NEXT = {
   PENDING:   ['ACCEPTED','CANCELLED'],
   ACCEPTED:  ['ON_ROAD','DELAYED','CANCELLED'],
@@ -58,7 +58,7 @@ async function loadSchedule() {
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],
-      assignment: x.assignment || {}   // expect driverAck here
+      assignment: x.assignment || {}
     }))
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || 'Failed to load schedule'
@@ -70,12 +70,11 @@ function prettyStops(stops = []) {
   return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
 }
 
-/* Status + Ack colors + FA icons */
+/* Colors + Icons */
 const statusColor = s => ({
   PENDING:'grey', ACCEPTED:'primary', ON_ROAD:'info', ARRIVING:'teal',
   COMPLETED:'success', DELAYED:'warning', CANCELLED:'error'
 }[s] || 'grey')
-
 const statusFa = s => ({
   PENDING:'fa-solid fa-hourglass-half',
   ACCEPTED:'fa-solid fa-circle-check',
@@ -85,7 +84,6 @@ const statusFa = s => ({
   DELAYED:'fa-solid fa-triangle-exclamation',
   CANCELLED:'fa-solid fa-ban'
 }[s] || 'fa-solid fa-hourglass-half')
-
 const ackColor = s => ({ PENDING:'grey', ACCEPTED:'success', DECLINED:'error' }[s] || 'grey')
 const ackFa  = s => ({
   PENDING:'fa-solid fa-circle-question',
@@ -93,12 +91,12 @@ const ackFa  = s => ({
   DECLINED:'fa-solid fa-thumbs-down'
 }[s] || 'fa-solid fa-circle-question')
 
-/* Assigned chip helpers */
+/* Assigned chip helpers (fallback to request category for icon/color) */
 const assigneeName  = (it) => it?.assignment?.driverName || it?.assignment?.driverId || ''
 const assigneeColor = (it) => (it?.category === 'Messenger' ? 'deep-orange' : 'indigo')
 const assigneeIconFA = (it) => (it?.category === 'Messenger' ? 'fa-motorcycle' : 'fa-car')
 
-/* Search/filter/sort */
+/* Search/filter */
 const filtered = computed(() => {
   const term = qSearch.value.trim().toLowerCase()
   return (rows.value || [])
@@ -114,7 +112,7 @@ const filtered = computed(() => {
     .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
-/* Sockets */
+/* Realtime */
 function onCreated(doc) {
   if (!doc?.tripDate) return
   if (selectedDate.value && doc.tripDate !== selectedDate.value) return
@@ -129,7 +127,7 @@ function onAssigned(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) {
     it.assignment = { ...(it.assignment||{}), driverId: p.driverId, driverName: p.driverName, driverAck: 'PENDING' }
-    if (it.status === 'PENDING') it.status = 'ACCEPTED'   // admin accepted request
+    if (it.status === 'PENDING') it.status = 'ACCEPTED'
   }
 }
 function onDriverAck(p) {
@@ -159,16 +157,24 @@ const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 
-/* Assign flow */
+/* ───────── Assign flow (Role-flexible) ───────── */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
 const assignLoading = ref(false)
 const assignError = ref('')
-const loadingPeople = ref(false)
+
+/** Role toggle: DRIVER or MESSENGER (admin can choose regardless of request category) */
+const assignRole = ref('DRIVER') // default tab
 const people = ref([])
 const selectedLoginId = ref('')
-const busyLoginIds = ref(new Set())
-const roleFromItem = (item) => (item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER')
+
+/** Busy map per chosen role; COMPLETED conflicts are ignored (free to assign) */
+const busyMap = ref(new Map())
+const isBusy = (loginId) => {
+  const v = busyMap.value.get(String(loginId))
+  if (!v) return false
+  return v.busy && String(v.status || '').toUpperCase() !== 'COMPLETED'
+}
 
 async function fetchFirstOk(requests) {
   for (const r of requests) {
@@ -176,15 +182,15 @@ async function fetchFirstOk(requests) {
   }
   return []
 }
-const isBusy = (loginId) => busyLoginIds.value.has(String(loginId))
 
-async function loadPeopleFor(item) {
-  loadingPeople.value = true
+async function loadPeopleAndAvailability(item) {
   people.value = []
-  busyLoginIds.value = new Set()
+  busyMap.value = new Map()
   selectedLoginId.value = item?.assignment?.driverId || ''
 
-  const role = roleFromItem(item)
+  const role = assignRole.value // 'DRIVER' | 'MESSENGER'
+
+  // 1) People list by role (try dedicated endpoints then fallback to /admin/users?role=)
   const list = await fetchFirstOk([
     () => api.get(role === 'DRIVER' ? '/admin/drivers' : '/admin/messengers'),
     () => api.get('/admin/users', { params: { role } })
@@ -195,38 +201,63 @@ async function loadPeopleFor(item) {
     name: u.name || u.fullName || u.loginId || '—'
   }))
 
+  // 2) Availability for the chosen role
   try {
     const { data } = await api.get('/admin/availability/assignees', {
       params: { role, date: item.tripDate, start: item.timeStart, end: item.timeEnd }
     })
-    busyLoginIds.value = new Set((data?.busy || []).map(String))
-  } catch { busyLoginIds.value = new Set() }
-
-  loadingPeople.value = false
+    const m = new Map()
+    if (Array.isArray(data)) {
+      for (const v of data) m.set(String(v), { busy: true, status: '' })
+    } else if (data && Array.isArray(data.busy)) {
+      for (const v of data.busy) {
+        if (typeof v === 'string') {
+          m.set(String(v), { busy: true, status: '' })
+        } else if (v && v.loginId) {
+          const stat = String(v.status || '').toUpperCase()
+          const consideredBusy = stat !== 'COMPLETED'
+          m.set(String(v.loginId), { busy: consideredBusy, status: stat })
+        }
+      }
+    }
+    busyMap.value = m
+  } catch {
+    busyMap.value = new Map()
+  }
 }
 
 function openAssignDialog(item) {
   assignTarget.value = item
   assignError.value = ''
+  // default role tab hint: prefer Messenger tab if request category is Messenger, else Driver
+  assignRole.value = item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
   assignOpen.value = true
-  loadPeopleFor(item)
+  loadPeopleAndAvailability(item)
 }
+
+watch(assignRole, () => {
+  if (assignOpen.value && assignTarget.value?._id) {
+    loadPeopleAndAvailability(assignTarget.value)
+  }
+})
 
 async function submitAssign() {
   if (!assignTarget.value?._id) return
-  if (!selectedLoginId.value) { assignError.value = 'Please select exactly one Driver/Messenger card'; return }
+  if (!selectedLoginId.value) { assignError.value = 'Please select exactly one card'; return }
   if (isBusy(selectedLoginId.value)) { assignError.value = 'This person is busy in this window.'; return }
   assignLoading.value = true
   assignError.value = ''
   try {
+    // Send selected role along; backend may ignore, but harmless and future-proof.
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
       driverId: selectedLoginId.value,
+      role: assignRole.value,         // <-- important: admin-chosen role
       status: 'ACCEPTED'
     })
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
     if (it) {
       it.assignment = { ...(it.assignment || {}), driverId: selectedLoginId.value, driverAck: 'PENDING' }
-      it.status = 'ACCEPTED'
+      if (it.status === 'PENDING') it.status = 'ACCEPTED'
     }
     assignOpen.value = false
   } catch (e) {
@@ -243,7 +274,6 @@ async function updateStatus(item, nextStatus){
   if (!allowed.includes(nextStatus)) { error.value = `Cannot change from ${item.status} to ${nextStatus}`; return }
   updating.value[item._id] = true
   try {
-    const prev = item.status
     item.status = nextStatus // optimistic
     await api.patch(`/admin/car-bookings/${item._id}/status`, { status: nextStatus })
   } catch (e) {
@@ -264,7 +294,7 @@ async function updateStatus(item, nextStatus){
             <i class="fa-solid fa-steering-wheel"></i>
             <span>Admin — Day Schedule (All Requests)</span>
           </div>
-          <div class="hero-sub">Admin accepts customer → assigns driver → driver must acknowledge (Accept/Decline).</div>
+          <div class="hero-sub">Admin can assign a <strong>Car Driver</strong> or a <strong>Messenger</strong> for any request.</div>
         </div>
       </div>
 
@@ -505,13 +535,13 @@ async function updateStatus(item, nextStatus){
       </v-card>
     </v-dialog>
 
-    <!-- Assign dialog (your existing content can remain; no mdi icons used there except we already use FA elsewhere) -->
-    <v-dialog v-model="assignOpen" max-width="860">
+    <!-- Assign dialog: role toggle -->
+    <v-dialog v-model="assignOpen" max-width="920">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
             <i class="fa-solid fa-id-badge"></i>
-            <span class="ml-2">Select Driver/Messenger</span>
+            <span class="ml-2">Assign to Driver or Messenger</span>
           </div>
           <v-btn icon variant="text" @click="assignOpen = false"><i class="fa-solid fa-xmark"></i></v-btn>
         </v-card-title>
@@ -519,10 +549,20 @@ async function updateStatus(item, nextStatus){
         <v-divider />
 
         <v-card-text>
+          <div class="d-flex align-center mb-3" style="gap:10px;">
+            <v-btn-toggle v-model="assignRole" mandatory density="comfortable" rounded="xl" divided>
+              <v-btn value="DRIVER"><i class="fa-solid fa-car mr-2"></i>Car Driver</v-btn>
+              <v-btn value="MESSENGER"><i class="fa-solid fa-motorcycle mr-2"></i>Messenger</v-btn>
+            </v-btn-toggle>
+          </div>
+
           <v-alert v-if="assignError" type="error" variant="tonal" border="start" class="mb-3">{{ assignError }}</v-alert>
-          <v-skeleton-loader v-if="loadingPeople" type="card, card, card" />
+
+          <template v-if="!people.length">
+            <v-skeleton-loader type="card, card, card" />
+          </template>
+
           <template v-else>
-            <div v-if="!people.length" class="text-medium-emphasis">No users found for this role.</div>
             <v-row dense>
               <v-col v-for="p in people" :key="p._id" cols="12" sm="6" md="4" lg="3">
                 <v-card
@@ -577,7 +617,7 @@ async function updateStatus(item, nextStatus){
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 .truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
-/* Purpose styling in table */
+/* Purpose styling */
 .purpose-pill {
   display:flex; align-items:center;
   background: #eef2ff; border: 1px solid #dfe3fb;
@@ -591,7 +631,6 @@ async function updateStatus(item, nextStatus){
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 
-/* Notes block only in details */
 .notes-block {
   border: 1px dashed #cbd5e1; background:#f8fafc;
   padding: 10px 12px; border-radius: 10px; white-space: pre-wrap;
