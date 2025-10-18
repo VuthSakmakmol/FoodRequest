@@ -11,7 +11,7 @@ try { Employee = require('../models/Employee') } catch {
 }
 
 const { toMinutes, overlaps, isValidDate } = require('../../utils/time')
-const { notify } = require('../../services/transport.telegram.notify')   // <-- ADD
+const { notify } = require('../../services/transport.telegram.notify')   // Telegram notify entrypoint
 
 const MAX_CAR  = 3
 const MAX_MSGR = 1
@@ -34,6 +34,7 @@ function parsePayload(req) {
   }
   return req.body || {}
 }
+
 function pickIdentityFrom(req) {
   const loginId =
     req.user?.loginId ||
@@ -128,7 +129,12 @@ async function createBooking(req, res, next) {
     })
 
     // TELEGRAM: employee created request (group only)
-    try { await notify('REQUEST_CREATED', { bookingId: doc._id, employeeName: employeeSnapshot?.name }) } catch {}
+    try {
+      console.log('[notify] REQUEST_CREATED', { bookingId: String(doc._id) })
+      await notify('REQUEST_CREATED', { bookingId: doc._id, employeeName: employeeSnapshot?.name })
+    } catch (e) {
+      console.error('[notify error] REQUEST_CREATED', e?.message || e)
+    }
 
     res.status(201).json(doc)
   } catch (err) { next(err) }
@@ -165,8 +171,15 @@ async function updateStatus(req, res, next) {
     // SOCKET
     req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status })
 
+    console.log('[status] updated', { bookingId: String(doc._id), newStatus: doc.status })
+
     // TELEGRAM: group + (if assigned) driver DM
-    try { await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name }) } catch {}
+    try {
+      console.log('[notify] STATUS_CHANGED', { bookingId: String(doc._id), newStatus: doc.status })
+      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name })
+    } catch (e) {
+      console.error('[notify error] STATUS_CHANGED', e?.message || e)
+    }
 
     res.json(doc)
   } catch (err) { next(err) }
@@ -198,6 +211,14 @@ async function assignBooking(req, res, next) {
     }).lean()
     const hasConflict = others.some(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd)))
     if (hasConflict) return res.status(409).json({ message: 'Driver is already assigned during this time.' })
+
+    console.log('[assign] applying assignment', {
+      bookingId: String(doc._id),
+      driverId,
+      driverName: resolvedDriverName || driverName || '',
+      vehicleName,
+      autoAccept
+    })
 
     doc.assignment = {
       driverId,
@@ -234,8 +255,19 @@ async function assignBooking(req, res, next) {
     })
     req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status })
 
+    console.log('[assign] saved & notifying', {
+      bookingId: String(doc._id),
+      status: doc.status,
+      driverId: doc.assignment.driverId
+    })
+
     // TELEGRAM: group + DM to assigned driver
-    try { await notify('ADMIN_ACCEPTED_ASSIGNED', { bookingId: doc._id, byName: req.user?.name }) } catch {}
+    try {
+      console.log('[notify] ADMIN_ACCEPTED_ASSIGNED', { bookingId: String(doc._id) })
+      await notify('ADMIN_ACCEPTED_ASSIGNED', { bookingId: doc._id, byName: req.user?.name })
+    } catch (e) {
+      console.error('[notify error] ADMIN_ACCEPTED_ASSIGNED', e?.message || e)
+    }
 
     res.json(doc)
   } catch (err) { next(err) }
@@ -255,7 +287,7 @@ async function listAdmin(req, res, next) {
 /* ---------- driver/messenger ---------- */
 async function listForAssignee(req, res, next) {
   try {
-    const { loginId, role } = pickIdentityFrom(req)
+    const { loginId } = pickIdentityFrom(req)
     if (!loginId) return res.json([])
 
     const { date, status } = req.query
@@ -268,7 +300,7 @@ async function listForAssignee(req, res, next) {
   } catch (err) { next(err) }
 }
 
-/* ---------- driver acknowledgment (new) ---------- */
+/* ---------- driver acknowledgment ---------- */
 async function driverAcknowledge(req, res, next) {
   try {
     const { id } = req.params
@@ -342,8 +374,15 @@ async function driverUpdateStatus(req, res, next) {
 
     req.io?.emit('carBooking:status', { bookingId: String(doc._id), status: doc.status })
 
+    console.log('[driverStatus] updated by driver', { bookingId: String(doc._id), newStatus: doc.status })
+
     // TELEGRAM: group + (if assigned) driver DM
-    try { await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name }) } catch {}
+    try {
+      console.log('[notify] STATUS_CHANGED (driver)', { bookingId: String(doc._id), newStatus: doc.status })
+      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name })
+    } catch (e) {
+      console.error('[notify error] STATUS_CHANGED (driver)', e?.message || e)
+    }
 
     res.json(doc)
   } catch (err) { next(err) }

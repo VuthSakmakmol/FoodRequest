@@ -96,7 +96,7 @@ const User = require('../models/User')
     // If that’s driver01, do this:
     const drivers = [
       { loginId: 'driver01', name: 'Driver One',   password: defaultPwd, telegramChatId: '537250678' },
-      { loginId: 'driver02', name: 'Driver Two',   password: defaultPwd },
+      { loginId: 'driver02', name: 'Driver Two',   password: defaultPwd, telegramChatId: '1055055243' },
       { loginId: 'driver03', name: 'Driver Three', password: defaultPwd },
       { loginId: 'driver04', name: 'Driver Four',  password: defaultPwd },
       { loginId: 'driver05', name: 'Driver Five',  password: defaultPwd },
