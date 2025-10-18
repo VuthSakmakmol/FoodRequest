@@ -10,9 +10,9 @@ try { Employee = require('../models/Employee'); } catch {
   try { Employee = require('../../models/EmployeeDirectory'); } catch { Employee = null; }
 }
 
-const { ROOMS, emitToRoom } = require('../../utils/realtime'); // ⬅️ use roomed emits
+const { ROOMS, emitToRoom } = require('../../utils/realtime');
 const { toMinutes, overlaps, isValidDate } = require('../../utils/time');
-const { notify } = require('../../services/transport.telegram.notify');   // Telegram notify entrypoint
+const { notify } = require('../../services/transport.telegram.notify');
 
 const MAX_CAR  = 3;
 const MAX_MSGR = 1;
@@ -53,7 +53,7 @@ function pickIdentityFrom(req) {
   return { loginId: String(loginId || ''), role };
 }
 
-/** Minimal delta payloads to keep frames small */
+/** Minimal delta payloads */
 const shape = {
   created: (doc) => ({
     _id: String(doc._id),
@@ -84,9 +84,27 @@ const shape = {
     response: doc.assignment?.driverAck || 'PENDING',
     at: doc.assignment?.driverAckAt || null,
   }),
+  updated: (doc) => ({
+    bookingId: String(doc._id),
+    patch: {
+      category: doc.category,
+      tripDate: doc.tripDate,
+      timeStart: doc.timeStart,
+      timeEnd: doc.timeEnd,
+      passengers: doc.passengers,
+      customerContact: doc.customerContact,
+      stops: doc.stops || [],
+      purpose: doc.purpose || '',
+      notes: doc.notes || '',
+      ticketUrl: doc.ticketUrl || '',
+    }
+  }),
+  deleted: (doc) => ({
+    bookingId: String(doc._id),
+  }),
 };
 
-/** Fan-out to relevant rooms (admins, chefs, employee, booking) */
+/** Fan-out to relevant rooms */
 function broadcast(io, doc, event, payload) {
   if (!io || !doc) return;
   const empId = String(doc.employeeId || doc.employee?.employeeId || '');
@@ -442,6 +460,69 @@ async function driverUpdateStatus(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/* ───────── NEW: update (CRUD → U) ─────────
+   Allows editing core fields; keeps your validations light and simple. */
+async function updateBooking(req, res, next) {
+  try {
+    const io = req.io;
+    const { id } = req.params;
+    const payload = parsePayload(req);
+
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found.');
+
+    // Editable fields (keep simple)
+    const editable = [
+      'category','tripDate','timeStart','timeEnd','passengers',
+      'customerContact','stops','purpose','notes','ticketUrl'
+    ];
+    for (const k of editable) {
+      if (payload[k] !== undefined) doc[k] = payload[k];
+    }
+
+    // basic time validity when both present
+    if (doc.timeStart && doc.timeEnd) {
+      const s = toMinutes(doc.timeStart), e = toMinutes(doc.timeEnd);
+      if (e <= s) throw createError(400, 'End must be after Start.');
+    }
+
+    await doc.save();
+
+    // Realtime
+    broadcast(io, doc, 'carBooking:updated', shape.updated(doc));
+
+    // Optional telegram (comment out if noisy)
+    try {
+      await notify('REQUEST_UPDATED', { bookingId: doc._id });
+    } catch {}
+
+    res.json(doc);
+  } catch (err) { next(err); }
+}
+
+/* ───────── NEW: delete (CRUD → D) ─────────
+   Hard delete. If you prefer soft delete, replace with doc.status='CANCELLED' + save. */
+async function deleteBooking(req, res, next) {
+  try {
+    const io = req.io;
+    const { id } = req.params;
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found.');
+
+    await CarBooking.deleteOne({ _id: id });
+
+    // Realtime
+    broadcast(io, doc, 'carBooking:deleted', shape.deleted(doc));
+
+    // Optional telegram (comment out if noisy)
+    try {
+      await notify('REQUEST_DELETED', { bookingId: doc._id });
+    } catch {}
+
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   checkAvailability,
   createBooking,
@@ -452,4 +533,6 @@ module.exports = {
   listForAssignee,
   driverAcknowledge,
   driverUpdateStatus,
+  updateBooking,
+  deleteBooking,
 };

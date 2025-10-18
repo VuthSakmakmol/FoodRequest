@@ -138,7 +138,7 @@ function onDriverAck(p) {
 }
 
 onMounted(() => {
-  try { subscribeRoleIfNeeded() } catch {}
+  try { subscribeRoleIfNeeded({ role: 'ADMIN' }) } catch {}
   loadSchedule()
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)

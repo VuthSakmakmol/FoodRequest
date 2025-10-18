@@ -139,8 +139,13 @@ async function loadList() {
     // Subscribe to booking:<id> rooms for all visible rows
     try {
       const ids = rows.value.map(r => String(r._id)).filter(Boolean)
-      if (leavePreviousRooms) { leavePreviousRooms(); leavePreviousRooms = null }
-      leavePreviousRooms = subscribeBookingRooms(ids)
+      // await the previous cleanup (it’s a function returned via a Promise)
+      if (typeof leavePreviousRooms === 'function') {
+        await leavePreviousRooms()
+        leavePreviousRooms = null
+      }
+      // IMPORTANT: await here to get the cleanup function
+      leavePreviousRooms = await subscribeBookingRooms(ids)
     } catch {}
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || 'Failed to load bookings'
@@ -263,8 +268,11 @@ onBeforeUnmount(() => {
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
   socket.off('carBooking:driverAck', onDriverAck)
-  if (leavePreviousRooms) { leavePreviousRooms(); leavePreviousRooms = null }
-})
+  if (typeof leavePreviousRooms === 'function') {
+    // fire-and-forget is fine; awaiting is nicer if this hook were async
+    leavePreviousRooms()
+    leavePreviousRooms = null
+  }})
 watch([selectedDate, statusFilter], loadList)
 
 /* Detail dialog */

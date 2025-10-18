@@ -21,10 +21,8 @@ export function getSocket(token) {
   socket.on('connect', () => { isConnected = true })
   socket.on('disconnect', () => { isConnected = false })
 
-  // DEV: log all events once (comment out in prod)
   // socket.onAny((ev, ...args) => console.debug('[ws<=]', ev, args))
 
-  // RTT probe (optional)
   setInterval(() => { try { socket.emit('ping:client', Date.now()) } catch {} }, 15000)
 
   return socket
@@ -34,9 +32,10 @@ const s = getSocket()
 export default s
 
 /* ---------- connect-aware joins ---------- */
-
 const subscribedRoles = new Set()
 const joinedBookings  = new Set()
+const joinedEmployees = new Set()
+const joinedCompanies = new Set()
 
 function waitConnected() {
   return new Promise((resolve) => {
@@ -50,9 +49,7 @@ export async function subscribeRole(role) {
   role = String(role || '').toUpperCase()
   if (!role || subscribedRoles.has(role)) return
   await waitConnected()
-  s.emit('subscribe', { role }, (ack) => {
-    // console.debug('[ws=>] join role', role, ack)
-  })
+  s.emit('subscribe', { role }, () => {})
   subscribedRoles.add(role)
 }
 
@@ -69,12 +66,9 @@ export async function subscribeBookingRooms(ids = []) {
   const uniq = Array.from(new Set(ids.map(String).filter(Boolean)))
   uniq.forEach((id) => {
     if (joinedBookings.has(id)) return
-    s.emit('subscribe', { bookingId: id }, (ack) => {
-      // console.debug('[ws=>] join booking', id, ack)
-    })
+    s.emit('subscribe', { bookingId: id }, () => {})
     joinedBookings.add(id)
   })
-  // return cleanup
   return async () => {
     await waitConnected()
     uniq.forEach((id) => {
@@ -83,6 +77,22 @@ export async function subscribeBookingRooms(ids = []) {
       joinedBookings.delete(id)
     })
   }
+}
+
+export async function subscribeEmployeeIfNeeded(employeeId) {
+  const id = String(employeeId || '')
+  if (!id || joinedEmployees.has(id)) return
+  await waitConnected()
+  s.emit('subscribe', { employeeId: id }, () => {})
+  joinedEmployees.add(id)
+}
+
+export async function subscribeCompanyIfNeeded(companyId) {
+  const id = String(companyId || '')
+  if (!id || joinedCompanies.has(id)) return
+  await waitConnected()
+  s.emit('subscribe', { companyId: id }, () => {})
+  joinedCompanies.add(id)
 }
 
 export function onSocket(event, handler) {
