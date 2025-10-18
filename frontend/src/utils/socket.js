@@ -1,74 +1,96 @@
 // src/utils/socket.js
 import { io } from 'socket.io-client'
 
-const base = (import.meta.env.VITE_API_URL || 'http://localhost:4333/api')
-  .replace(/\/api\/?$/, '')
+let socket = null
+let isConnected = false
 
-const socket = io(base, {
-  transports: ['websocket'],
-  autoConnect: true,
-  reconnection: true,
-  reconnectionAttempts: Infinity,
-  reconnectionDelay: 800,
-  auth: () => ({
-    token: localStorage.getItem('token') || '',
-    role:  localStorage.getItem('authRole') || '',
-    employeeId: localStorage.getItem('employeeId') || '',
-  }),
-})
+export function getSocket(token) {
+  if (socket) return socket
+  const wsOrigin =
+    import.meta.env.VITE_WS_ORIGIN ||
+    import.meta.env.VITE_API_BASE ||
+    `${location.protocol}//${location.hostname}:4333`
 
-/* verbose logs */
-socket.onAny((ev, p) => {
-  try { console.log('[socket:onAny]', ev, p?._id || p?.requestId || null) }
-  catch { console.log('[socket:onAny]', ev) }
-})
-socket.on('connect', () => console.log('[socket] connect', socket.id))
-socket.on('reconnect', n => console.log('[socket] reconnect', n))
-socket.on('disconnect', r => console.log('[socket] disconnect', r))
-socket.on('connect_error', e => console.log('[socket] connect_error', e?.message))
+  socket = io(wsOrigin, {
+    transports: ['websocket'],
+    auth: token ? { token } : undefined,
+    reconnectionAttempts: Infinity,
+    reconnectionDelayMax: 8000,
+  })
 
-/* ------- subscribe helpers ------- */
-export function subscribeEmployeeIfNeeded() {
-  const employeeId = localStorage.getItem('employeeId') || ''
-  if (!employeeId) return console.log('[emp] skip subscribe — no employeeId')
-  socket.emit('subscribe', { employeeId: String(employeeId) }, ack =>
-    console.log('[emp] subscribe ack', ack)
-  )
-}
-export function subscribeRoleIfNeeded() {
-  const role = localStorage.getItem('authRole') || ''
-  if (!role) return console.log('[role] skip subscribe — no authRole')
-  socket.emit('subscribe', { role }, ack =>
-    console.log('[role] subscribe ack', ack)
-  )
-}
-/* Back-compat alias some code expects */
-export const subscribeRole = subscribeRoleIfNeeded
+  socket.on('connect', () => { isConnected = true })
+  socket.on('disconnect', () => { isConnected = false })
 
-/* ------- unsubscribe helpers (⬅️ missing before) ------- */
-export function unsubscribeRole() {
-  const role = localStorage.getItem('authRole') || ''
-  if (!role) return console.log('[role] skip unsubscribe — no authRole')
-  socket.emit('unsubscribe', { role }, ack =>
-    console.log('[role] unsubscribe ack', ack)
-  )
-}
-export function unsubscribeEmployee() {
-  const employeeId = localStorage.getItem('employeeId') || ''
-  if (!employeeId) return console.log('[emp] skip unsubscribe — no employeeId')
-  socket.emit('unsubscribe', { employeeId: String(employeeId) }, ack =>
-    console.log('[emp] unsubscribe ack', ack)
-  )
+  // DEV: log all events once (comment out in prod)
+  // socket.onAny((ev, ...args) => console.debug('[ws<=]', ev, args))
+
+  // RTT probe (optional)
+  setInterval(() => { try { socket.emit('ping:client', Date.now()) } catch {} }, 15000)
+
+  return socket
 }
 
-/* re-join on connect/reconnect */
-socket.on('connect', () => {
-  subscribeEmployeeIfNeeded()
-  subscribeRoleIfNeeded()
-})
-socket.on('reconnect', () => {
-  subscribeEmployeeIfNeeded()
-  subscribeRoleIfNeeded()
-})
+const s = getSocket()
+export default s
 
-export default socket
+/* ---------- connect-aware joins ---------- */
+
+const subscribedRoles = new Set()
+const joinedBookings  = new Set()
+
+function waitConnected() {
+  return new Promise((resolve) => {
+    if (isConnected) return resolve()
+    const onConnect = () => { s.off('connect', onConnect); resolve() }
+    s.on('connect', onConnect)
+  })
+}
+
+export async function subscribeRole(role) {
+  role = String(role || '').toUpperCase()
+  if (!role || subscribedRoles.has(role)) return
+  await waitConnected()
+  s.emit('subscribe', { role }, (ack) => {
+    // console.debug('[ws=>] join role', role, ack)
+  })
+  subscribedRoles.add(role)
+}
+
+export async function unsubscribeRole(role) {
+  role = String(role || '').toUpperCase()
+  if (!role || !subscribedRoles.has(role)) return
+  await waitConnected()
+  s.emit('unsubscribe', { role }, () => {})
+  subscribedRoles.delete(role)
+}
+
+export async function subscribeBookingRooms(ids = []) {
+  await waitConnected()
+  const uniq = Array.from(new Set(ids.map(String).filter(Boolean)))
+  uniq.forEach((id) => {
+    if (joinedBookings.has(id)) return
+    s.emit('subscribe', { bookingId: id }, (ack) => {
+      // console.debug('[ws=>] join booking', id, ack)
+    })
+    joinedBookings.add(id)
+  })
+  // return cleanup
+  return async () => {
+    await waitConnected()
+    uniq.forEach((id) => {
+      if (!joinedBookings.has(id)) return
+      s.emit('unsubscribe', { bookingId: id }, () => {})
+      joinedBookings.delete(id)
+    })
+  }
+}
+
+export function onSocket(event, handler) {
+  s.on(event, handler)
+  return () => s.off(event, handler)
+}
+
+export function subscribeRoleIfNeeded(payload = {}) {
+  const role = String(payload.role || '').toUpperCase()
+  if (role) subscribeRole(role)
+}

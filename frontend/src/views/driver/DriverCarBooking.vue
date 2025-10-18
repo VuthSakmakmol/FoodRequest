@@ -2,7 +2,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
-import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
+import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
 
 const loading = ref(false)
 const error   = ref('')
@@ -91,7 +91,7 @@ const statusFa = s => ({
   ACCEPTED:'fa-solid fa-circle-check',
   ON_ROAD:'fa-solid fa-truck-fast',
   ARRIVING:'fa-solid fa-flag-checkered',
-  COMPLETED:'fa-solid fa-badge-check', // fallback if not in your FA set: use fa-check-double
+  COMPLETED:'fa-solid fa-check-double',
   DELAYED:'fa-solid fa-triangle-exclamation',
   CANCELLED:'fa-solid fa-ban',
   DECLINED:'fa-solid fa-circle-xmark'
@@ -115,7 +115,8 @@ function absUrl(u) {
   return `${base}${u.startsWith('/') ? '' : '/'}${u}`
 }
 
-/* Load */
+/* Load + booking-room subscriptions */
+let leavePreviousRooms = null
 async function loadList() {
   loading.value = true
   error.value = ''
@@ -132,8 +133,15 @@ async function loadList() {
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],
-      assignment: x.assignment || {}      // expect { driverId, driverName, driverAck, driverAckAt }
+      assignment: x.assignment || {}
     }))
+
+    // Subscribe to booking:<id> rooms for all visible rows
+    try {
+      const ids = rows.value.map(r => String(r._id)).filter(Boolean)
+      if (leavePreviousRooms) { leavePreviousRooms(); leavePreviousRooms = null }
+      leavePreviousRooms = subscribeBookingRooms(ids)
+    } catch {}
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || 'Failed to load bookings'
   } finally { loading.value = false }
@@ -227,7 +235,7 @@ async function setDriverStatus(item, nextStatus) {
   }
 }
 
-/* Sockets */
+/* Sockets: scoped event handlers */
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
@@ -243,8 +251,9 @@ function onDriverAck(p) {
   if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
 }
 
+/* Mount/Unmount */
 onMounted(() => {
-  try { subscribeRoleIfNeeded() } catch {}
+  try { subscribeRoleIfNeeded({ role: 'DRIVER' }) } catch {}
   loadList()
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
@@ -254,6 +263,7 @@ onBeforeUnmount(() => {
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
   socket.off('carBooking:driverAck', onDriverAck)
+  if (leavePreviousRooms) { leavePreviousRooms(); leavePreviousRooms = null }
 })
 watch([selectedDate, statusFilter], loadList)
 

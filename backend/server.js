@@ -16,25 +16,33 @@ const { startRecurringEngine } = require('./services/recurring.engine');
 
 const app = express();
 
-/* ───────────── Env toggles ───────────── */
-const isProd     = process.env.NODE_ENV === 'production';
+/* ───────────────── Env & toggles ───────────────── */
+const isProd     = String(process.env.NODE_ENV).toLowerCase() === 'production';
 const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true';
 if (isProd) app.set('trust proxy', 1);
 
-/* ───────────── CORS ───────────── */
+/* ───────────────── CORS ───────────────── */
 const rawOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean);
 
-const wildcard = rawOrigins.includes('*');
-const corsOptions = wildcard
+const hasWildcard = rawOrigins.includes('*');
+const apiCorsOptions = hasWildcard
   ? { origin: true, credentials: false }
   : { origin: rawOrigins, credentials: true };
 
-app.use(cors(corsOptions));
+/* ───────────────── HTTPS redirect (if enabled) ───────────────── */
+// Do this before helmet so HSTS only applies after redirect to HTTPS.
+if (forceHTTPS) {
+  app.use((req, res, next) => {
+    if (req.secure || req.headers['x-forwarded-proto'] === 'https') return next();
+    const host = req.headers.host;
+    return res.redirect(301, `https://${host}${req.originalUrl}`);
+  });
+}
 
-/* ───────────── Security & Perf ───────────── */
+/* ───────────────── Security & Perf ───────────────── */
 app.use(helmet({
   hsts: forceHTTPS,
   contentSecurityPolicy: false,
@@ -42,25 +50,37 @@ app.use(helmet({
   crossOriginOpenerPolicy: false,
   crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
+
+// If HTTPS is not enforced, strip HSTS so local/dev stays happy.
 if (!forceHTTPS) {
-  app.use((req, res, next) => { res.removeHeader('Strict-Transport-Security'); next(); });
+  app.use((_, res, next) => { res.removeHeader('Strict-Transport-Security'); next(); });
 }
+
+app.use(cors(apiCorsOptions));
 app.use(compression());
 
-/* ───────────── Parsers & Limits ───────────── */
+/* ───────────────── Parsers & Limits ───────────────── */
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ limit: '5mb', extended: true }));
 
-/* ───────────── Basic rate limit on API ───────────── */
-app.use('/api', rateLimit({ windowMs: 60_000, max: 200 }));
-
-/* ───────────── Health ───────────── */
+/* ───────────────── Health ───────────────── */
+// Machine-friendly probe (outside /api and not rate-limited)
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+// Human-friendly
 app.get('/api/health', (_req, res) => res.send('✅ API running'));
 
-/* ───────────── Attach io onto req (for controllers) ───────────── */
+/* ───────────────── Basic rate limit on API ───────────────── */
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+}));
+
+/* ───────────────── Attach io onto req (for controllers) ───────────────── */
 app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 
-/* ───────────── Routes ───────────── */
+/* ───────────────── Routes ───────────────── */
 // Auth
 app.use('/api/auth',   require('./routes/auth.routes'));
 
@@ -85,16 +105,15 @@ app.use('/api/admin',               require('./routes/admin-user.routes'));
 app.use('/api/driver',              require('./routes/transportation/carBooking-driver.routes'));
 // Optional alias for legacy callers
 app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'));
-app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
+app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'));
 
-// public routes (holiday)
-app.use('/api/public', require('./routes/public-holidays.routes'))
+// Public routes (holidays)
+app.use('/api/public', require('./routes/public-holidays.routes'));
 
-
-/* ───────────── 404 for API (keep above SPA static + after all API mounts) ───────────── */
+/* ───────────────── 404 for API ───────────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));
 
-/* ───────────── Error handler ───────────── */
+/* ───────────────── Error handler ───────────────── */
 app.use((err, _req, res, _next) => {
   if (!isProd) console.error(err);
   res.status(err.status || 500).json({
@@ -103,35 +122,50 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-/* ───────────── Static SPA (optional) ─────────────
+/* ───────────────── Static SPA (optional) ─────────────────
    Set FRONTEND_DIR=/absolute/path/to/frontend/dist
+   Note: exclude /socket.io path from catch-all.
 */
 const frontendDir = process.env.FRONTEND_DIR;
 if (frontendDir) {
   const distPath = path.resolve(frontendDir);
   app.use(express.static(distPath));
-  // MUST be last (after API handlers), so it doesn't swallow /api 404
-  app.get(/.*/, (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+  app.get(/^\/(?!socket\.io\/).*/, (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
-/* ───────────── HTTP + Socket.IO ───────────── */
+/* ───────────────── HTTP + Socket.IO ───────────────── */
 const server = http.createServer(app);
+
+// Socket.IO CORS (separate from Express CORS)
+const ioCors = hasWildcard
+  ? { origin: true, methods: ['GET', 'POST'] }                       // allow all
+  : { origin: rawOrigins, methods: ['GET', 'POST'], credentials: true }; // restrict
+
 const io = new Server(server, {
-  cors: corsOptions,
-  pingTimeout: 60_000,
+  cors: ioCors,
+  transports: ['websocket'],                    // pure WS for performance
+  perMessageDeflate: { threshold: 1024 },       // compress only bigger frames
+  maxHttpBufferSize: 1 * 1024 * 1024,           // 1MB payload cap
   pingInterval: 25_000,
-  connectionStateRecovery: { maxDisconnectionDuration: 120_000, skipMiddlewares: true },
+  pingTimeout: 60_000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 120_000,
+    skipMiddlewares: false,                     // re-run auth on recovery
+  },
 });
+
 registerSocket(io);
 app.set('io', io);
 attachDebugEndpoints(app);
 
-/* ───────────── Boot ───────────── */
+/* ───────────────── Boot ───────────────── */
 const PORT = Number(process.env.PORT || 4333);
 
 (async function boot() {
   try {
-    await mongoose.connect(process.env.MONGO_URI, {});
+    await mongoose.connect(process.env.MONGO_URI, {
+      dbName: process.env.MONGO_DB || undefined,
+    });
     console.log('✅ MongoDB connected');
 
     server.listen(PORT, () => {
@@ -139,15 +173,15 @@ const PORT = Number(process.env.PORT || 4333);
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`);
     });
 
-    // 🔁 start recurring engine after IO is ready
+    // 🔁 Start recurring engine after IO is ready
     const stopRecurring = startRecurringEngine(io);
 
-    // graceful shutdown
+    // Graceful shutdown
     const shutdown = async (sig) => {
       console.log(`\n${sig} received. Shutting down...`);
-      stopRecurring && stopRecurring();
+      try { stopRecurring && stopRecurring(); } catch (_) {}
       server.close(() => console.log('HTTP server closed'));
-      await mongoose.connection.close();
+      try { await mongoose.connection.close(); } catch (_) {}
       process.exit(0);
     };
     process.on('SIGINT',  () => shutdown('SIGINT'));

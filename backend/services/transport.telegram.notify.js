@@ -42,6 +42,19 @@ async function notify(event, payload) {
       if (chatId) await sendDM(chatId, msg.driverStatusDM(bk, payload.newStatus))
       return
     }
+    case 'DRIVER_ACK': {
+      const bk = await CarBooking.findById(payload.bookingId).lean()
+      if (!bk) return
+      const resp = String(payload.response || bk?.assignment?.driverAck || '').toUpperCase()
+
+      // Group alert
+      await sendToTransportGroup(msg.driverAckGroupMsg(bk, resp))
+
+      // DM the driver (confirmation)
+      const chatId = await resolveAssignedDriverChatId(bk)
+      if (chatId) await sendDM(chatId, msg.driverAckConfirmDM(bk, resp))
+      return
+    }
   }
 }
 

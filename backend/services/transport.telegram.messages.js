@@ -96,11 +96,41 @@ function driverStatusDM(bk, status){
   ].join('\n')
 }
 
+function driverAckGroupMsg(bk, response) {
+  const r = String(response || bk?.assignment?.driverAck || '').toUpperCase()
+  const label = r === 'ACCEPTED' ? '✅ Driver accepted' : r === 'DECLINED' ? '⛔ Driver declined' : `ℹ️ Driver ack: ${r}`
+  return [
+    `${label}`,
+    '=============================',
+    `👤 Driver: ${esc(bk.assignment?.driverName || '—')}`,
+    `📅 When: ${span(bk)}`,
+    `📍 Route: ${route(bk)}`,
+    '-----------------------------',
+    code(bk),
+  ].join('\n')
+}
+
+function driverAckConfirmDM(bk, response) {
+  const r = String(response || bk?.assignment?.driverAck || '').toUpperCase()
+  const label = r === 'ACCEPTED' ? '👍 You accepted' : r === 'DECLINED' ? '👋 You declined' : `ℹ️ Ack: ${r}`
+  return [
+    `<b>${label}</b>`,
+    `• ${span(bk)}`,
+    `• ${route(bk)}`,
+    code(bk),
+  ].join('\n')
+}
+
 module.exports = {
+  // ...keep existing exports
   newRequestMsg,
   declinedMsg,
   acceptedAssignedMsg,
   statusChangedMsg,
   driverAssignmentDM,
   driverStatusDM,
+  // 👇 add these two
+  driverAckGroupMsg,
+  driverAckConfirmDM,
 }
+
