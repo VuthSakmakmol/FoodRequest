@@ -95,20 +95,14 @@ const User = require('../models/User')
     // You said one driver(messenger) chat ID is 537250678 — attach it to the right user(s).
     // If that’s driver01, do this:
     const drivers = [
-      { loginId: 'driver01', name: 'Driver One',   password: defaultPwd, telegramChatId: '537250678' },
-      { loginId: 'driver02', name: 'Driver Two',   password: defaultPwd, telegramChatId: '1055055243' },
-      { loginId: 'driver03', name: 'Driver Three', password: defaultPwd },
-      { loginId: 'driver04', name: 'Driver Four',  password: defaultPwd },
-      { loginId: 'driver05', name: 'Driver Five',  password: defaultPwd },
+      { loginId: 'driver01', name: 'Prius',   password: defaultPwd, telegramChatId: '537250678' },
+      { loginId: 'driver02', name: 'Staria',   password: defaultPwd, telegramChatId: '1055055243' },
+      { loginId: 'driver03', name: 'New Van', password: defaultPwd },
     ]
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):
     const messengers = [
       { loginId: 'messenger01', name: 'Messenger One',   password: defaultPwd /* , telegramChatId: '537250678' */ },
-      { loginId: 'messenger02', name: 'Messenger Two',   password: defaultPwd },
-      { loginId: 'messenger03', name: 'Messenger Three', password: defaultPwd },
-      { loginId: 'messenger04', name: 'Messenger Four',  password: defaultPwd },
-      { loginId: 'messenger05', name: 'Messenger Five',  password: defaultPwd },
     ]
 
     /* ---------- run ---------- */

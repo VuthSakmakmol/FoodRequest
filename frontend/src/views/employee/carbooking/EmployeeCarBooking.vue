@@ -1,3 +1,4 @@
+<!-- views/employee/carbooking/EmployeeCarBooking.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Swal from 'sweetalert2'
@@ -14,6 +15,11 @@ import RequesterSection from './sections/RequesterSection.vue'
 import TripDetailSection from './sections/TripDetailSection.vue'
 import VehicleSection from './sections/VehicleSection.vue'
 import RecurringBookingSection from './sections/RecurringBookingSection.vue'
+
+/* NEW: Calendar (dialog render) */
+import TransportScheduleCalendar from './calendars/TransportScheduleCalendar.vue'
+const showSchedule = ref(false)
+const scheduleDate = ref(dayjs().format('YYYY-MM-DD'))
 
 /* Constants */
 const CATEGORY = ['Car','Messenger']
@@ -195,7 +201,7 @@ function buildPayloadFromForm(f) {
   }
 }
 
-/* ───────── submit/reset (frontend only; backend later) ───────── */
+/* ───────── submit/reset ───────── */
 async function submit() {
   error.value = ''; success.value = '';
 
@@ -212,15 +218,13 @@ async function submit() {
     loading.value = true;
 
     if (needsTicket) {
-      // multipart only when a file must be sent
       const fd = new FormData();
       fd.append('data', JSON.stringify(payload));
       const file = form.value.ticketFile;
       if (!file) throw new Error('Airplane ticket is required for Airport destination.');
       fd.append('ticket', file);
-      await api.post('/public/car-bookings', fd); // let axios set the boundary
+      await api.post('/public/car-bookings', fd);
     } else {
-      // pure JSON when no file
       await api.post('/public/car-bookings', payload);
     }
 
@@ -235,8 +239,6 @@ async function submit() {
     loading.value = false;
   }
 }
-
-
 
 function resetForm({ keepEmployee = false } = {}) {
   const cur = { id: form.value.employeeId, name: form.value.name, dept: form.value.department, phone: form.value.contactNumber }
@@ -278,6 +280,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onHotkey)
 })
 function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit() }
+
+/* NEW: open schedule dialog preset to current tripDate */
+function openSchedule() {
+  scheduleDate.value = form.value.tripDate || dayjs().format('YYYY-MM-DD')
+  showSchedule.value = true
+}
 </script>
 
 <template>
@@ -329,6 +337,17 @@ function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loa
       <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">Employee Car / Messenger Booking</v-toolbar-title>
         <v-spacer />
+
+        <!-- NEW: Vue Schedule button -->
+        <v-btn
+          size="small"
+          variant="outlined"
+          class="mr-2"
+          @click="openSchedule"
+        >
+          Vue Schedule
+        </v-btn>
+
         <v-btn
           :loading="loading"
           size="small"
@@ -339,8 +358,36 @@ function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loa
         >
           Submit
         </v-btn>
-        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color:red;">Reset</v-btn>
+        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color:red;">
+          Reset
+        </v-btn>
       </v-toolbar>
+
+      <!-- NEW: Schedule Dialog -->
+      <v-dialog v-model="showSchedule" max-width="1200">
+        <v-card class="rounded-lg">
+          <v-toolbar flat density="comfortable">
+            <v-toolbar-title class="font-weight-bold">Transport Schedule</v-toolbar-title>
+            <v-spacer />
+            <v-btn icon variant="text" @click="showSchedule = false">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </v-toolbar>
+
+          <v-divider />
+
+          <v-card-text class="pa-3">
+            <TransportScheduleCalendar
+              v-model="scheduleDate"
+              :max-car="MAX_CAR"
+              :max-msgr="MAX_MSGR"
+              start-hour="06"
+              end-hour="22"
+              :minute-step="30"
+            />
+          </v-card-text>
+        </v-card>
+      </v-dialog>
     </v-card>
   </v-container>
 </template>
@@ -355,4 +402,7 @@ function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loa
 :deep(.v-input){ margin-bottom:6px !important; }
 :deep(.v-field__input){ padding-top:6px; padding-bottom:6px; }
 .sticky-col { align-self:flex-start; }
+
+/* optional: dialog width nicer on small screens */
+:deep(.v-dialog > .v-overlay__content) { width: 96%; }
 </style>
