@@ -1,27 +1,29 @@
+<!-- src/views/employee/carbooking/sections/RecurringBookingSection.vue -->
 <script setup>
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
+import Swal from 'sweetalert2'
 import api from '@/utils/api'
 
 const props = defineProps({
   form: { type: Object, required: true },
   timezone: { type: String, default: 'Asia/Phnom_Penh' },
-  defaultPickupTime: { type: String, default: '07:00' },
   maxDays: { type: Number, default: 30 },
-  holidays: { type: Array, default: () => [] }, // optional: preloaded holidays
+  holidays: { type: Array, default: () => [] },
 })
 
 /* ---------- helpers ---------- */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
-const triggerTime = computed(() => props.form.timeStart || props.defaultPickupTime)
+const pad2 = s => String(s ?? '').padStart(2,'0')
 
-/* time input v-model (native <input type="time"> expects HH:mm) */
-const timeValue = computed({
-  get: () => props.form.timeStart || '',
-  set: (v) => {
-    const [h='07', m='00'] = String(v || '').split(':')
-    props.form.timeStart = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
-  }
+/* Use ONLY main form’s Start/End (no separate pickup) */
+const timeStartWin = computed(() => {
+  const h = props.form.startHour, m = props.form.startMinute
+  return (h && m) ? `${pad2(h)}:${pad2(m)}` : ''
+})
+const timeEndWin = computed(() => {
+  const h = props.form.endHour, m = props.form.endMinute
+  return (h && m) ? `${pad2(h)}:${pad2(m)}` : ''
 })
 
 /* ---------- end date control ---------- */
@@ -78,7 +80,7 @@ watch(() => props.form.endDate, (end) => {
 
 /* ---------- server preview (holidays + Sundays) ---------- */
 const serverDates   = ref([])   // will-create dates from server
-const serverSkipped = ref([])   // holidays from server (includes Sundays)
+const serverSkipped = ref([])   // holidays (incl. Sundays if skipHolidays=true)
 const serverBusy    = ref(false)
 const serverErr     = ref('')
 
@@ -86,15 +88,16 @@ async function fetchServerPreview() {
   serverErr.value = ''
   serverDates.value = []
   serverSkipped.value = []
-  if (!props.form.recurring || !props.form.tripDate || !props.form.endDate || !triggerTime.value) return
+  // REQUIRE main date range + main start time (no pickup field)
+  if (!props.form.recurring || !props.form.tripDate || !props.form.endDate || !timeStartWin.value) return
   try {
     serverBusy.value = true
-    // NOTE: axios baseURL already includes /api → path starts with /transport
     const { data } = await api.get('/transport/recurring/preview', {
       params: {
         start: props.form.tripDate,
         end: props.form.endDate,
-        timeStart: triggerTime.value,
+        // backend preview requires timeStart → give main start time
+        timeStart: timeStartWin.value,
         skipHolidays: String(!!props.form.skipHolidays),
       }
     })
@@ -105,7 +108,7 @@ async function fetchServerPreview() {
       serverErr.value = data?.error || 'Preview failed'
     }
   } catch (e) {
-    serverErr.value = e?.message || 'Network error'
+    serverErr.value = e?.response?.data?.error || e?.message || 'Network error'
   } finally {
     serverBusy.value = false
   }
@@ -113,14 +116,16 @@ async function fetchServerPreview() {
 let debounce
 function schedulePreview() { clearTimeout(debounce); debounce = setTimeout(fetchServerPreview, 300) }
 onBeforeUnmount(() => clearTimeout(debounce))
-watch(() => [props.form.recurring, props.form.tripDate, props.form.endDate, triggerTime.value, props.form.skipHolidays],
-  () => schedulePreview(), { immediate: true })
+watch(
+  () => [props.form.recurring, props.form.tripDate, props.form.endDate, timeStartWin.value, props.form.skipHolidays],
+  () => schedulePreview(),
+  { immediate: true }
+)
 
 /* ---------- holiday badges ---------- */
 const holidaySet = computed(() => new Set(props.holidays || []))
-const isSunday   = (d) => dayjs(d).day() === 0
-// union of client holidays + serverSkipped (env + Sundays)
-const isHoliday  = (d) => isSunday(d) || holidaySet.value.has(d) || serverSkipped.value.includes(d)
+const isSun   = (d) => dayjs(d).day() === 0
+const isHoliday  = (d) => isSun(d) || holidaySet.value.has(d) || serverSkipped.value.includes(d)
 
 /* ---------- calendar items/grid ---------- */
 const dateItems = computed(() => {
@@ -141,7 +146,7 @@ const dateItems = computed(() => {
       weekday: cur.format('ddd'),
       willCreate,
       isHoliday: holiday,
-      isSunday: isSunday(dStr),
+      isSunday: isSun(dStr),
       dow: cur.day(),
     })
     cur = cur.add(1, 'day')
@@ -149,7 +154,7 @@ const dateItems = computed(() => {
   return items
 })
 
-const weekHeader = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+const weekHeader = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']
 const monFirstIndex = (dowSun0) => (dowSun0 + 6) % 7
 const gridCells = computed(() => {
   if (!dateItems.value.length) return []
@@ -171,6 +176,82 @@ const counts = computed(() => {
   const skipped = total - create
   return { total, create, skipped }
 })
+
+/* ---------- CREATE SERIES (uses main Start/End) ---------- */
+function validateSeriesPayload () {
+  const missing = []
+  if (!props.form.tripDate) missing.push('Start date')
+  if (!props.form.endDate)  missing.push('End date')
+  if (!timeStartWin.value)  missing.push('Start time (main form)')
+  if (!timeEndWin.value)    missing.push('End time (main form)')
+  if (timeStartWin.value && timeEndWin.value && timeEndWin.value <= timeStartWin.value)
+    missing.push('End time must be after Start time')
+
+  const stops = props.form.stops || []
+  if (!stops.length) missing.push('At least one destination')
+  for (const s of stops) {
+    if (!s.destination) missing.push('Destination is required')
+    if (s.destination === 'Other' && !s.destinationOther)
+      missing.push('Destination Name (Other) is required')
+  }
+  return missing
+}
+
+async function createSeries () {
+  if (!props.form.recurring) return
+  const errs = validateSeriesPayload()
+  if (errs.length) {
+    await Swal.fire({ icon:'warning', title:'Please fix', html: errs.map(e=>`• ${e}`).join('<br>') })
+    return
+  }
+
+  const payload = {
+    startDate: fmtDate(props.form.tripDate),
+    endDate:   fmtDate(props.form.endDate),
+    skipHolidays: !!props.form.skipHolidays,
+    timeStart: timeStartWin.value, // ← main window only
+    timeEnd:   timeEndWin.value,
+    category: props.form.category || 'Car',
+    passengers: Number(props.form.passengers || 1),
+    customerContact: props.form.customerContact || '',
+    stops: (props.form.stops || []).map(s => ({
+      destination: s.destination,
+      destinationOther: s.destination === 'Other' ? (s.destinationOther || '') : '',
+      mapLink: s.mapLink || ''
+    })),
+    purpose: props.form.purpose || '',
+    notes: props.form.notes || '',
+    createdByEmp: {
+      employeeId: props.form.employeeId || '',
+      name: props.form.name || '',
+      department: props.form.department || '',
+      contactNumber: props.form.contactNumber || ''
+    }
+  }
+
+  try {
+    const { value: ok } = await Swal.fire({
+      title: 'Create recurring series?',
+      html: `This will create bookings for <b>${counts.value.create}</b> day(s) and skip <b>${counts.value.skipped}</b>.`,
+      icon: 'question', showCancelButton: true, confirmButtonText: 'Create'
+    })
+    if (!ok) return
+
+    const { data } = await api.post('/transport/recurring', payload)
+    if (data?.ok) {
+      await Swal.fire({
+        icon:'success',
+        title:'Recurring series created',
+        html:`Created <b>${data.created}</b>, skipped <b>${data.skipped}</b>.`,
+        timer: 1800, showConfirmButton:false
+      })
+    } else {
+      throw new Error(data?.error || 'Create failed')
+    }
+  } catch (e) {
+    await Swal.fire({ icon:'error', title:'Create failed', text: e?.message || 'Something went wrong.' })
+  }
+}
 </script>
 
 <template>
@@ -180,6 +261,7 @@ const counts = computed(() => {
         <i class="fa-solid fa-rotate-right icon-ttl"></i>
         <span class="t">Recurring Booking</span>
       </div>
+
     </div>
 
     <v-row dense class="mt-3">
@@ -202,13 +284,6 @@ const counts = computed(() => {
       </v-col>
 
       <template v-if="form.recurring">
-        <!-- Pickup time -->
-        <v-col cols="12" sm="6" md="4" lg="3">
-          <div class="field-label"><i class="fa-solid fa-clock"></i><span>Pickup Time</span></div>
-          <v-text-field v-model="timeValue" type="time" step="60" density="compact" variant="outlined" hide-details placeholder="HH:mm" />
-          <div class="text-caption mt-1">Auto-create at <strong>{{ triggerTime || defaultPickupTime }}</strong> ({{ timezone }}).</div>
-        </v-col>
-
         <!-- End date -->
         <v-col cols="12" sm="6" md="4" lg="3">
           <div class="field-label"><i class="fa-solid fa-calendar-check"></i><span>End Date</span></div>
@@ -269,7 +344,7 @@ const counts = computed(() => {
           </div>
         </v-col>
 
-        <!-- Calendar -->
+        <!-- Calendar grid -->
         <v-col cols="12">
           <div class="calendar-scroll">
             <div class="week-header"><div v-for="w in weekHeader" :key="w" class="wkcell">{{ w }}</div></div>
@@ -308,7 +383,7 @@ const counts = computed(() => {
           </div>
 
           <div v-if="!gridCells.length" class="text-caption mt-2">
-            Set a <strong>Trip Date</strong> and a valid <strong>End Date</strong> to see the preview.
+            Set a <strong>Trip Date</strong>, a valid <strong>End Date</strong>, and the main form’s <strong>Start/End</strong> time to see the preview.
           </div>
         </v-col>
       </template>

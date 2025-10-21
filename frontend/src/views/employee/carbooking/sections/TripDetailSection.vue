@@ -11,18 +11,44 @@ const props = defineProps({
 })
 const emit = defineEmits(['capacity-change'])
 
-/* Backend capacity rules (fallbacks for chips) */
-const MAX_CAR = 3
+/* Fallback capacities when no people list is available */
+const MAX_CAR  = 3
 const MAX_MSGR = 1
 
 /* UI state */
 const availLoading = ref(false)
 const availError   = ref('')
-const availableCar  = ref(null) // null => show default max
-const availableMsgr = ref(null) // null => show default max
-const clashes      = ref([])     // overlapping bookings for the selected window (selected category)
+const availableCar  = ref(null) // null -> show default max
+const availableMsgr = ref(null) // null -> show default max
+const clashes      = ref([])     // overlapping non-pending bookings for the selected category
 
-/* Derived */
+/* People for capacity (same as calendar) */
+const drivers    = ref([]) // [{ loginId, name }]
+const messengers = ref([])
+
+async function fetchPeople() {
+  const normalize = (arr = []) =>
+    (Array.isArray(arr) ? arr : [])
+      .map(u => {
+        const loginId = String(u.loginId || u._id || u.id || '').trim()
+        return { loginId, name: u.name || u.fullName || loginId || '—' }
+      })
+      .filter(u => !!u.loginId)
+
+  try {
+    const [drv, msg] = await Promise.all([
+      api.get('/admin/users', { params: { role: 'DRIVER',    isActive: true } }),
+      api.get('/admin/users', { params: { role: 'MESSENGER', isActive: true } }),
+    ])
+    drivers.value    = normalize(drv?.data)
+    messengers.value = normalize(msg?.data)
+  } catch (e) {
+    // fall back to constant capacities
+    drivers.value = []
+    messengers.value = []
+  }
+}
+
 const startTime = computed(() =>
   props.form.startHour && props.form.startMinute ? `${props.form.startHour}:${props.form.startMinute}` : ''
 )
@@ -43,7 +69,7 @@ const destinationItems = computed(() => {
   return base
 })
 
-/* Itinerary */
+/* Itinerary helpers */
 function addStop() {
   props.form.stops.push({ destination: '', destinationOther: '', mapLink: '' })
 }
@@ -58,7 +84,7 @@ function onDestinationChange(row) {
   }
 }
 
-/* Time helpers */
+/* Time math */
 const toMin = (hhmm) => {
   if (!hhmm) return null
   const [h, m] = hhmm.split(':').map(n => parseInt(n || '0', 10))
@@ -66,15 +92,14 @@ const toMin = (hhmm) => {
 }
 const overlaps = (aS, aE, bS, bE) => aS < bE && bS < aE
 
-/* Availability + clash windows */
+/* Availability + clashes (client-side, PENDING is ignored) */
 async function refreshAvailability() {
   availError.value = ''
   clashes.value = []
 
   const haveAll = props.form.tripDate && startTime.value && endTime.value
-
-  // No time picked yet → display defaults
   if (!haveAll) {
+    // nothing chosen yet -> use defaults
     availableCar.value  = null
     availableMsgr.value = null
     emit('capacity-change', false)
@@ -83,36 +108,43 @@ async function refreshAvailability() {
 
   availLoading.value = true
   try {
-    // Fetch both capacities (Cars + Messenger)
-    const [carCap, msgrCap] = await Promise.all([
-      api.get('/car-bookings/availability', {
-        params: { date: props.form.tripDate, start: startTime.value, end: endTime.value, category: 'Car' }
-      }),
-      api.get('/car-bookings/availability', {
-        params: { date: props.form.tripDate, start: startTime.value, end: endTime.value, category: 'Messenger' }
-      })
-    ])
+    // Ensure we have current people lists (for true capacity)
+    if (!drivers.value.length && !messengers.value.length) {
+      await fetchPeople()
+    }
 
-    const leftCar = Number(carCap?.data?.available ?? MAX_CAR)
-    const leftMsgr = Number(msgrCap?.data?.available ?? MAX_MSGR)
-    availableCar.value  = Math.max(0, Math.min(MAX_CAR, leftCar))
-    availableMsgr.value = Math.max(0, Math.min(MAX_MSGR, leftMsgr))
+    const capCar  = drivers.value.length    ? drivers.value.length    : MAX_CAR
+    const capMsgr = messengers.value.length ? messengers.value.length : MAX_MSGR
 
-    // Lock submit based on *selected* category
+    // Get all bookings for the day
+    const { data: day } = await api.get('/admin/car-bookings', { params: { date: props.form.tripDate } })
+
+    const s = toMin(startTime.value)
+    const e = toMin(endTime.value)
+
+    // statuses considered BUSY (PENDING should NOT block)
+    const BUSY = new Set(['ACCEPTED','ON_ROAD','ARRIVING','DELAYED'])
+
+    // Busy counts by category
+    const busyCar = (Array.isArray(day) ? day : [])
+      .filter(b => b.category === 'Car' && BUSY.has(b.status))
+      .filter(b => overlaps(s, e, toMin(b.timeStart), toMin(b.timeEnd))).length
+
+    const busyMsgr = (Array.isArray(day) ? day : [])
+      .filter(b => b.category === 'Messenger' && BUSY.has(b.status))
+      .filter(b => overlaps(s, e, toMin(b.timeStart), toMin(b.timeEnd))).length
+
+    availableCar.value  = Math.max(0, capCar  - busyCar)
+    availableMsgr.value = Math.max(0, capMsgr - busyMsgr)
+
+    // Button lock: based on selected category only
     const noneLeft = isCarSelected.value ? availableCar.value === 0 : availableMsgr.value === 0
     emit('capacity-change', noneLeft)
 
-    // Fetch day list → compute clashes only for the *selected* category
-    const { data: day } = await api.get('/admin/car-bookings', { params: { date: props.form.tripDate } })
-    const s = toMin(startTime.value)
-    const e = toMin(endTime.value)
+    // Build "busy windows" chips for the selected category only (ignore PENDING/COMPLETED/CANCELLED)
     const sel = props.form.category
-
-    // IMPORTANT CHANGE:
-    // We now ignore both CANCELLED **and COMPLETED** bookings in the "busy" preview
-    // so employees can request again once a driver/messenger has completed a job.
     clashes.value = (Array.isArray(day) ? day : [])
-      .filter(b => b.category === sel && !['CANCELLED','COMPLETED'].includes(b.status))
+      .filter(b => b.category === sel && BUSY.has(b.status))
       .filter(b => overlaps(s, e, toMin(b.timeStart), toMin(b.timeEnd)))
       .map(b => ({ id: b._id, start: b.timeStart, end: b.timeEnd }))
       .sort((a, b) => a.start.localeCompare(b.start))
@@ -129,7 +161,11 @@ async function refreshAvailability() {
 const trigger = () => queueMicrotask(refreshAvailability)
 watch(() => [props.form.tripDate, props.form.category], trigger)
 watch(() => [props.form.startHour, props.form.startMinute, props.form.endHour, props.form.endMinute], trigger)
-onMounted(refreshAvailability)
+onMounted(() => {
+  // make sure a stop row exists
+  if (!props.form.stops?.length) addStop()
+  refreshAvailability()
+})
 </script>
 
 <template>
@@ -141,7 +177,7 @@ onMounted(refreshAvailability)
           <i class="fa-solid fa-route"></i>
           <span>Order Detail</span>
         </div>
-        <div class="hero-sub">Live availability shows exact vehicles left for your selected time.</div>
+        <div class="hero-sub">Live availability shows vehicles left (only non-pending jobs block).</div>
       </div>
     </div>
 
@@ -175,7 +211,7 @@ onMounted(refreshAvailability)
             </div>
           </div>
 
-          <!-- Busy windows for the *selected* category -->
+          <!-- Busy windows for the *selected* category (ignores PENDING/COMPLETED/CANCELLED) -->
           <v-alert
             v-if="!availLoading && !availError && (availableCar !== null || availableMsgr !== null) && clashes.length"
             type="warning"
@@ -218,7 +254,7 @@ onMounted(refreshAvailability)
               <v-select :items="CATEGORY" v-model="props.form.category" label="Category" variant="outlined" density="compact" hide-details />
             </v-col>
             <v-col cols="12" md="4">
-              <v-text-field v-model="props.form.tripDate" type="date" label="Comfirm Date" variant="outlined" density="compact" hide-details />
+              <v-text-field v-model="props.form.tripDate" type="date" label="Confirm Date" variant="outlined" density="compact" hide-details />
             </v-col>
           </v-row>
         </v-card-text>
@@ -285,49 +321,47 @@ onMounted(refreshAvailability)
               </v-expansion-panel-title>
 
               <v-expansion-panel-text>
-              <v-row dense class="align-center">
-                <v-col cols="12" md="3">
-                  <v-select
-                    :items="destinationItems"
-                    v-model="row.destination"
-                    :label="`Destination #${idx + 1}`"
-                    variant="outlined"
-                    density="compact"
-                    hide-details
-                    width="300px"
-                    @update:model-value="onDestinationChange(row)"
-                  />
-                </v-col>
+                <v-row dense class="align-center">
+                  <v-col cols="12" md="3">
+                    <v-select
+                      :items="destinationItems"
+                      v-model="row.destination"
+                      :label="`Destination #${idx + 1}`"
+                      variant="outlined"
+                      density="compact"
+                      hide-details
+                      width="300px"
+                      @update:model-value="onDestinationChange(row)"
+                    />
+                  </v-col>
 
-                <v-col v-if="row.destination === 'Other'" cols="12" md="4">
-                  <v-text-field v-model="row.destinationOther" label="Destination Name (Other)" variant="outlined" density="compact" hide-details />
-                </v-col>
+                  <v-col v-if="row.destination === 'Other'" cols="12" md="4">
+                    <v-text-field v-model="row.destinationOther" label="Destination Name (Other)" variant="outlined" density="compact" hide-details />
+                  </v-col>
 
-                <v-col v-if="row.destination === 'Other'" cols="12" md="4">
-                  <v-text-field v-model="row.mapLink" label="Google Maps Link" placeholder="https://maps.google.com/…" variant="outlined" density="compact" hide-details />
-                </v-col>
+                  <v-col v-if="row.destination === 'Other'" cols="12" md="4">
+                    <v-text-field v-model="row.mapLink" label="Google Maps Link" placeholder="https://maps.google.com/…" variant="outlined" density="compact" hide-details />
+                  </v-col>
 
-                <!-- push the button to the far right -->
-                <v-spacer class="d-none d-md-flex" />
+                  <v-spacer class="d-none d-md-flex" />
 
-                <v-col cols="12" md="auto" class="d-flex justify-end ms-auto mt-2 mt-md-0">
-                  <v-btn
-                    color="error"
-                    variant="text"
-                    size="small"
-                    class="remove-btn"
-                    @click="removeStop(idx)"
-                  >
-                    <i class="fa-solid fa-trash"></i>
-                    <span class="ml-1">Remove</span>
-                  </v-btn>
-                </v-col>
-              </v-row>
-            </v-expansion-panel-text>
+                  <v-col cols="12" md="auto" class="d-flex justify-end ms-auto mt-2 mt-md-0">
+                    <v-btn
+                      color="error"
+                      variant="text"
+                      size="small"
+                      class="remove-btn"
+                      @click="removeStop(idx)"
+                    >
+                      <i class="fa-solid fa-trash"></i>
+                      <span class="ml-1">Remove</span>
+                    </v-btn>
+                  </v-col>
+                </v-row>
+              </v-expansion-panel-text>
             </v-expansion-panel>
           </v-expansion-panels>
 
-          <!-- Airport ticket -->
           <v-alert v-if="hasAirport" type="info" variant="tonal" density="comfortable" class="mt-3 mb-2" border="start">
             Airport selected — please attach the airplane ticket below.
           </v-alert>
