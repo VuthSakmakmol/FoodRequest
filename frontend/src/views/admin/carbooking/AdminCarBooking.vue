@@ -3,7 +3,13 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
+import { useDisplay } from 'vuetify'
 
+/* ───────── responsive helpers (for footer) ───────── */
+const { smAndDown } = useDisplay()
+const isMobile = computed(() => smAndDown.value)
+
+/* base state */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
@@ -110,6 +116,21 @@ const filtered = computed(() => {
       return hay.includes(term)
     })
     .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
+})
+
+/* ───────── Pagination (same as EmployeeCarHistory) ───────── */
+const page = ref(1)
+const itemsPerPage = ref(10)
+const pageCount = computed(() => {
+  const n = Math.ceil((filtered.value?.length || 0) / (itemsPerPage.value || 10))
+  return Math.max(1, n || 1)
+})
+const totalItems = computed(() => filtered.value?.length || 0)
+const rangeStart = computed(() => totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0)
+const rangeEnd   = computed(() => Math.min(page.value * itemsPerPage.value, totalItems.value))
+
+watch([filtered, itemsPerPage], () => {
+  if (page.value > pageCount.value) page.value = pageCount.value
 })
 
 /* Realtime */
@@ -248,10 +269,9 @@ async function submitAssign() {
   assignLoading.value = true
   assignError.value = ''
   try {
-    // Send selected role along; backend may ignore, but harmless and future-proof.
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
       driverId: selectedLoginId.value,
-      role: assignRole.value,         // <-- important: admin-chosen role
+      role: assignRole.value,
       status: 'ACCEPTED'
     })
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
@@ -334,9 +354,16 @@ async function updateStatus(item, nextStatus){
           <v-card-text>
             <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
 
-            <v-data-table :headers="headers" :items="filtered" :loading="loading"
-                          item-key="_id" density="comfortable" class="elevated">
-
+            <v-data-table
+              :headers="headers"
+              :items="filtered"
+              :loading="loading"
+              item-key="_id"
+              density="comfortable"
+              class="elevated"
+              v-model:page="page"
+              :items-per-page="itemsPerPage"
+            >
               <template #loading><v-skeleton-loader type="table-row@6" /></template>
 
               <template #item.time="{ item }"><div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div></template>
@@ -441,6 +468,55 @@ async function updateStatus(item, nextStatus){
                 <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">
                   No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
                 </v-sheet>
+              </template>
+
+              <!-- ✅ Same custom responsive pagination footer -->
+              <template #bottom>
+                <div class="table-footer">
+                  <div class="tf-left">
+                    <div class="text-caption text-medium-emphasis d-none d-sm-inline">
+                      Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                    </div>
+                    <div class="text-caption text-medium-emphasis d-sm-none">
+                      {{ page }} / {{ pageCount }}
+                    </div>
+                  </div>
+
+                  <div class="tf-middle">
+                    <v-select
+                      v-if="!isMobile"
+                      v-model="itemsPerPage"
+                      :items="[5,10,20,50]"
+                      density="compact"
+                      variant="outlined"
+                      hide-details
+                      style="max-width: 300px"
+                      label="Rows"
+                    />
+                  </div>
+
+                  <div class="tf-right">
+                    <v-pagination
+                      v-model="page"
+                      :length="pageCount"
+                      :total-visible="isMobile ? 3 : 7"
+                      density="comfortable"
+                    >
+                      <template #first>
+                        <i class="fa-solid fa-angles-left"></i>
+                      </template>
+                      <template #prev>
+                        <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #next>
+                        <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #last>
+                        <i class="fa-solid fa-angles-right"></i>
+                      </template>
+                    </v-pagination>
+                  </div>
+                </div>
               </template>
             </v-data-table>
           </v-card-text>
@@ -647,4 +723,28 @@ i.fa-solid, i.fa-regular { line-height: 1; }
 .ml-2 { margin-left: .5rem; }
 
 .assignee-chip { font-weight: 600; }
+
+/* ───────── Same responsive table footer as Employee ───────── */
+.table-footer{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding: 12px 16px;
+  flex-wrap: wrap; /* allow wrap on small screens */
+}
+.tf-left { min-width: 120px; }
+.tf-middle { display:flex; align-items:center; }
+.tf-right { display:flex; align-items:center; }
+
+/* tighter pagination buttons and icon alignment */
+:deep(.v-pagination .v-btn){ min-width: 36px; }
+:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
+
+/* On very narrow screens, stretch footer sections to full width */
+@media (max-width: 600px){
+  .table-footer { padding: 10px 12px; gap:10px; }
+  .tf-left, .tf-middle, .tf-right { width: 100%; }
+  .tf-right { justify-content: flex-end; }
+}
 </style>

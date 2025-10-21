@@ -4,6 +4,10 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket from '@/utils/socket'
+import { useDisplay } from 'vuetify'
+
+const { smAndDown } = useDisplay()
+const isMobile = computed(() => smAndDown.value)
 
 const loading = ref(false)
 const error   = ref('')
@@ -63,15 +67,30 @@ function prettyStops(stops = []) {
   return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
 }
 
+/* ——— Colors unchanged ——— */
 const statusColor = s => ({
   PENDING:'grey', ACCEPTED:'primary', ON_ROAD:'info', ARRIVING:'teal',
   COMPLETED:'success', DELAYED:'warning', CANCELLED:'error'
 }[s] || 'grey')
-const statusIcon = s => ({
-  PENDING:'mdi-timer-sand', ACCEPTED:'mdi-check-circle', ON_ROAD:'mdi-truck-fast',
-  ARRIVING:'mdi-flag-checkered', COMPLETED:'mdi-check-decagram',
-  DELAYED:'mdi-alert', CANCELLED:'mdi-cancel'
-}[s] || 'mdi-timer-sand')
+
+/* ——— Font Awesome icon classes ——— */
+const statusIconFA = s => ({
+  PENDING:   'fa-solid fa-hourglass-half',
+  ACCEPTED:  'fa-solid fa-circle-check',
+  ON_ROAD:   'fa-solid fa-truck-fast',
+  ARRIVING:  'fa-solid fa-flag-checkered',
+  COMPLETED: 'fa-solid fa-badge-check', // fallback below if not available
+  DELAYED:   'fa-solid fa-triangle-exclamation',
+  CANCELLED: 'fa-solid fa-ban'
+}[s] || 'fa-solid fa-hourglass-half')
+
+// Many FA builds don’t have fa-badge-check in Free. Fallback:
+function fixFA(icon) {
+  return icon === 'fa-solid fa-badge-check' ? 'fa-solid fa-circle-check' : icon
+}
+
+const categoryIconFA = cat => (cat === 'Car' ? 'fa-solid fa-car' : 'fa-solid fa-motorcycle')
+const stopIconFA = dest => (dest === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot')
 
 const filtered = computed(() => {
   const term = qSearch.value.trim().toLowerCase()
@@ -121,6 +140,21 @@ const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; if (data) showDetails(data) }
+
+/* ——— Pagination (responsive + FA footer) ——— */
+const page = ref(1)
+const itemsPerPage = ref(10)
+const pageCount = computed(() => {
+  const n = Math.ceil((filtered.value?.length || 0) / (itemsPerPage.value || 10))
+  return Math.max(1, n || 1)
+})
+const totalItems = computed(() => filtered.value?.length || 0)
+const rangeStart = computed(() => totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0)
+const rangeEnd   = computed(() => Math.min(page.value * itemsPerPage.value, totalItems.value))
+
+watch([filtered, itemsPerPage], () => {
+  if (page.value > pageCount.value) page.value = pageCount.value
+})
 </script>
 
 <template>
@@ -145,7 +179,10 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
           <v-card-title class="subhdr">
             <i class="fa-solid fa-filter"></i><span>Filters</span>
             <v-spacer />
-            <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading" prepend-icon="mdi-refresh">Refresh</v-btn>
+            <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading">
+              <template #prepend><i class="fa-solid fa-rotate-right"></i></template>
+              Refresh
+            </v-btn>
           </v-card-title>
           <v-card-text class="pt-0">
             <v-row dense>
@@ -162,7 +199,11 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
               </v-col>
               <v-col cols="12" md="3">
                 <v-text-field v-model="qSearch" label="Search requester / purpose / destination"
-                              prepend-inner-icon="mdi-magnify" variant="outlined" density="compact" hide-details clearable />
+                              variant="outlined" density="compact" hide-details clearable>
+                  <template #prepend-inner>
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                  </template>
+                </v-text-field>
               </v-col>
             </v-row>
           </v-card-text>
@@ -173,8 +214,14 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
             <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
 
             <v-data-table
-              :headers="headers" :items="filtered" :loading="loading"
-              item-key="_id" density="comfortable" class="elevated"
+              :headers="headers"
+              :items="filtered"
+              :loading="loading"
+              item-key="_id"
+              density="comfortable"
+              class="elevated"
+              v-model:page="page"
+              :items-per-page="itemsPerPage"
               @click:row="onRowClick"
             >
               <template #loading><v-skeleton-loader type="table-row@6" /></template>
@@ -183,7 +230,7 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
 
               <template #item.category="{ item }">
                 <v-chip :color="item.category === 'Car' ? 'primary' : 'orange'" size="small" label>
-                  <v-icon start :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" /> {{ item.category }}
+                  <i :class="categoryIconFA(item.category)" class="mr-1"></i> {{ item.category }}
                 </v-chip>
               </template>
 
@@ -202,7 +249,8 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
                   {{ prettyStops(item.stops) }}
                   <v-btn v-if="item.ticketUrl" size="x-small" color="indigo" variant="tonal" class="ml-2"
                          @click.stop="openTicket(item.ticketUrl)">
-                    <v-icon start icon="mdi-paperclip" /> Ticket
+                    <template #prepend><i class="fa-solid fa-paperclip"></i></template>
+                    Ticket
                   </v-btn>
                 </div>
                 <div class="text-caption mt-1" v-if="item.purpose || item.notes">
@@ -215,18 +263,66 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
 
               <template #item.status="{ item }">
                 <v-chip :color="statusColor(item.status)" size="small" label>
-                  <v-icon start :icon="statusIcon(item.status)" /> {{ item.status }}
+                  <i :class="fixFA(statusIconFA(item.status))" class="mr-1"></i> {{ item.status }}
                 </v-chip>
               </template>
 
               <template #item.actions="{ item }">
                 <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
-                  <v-icon start icon="mdi-information-outline" /> Details
+                  <template #prepend><i class="fa-solid fa-circle-info"></i></template>
+                  Details
                 </v-btn>
               </template>
 
-              <template #no-data>
-                <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">No bookings on {{ selectedDate }}.</v-sheet>
+              <!-- ✅ Responsive bottom footer with Font Awesome -->
+              <template #bottom>
+                <div class="table-footer">
+                  <div class="tf-left">
+                    <div class="text-caption text-medium-emphasis d-none d-sm-inline">
+                      Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                    </div>
+                    <div class="text-caption text-medium-emphasis d-sm-none">
+                      {{ page }} / {{ pageCount }}
+                    </div>
+                  </div>
+
+                  <div class="tf-middle">
+                    <!-- Hide rows-per-page on phones to save space -->
+                    <v-select
+                      v-if="!isMobile"
+                      v-model="itemsPerPage"
+                      :items="[5,10,20,50]"
+                      density="compact"
+                      variant="outlined"
+                      hide-details
+                      style="max-width: 300px"
+                      label="Rows"
+                    />
+                  </div>
+
+                  <div class="tf-right">
+                    <v-pagination 
+                      v-model="page"
+                      :length="pageCount"
+                      :total-visible="isMobile ? 3 : 7"
+                      density="comfortable"
+                      
+                    >
+                      <template #first>
+                        <i class="fa-solid fa-angles-left"></i>
+                      </template>
+                      <template #prev>
+                        <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #next>
+                        <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #last>
+                        <i class="fa-solid fa-angles-right"></i>
+                      </template>
+                    </v-pagination>
+                  </div>
+                </div>
               </template>
             </v-data-table>
           </v-card-text>
@@ -240,11 +336,13 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
             <v-chip :color="detailItem?.category === 'Car' ? 'primary' : 'orange'" size="small" label>
-              <v-icon start :icon="detailItem?.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" /> {{ detailItem?.category || '—' }}
+              <i :class="categoryIconFA(detailItem?.category)" class="mr-1"></i> {{ detailItem?.category || '—' }}
             </v-chip>
             <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
           </div>
-          <v-btn icon="mdi-close" variant="text" @click="detailOpen = false" />
+          <v-btn variant="text" @click="detailOpen = false" icon>
+            <i class="fa-solid fa-xmark"></i>
+          </v-btn>
         </v-card-title>
 
         <v-divider />
@@ -273,11 +371,14 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
                   <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
-                    <v-icon size="16" :icon="s.destination === 'Airport' ? 'mdi-airplane' : 'mdi-map-marker'" class="mr-1" />
+                    <i :class="stopIconFA(s.destination)" class="mr-1"></i>
                     <strong>#{{ i+1 }}:</strong>
                     <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
                     <a v-if="s.mapLink" :href="absUrl(s.mapLink)" target="_blank" rel="noopener" class="ml-2 text-decoration-none">
-                      <v-btn size="x-small" variant="text" color="primary"><v-icon start icon="mdi-link-variant" /> Map</v-btn>
+                      <v-btn size="x-small" variant="text" color="primary">
+                        <template #prepend><i class="fa-solid fa-link"></i></template>
+                        Map
+                      </v-btn>
                     </a>
                   </div>
                 </div>
@@ -286,8 +387,10 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
             </v-col>
 
             <v-col cols="12" md="6"><div class="lbl">Status</div>
-              <div class="val"><v-chip :color="statusColor(detailItem?.status)" size="small" label>
-                <v-icon start :icon="statusIcon(detailItem?.status)" /> {{ detailItem?.status || '—' }}</v-chip>
+              <div class="val">
+                <v-chip :color="statusColor(detailItem?.status)" size="small" label>
+                  <i :class="fixFA(statusIconFA(detailItem?.status))" class="mr-1"></i> {{ detailItem?.status || '—' }}
+                </v-chip>
               </div>
             </v-col>
 
@@ -296,7 +399,8 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
               <div class="val">
                 <a :href="absUrl(detailItem.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
                   <v-btn size="small" color="indigo" variant="tonal">
-                    <v-icon start icon="mdi-paperclip" /> VIEW TICKET
+                    <template #prepend><i class="fa-solid fa-paperclip"></i></template>
+                    VIEW TICKET
                   </v-btn>
                 </a>
               </div>
@@ -339,4 +443,28 @@ function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; i
 .val { font-weight:600; }
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+
+/* ——— Responsive table footer ——— */
+.table-footer{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding: 12px 16px;
+  flex-wrap: wrap; /* allow wrap on small screens */
+}
+.tf-left { min-width: 120px; }
+.tf-middle { display:flex; align-items:center; }
+.tf-right { display:flex; align-items:center; }
+
+/* tighter pagination buttons and icon alignment */
+:deep(.v-pagination .v-btn){ min-width: 36px; }
+:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
+
+/* On very narrow screens, stretch footer sections to full width */
+@media (max-width: 600px){
+  .table-footer { padding: 10px 12px; gap:10px; }
+  .tf-left, .tf-middle, .tf-right { width: 100%; }
+  .tf-right { justify-content: flex-end; }
+}
 </style>
