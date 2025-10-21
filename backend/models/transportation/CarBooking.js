@@ -1,4 +1,3 @@
-// backend/models/CarBooking.js
 const mongoose = require('mongoose')
 
 const StopSchema = new mongoose.Schema({
@@ -21,12 +20,9 @@ const AssignmentSchema = new mongoose.Schema({
 }, { _id: false })
 
 const CarBookingSchema = new mongoose.Schema({
-  /* ───────── Recurring linkage & idempotency ───────── */
   seriesId: { type: mongoose.Schema.Types.ObjectId, ref: 'TransportationRecurringSeries' },
-  // IMPORTANT: do NOT default to '', and do not put unique here (use partial index below)
   idempotencyKey: { type: String, default: undefined },
 
-  /* ───────── Requester ───────── */
   employeeId: { type: String, required: true, index: true },
   employee: {
     employeeId: { type: String, required: true },
@@ -35,11 +31,10 @@ const CarBookingSchema = new mongoose.Schema({
     contactNumber: { type: String, default: '' }
   },
 
-  /* ───────── Booking core ───────── */
   category: { type: String, enum: ['Car','Messenger'], required: true, index: true },
-  tripDate: { type: String, required: true, index: true },  // YYYY-MM-DD (local)
-  timeStart:{ type: String, required: true },                // HH:MM (local)
-  timeEnd:  { type: String, required: true },                // HH:MM (local)
+  tripDate: { type: String, required: true, index: true },  // YYYY-MM-DD
+  timeStart:{ type: String, required: true },
+  timeEnd:  { type: String, required: true },
 
   passengers: { type: Number, default: 1, min: 1 },
   customerContact: { type: String, default: '' },
@@ -70,18 +65,15 @@ const CarBookingSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 }, { collection: 'car_bookings' })
 
-/* ───────── Indexes ───────── */
 CarBookingSchema.index({ tripDate: 1, category: 1 })
 CarBookingSchema.index({ employeeId: 1, createdAt: -1 })
 CarBookingSchema.index({ 'assignment.driverId': 1, tripDate: 1 })
 
-// Unique only when idempotencyKey exists and is not empty
 CarBookingSchema.index(
   { idempotencyKey: 1 },
   { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string', $ne: '' } } }
 )
 
-/* ───────── Validators / methods ───────── */
 CarBookingSchema.path('stops').validate(function (stops) {
   for (const s of (stops || [])) {
     if (s.destination === 'Other' && !s.destinationOther) return false

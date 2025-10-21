@@ -1,149 +1,168 @@
-// backend/services/recurring.engine.js
-const dayjs = require('dayjs');
-const FoodRequest = require('../models/food/FoodRequest');
-const RecurringTemplate = require('../models/food/RecurringTemplate');
-const { sendToAll } = require('./telegram.service');
-const { newRequestMsg } = require('./telegram.messages');
+// backend/services/transportRecurring.engine.js
+const dayjs = require('dayjs')
+const utc = require('dayjs/plugin/utc')
+const tz = require('dayjs/plugin/timezone')
+const isSameOrBefore = require('dayjs/plugin/isSameOrBefore')
+dayjs.extend(utc); dayjs.extend(tz); dayjs.extend(isSameOrBefore)
 
-// Holidays from .env (YYYY-MM-DD, comma-separated)
-const HOLIDAY_SET = new Set(
-  String(process.env.HOLIDAYS || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-);
+const Series = require('../models/transportation/TransportationRecurringSeries')
+const CarBooking = require('../models/transportation/CarBooking')
+const { enumerateLocalDates } = require('../utils/datetime')
+const { getHolidaySet, isSunday } = require('../utils/holidays')
 
-// Khmer rule: Sundays are holidays; Saturdays are NOT
-const isSunday = (dateStr) => dayjs(dateStr).day() === 0;
-const isHolidayCore = (dateStr) => isSunday(dateStr) || HOLIDAY_SET.has(dateStr);
+const ZONE = 'Asia/Phnom_Penh'
+const MAX_DAYS = Number(process.env.MAX_RECURRING_DAYS || 30)
 
-// Default time when none provided
-const DEFAULT_MORNING_ALERT = String(process.env.DEFAULT_MORNING_ALERT || '07:00');
-
-// safe HH:mm
-function hhmm(s) {
-  const [h='07', m='00'] = String(s || '').split(':');
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+function seriesKey(seriesId, dateStr) {
+  return `series:${String(seriesId)}:${dateStr}`
 }
 
-// next local day 00:00:00Z (we rely on process.env.TZ for Node's local time)
-function nextDayStart(dateStr) {
-  return dayjs(dateStr).add(1, 'day').startOf('day').toDate();
-}
+async function expandSeries(seriesId, createdByEmpFromController = null) {
+  const series = await Series.findById(seriesId).lean()
+  if (!series) throw new Error('Series not found')
+  if (series.status !== 'ACTIVE') return { ok: true, created: 0, skipped: ['Series not ACTIVE'] }
 
-async function createOccurrenceIfNeeded(tpl, todayStr) {
-  // 0) User skips / holidays
-  const isSkippedByUser = Array.isArray(tpl.skipDates) && tpl.skipDates.includes(todayStr);
-  const isHoliday = tpl.skipHolidays ? isHolidayCore(todayStr) : false;
-  if (isSkippedByUser || isHoliday) return null;
+  const s = dayjs.tz(series.startDate, ZONE).startOf('day')
+  const e = dayjs.tz(series.endDate, ZONE).startOf('day')
+  if (!s.isValid() || !e.isValid()) throw new Error('Invalid start/end date')
 
-  // 1) Already exists? (idempotency)
-  const exists = await FoodRequest.findOne({
-    'recurring.templateId': tpl._id,
-    'recurring.occurrenceDate': todayStr
-  }).lean();
-  if (exists) return null;
+  const spanDays = e.diff(s, 'day') + 1
+  const clampedEnd = spanDays > MAX_DAYS ? s.add(MAX_DAYS - 1, 'day') : e
+  const endStr = clampedEnd.format('YYYY-MM-DD')
+  const allDates = enumerateLocalDates(series.startDate, endStr, ZONE)
 
-  // 2) Build linked occurrence
-  const eatDate = new Date(`${todayStr}T00:00:00.000Z`);
-  const payload = {
-    orderDate: new Date(),
-    eatDate,
-    eatTimeStart: tpl.eatTimeStart || null,
-    eatTimeEnd:   tpl.eatTimeEnd   || null,
+  const baseHolidaySet = await getHolidaySet()
+  const holidays = new Set(baseHolidaySet)
+  if (series.skipHolidays) for (const d of allDates) if (isSunday(d)) holidays.add(d)
 
-    employee: {
-      employeeId: tpl.owner.employeeId,
-      name: tpl.owner.name || '',
-      department: tpl.owner.department || ''
-    },
+  const createdDates = []
+  const skippedDates = []
+  const skippedReasons = []
 
-    orderType: tpl.orderType,
-    meals: tpl.meals,
-    quantity: tpl.quantity,
-    location: tpl.location,
-
-    menuChoices: tpl.menuChoices,
-    menuCounts: tpl.menuCounts,
-
-    dietary: tpl.dietary,
-    dietaryCounts: tpl.dietaryCounts,
-    dietaryOther: tpl.dietaryOther,
-
-    specialInstructions: tpl.specialInstructions || '',
-
-    // Mark as RECURRING linked instance
-    recurring: {
-      enabled: true,
-      frequency: tpl.frequency || 'Daily',
-      endDate: tpl.endDate,
-      skipHolidays: !!tpl.skipHolidays,
-      parentId: null,
-      source: 'RECURRING',
-      templateId: tpl._id,
-      occurrenceDate: todayStr // 'YYYY-MM-DD'
-    },
-
-    status: 'NEW',
-    statusHistory: [{ status: 'NEW', at: new Date() }],
-    notified: { deliveredAt: null, reminderSentAt: null },
-  };
-
-  try {
-    const doc = await FoodRequest.create(payload);
-    try { await sendToAll(newRequestMsg(doc)); }
-    catch (e) { console.warn('[Recurring] Telegram notify failed:', e?.message); }
-    return doc;
-  } catch (e) {
-    // Backstop for races: unique index on (templateId, occurrenceDate)
-    if (e?.code === 11000) return null;
-    throw e;
+  const createdByEmp = series.createdByEmp || createdByEmpFromController || {
+    employeeId: '',
+    name: '',
+    department: '',
+    contactNumber: '',
   }
-}
+  if (!createdByEmp?.employeeId) throw new Error('createdByEmp.employeeId missing; cannot create CarBooking')
 
-async function tick(io) {
-  // We assume Node process runs with correct TZ via process.env.TZ
-  const now = dayjs();
-  const todayStr = now.format('YYYY-MM-DD');
-  const currentHHmm = hhmm(now.format('HH:mm'));
-  const startOfToday = new Date(`${todayStr}T00:00:00.000Z`);
+  for (const d of allDates) {
+    if (series.skipHolidays && holidays.has(d)) { skippedDates.push(d); continue }
 
-  // Fetch ACTIVE templates whose window covers today
-  const templates = await RecurringTemplate.find({
-    status: 'ACTIVE',
-    startDate: { $lte: startOfToday },
-    endDate: { $gte: startOfToday }
-  }).lean();
+    const idem = seriesKey(series._id, d)
+    const payload = {
+      seriesId: series._id,
+      idempotencyKey: idem,
 
-  for (const tpl of templates) {
-    const trigger = hhmm(tpl.eatTimeStart || DEFAULT_MORNING_ALERT);
+      employeeId: createdByEmp.employeeId,
+      employee: {
+        employeeId: createdByEmp.employeeId,
+        name: createdByEmp.name || '',
+        department: createdByEmp.department || '',
+        contactNumber: createdByEmp.contactNumber || '',
+      },
 
-    // 1) Respect trigger time (run once at/after trigger)
-    if (currentHHmm < trigger) continue;
+      category: series.category,
+      tripDate: d,
+      timeStart: series.timeStart,
+      timeEnd: series.timeEnd,
 
-    // 2) Create if needed
-    const created = await createOccurrenceIfNeeded(tpl, todayStr);
+      passengers: series.passengers || 1,
+      customerContact: series.customerContact || '',
+      stops: Array.isArray(series.stops) ? series.stops : [],
+      purpose: series.purpose || '',
+      notes: series.notes || '',
 
-    // 3) Advance nextRunAt → tomorrow (even if nothing created due to skip/exists)
-    //    so the engine doesn't keep re-checking and spamming logs in the same day
-    const newNext = nextDayStart(todayStr);
-    if (!tpl.nextRunAt || dayjs(tpl.nextRunAt).isBefore(newNext)) {
-      await RecurringTemplate.updateOne(
-        { _id: tpl._id },
-        { $set: { nextRunAt: newNext } }
-      );
+      status: 'PENDING',
     }
 
-    // 4) Emit socket if we actually created a row
-    if (created && io) io.emit('foodRequest:created', created);
+    try {
+      await CarBooking.create(payload)
+      createdDates.push(d)
+    } catch (e) {
+      if (e?.code === 11000) {
+        skippedDates.push(d); skippedReasons.push({ date: d, reason: 'duplicate' })
+      } else {
+        skippedDates.push(d); skippedReasons.push({ date: d, reason: e.message || 'DB error' })
+      }
+    }
   }
+
+  return {
+    ok: true,
+    created: createdDates.length,
+    createdDates,
+    skipped: skippedDates,
+    skippedReasons,
+    spanClampedTo: endStr !== series.endDate ? endStr : undefined,
+  }
+}
+
+async function expandTodayIfMissing() {
+  const today = dayjs().tz(ZONE).format('YYYY-MM-DD')
+  const active = await Series.find({
+    status: 'ACTIVE',
+    startDate: { $lte: today },
+    endDate: { $gte: today },
+  }).lean()
+
+  if (!active.length) return { scanned: 0, created: 0 }
+
+  const baseHolidaySet = await getHolidaySet()
+  let created = 0
+
+  for (const s of active) {
+    if (s.skipHolidays && (baseHolidaySet.has(today) || isSunday(today))) continue
+    const idem = seriesKey(s._id, today)
+    const exists = await CarBooking.findOne({ idempotencyKey: idem }).lean()
+    if (exists) continue
+
+    const emp = s.createdByEmp || {}
+    if (!emp.employeeId) continue
+
+    try {
+      await CarBooking.create({
+        seriesId: s._id, idempotencyKey: idem,
+        employeeId: emp.employeeId,
+        employee: {
+          employeeId: emp.employeeId,
+          name: emp.name || '',
+          department: emp.department || '',
+          contactNumber: emp.contactNumber || '',
+        },
+        category: s.category,
+        tripDate: today,
+        timeStart: s.timeStart,
+        timeEnd: s.timeEnd,
+        passengers: s.passengers || 1,
+        customerContact: s.customerContact || '',
+        stops: Array.isArray(s.stops) ? s.stops : [],
+        purpose: s.purpose || '',
+        notes: s.notes || '',
+        status: 'PENDING',
+      })
+      created++
+    } catch (e) {
+      if (e?.code !== 11000) console.warn('[transportRecurring] create failed:', e?.message)
+    }
+  }
+
+  return { scanned: active.length, created }
 }
 
 function startRecurringEngine(io) {
-  const everyMs = Number(process.env.RECURRING_TICK_MS || 60_000); // default 1 min
-  console.log(`[recurring] engine started. interval=${everyMs}ms`);
-  const handle = setInterval(() => tick(io).catch(e => console.error('[recurring] tick error', e)), everyMs);
-  return () => clearInterval(handle);
+  const everyMs = Number(process.env.RECURRING_TICK_MS || 60_000)
+  console.log(`[transportRecurring] engine started (${everyMs}ms)`)
+  const tick = async () => {
+    try {
+      const res = await expandTodayIfMissing()
+      if (res.created > 0 && io) io.emit('transport:recurring:createdToday', res)
+    } catch (e) { console.error('[transportRecurring] tick error:', e?.message) }
+  }
+  tick()
+  const handle = setInterval(tick, everyMs)
+  return () => clearInterval(handle)
 }
 
-module.exports = { startRecurringEngine, tick };
+module.exports = { expandSeries, startRecurringEngine }

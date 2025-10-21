@@ -1,4 +1,3 @@
-<!-- views/employee/carbooking/EmployeeCarBooking.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import Swal from 'sweetalert2'
@@ -16,7 +15,7 @@ import TripDetailSection from './sections/TripDetailSection.vue'
 import VehicleSection from './sections/VehicleSection.vue'
 import RecurringBookingSection from './sections/RecurringBookingSection.vue'
 
-/* NEW: Calendar (dialog render) */
+/* Calendar dialog */
 import TransportScheduleCalendar from './calendars/TransportScheduleCalendar.vue'
 const showSchedule = ref(false)
 const scheduleDate = ref(dayjs().format('YYYY-MM-DD'))
@@ -37,48 +36,43 @@ const loadingEmployees = ref(false)
 
 /* ───────── form state ───────── */
 const form = ref({
-  /* requester */
   employeeId: '',
   name: '',
   department: '',
   contactNumber: '',
 
-  /* order detail */
   category: 'Car',
   tripDate: dayjs().format('YYYY-MM-DD'),
 
-  // multi-stop itinerary
   stops: [ { destination: '', destinationOther: '', mapLink: '' } ],
 
-  // overall time window
   startHour: '', startMinute: '',
   endHour:   '', endMinute:   '',
 
   passengers: '1',
   customerContact: '',
 
-  /* section 3 */
   purpose: '',
   notes: '',
 
-  // file (required if any stop is Airport)
   ticketFile: null,
 
-  /* recurring */
-  recurring: false, frequency: '', endDate: '', skipHolidays: false
+  recurring: false, frequency: '', endDate: '', skipHolidays: false,
+  // timeStart for recurring preview UI (kept in RecurringBookingSection)
+  timeStart: ''
 })
 
 const loading = ref(false)
 const success = ref('')
 const error = ref('')
 
-/* ───────── Demo availability (frontend only) ───────── */
+/* Demo availability (frontend only) */
 const demoBookings = ref([
   { date: dayjs().format('YYYY-MM-DD'), category: 'Car',       start: '07:00', end: '09:00' },
   { date: dayjs().format('YYYY-MM-DD'), category: 'Messenger', start: '08:00', end: '10:00' }
 ])
 
-/* ───────── load employees ───────── */
+/* Load employees */
 async function loadEmployees() {
   loadingEmployees.value = true
   try {
@@ -111,7 +105,7 @@ function onEmployeeSelected(val) {
   form.value.contactNumber = emp?.contactNumber || ''
 }
 
-/* ───────── time helpers + availability ───────── */
+/* time helpers + availability */
 const selectedStart = computed(() => toMinutes(form.value.startHour, form.value.startMinute))
 const selectedEnd   = computed(() => toMinutes(form.value.endHour,   form.value.endMinute))
 function toMinutes(h, m){ const H=Number(h||0), M=Number(m||0); return H*60+M }
@@ -133,7 +127,6 @@ const busyMsgr = computed(() => {
     overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
   ).length
 })
-
 const availableCar  = computed(() => Math.max(0, MAX_CAR  - busyCar.value))
 const availableMsgr = computed(() => Math.max(0, MAX_MSGR - busyMsgr.value))
 const capacityExceeded = computed(() => {
@@ -143,7 +136,7 @@ const capacityExceeded = computed(() => {
   return false
 })
 
-/* ───────── validation & payload ───────── */
+/* validation + payload */
 const hasAirport = computed(() => (form.value.stops || []).some(s => s.destination === 'Airport'))
 const startTime = computed(() => form.value.startHour && form.value.startMinute ? `${form.value.startHour}:${form.value.startMinute}` : '')
 const endTime   = computed(() => form.value.endHour   && form.value.endMinute   ? `${form.value.endHour}:${form.value.endMinute}`   : '')
@@ -176,7 +169,7 @@ function validateForm() {
   return errs
 }
 
-function buildPayloadFromForm(f) {
+function buildOneOffPayload(f) {
   return {
     employeeId: f.employeeId,
     category: f.category,
@@ -191,52 +184,83 @@ function buildPayloadFromForm(f) {
     passengers: Number(f.passengers || 1),
     customerContact: f.customerContact || '',
     purpose: f.purpose,
-    notes: f.notes || '',
-    recurring: {
-      enabled: !!f.recurring,
-      frequency: f.recurring ? (f.frequency || null) : null,
-      endDate: f.recurring ? (f.endDate || null) : null,
-      skipHolidays: f.recurring ? !!f.skipHolidays : false
-    }
+    notes: f.notes || ''
   }
 }
 
-/* ───────── submit/reset ───────── */
-async function submit() {
-  error.value = ''; success.value = '';
+function buildRecurringSeriesPayload(f) {
+  return {
+    category: f.category,
+    startDate: f.tripDate,
+    endDate: f.endDate,                 // set by RecurringBookingSection
+    timeStart: f.timeStart || startTime.value, // prefer section’s HH:mm if set
+    timeEnd: endTime.value,
+    timezone: 'Asia/Phnom_Penh',
+    skipHolidays: !!f.skipHolidays,
+    passengers: Number(f.passengers || 1),
+    customerContact: f.customerContact || '',
+    stops: (f.stops || []).map(s => ({
+      destination: s.destination,
+      destinationOther: s.destination === 'Other' ? (s.destinationOther || '') : '',
+      mapLink: s.mapLink || ''
+    })),
+    purpose: f.purpose || '',
+    notes: f.notes || ''
+  }
+}
 
-  const errs = validateForm();
+/* submit/reset */
+async function submit() {
+  error.value = ''; success.value = ''
+
+  const errs = validateForm()
   if (errs.length) {
-    await Swal.fire({ icon:'warning', title:'Please fix the following', html: errs.join('<br>') });
-    return;
+    await Swal.fire({ icon:'warning', title:'Please fix the following', html: errs.join('<br>') })
+    return
   }
 
-  const payload = buildPayloadFromForm(form.value);
-  const needsTicket = (form.value.stops || []).some(s => s.destination === 'Airport');
-
   try {
-    loading.value = true;
+    loading.value = true
 
-    if (needsTicket) {
-      const fd = new FormData();
-      fd.append('data', JSON.stringify(payload));
-      const file = form.value.ticketFile;
-      if (!file) throw new Error('Airplane ticket is required for Airport destination.');
-      fd.append('ticket', file);
-      await api.post('/public/car-bookings', fd);
-    } else {
-      await api.post('/public/car-bookings', payload);
+    // RECURRING path
+    if (form.value.recurring) {
+      const seriesPayload = buildRecurringSeriesPayload(form.value)
+      const { data } = await api.post('/transport/recurring', seriesPayload) // baseURL already has /api
+      if (!data?.ok) throw new Error(data?.error || 'Failed to create recurring series')
+      await Swal.fire({
+        icon:'success',
+        title:'Recurring series created',
+        html:`Created <b>${data.created}</b>, skipped <b>${(data.skipped||[]).length}</b>.`,
+        timer:1700, showConfirmButton:false
+      })
+      resetForm({ keepEmployee: true })
+      router.push({ name: 'employee-car-history' })
+      return
     }
 
-    await Swal.fire({ icon:'success', title:'Submitted', timer:1400, showConfirmButton:false });
-    resetForm({ keepEmployee: true });
-    router.push({ name: 'employee-car-history' });
+    // ONE-OFF path
+    const payload = buildOneOffPayload(form.value)
+    const needsTicket = (form.value.stops || []).some(s => s.destination === 'Airport')
+    if (needsTicket) {
+      const fd = new FormData()
+      fd.append('data', JSON.stringify(payload))
+      const file = form.value.ticketFile
+      if (!file) throw new Error('Airplane ticket is required for Airport destination.')
+      fd.append('ticket', file)
+      await api.post('/public/car-bookings', fd)
+    } else {
+      await api.post('/public/car-bookings', payload)
+    }
+
+    await Swal.fire({ icon:'success', title:'Submitted', timer:1400, showConfirmButton:false })
+    resetForm({ keepEmployee: true })
+    router.push({ name: 'employee-car-history' })
   } catch (e) {
-    const msg = e?.response?.data?.message || e?.message || 'Submission failed.';
-    error.value = msg;
-    await Swal.fire({ icon:'error', title:'Submission failed', text: msg });
+    const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Submission failed.'
+    error.value = msg
+    await Swal.fire({ icon:'error', title:'Submission failed', text: msg })
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
@@ -253,19 +277,20 @@ function resetForm({ keepEmployee = false } = {}) {
     stops: [ { destination: '', destinationOther: '', mapLink: '' } ],
 
     startHour:'', startMinute:'', endHour:'', endMinute:'',
+
     passengers:'1',
     customerContact:'',
 
     purpose:'', notes:'', ticketFile: null,
 
-    recurring:false, frequency:'', endDate:'', skipHolidays:false
+    recurring:false, frequency:'', endDate:'', skipHolidays:false,
+    timeStart:''
   }
 }
 
-/* Housekeeping */
+/* misc */
 watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeId', v) })
 
-/* Toast + hotkey */
 onMounted(() => {
   socket.on('carBooking:created', (doc) => {
     const empId = doc?.employee?.employeeId || doc?.employeeId
@@ -281,7 +306,6 @@ onBeforeUnmount(() => {
 })
 function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit() }
 
-/* NEW: open schedule dialog preset to current tripDate */
 function openSchedule() {
   scheduleDate.value = form.value.tripDate || dayjs().format('YYYY-MM-DD')
   showSchedule.value = true
@@ -338,24 +362,9 @@ function openSchedule() {
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">Employee Car / Messenger Booking</v-toolbar-title>
         <v-spacer />
 
-        <!-- NEW: Vue Schedule button -->
-        <v-btn
-          size="small"
-          variant="outlined"
-          class="mr-2"
-          @click="openSchedule"
-        >
-          Vue Schedule
-        </v-btn>
+        <v-btn size="small" variant="outlined" class="mr-2" @click="openSchedule">Vue Schedule</v-btn>
 
-        <v-btn
-          :loading="loading"
-          size="small"
-          class="px-4"
-          @click="submit"
-          :disabled="capacityExceeded"
-          style="background-color:aqua;"
-        >
+        <v-btn :loading="loading" size="small" class="px-4" @click="submit" :disabled="capacityExceeded" style="background-color:aqua;">
           Submit
         </v-btn>
         <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color:red;">
@@ -363,19 +372,14 @@ function openSchedule() {
         </v-btn>
       </v-toolbar>
 
-      <!-- NEW: Schedule Dialog -->
       <v-dialog v-model="showSchedule" max-width="1200">
         <v-card class="rounded-lg">
           <v-toolbar flat density="comfortable">
             <v-toolbar-title class="font-weight-bold">Transport Schedule</v-toolbar-title>
             <v-spacer />
-            <v-btn icon variant="text" @click="showSchedule = false">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
+            <v-btn icon variant="text" @click="showSchedule = false"><v-icon>mdi-close</v-icon></v-btn>
           </v-toolbar>
-
           <v-divider />
-
           <v-card-text class="pa-3">
             <TransportScheduleCalendar
               v-model="scheduleDate"
@@ -402,7 +406,5 @@ function openSchedule() {
 :deep(.v-input){ margin-bottom:6px !important; }
 :deep(.v-field__input){ padding-top:6px; padding-bottom:6px; }
 .sticky-col { align-self:flex-start; }
-
-/* optional: dialog width nicer on small screens */
 :deep(.v-dialog > .v-overlay__content) { width: 96%; }
 </style>

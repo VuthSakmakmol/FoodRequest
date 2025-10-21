@@ -2,7 +2,7 @@ const mongoose = require('mongoose')
 const { Schema, Types } = mongoose
 
 const TransportationRecurringSeriesSchema = new Schema({
-  createdBy:    { type: Types.ObjectId, ref: 'User', required: true },
+  createdBy:    { type: Types.ObjectId, ref: 'User', default: null },
   createdByEmp: {
     employeeId: { type: String, default: '' },
     name:       { type: String, default: '' },
