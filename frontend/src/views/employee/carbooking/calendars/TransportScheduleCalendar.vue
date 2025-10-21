@@ -28,6 +28,7 @@ watch(selectedDate, v => emit('update:modelValue', v))
 
 const loading   = ref(false)
 const err       = ref('')
+const info      = ref('')        // small hint showing which endpoint returned data
 const bookings  = ref([])
 
 /* fetched people for lane labels/capacity (normalized to loginId) */
@@ -53,6 +54,7 @@ const dayEndHH   = computed(()   => String(props.endHour).padStart(2,'0'))
 const timeMin = computed(() => `${dayStartHH.value}:00`)
 const timeMax = computed(() => `${dayEndHH.value}:00`)
 
+/* refetch when date or time window changes (other filters are client-side) */
 watch(selectedDate, () => {
   filters.value.timeStart = ''
   filters.value.timeEnd   = ''
@@ -66,6 +68,7 @@ const driverOptions = computed(() => {
   for (const p of drivers.value)    dict.set(p.loginId, p.name || p.loginId)
   for (const p of messengers.value) dict.set(p.loginId, p.name || p.loginId)
   if (dict.size === 0) {
+    // build from current bookings so filters still useful
     for (const b of bookings.value) {
       const id = String(b?.assignment?.driverId || '').trim()
       const nm = String(b?.assignment?.driverName || '').trim()
@@ -120,18 +123,30 @@ const colLabels = computed(() => {
 })
 
 /* ---------- API ---------- */
+/* IMPORTANT: switch to the PUBLIC endpoint so auth isn’t required */
 async function fetchDay() {
   if (!selectedDate.value) return
-  loading.value = true; err.value = ''
+  loading.value = true; err.value = ''; info.value = ''
   try {
-    const { data } = await api.get('/admin/car-bookings', { params: { date: selectedDate.value }})
+    const { data } = await api.get('/public/transport/schedule', { params: { date: selectedDate.value }})
     bookings.value = Array.isArray(data) ? data : []
+    info.value = `Loaded ${bookings.value.length} bookings via /public/transport/schedule`
   } catch (e) {
-    err.value = e?.response?.data?.message || e?.message || 'Failed to load schedule'
+    // As a fallback, try the admin route if public route wasn't mounted yet
+    try {
+      const { data } = await api.get('/admin/car-bookings', { params: { date: selectedDate.value }})
+      bookings.value = Array.isArray(data) ? data : []
+      info.value = `Loaded ${bookings.value.length} bookings via /admin/car-bookings`
+    } catch (e2) {
+      err.value = e2?.response?.data?.message || e2?.message || 'Failed to load schedule'
+      bookings.value = []
+    }
   } finally {
     loading.value = false
   }
 }
+
+/* Best-effort assignee directory (optional). If this fails, UI still works with fallback lanes. */
 async function fetchPeople() {
   const normalize = (arr = []) => {
     return (Array.isArray(arr) ? arr : []).map(u => {
@@ -146,8 +161,7 @@ async function fetchPeople() {
     ])
     drivers.value    = normalize(drv?.data)
     messengers.value = normalize(msg?.data)
-  } catch (e) {
-    console.warn('fetchPeople failed:', e?.message || e)
+  } catch {
     drivers.value = []
     messengers.value = []
   }
@@ -201,7 +215,7 @@ function packByAssignee(category, peopleList, fallbackCap) {
   if (!peopleList || peopleList.length === 0) {
     return {
       lanes: Array.from({ length: fallbackCap }, () => []),
-      unassigned: items // show under Unassigned section so they’re visible
+      unassigned: items
     }
   }
 
@@ -248,6 +262,7 @@ function updateCellWidth() {
   else if (w < 1100) cellW.value = 120
   else cellW.value = 160
 }
+let removeScrollSync = null
 onMounted(async () => {
   await nextTick()
   updateCellWidth()
@@ -258,13 +273,15 @@ onMounted(async () => {
     const onB = () => { h.scrollLeft = b.scrollLeft }
     h.addEventListener('scroll', onH)
     b.addEventListener('scroll', onB)
-    onBeforeUnmount(() => {
+    removeScrollSync = () => {
       h.removeEventListener('scroll', onH)
       b.removeEventListener('scroll', onB)
-    })
+    }
   }
 })
-
+onBeforeUnmount(() => {
+  if (removeScrollSync) removeScrollSync()
+})
 /* ---------- now-availability ---------- */
 const nowSlice = computed(() => {
   const now = dayjs()
@@ -349,6 +366,9 @@ const LEGEND = [
           <span>Include cancelled</span>
         </label>
       </div>
+
+      <!-- tiny inline info so you can confirm data source quickly -->
+      <div v-if="info" class="hint">{{ info }}</div>
     </div>
 
     <!-- ================= Legend ================= -->
@@ -532,7 +552,7 @@ const LEGEND = [
 
     <!-- ================= chips ================= -->
     <div class="nowchips">
-      <span v-if="availCarNow !== null" class="chip blue">🚗 Now: {{ availCarNow }}free</span>
+      <span v-if="availCarNow !== null" class="chip blue">🚗 Now: {{ availCarNow }} free</span>
       <span v-if="availMsgrNow !== null" class="chip amber">🛵 Now: {{ availMsgrNow }} free</span>
     </div>
 
@@ -551,6 +571,8 @@ const LEGEND = [
 .fg-date .date-ctrl{ display:flex; gap:8px; align-items:center; }
 .fg-span2{ grid-column: span 2; }
 @media (max-width: 720px){ .fg-span2{ grid-column: span 1; } }
+
+.hint{ margin-top:8px; font-size:.82rem; color:#334155; }
 
 .input{ width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:8px 10px; font-size:.95rem; outline:none; background:#fff; }
 .input:focus{ border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.15); }

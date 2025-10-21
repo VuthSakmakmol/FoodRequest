@@ -137,6 +137,29 @@ async function checkAvailability(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/** PUBLIC: read-only day schedule for timelines/calendars
+ *  GET /api/public/transport/schedule?date=YYYY-MM-DD&category=Car|Messenger&status=PENDING&driverId=loginId
+ */
+async function listSchedulePublic(req, res, next) {
+  try {
+    const { date, category, status, driverId } = req.query;
+
+    const filter = {};
+    if (date) { if (!isValidDate(date)) throw createError(400, 'Invalid date (YYYY-MM-DD).'); filter.tripDate = date; }
+    if (category && (category === 'Car' || category === 'Messenger')) filter.category = category;
+    if (status && status !== 'ALL') filter.status = status;
+    if (driverId) filter['assignment.driverId'] = String(driverId);
+
+    const list = await CarBooking
+      .find(filter)
+      .sort({ tripDate: 1, timeStart: 1 })
+      .lean();
+
+    res.json(list);
+  } catch (err) { next(err); }
+}
+
+
 async function createBooking(req, res, next) {
   try {
     const io = req.io;
@@ -535,4 +558,5 @@ module.exports = {
   driverUpdateStatus,
   updateBooking,
   deleteBooking,
+  listSchedulePublic
 };

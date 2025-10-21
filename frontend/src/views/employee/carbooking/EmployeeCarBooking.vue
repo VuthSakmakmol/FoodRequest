@@ -205,7 +205,13 @@ function buildRecurringSeriesPayload(f) {
       mapLink: s.mapLink || ''
     })),
     purpose: f.purpose || '',
-    notes: f.notes || ''
+    notes: f.notes || '',
+    createdByEmp: {
+    employeeId: String(f.employeeId || ''),
+    name: f.name || '',
+    department: f.department || '',
+    contactNumber: f.contactNumber || ''
+    }
   }
 }
 

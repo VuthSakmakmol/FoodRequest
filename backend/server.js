@@ -106,6 +106,7 @@ app.use('/api/driver',              require('./routes/transportation/carBooking-
 // Optional alias for legacy callers
 app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'));
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'));
+app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
 
 // Public routes (holidays)
 app.use('/api/public', require('./routes/public-holidays.routes'));
