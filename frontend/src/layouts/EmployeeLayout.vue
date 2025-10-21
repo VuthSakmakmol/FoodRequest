@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer   = ref(true)
 const rail     = ref(false)
-const appTitle = 'Trax — Employee'
+const appTitle = 'Employee'
 
 /** Sections (no duplicates) */
 const groups = [
@@ -69,7 +69,7 @@ function toggleAuth() {
         <v-btn icon class="mr-2 text-on-brand" @click="drawer = !drawer">
           <i class="fa-solid fa-bars" />
         </v-btn>
-        <v-app-bar-title class="text-on-brand title">{{ appTitle }}</v-app-bar-title>
+        <p class="text-on-brand title">Employee</p>
         <v-spacer />
         <v-chip v-if="auth.user" class="mr-2 user-chip" label>
           <v-avatar size="24" class="chip-avatar mr-1">
@@ -78,7 +78,7 @@ function toggleAuth() {
           <span class="chip-text">{{ auth.user.name || auth.user.loginId }}</span>
           <span class="chip-role">({{ auth.user.role }})</span>
         </v-chip>
-        <v-btn size="small" class="logout" variant="flat" @click="toggleAuth">
+        <v-btn size="small" class="logout mr-4" variant="flat" @click="toggleAuth">
           <i class="fa-solid fa-right-from-bracket mr-2"></i>{{ auth.user ? 'Logout' : 'Go' }}
         </v-btn>
       </v-app-bar>
@@ -126,7 +126,7 @@ function toggleAuth() {
                   @click="go(it)"
                 >
                   <template #prepend><i :class="it.icon" class="fa-fw" /></template>
-                  <v-list-item-title>{{ it.label }}</v-list-item-title>
+                  <v-list-item-title class="ml-2">{{ it.label }}</v-list-item-title>
                   <template #append></template>
                 </v-list-item>
               </div>

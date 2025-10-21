@@ -49,7 +49,6 @@ watch(() => [props.form.employeeId, props.employees.length], ([id]) => fillFromD
           <i class="fa-solid fa-user"></i>
           <span>Requester</span>
         </div>
-        <div class="hero-sub">Select your employee profile. Contact number will auto-fill.</div>
       </div>
     </div>
 
@@ -81,13 +80,13 @@ watch(() => [props.form.employeeId, props.employees.length], ([id]) => fillFromD
           </v-autocomplete>
 
           <v-row dense class="mt-3">
-            <v-col cols="12" md="4">
+            <v-col cols="12" md="6">
               <v-text-field v-model="props.form.name" label="Name" readonly variant="outlined" density="compact" hide-details />
             </v-col>
-            <v-col cols="12" md="4">
+            <v-col cols="12" md="6">
               <v-text-field v-model="props.form.department" label="Department" readonly variant="outlined" density="compact" hide-details />
             </v-col>
-            <v-col cols="12" md="4">
+            <v-col cols="12" md="6">
               <v-text-field v-model="props.form.contactNumber" label="Contact Number" readonly variant="outlined" density="compact" hide-details />
             </v-col>
           </v-row>

@@ -50,7 +50,6 @@ function logout(){
         <v-btn icon class="mr-2 text-on-brand" @click="drawer = !drawer">
           <i class="fa-solid fa-bars" />
         </v-btn>
-        <v-app-bar-title class="text-on-brand title">{{ appTitle }}</v-app-bar-title>
         <v-spacer />
         <v-chip v-if="auth.user" class="mr-2 user-chip" label>
           <v-avatar size="24" class="chip-avatar mr-1">
@@ -59,7 +58,7 @@ function logout(){
           <span class="chip-text">{{ auth.user.name || auth.user.loginId }}</span>
           <span class="chip-role">(DRIVER)</span>
         </v-chip>
-        <v-btn size="small" class="logout" variant="flat" @click="logout">
+        <v-btn size="small" class="logout mr-4" variant="flat" @click="logout">
           <i class="fa-solid fa-right-from-bracket mr-2"></i>Logout
         </v-btn>
       </v-app-bar>

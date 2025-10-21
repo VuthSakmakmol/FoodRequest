@@ -15,20 +15,17 @@ const props = defineProps({
           <i class="fa-solid fa-clipboard-check"></i>
           <span>Purpose</span>
         </div>
-        <div class="hero-sub">Tell us why you need this trip and add any special instructions.</div>
       </div>
     </div>
 
     <div class="px-3 pb-3 pt-2">
       <v-card flat class="soft-card glass">
         <v-card-title class="subhdr">
-          <i class="fa-solid fa-bullseye"></i>
-          <span>Trip Purpose</span>
         </v-card-title>
 
         <v-card-text class="pt-0">
           <v-row dense>
-            <v-col cols="12" md="6">
+            <v-col cols="12" md="12">
               <v-select
                 :items="PURPOSES"
                 v-model="props.form.purpose"
@@ -48,7 +45,6 @@ const props = defineProps({
                 variant="outlined"
                 density="compact"
                 hide-details
-                placeholder="Anything the driver/dispatcher should know (e.g., gate pass needed, contact person on arrival)…"
                 class="mt-2"
               />
             </v-col>

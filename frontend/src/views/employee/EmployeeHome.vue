@@ -513,10 +513,9 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
       </v-card-text>
 
       <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Employee Food Request</v-toolbar-title>
         <v-spacer />
-        <v-btn :loading="loading" size="small" class="px-4" @click="submit" color="primary">Submit</v-btn>
-        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()">Reset</v-btn>
+        <v-btn :loading="loading" size="small" class="px-4" @click="submit" color="primary" style="background-color:aqua;">Submit</v-btn>
+        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color:red;">Reset</v-btn>
       </v-toolbar>
     </v-card>
   </v-container>

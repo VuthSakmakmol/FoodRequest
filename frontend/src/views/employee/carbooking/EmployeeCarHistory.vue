@@ -166,7 +166,6 @@ watch([filtered, itemsPerPage], () => {
             <i class="fa-solid fa-calendar-check"></i>
             <span>Day Schedule — All Requests</span>
           </div>
-          <div class="hero-sub">Browse all bookings for a selected date. Your requests are highlighted.</div>
         </div>
         <div class="hero-right d-none d-sm-flex">
           <v-chip size="small" color="primary" label class="mr-1">Mine</v-chip>
@@ -179,7 +178,7 @@ watch([filtered, itemsPerPage], () => {
           <v-card-title class="subhdr">
             <i class="fa-solid fa-filter"></i><span>Filters</span>
             <v-spacer />
-            <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading">
+            <v-btn size="small" @click="loadSchedule" :loading="loading">
               <template #prepend><i class="fa-solid fa-rotate-right"></i></template>
               Refresh
             </v-btn>

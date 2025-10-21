@@ -419,12 +419,14 @@ function dietaryByMenu(r) {
                 @click="load"
                 aria-label="Refresh"
                 title="Refresh"
+                size="small"
+                style="margin: 4px;"
               >
                 <i class="fa-solid fa-rotate-right"></i>
               </v-btn>
             </template>
           </v-tooltip>
-          <v-btn color="primary" variant="flat" @click="showFilterDialog = true">{{ tkm('Filters') }}</v-btn>
+          <v-btn @click="showFilterDialog = true">{{ tkm('Filters') }}</v-btn>
         </div>
       </v-sheet>
 
@@ -482,7 +484,7 @@ function dietaryByMenu(r) {
           <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
             <thead>
               <tr>
-                <th><div class="hdr-2l"><div class="en">{{ tkm('Status') }}</div><div class="km">{{ tkm('Status') }}</div></div></th>
+                <th><div class="hdr-2l"><div class="en">Status</div><div class="km">{{ tkm('Status') }}</div></div></th>
                 <th style="width: 120px;"><div class="hdr-2l"><div class="en">Details</div><div class="km">{{ tkm('Details') }}</div></div></th>
                 <th><div class="hdr-2l"><div class="en">Requester (ID & Name)</div><div class="km">{{ tkm('Requester (ID & Name)') }}</div></div></th>
                 <th><div class="hdr-2l"><div class="en">Order Date</div><div class="km">{{ tkm('Order Date') }}</div></div></th>

@@ -389,11 +389,7 @@ async function exportExcel() {
     <v-card elevation="1" class="rounded-lg">
       <!-- Toolbar -->
       <v-toolbar flat density="comfortable" class="px-2">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold title-clamp">
-          <span>Food Requests</span>
-        </v-toolbar-title>
         <v-spacer />
-
         <!-- Desktop/tablet inline filters (EN-only labels) -->
         <template v-if="mdAndUp">
           <v-text-field v-model="q" density="compact" placeholder="Search"
@@ -451,19 +447,19 @@ async function exportExcel() {
           <div class="d-flex align-center gap-2">
             <v-text-field
               v-model="q" density="compact" placeholder="Search"
-              clearable hide-details variant="outlined" class="flex-grow-1"
+              clearable hide-details variant="outlined" class="flex-grow-1" style="width: 180px;"
               @keyup.enter="load"
             />
             <v-tooltip text="Refresh" location="bottom">
               <template #activator="{ props }">
-                <v-btn v-bind="props" :loading="loading" icon variant="tonal" @click="load">
+                <v-btn v-bind="props" :loading="loading" icon size="small" variant="tonal" @click="load"  style="margin: 5px;">
                   <i class="fa-solid fa-rotate-right"></i>
                 </v-btn>
               </template>
             </v-tooltip>
             <v-tooltip text="Filters" location="bottom">
               <template #activator="{ props }">
-                <v-btn v-bind="props" icon color="primary" variant="flat" @click="showFilterDialog = true">
+                <v-btn v-bind="props" icon color="primary" variant="flat" size="small" @click="showFilterDialog = true">
                   <i class="fa-solid fa-filter"></i>
                 </v-btn>
               </template>
@@ -675,16 +671,7 @@ async function exportExcel() {
 /* Tighter inputs */
 :deep(.v-field__input){ min-height: 36px; }
 
-/* Title clamp so controls stay visible */
-.title-clamp {
-  max-width: 38vw;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-@media (max-width: 420px){
-  .title-clamp { max-width: 48vw; }
-}
+
 
 /* Table min widths; shrink on phones */
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }

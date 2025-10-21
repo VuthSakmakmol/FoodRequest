@@ -365,12 +365,9 @@ function openSchedule() {
       </v-card-text>
 
       <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold">Employee Car / Messenger Booking</v-toolbar-title>
-        <v-spacer />
+        <v-btn size="small" variant="outlined" @click="openSchedule">Schedule</v-btn>
 
-        <v-btn size="small" variant="outlined" class="mr-2" @click="openSchedule">Vue Schedule</v-btn>
-
-        <v-btn :loading="loading" size="small" class="px-4" @click="submit" :disabled="capacityExceeded" style="background-color:aqua;">
+        <v-btn :loading="loading" size="small" class="px-4 ml-1" @click="submit" :disabled="capacityExceeded" style="background-color:aqua;">
           Submit
         </v-btn>
         <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color:red;">

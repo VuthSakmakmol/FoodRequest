@@ -177,7 +177,6 @@ onMounted(() => {
           <i class="fa-solid fa-route"></i>
           <span>Order Detail</span>
         </div>
-        <div class="hero-sub">Live availability shows vehicles left (only non-pending jobs block).</div>
       </div>
     </div>
 
@@ -186,12 +185,8 @@ onMounted(() => {
       <v-card flat class="mb-3 soft-card glass">
         <v-card-text class="pt-3">
           <div class="cap-row">
-            <div class="left">
-              <i class="fa-solid fa-warehouse"></i>
-              <span>Availability</span>
-            </div>
             <div class="right">
-              <v-chip class="gradient-chip car" size="small">
+              <v-chip class="gradient-chip car" size="small" style="margin-bottom: 2px;">
                 <i class="fa-solid fa-car"></i>&nbsp;
                 <template v-if="availLoading">Checking…</template>
                 <template v-else-if="availError">{{ availError }}</template>
@@ -294,10 +289,6 @@ onMounted(() => {
       <!-- Itinerary -->
       <v-card flat class="mb-2 soft-card glass">
         <v-card-title class="subhdr between">
-          <div class="left">
-            <i class="fa-solid fa-map-location-dot"></i>
-            <span>Itinerary</span>
-          </div>
           <v-btn size="x-small" class="btn-grad" @click="addStop">
             <i class="fa-solid fa-plus"></i>&nbsp; Add destination
           </v-btn>

@@ -301,12 +301,11 @@ function showDetails(item){ detailItem.value = item; detailOpen.value = true }
         <div class="hdr-left">
           <div class="hdr-title">
             <i class="fa-solid fa-clipboard-list"></i>
-            <span>Car Bookings — All Status</span>
+            <span>Car Bookings</span>
           </div>
-          <div class="hdr-sub">Assigned to you. Acknowledge and keep status updated.</div>
         </div>
         <div class="hdr-actions">
-          <v-btn size="small" variant="text" :loading="loading" @click="loadList">
+          <v-btn size="small" :loading="loading" @click="loadList">
             <i class="fa-solid fa-rotate-right mr-1"></i> REFRESH
           </v-btn>
         </div>
