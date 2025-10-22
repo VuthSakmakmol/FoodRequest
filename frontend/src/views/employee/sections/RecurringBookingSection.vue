@@ -69,7 +69,6 @@ function setRecurring(val) {
 
   // If turning ON, ensure endDate exists and within maxDays
   if (val && props.form.eatDate) {
-    // reuse helpers if you already have them; otherwise clamp like this:
     const start = dayjs(props.form.eatDate).startOf('day')
     const maxEnd = start.add(Math.max(props.maxDays - 1, 0), 'day')
     const curEnd = props.form.endDate ? dayjs(props.form.endDate) : start
@@ -79,7 +78,6 @@ function setRecurring(val) {
     props.form.endDate = end.format('YYYY-MM-DD')
   }
 }
-
 
 function setEndDateAndRepeat(endDateStr) {
   if (!props.form.eatDate) return
@@ -117,18 +115,17 @@ const dateItems = computed(() => {
   const start = dayjs(props.form.eatDate).startOf('day')
   const end   = dayjs(props.form.endDate).startOf('day')
   let cur = start.clone()
-  // no plugin: include end by adding a day to end in isBefore
   while (cur.isBefore(end.add(1,'day'), 'day')) {
     const dStr = cur.format('YYYY-MM-DD')
     const holiday   = isHoliday(dStr)
     const willCreate = props.form.skipHolidays ? !holiday : true
     items.push({
       date: dStr,
-      weekday: cur.format('ddd'), // Mon/Tue/…
+      weekday: cur.format('ddd'),
       willCreate,
       isHoliday: holiday,
       isSunday: isSunday(dStr),
-      dow: cur.day(), // 0..6 (Sun..Sat)
+      dow: cur.day(),
     })
     cur = cur.add(1, 'day')
   }
@@ -158,227 +155,244 @@ const counts = computed(() => {
 </script>
 
 <template>
-  <v-sheet class="section pa-3 rounded-lg">
-    <div class="hdr">
-      <div class="title-wrap">
-        <i class="fa-solid fa-rotate-right icon-ttl"></i>
-        <span class="t">Recurring Order</span>
+  <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
+    <!-- CarBooking-style gradient hero -->
+    <div class="hero">
+      <div class="hero-left">
+        <div class="hero-title">
+          <i class="fa-solid fa-rotate-right"></i>
+          <span>Recurring Order</span>
+        </div>
       </div>
     </div>
 
-    <v-row dense class="mt-3">
-      <!-- Repeat ON/OFF -->
-      <v-col cols="12" md="4" lg="3">
-        <div class="yesno-wrap">
-          <v-btn
-            size="small"
-            class="yesno-btn"
-            :class="form.recurring ? 'yes-on' : 'yes-off'"
-            @click="setRecurring(true)"
-          >
-            <i class="fa-solid fa-check"></i>&nbsp; YES
-          </v-btn>
+    <div class="px-3 pb-3 pt-2">
+      <v-card flat class="soft-card glass">
+        <v-card-text class="pt-2">
+          <v-row dense>
+            <!-- Repeat ON/OFF -->
+            <v-col cols="12" md="4" lg="3">
 
-          <v-btn
-            size="small"
-            class="yesno-btn"
-            :class="!form.recurring ? 'no-on' : 'no-off'"
-            @click="setRecurring(false)"
-          >
-            <i class="fa-solid fa-xmark"></i>&nbsp; NO
-          </v-btn>
-        </div>
-      </v-col>
+              <div class="yesno-wrap">
+                <v-btn
+                  size="small"
+                  class="yesno-btn"
+                  :class="form.recurring ? 'yes-on' : 'yes-off'"
+                  @click="setRecurring(true)"
+                >
+                  <i class="fa-solid fa-check"></i>&nbsp; YES
+                </v-btn>
 
+                <v-btn
+                  size="small"
+                  class="yesno-btn"
+                  :class="!form.recurring ? 'no-on' : 'no-off'"
+                  @click="setRecurring(false)"
+                >
+                  <i class="fa-solid fa-xmark"></i>&nbsp; NO
+                </v-btn>
+              </div>
+            </v-col>
 
-      <template v-if="form.recurring">
-        <!-- Time -->
-        <v-col cols="12" sm="6" md="4" lg="3">
-          <div class="field-label">
-            <i class="fa-solid fa-clock"></i>
-            <span>Time</span>
-          </div>
-          <v-text-field
-            v-model="timeValue"
-            type="time"
-            step="60"
-            density="compact"
-            variant="outlined"
-            hide-details
-            placeholder="HH:mm"
-          />
-          <div class="text-caption mt-1">
-            Auto-create at <strong>{{ triggerTime || defaultMorningAlert }}</strong> ({{ timezone }}).
-          </div>
-        </v-col>
+            <template v-if="form.recurring">
+              <!-- Time -->
+              <v-col cols="12" sm="6" md="4" lg="3">
+                <v-card-title class="subhdr">
+                  <i class="fa-solid fa-clock"></i>
+                  <span>Time</span>
+                </v-card-title>
+                <v-text-field
+                  v-model="timeValue"
+                  type="time"
+                  step="60"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  placeholder="HH:mm"
+                />
+                <div class="text-caption mt-1">
+                  Auto-create at <strong>{{ triggerTime || defaultMorningAlert }}</strong> ({{ timezone }}).
+                </div>
+              </v-col>
 
-        <!-- End Date -->
-        <v-col cols="12" sm="6" md="4" lg="3">
-          <div class="field-label">
-            <i class="fa-solid fa-calendar-check"></i>
-            <span>End Date</span>
-          </div>
+              <!-- End Date -->
+              <v-col cols="12" sm="6" md="4" lg="3">
+                <v-card-title class="subhdr">
+                  <i class="fa-solid fa-calendar-check"></i>
+                  <span>End Date</span>
+                </v-card-title>
 
-          <v-menu
-            v-model="endDateMenu"
-            :close-on-content-click="false"
-            transition="scale-transition"
-            offset-y
-          >
-            <template #activator="{ props: mprops }">
-              <v-text-field
-                v-bind="mprops"
-                :model-value="fmtDate(form.endDate)"
-                variant="outlined"
-                density="compact"
-                readonly
-                placeholder="YYYY-MM-DD"
-                hide-details
-                prepend-inner-icon="mdi-calendar"
-              />
-            </template>
+                <v-menu
+                  v-model="endDateMenu"
+                  :close-on-content-click="false"
+                  transition="scale-transition"
+                  offset-y
+                >
+                  <template #activator="{ props: mprops }">
+                    <v-text-field
+                      v-bind="mprops"
+                      :model-value="fmtDate(form.endDate)"
+                      variant="outlined"
+                      density="compact"
+                      readonly
+                      placeholder="YYYY-MM-DD"
+                      hide-details
+                      prepend-inner-icon="mdi-calendar"
+                    />
+                  </template>
 
-            <v-card>
-              <v-date-picker
-                :model-value="form.endDate || form.eatDate"
-                @update:model-value="(val) => { setEndDateAndRepeat(val); endDateMenu = false }"
-                :min="form.eatDate || undefined"
-                :max="form.eatDate ? dayjs(form.eatDate).add(Math.max(maxDays-1,0),'day').format('YYYY-MM-DD') : undefined"
-              />
-              <v-card-actions class="justify-end">
-                <v-btn variant="text" @click="endDateMenu = false">Close</v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-menu>
+                  <v-card>
+                    <v-date-picker
+                      :model-value="form.endDate || form.eatDate"
+                      @update:model-value="(val) => { setEndDateAndRepeat(val); endDateMenu = false }"
+                      :min="form.eatDate || undefined"
+                      :max="form.eatDate ? dayjs(form.eatDate).add(Math.max(maxDays-1,0),'day').format('YYYY-MM-DD') : undefined"
+                    />
+                    <v-card-actions class="justify-end">
+                      <v-btn variant="text" @click="endDateMenu = false">Close</v-btn>
+                    </v-card-actions>
+                  </v-card>
+                </v-menu>
 
-          <div class="text-caption mt-1">
-            From <strong>{{ fmtDate(form.eatDate) }}</strong>
-            to <strong>{{ fmtDate(form.endDate) }}</strong>
-            <span v-if="form.eatDate && form.endDate">
-              ({{ daysBetweenInclusive(form.eatDate, form.endDate) }} days)
-            </span>.
-          </div>
-        </v-col>
+                <div class="text-caption mt-1">
+                  From <strong>{{ fmtDate(form.eatDate) }}</strong>
+                  to <strong>{{ fmtDate(form.endDate) }}</strong>
+                  <span v-if="form.eatDate && form.endDate">
+                    ({{ daysBetweenInclusive(form.eatDate, form.endDate) }} days)
+                  </span>.
+                </div>
+              </v-col>
 
-        <!-- Skip holidays -->
-        <v-col cols="12" md="4" lg="3">
-          <div class="field-label">
-            <i class="fa-solid fa-umbrella-beach"></i>
-            <span>Skip holidays</span>
-          </div>
-          <v-switch
-            v-model="form.skipHolidays"
-            inset
-            color="teal"
-            density="compact"
-            hide-details
-            class="switch-compact"
-            :label="form.skipHolidays ? 'Enabled' : 'Disabled'"
-          />
-        </v-col>
+              <!-- Skip holidays -->
+              <v-col cols="12" md="4" lg="3">
+                <v-card-title class="subhdr">
+                  <i class="fa-solid fa-umbrella-beach"></i>
+                  <span>Skip Holidays</span>
+                </v-card-title>
+                <v-switch
+                  v-model="form.skipHolidays"
+                  inset
+                  color="teal"
+                  density="compact"
+                  hide-details
+                  class="switch-compact"
+                  :label="form.skipHolidays ? 'Enabled' : 'Disabled'"
+                />
+              </v-col>
 
-        <!-- Summary -->
-        <v-col cols="12" class="pt-0">
-          <div class="preview-header">
-            <div class="counts">
-              <span class="pill total">
-                <i class="fa-solid fa-list"></i> Total: {{ counts.total }}
-              </span>
-              <span class="pill create">
-                <i class="fa-solid fa-circle-check"></i> Will create: {{ counts.create }}
-              </span>
-              <span class="pill skipped" v-if="form.skipHolidays">
-                <i class="fa-solid fa-ban"></i> Skipped: {{ counts.skipped }}
-              </span>
-            </div>
-          </div>
-        </v-col>
+              <!-- Summary -->
+              <v-col cols="12" class="pt-0">
+                <v-card-title class="subhdr">
+                  <i class="fa-solid fa-list-check"></i>
+                  <span>Summary</span>
+                </v-card-title>
+                <div class="preview-header">
+                  <div class="counts">
+                    <span class="pill total">
+                      <i class="fa-solid fa-list"></i> Total: {{ counts.total }}
+                    </span>
+                    <span class="pill create">
+                      <i class="fa-solid fa-circle-check"></i> Will create: {{ counts.create }}
+                    </span>
+                    <span class="pill skipped" v-if="form.skipHolidays">
+                      <i class="fa-solid fa-ban"></i> Skipped: {{ counts.skipped }}
+                    </span>
+                  </div>
+                </div>
+              </v-col>
 
-        <!-- Calendar (responsive) -->
-        <v-col cols="12">
-          <div class="calendar-scroll">
-            <div class="week-header">
-              <div v-for="w in weekHeader" :key="w" class="wkcell">{{ w }}</div>
-            </div>
+              <!-- Calendar (responsive) -->
+              <v-col cols="12">
+                <v-card-title class="subhdr">
+                  <i class="fa-solid fa-calendar-days"></i>
+                  <span>Preview Calendar</span>
+                </v-card-title>
 
-            <div class="preview-grid">
-              <div
-                v-for="cell in gridCells"
-                :key="cell.key"
-                class="preview-card"
-                :class="{
-                  spacer: cell.isSpacer,
-                  'is-holiday': !cell.isSpacer && cell.isHoliday,
-                  'will-create': !cell.isSpacer && cell.willCreate,
-                  'will-skip': !cell.isSpacer && !cell.willCreate
-                }"
-              >
-                <template v-if="!cell.isSpacer">
-                  <div class="date-row">
-                    <i class="fa-solid fa-calendar-day"></i>
-                    <div class="date-wrap">
-                      <div class="en">
-                        <span class="wk">{{ cell.weekday }}</span>
-                        <span class="date">{{ cell.date }}</span>
-                        <span v-if="cell.isSunday" class="sun-badge">Sun</span>
-                      </div>
+                <div class="calendar-scroll">
+                  <div class="week-header">
+                    <div v-for="w in weekHeader" :key="w" class="wkcell">{{ w }}</div>
+                  </div>
+
+                  <div class="preview-grid">
+                    <div
+                      v-for="cell in gridCells"
+                      :key="cell.key"
+                      class="preview-card"
+                      :class="{
+                        spacer: cell.isSpacer,
+                        'is-holiday': !cell.isSpacer && cell.isHoliday,
+                        'will-create': !cell.isSpacer && cell.willCreate,
+                        'will-skip': !cell.isSpacer && !cell.willCreate
+                      }"
+                    >
+                      <template v-if="!cell.isSpacer">
+                        <div class="date-row">
+                          <i class="fa-solid fa-calendar-day"></i>
+                          <div class="date-wrap">
+                            <div class="en">
+                              <span class="wk">{{ cell.weekday }}</span>
+                              <span class="date">{{ cell.date }}</span>
+                              <span v-if="cell.isSunday" class="sun-badge">Sun</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="status-row">
+                          <template v-if="cell.willCreate">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <span>Will create</span>
+                          </template>
+                          <template v-else>
+                            <i class="fa-solid fa-ban"></i>
+                            <span>Skipped</span>
+                          </template>
+                        </div>
+
+                        <div v-if="cell.isHoliday && form.skipHolidays" class="badge-holiday">
+                          Holiday
+                        </div>
+                        <div v-else-if="cell.isHoliday" class="badge-holiday subtle">
+                          Holiday
+                        </div>
+                      </template>
                     </div>
                   </div>
+                </div>
 
-                  <div class="status-row">
-                    <template v-if="cell.willCreate">
-                      <i class="fa-solid fa-circle-check"></i>
-                      <span>Will create</span>
-                    </template>
-                    <template v-else>
-                      <i class="fa-solid fa-ban"></i>
-                      <span>Skipped</span>
-                    </template>
-                  </div>
-
-                  <div v-if="cell.isHoliday && form.skipHolidays" class="badge-holiday">
-                    Holiday
-                  </div>
-                  <div v-else-if="cell.isHoliday" class="badge-holiday subtle">
-                    Holiday
-                  </div>
-                </template>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="!gridCells.length" class="text-caption mt-2">
-            Set an <strong>Eat Date</strong> and a valid <strong>End Date</strong> to see the preview.
-          </div>
-        </v-col>
-      </template>
-    </v-row>
+                <div v-if="!gridCells.length" class="text-caption mt-2">
+                  Set an <strong>Eat Date</strong> and a valid <strong>End Date</strong> to see the preview.
+                </div>
+              </v-col>
+            </template>
+          </v-row>
+        </v-card-text>
+      </v-card>
+    </div>
   </v-sheet>
 </template>
 
 <style scoped>
-/* ===== Container ===== */
-.section{
-  background:#fff;
-  border:1px solid rgba(100,116,139,.18);
-  border-radius:14px;
-  box-shadow:0 1px 2px rgba(0,0,0,.04), 0 4px 14px -6px rgba(16,24,40,.16);
+/* ——— CarBooking visual style ——— */
+.section { 
+  background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border: 1px solid rgba(100,116,139,.18);
 }
-
-/* ===== Header ===== */
-.hdr{
-  display:flex;
-  align-items:baseline;
-  justify-content:space-between;
-  gap:12px;
-  flex-wrap:wrap;
+.hero { 
+  display:flex; align-items:center; justify-content:space-between; 
+  padding: 14px 18px; 
+  background: linear-gradient(90deg, #5d7884 0%, #9293d4 60%, #786e95 100%); 
+  color:#fff; 
 }
-.title-wrap{ display:flex; align-items:center; gap:8px; }
-.icon-ttl{ color:#0ea5a0; }
-.t{ font-weight:700; font-size:1.02rem; }
-.hint{ font-size:.86rem; opacity:.8; }
+.hero-left { display:flex; flex-direction:column; gap:6px; }
+.hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
+.hero-sub { opacity:.92; font-size:.9rem; }
 
-/* ===== Field label ===== */
+.soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
+.glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
+
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
+
+/* ===== Field label (kept for consistency where used) ===== */
 .field-label{
   display:flex;
   align-items:center;
@@ -387,17 +401,13 @@ const counts = computed(() => {
   margin-bottom:6px;
 }
 
-/* ===== YES/NO buttons ===== */
+/* ===== YES/NO buttons (unchanged behavior) ===== */
 .yesno-wrap{ display:flex; gap:8px; width:100%; }
 .yesno-btn{ flex:1 1 0; font-weight:700; text-transform:none; }
 .yes-on{ background:#16a34a !important; color:#fff !important; }
 .yes-off{ background:#e5f7ea !important; color:#065f46 !important; }
 .no-on{ background:#fca5a5 !important; color:#7f1d1d !important; }
 .no-off{ background:#e5e7eb !important; color:#111827 !important; }
-
-/* If you're still using v-btn-toggle instead of simple buttons */
-.toggle-wrap{ background:#f3f4f6; border-radius:12px; }
-.toggle-btn{ font-weight:700; text-transform:none; width:100%; }
 
 /* ===== Compact switch ===== */
 .switch-compact :deep(.v-selection-control){ margin-block:-6px; }
@@ -417,7 +427,7 @@ const counts = computed(() => {
 .calendar-scroll{
   overflow-x:auto;
   -webkit-overflow-scrolling: touch;
-  padding: 6px 12px;              /* breathing room at edges */
+  padding: 6px 12px;
 }
 
 /* Keep 7 columns readable on phones; container scrolls horizontally */
@@ -427,13 +437,13 @@ const counts = computed(() => {
 .week-header{
   display:grid;
   grid-template-columns:repeat(7, minmax(210px, 1fr));
-  gap: 14px;                       /* wider gap */
+  gap: 14px;
   margin: 8px 0 8px;
 }
 .wkcell{
   text-align:center;
   font-weight:700;
-  font-size:.9rem;                 /* a touch larger */
+  font-size:.9rem;
   opacity:.85;
 }
 
@@ -441,14 +451,14 @@ const counts = computed(() => {
 .preview-grid{
   display:grid;
   grid-template-columns:repeat(7, minmax(210px, 1fr));
-  column-gap: 14px;                /* wider column gap */
-  row-gap: 14px;                   /* wider row gap */
+  column-gap: 14px;
+  row-gap: 14px;
 }
 
 /* ===== Day cards ===== */
 .preview-card{
   border:1px solid rgba(100,116,139,.18);
-  border-radius:16px;              /* softer corners */
+  border-radius:16px;
   min-height:118px;
   padding:12px 14px;
   display:flex;
@@ -488,7 +498,6 @@ const counts = computed(() => {
 
 /* ===== Small screens: compact a bit ===== */
 @media (max-width: 599px){
-  .section{ padding:.5rem; }
   .preview-card{ min-height:104px; }
 }
 </style>

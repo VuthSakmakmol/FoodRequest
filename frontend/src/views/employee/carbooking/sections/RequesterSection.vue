@@ -54,12 +54,7 @@ watch(() => [props.form.employeeId, props.employees.length], ([id]) => fillFromD
 
     <div class="px-3 pb-3 pt-2">
       <v-card flat class="soft-card glass">
-        <v-card-title class="subhdr">
-          <i class="fa-solid fa-id-badge"></i>
-          <span>Employee</span>
-        </v-card-title>
-
-        <v-card-text class="pt-0">
+        <v-card-text class="pt-0 mt-4">
           <v-autocomplete
             v-model="props.form.employeeId"
             :items="employeeOptions"
@@ -107,7 +102,7 @@ watch(() => [props.form.employeeId, props.employees.length], ([id]) => fillFromD
 .soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
 .glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
 
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size: medium; }
 
 :deep(.v-field__clearable) { opacity: 1 !important; } /* keep the X visible */
 </style>

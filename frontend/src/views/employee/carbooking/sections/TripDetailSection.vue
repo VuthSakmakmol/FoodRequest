@@ -321,7 +321,6 @@ onMounted(() => {
                       variant="outlined"
                       density="compact"
                       hide-details
-                      width="300px"
                       @update:model-value="onDestinationChange(row)"
                     />
                   </v-col>
@@ -384,7 +383,7 @@ onMounted(() => {
 .glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
 .dashed { border: 1px dashed rgba(100,116,139,.25); }
 
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size: medium; }
 .subhdr.between { justify-content:space-between; }
 
 .cap-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }

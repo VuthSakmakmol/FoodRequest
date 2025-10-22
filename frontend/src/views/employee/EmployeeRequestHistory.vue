@@ -325,17 +325,29 @@ function dietaryByMenu(r) {
           clearable hide-details variant="outlined" class="mr-2" style="max-width:260px"
           @keyup.enter="load"
         />
+        <!-- Desktop select -->
         <v-select
-          v-model="status" :items="statuses" density="compact"
-          :label="tkm('Status')" hide-details variant="outlined" class="mr-2" style="max-width:160px">
+          v-model="status"
+          :items="statuses"
+          density="compact"
+          :label="tkm('Status')"
+          hide-details
+          variant="outlined"
+          class="mr-2"
+          style="max-width:160px"
+        >
           <template #selection="{ item }">
             <span>{{ item.title || item.value || item }}</span>
             <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
           </template>
+
+          <!-- prevent duplicate by clearing default title/subtitle -->
           <template #item="{ props: sp, item }">
-            <v-list-item v-bind="sp">
+            <v-list-item v-bind="sp" :title="undefined" :subtitle="undefined">
               <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
-              <v-list-item-subtitle class="km">{{ tkm(item.title || item.value || item) }}</v-list-item-subtitle>
+              <v-list-item-subtitle class="km">
+                {{ tkm(item.title || item.value || item) }}
+              </v-list-item-subtitle>
             </v-list-item>
           </template>
         </v-select>
@@ -451,9 +463,11 @@ function dietaryByMenu(r) {
                     <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
                   </template>
                   <template #item="{ props: sp, item }">
-                    <v-list-item v-bind="sp">
+                    <v-list-item v-bind="sp" :title="undefined" :subtitle="undefined">
                       <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
-                      <v-list-item-subtitle class="km">{{ tkm(item.title || item.value || item) }}</v-list-item-subtitle>
+                      <v-list-item-subtitle class="km">
+                        {{ tkm(item.title || item.value || item) }}
+                      </v-list-item-subtitle>
                     </v-list-item>
                   </template>
                 </v-select>

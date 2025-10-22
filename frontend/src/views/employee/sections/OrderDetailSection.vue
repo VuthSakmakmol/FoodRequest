@@ -13,7 +13,7 @@ const props = defineProps({
 
 const eatDateMenu = ref(false)
 
-/* Hours/Minutes */
+/* Hours/Minutes (unchanged) */
 const HOURS = Array.from({ length: 23 }, (_, i) => String(i + 1).padStart(2, '0'))
 const MINUTES = ['00','30']
 
@@ -28,7 +28,7 @@ const timeError = computed(() => {
   return eatEndTime.value > eatStartTime.value ? '' : 'End time must be after start time'
 })
 
-/* Khmer labels for meals */
+/* Khmer labels for meals (unchanged) */
 const MEAL_KM = {
   Breakfast: 'អាហារពេលព្រឹក',
   Lunch: 'អាហារថ្ងៃត្រង់',
@@ -36,7 +36,7 @@ const MEAL_KM = {
   Snack: 'អាហារសម្រន់'
 }
 
-/* Select data (value is EN; subtitle is KM) */
+/* Select data (unchanged) */
 const ORDER_TYPES = [
   { value: 'Daily meal',       title: 'Daily meal',       subtitle: 'អាហារប្រចាំថ្ងៃ' },
   { value: 'Meeting catering', title: 'Meeting catering', subtitle: 'អាហារប្រជុំ' },
@@ -48,7 +48,7 @@ const LOCATIONS = [
   { value: 'Other',        title: 'Other',        subtitle: 'ផ្សេងៗ' }
 ]
 
-/* Minutes default to '00' */
+/* Minutes default to '00' (unchanged) */
 onMounted(() => {
   if (!props.form.eatStartMinute) props.form.eatStartMinute = '00'
   if (!props.form.eatEndMinute)   props.form.eatEndMinute   = '00'
@@ -61,7 +61,7 @@ watch(() => props.form.eatEndHour, (h) => {
   if (h && !props.form.eatEndMinute) props.form.eatEndMinute = '00'
 })
 
-/* Show “Other Location” when value is 'Other' or forced by prop */
+/* Show “Other Location” (unchanged) */
 const showOtherLocation = computed(() =>
   props.needsOtherLocation || String(props.form.location || '') === 'Other'
 )
@@ -69,7 +69,7 @@ watch(showOtherLocation, (visible) => {
   if (!visible) props.form.locationOther = ''
 })
 
-/* Normalize legacy bilingual values like "X - ខ្មែរ" -> "X" */
+/* Normalize bilingual values (unchanged) */
 function stripBilingual(v) {
   if (typeof v === 'string' && v.includes(' - ')) return v.split(' - ')[0].trim()
   return v
@@ -83,146 +83,210 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
 </script>
 
 <template>
-  <v-sheet class="section pa-2" rounded="lg">
-    <div class="hdr">
-      <span class="n"><strong>2</strong></span>
-      <span class="t"><strong>. Order Detail</strong></span>
+  <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
+    <!-- CarBooking-style gradient header -->
+    <div class="hero">
+      <div class="hero-left">
+        <div class="hero-title">
+          <i class="fa-solid fa-bowl-food"></i>
+          <span>Order Detail</span>
+        </div>
+      </div>
     </div>
 
-    <!-- Eat Date + Order Type -->
-    <v-row dense class="mt-3">
-      <v-col cols="12" sm="6">
-        <v-menu v-model="eatDateMenu" :close-on-content-click="false">
-          <template #activator="{ props: act }">
-            <v-text-field
-              v-bind="act"
-              :model-value="fmtDate(form.eatDate)"
-              label="Eat Date"
-              variant="outlined"
-              density="compact"
-              readonly
-              placeholder="YYYY-MM-DD"
-            />
-          </template>
-          <v-date-picker v-model="form.eatDate" @update:model-value="eatDateMenu = false" />
-        </v-menu>
-      </v-col>
+    <div class="px-3 pb-3 pt-2">
+      <v-card flat class="soft-card glass">
+        <!-- Date & Type -->
+        <v-card-title class="subhdr">
+          <i class="fa-solid fa-calendar-day"></i>
+          <span>Date & Type</span>
+        </v-card-title>
+        <v-card-text class="pt-0">
+          <v-row dense class="mt-2">
+            <v-col cols="12" sm="6">
+              <v-menu v-model="eatDateMenu" :close-on-content-click="false">
+                <template #activator="{ props: act }">
+                  <v-text-field
+                    v-bind="act"
+                    :model-value="fmtDate(form.eatDate)"
+                    label="Eat Date"
+                    variant="outlined"
+                    density="compact"
+                    readonly
+                    placeholder="YYYY-MM-DD"
+                  />
+                </template>
+                <v-date-picker v-model="form.eatDate" @update:model-value="eatDateMenu = false" />
+              </v-menu>
+            </v-col>
 
-      <v-col cols="12" sm="6">
-        <v-select
-          v-model="form.orderType"
-          :items="ORDER_TYPES"
-          item-title="title"
-          item-value="value"
-          :item-props="it => ({ title: it.title, subtitle: it.subtitle })"
-          label="Order Type"
-          variant="outlined"
-          density="compact"
-          hide-details="auto"
-        >
-          <!-- EN + KM in the field (no duplication) -->
-          <template #selection="{ item }">
-            <div class="two-line">
-              <div class="en">{{ item?.title }}</div>
-              <div class="km">{{ item?.raw?.subtitle }}</div>
-            </div>
-          </template>
-        </v-select>
-      </v-col>
-    </v-row>
+            <v-col cols="12" sm="6">
+              <v-select
+                v-model="form.orderType"
+                :items="ORDER_TYPES"
+                item-title="title"
+                item-value="value"
+                :item-props="it => ({ title: it.title, subtitle: it.subtitle })"
+                label="Order Type"
+                variant="outlined"
+                density="compact"
+                hide-details="auto"
+              >
+                <template #selection="{ item }">
+                  <div class="two-line">
+                    <div class="en">{{ item?.title }}</div>
+                    <div class="km">{{ item?.raw?.subtitle }}</div>
+                  </div>
+                </template>
+              </v-select>
+            </v-col>
+          </v-row>
+        </v-card-text>
 
-    <!-- Location -->
-    <v-row dense class="mt-1">
-      <v-col cols="12">
-        <v-select
-          v-model="form.location"
-          :items="LOCATIONS"
-          item-title="title"
-          item-value="value"
-          :item-props="it => ({ title: it.title, subtitle: it.subtitle })"
-          label="Location"
-          variant="outlined"
-          density="compact"
-          hide-details="auto"
-        >
-          <template #selection="{ item }">
-            <div class="two-line">
-              <div class="en">{{ item?.title }}</div>
-              <div class="km">{{ item?.raw?.subtitle }}</div>
-            </div>
-          </template>
-        </v-select>
-      </v-col>
-    </v-row>
+        <v-divider class="my-2" />
 
-    <!-- Other Location (conditional) -->
-    <v-text-field
-      v-if="showOtherLocation"
-      v-model="form.locationOther"
-      label="Other Location"
-      placeholder="e.g., Building B, Lobby, Warehouse 2"
-      variant="outlined"
-      density="compact"
-      class="mt-1"
-      hide-details="auto"
-    />
+        <!-- Location -->
+        <v-card-title class="subhdr">
+          <i class="fa-solid fa-location-dot"></i>
+          <span>Location</span>
+        </v-card-title>
+        <v-card-text class="pt-0">
+          <v-row dense>
+            <v-col cols="12">
+              <v-select
+                v-model="form.location"
+                :items="LOCATIONS"
+                item-title="title"
+                item-value="value"
+                :item-props="it => ({ title: it.title, subtitle: it.subtitle })"
+                label="Location"
+                variant="outlined"
+                density="compact"
+                hide-details="auto"
+              >
+                <template #selection="{ item }">
+                  <div class="two-line">
+                    <div class="en">{{ item?.title }}</div>
+                    <div class="km">{{ item?.raw?.subtitle }}</div>
+                  </div>
+                </template>
+              </v-select>
+            </v-col>
+          </v-row>
 
-    <!-- Eat Time pickers -->
-    <v-row dense class="mt-1" v-if="isTimedOrder">
-      <v-col cols="12" sm="6">
-        <div class="mini-title">Eat Start</div>
-        <v-row dense class="mt-1">
-          <v-col cols="6">
-            <v-select v-model="form.eatStartHour" :items="HOURS" label="Hour" variant="outlined" density="compact" hide-details="auto" />
-          </v-col>
-          <v-col cols="6">
-            <v-select v-model="form.eatStartMinute" :items="MINUTES" label="Minute" variant="outlined" density="compact" hide-details="auto" />
-          </v-col>
-        </v-row>
-      </v-col>
+          <v-text-field
+            v-if="showOtherLocation"
+            v-model="form.locationOther"
+            label="Other Location"
+            placeholder="e.g., Building B, Lobby, Warehouse 2"
+            variant="outlined"
+            density="compact"
+            class="mt-2"
+            hide-details="auto"
+          />
+        </v-card-text>
 
-      <v-col cols="12" sm="6">
-        <div class="mini-title">Eat End</div>
-        <v-row dense class="mt-1">
-          <v-col cols="6">
-            <v-select v-model="form.eatEndHour" :items="HOURS" label="Hour" variant="outlined" density="compact" hide-details="auto" />
-          </v-col>
-          <v-col cols="6">
-            <v-select v-model="form.eatEndMinute" :items="MINUTES" label="Minute" variant="outlined" density="compact" hide-details="auto" :error-messages="timeError" />
-          </v-col>
-        </v-row>
-      </v-col>
-    </v-row>
+        <v-divider class="my-2" />
 
-    <!-- Meals -->
-    <div class="mt-2">
-      <div class="mini-title"><strong>Meal</strong></div>
-      <v-row dense class="mt-1">
-        <v-col cols="6" v-for="m in MEALS" :key="m">
-          <v-btn
-            block variant="tonal" class="choice-btn two-line"
-            :class="{ active: form.meals.includes(m) }"
-            @click="form.meals = form.meals.includes(m) ? form.meals.filter(x => x !== m) : [...form.meals, m]"
-          >
-            <div class="label mt-2">
-              <div class="en">{{ m }}</div>
-              <div class="km">{{ MEAL_KM[m] }}</div>
-            </div>
-          </v-btn>
-        </v-col>
-      </v-row>
-      <div v-if="!form.meals.length" class="text-error text-caption mt-1">Please select at least one meal</div>
+        <!-- Time (conditional) -->
+        <v-card-title v-if="isTimedOrder" class="subhdr">
+          <i class="fa-solid fa-clock"></i>
+          <span>Eat Time</span>
+        </v-card-title>
+        <v-card-text v-if="isTimedOrder" class="pt-0">
+          <v-row dense class="mt-1">
+            <v-col cols="12" sm="6">
+              <div class="mini-title">Eat Start</div>
+              <v-row dense class="mt-1">
+                <v-col cols="6">
+                  <v-select v-model="form.eatStartHour" :items="HOURS" label="Hour" variant="outlined" density="compact" hide-details="auto" />
+                </v-col>
+                <v-col cols="6">
+                  <v-select v-model="form.eatStartMinute" :items="MINUTES" label="Minute" variant="outlined" density="compact" hide-details="auto" />
+                </v-col>
+              </v-row>
+            </v-col>
+
+            <v-col cols="12" sm="6">
+              <div class="mini-title">Eat End</div>
+              <v-row dense class="mt-1">
+                <v-col cols="6">
+                  <v-select v-model="form.eatEndHour" :items="HOURS" label="Hour" variant="outlined" density="compact" hide-details="auto" />
+                </v-col>
+                <v-col cols="6">
+                  <v-select v-model="form.eatEndMinute" :items="MINUTES" label="Minute" variant="outlined" density="compact" hide-details="auto" :error-messages="timeError" />
+                </v-col>
+              </v-row>
+            </v-col>
+          </v-row>
+        </v-card-text>
+
+        <v-divider class="my-2" />
+
+        <!-- Meals -->
+        <v-card-title class="subhdr">
+          <i class="fa-solid fa-utensils"></i>
+          <span>Meal</span>
+        </v-card-title>
+        <v-card-text class="pt-0">
+          <v-row dense class="mt-1">
+            <v-col cols="6" v-for="m in MEALS" :key="m">
+              <v-btn
+                block variant="tonal" class="choice-btn two-line"
+                :class="{ active: form.meals.includes(m) }"
+                @click="form.meals = form.meals.includes(m) ? form.meals.filter(x => x !== m) : [...form.meals, m]"
+              >
+                <div class="label mt-2">
+                  <div class="en">{{ m }}</div>
+                  <div class="km">{{ MEAL_KM[m] }}</div>
+                </div>
+              </v-btn>
+            </v-col>
+          </v-row>
+          <div v-if="!form.meals.length" class="text-error text-caption mt-1">Please select at least one meal</div>
+        </v-card-text>
+
+        <v-divider class="my-2" />
+
+        <!-- Quantity -->
+        <v-card-title class="subhdr">
+          <i class="fa-solid fa-people-group"></i>
+          <span>Quantity</span>
+        </v-card-title>
+        <v-card-text class="pt-0">
+          <v-row dense class="mt-1">
+            <v-col cols="12" sm="6">
+              <v-text-field v-model.number="form.quantity" type="number" min="1" label="Qty" suffix="People" variant="outlined" density="compact" />
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
     </div>
-
-    <v-row dense class="mt-2">
-      <v-col cols="12" sm="6">
-        <v-text-field v-model.number="form.quantity" type="number" min="1" label="Qty" suffix="People" variant="outlined" density="compact" />
-      </v-col>
-    </v-row>
   </v-sheet>
 </template>
 
 <style scoped>
+/* ——— CarBooking visual style ——— */
+.section { 
+  background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border: 1px solid rgba(100,116,139,.18);
+}
+.hero { 
+  display:flex; align-items:center; justify-content:space-between; 
+  padding: 14px 18px; 
+  background: linear-gradient(90deg, #5d7884 0%, #9293d4 60%, #786e95 100%); 
+  color:#fff; 
+}
+.hero-left { display:flex; flex-direction:column; gap:6px; }
+.hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
+.hero-sub { opacity:.92; font-size:.9rem; }
+
+.soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
+.glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
+
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size: medium; }
+
+/* ——— Existing component styles (kept) ——— */
 .km{
   font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;

@@ -1,7 +1,8 @@
+<!-- src/employee/foodrequest/sections/RequesterSection.vue -->
 <script setup>
 import { computed, watch } from 'vue'
-const DEBUG = false
 
+/* ───────── Props / Emits (unchanged logic) ───────── */
 const props = defineProps({
   form: Object,                 // { employeeId, name, department, contactNumber, ... }
   employees: Array,
@@ -9,7 +10,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['updateEmployee'])
 
-/* Build options with department + phone as subtitle */
+/* Build options with department + phone as subtitle (unchanged) */
 const employeeOptions = computed(() =>
   (props.employees || []).map(e => ({
     value: String(e.employeeId || ''),
@@ -18,79 +19,120 @@ const employeeOptions = computed(() =>
   }))
 )
 
-/* Copy fields from directory into the form */
+/* Copy fields from directory into the form (unchanged) */
 function fillFromDirectory (id) {
   const emp = (props.employees || []).find(e => String(e.employeeId) === String(id))
-  if (DEBUG) console.log('📒 fillFromDirectory id:', id, 'emp:', emp)
   props.form.name          = emp?.name || ''
   props.form.department    = emp?.department || ''
   props.form.contactNumber = emp?.contactNumber || ''
-  if (DEBUG) console.log('✅ props.form.contactNumber:', props.form.contactNumber)
 }
 
-/* On select */
-function onEmployeeSelected (val) {
-  fillFromDirectory(val)
-  emit('updateEmployee', val)
-}
-
-/* On clear (X) */
+/* On select / clear (unchanged) */
+function onEmployeeSelected (val) { fillFromDirectory(val); emit('updateEmployee', val) }
 function onClear () {
-  props.form.employeeId    = ''
-  props.form.name          = ''
-  props.form.department    = ''
+  props.form.employeeId = ''
+  props.form.name = ''
+  props.form.department = ''
+  props.form.contactNumber = ''
   emit('updateEmployee', '')
 }
 
-/* Fill on preset id and when list arrives */
-watch(
-  () => [props.form.employeeId, props.employees.length],
-  ([id]) => fillFromDirectory(id),
-  { immediate: true }
-)
+/* Fill when preset id or when list arrives (unchanged) */
+watch(() => [props.form.employeeId, props.employees.length], ([id]) => fillFromDirectory(id), { immediate: true })
 </script>
 
 <template>
-  <v-sheet class="section pa-2" rounded="lg">
-    <div class="hdr">
-      <span class="n"><strong>1</strong></span>
-      <span class="t"><strong>. Requester</strong></span>
+  <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
+    <!-- CarBooking-style gradient header -->
+    <div class="hero">
+      <div class="hero-left">
+        <div class="hero-title">
+          <i class="fa-solid fa-user"></i>
+          <span>Requester</span>
+        </div>
+      </div>
     </div>
 
-    <v-autocomplete
-      v-model="props.form.employeeId"
-      :items="employeeOptions"
-      item-title="title"
-      item-value="value"
-      :loading="loadingEmployees"
-      label="Employee | និយោជិក"
-      variant="outlined"
-      density="compact"
-      class="mt-3"
-      hide-details="auto"
-      clearable
-      @update:model-value="onEmployeeSelected"
-      @click:clear="onClear"
-    >
-      <template #item="{ props: itemProps, item }">
-        <v-list-item v-bind="itemProps" :title="item.raw.title" :subtitle="item.raw.subtitle" />
-      </template>
-    </v-autocomplete>
+    <div class="px-3 pb-3 pt-2">
+      <v-card flat class="soft-card glass">
+        <v-card-text class="pt-0 mt-4">
+          <v-autocomplete
+            v-model="props.form.employeeId"
+            :items="employeeOptions"
+            item-title="title"
+            item-value="value"
+            :loading="loadingEmployees"
+            label="Employee"
+            variant="outlined"
+            density="compact"
+            hide-details="auto"
+            clearable
+            @update:model-value="onEmployeeSelected"
+            @click:clear="onClear"
+          >
+            <template #item="{ props: ip, item }">
+              <v-list-item v-bind="ip" :title="item.raw.title" :subtitle="item.raw.subtitle" />
+            </template>
+          </v-autocomplete>
 
-    <v-row dense class="mt-3">
-      <v-col cols="12" md="6">
-        <v-text-field v-model="props.form.name" label="Name | ឈ្មោះ" readonly variant="outlined" density="compact" hide-details />
-      </v-col>
-      <v-col cols="12" md="6">
-        <v-text-field v-model="props.form.department" label="Department | ផ្នែក" readonly variant="outlined" density="compact" hide-details />
-      </v-col>
-    </v-row>
+          <v-row dense class="mt-3">
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="props.form.name"
+                label="Name"
+                readonly
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="props.form.department"
+                label="Department"
+                readonly
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="12" md="6">
+              <v-text-field
+                v-model="props.form.contactNumber"
+                label="Contact Number"
+                readonly
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+        </v-card-text>
+      </v-card>
+    </div>
   </v-sheet>
 </template>
 
 <style scoped>
-.section { background: #fafafb; border: 1px dashed rgba(100,116,139,.25); }
-.hdr { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-.n { width:18px; height:18px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#6b7280; color:#fff; font-size:11px; font-weight:700; }
+/* ——— CarBooking requester visual style ——— */
+.section { 
+  background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border: 1px solid rgba(100,116,139,.18);
+}
+.hero { 
+  display:flex; align-items:center; justify-content:space-between; 
+  padding: 14px 18px; 
+  background: linear-gradient(90deg, #5d7884 0%, #9293d4 60%, #786e95 100%); 
+  color:#fff; 
+}
+.hero-left { display:flex; flex-direction:column; gap:6px; }
+.hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
+.hero-sub { opacity:.92; font-size:.9rem; }
+
+.soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
+.glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
+
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
+
 :deep(.v-field__clearable) { opacity: 1 !important; } /* keep the X visible */
 </style>

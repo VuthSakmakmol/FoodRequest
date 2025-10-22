@@ -125,7 +125,7 @@ function logout(){
                 >
                   <template #prepend><i :class="it.icon" class="fa-fw" /></template>
                   <v-list-item-title>{{ it.label }}</v-list-item-title>
-                  <template #append><i class="fa-solid fa-chevron-right caret"></i></template>
+                  <template #append></template>
                 </v-list-item>
               </div>
             </v-expand-transition>
