@@ -523,6 +523,8 @@ async function updateBooking(req, res, next) {
   } catch (err) { next(err); }
 }
 
+
+
 /* ───────── NEW: delete (CRUD → D) ─────────
    Hard delete. If you prefer soft delete, replace with doc.status='CANCELLED' + save. */
 async function deleteBooking(req, res, next) {
