@@ -1,25 +1,21 @@
-<!-- src/views/employee/EmployeeCarBooking.vue -->
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket from '@/utils/socket'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'   // ✅ useRoute added
 
+/* ───────── Router ───────── */
 const router = useRouter()
+const route = useRoute()
 const DEBUG = true
 
 /* ───────── Sections ───────── */
 import RequesterSection from './sections/RequesterSection.vue'
 import TripDetailSection from './sections/TripDetailSection.vue'
-import PurposeSection from './sections/PurposeSection.vue' // ✅ replaced VehicleSection
+import PurposeSection from './sections/PurposeSection.vue'
 import RecurringBookingSection from './sections/RecurringBookingSection.vue'
-import TransportScheduleCalendar from './calendars/TransportScheduleCalendar.vue'
-
-/* ───────── Dialog ───────── */
-const showSchedule = ref(false)
-const scheduleDate = ref(dayjs().format('YYYY-MM-DD'))
 
 /* ───────── Constants ───────── */
 const CATEGORY = ['Car', 'Messenger']
@@ -50,7 +46,10 @@ async function loadEmployees() {
     const savedId = localStorage.getItem('employeeId') || ''
     if (savedId && !form.value.employeeId) {
       const exists = employees.value.some(e => String(e.employeeId) === String(savedId))
-      if (exists) { form.value.employeeId = savedId; onEmployeeSelected(savedId) }
+      if (exists) {
+        form.value.employeeId = savedId
+        onEmployeeSelected(savedId)
+      }
     } else if (form.value.employeeId) {
       onEmployeeSelected(form.value.employeeId)
     }
@@ -103,11 +102,17 @@ const demoBookings = ref([
   { date: dayjs().format('YYYY-MM-DD'), category: 'Messenger', start: '08:00', end: '10:00' }
 ])
 
+function toMinutes(h, m) {
+  const H = Number(h || 0)
+  const M = Number(m || 0)
+  return H * 60 + M
+}
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd
+}
+
 const selectedStart = computed(() => toMinutes(form.value.startHour, form.value.startMinute))
 const selectedEnd = computed(() => toMinutes(form.value.endHour, form.value.endMinute))
-
-function toMinutes(h, m) { const H = Number(h || 0), M = Number(m || 0); return H * 60 + M }
-function overlaps(aStart, aEnd, bStart, bEnd) { return aStart < bEnd && bStart < aEnd }
 
 const busyCar = computed(() => {
   if (!form.value.tripDate || !selectedStart.value || !selectedEnd.value) return 0
@@ -117,6 +122,7 @@ const busyCar = computed(() => {
     overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
   ).length
 })
+
 const busyMsgr = computed(() => {
   if (!form.value.tripDate || !selectedStart.value || !selectedEnd.value) return 0
   return demoBookings.value.filter(b =>
@@ -125,6 +131,7 @@ const busyMsgr = computed(() => {
     overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
   ).length
 })
+
 const availableCar = computed(() => Math.max(0, MAX_CAR - busyCar.value))
 const availableMsgr = computed(() => Math.max(0, MAX_MSGR - busyMsgr.value))
 const capacityExceeded = computed(() => {
@@ -213,6 +220,8 @@ function buildRecurringSeriesPayload(f) {
 }
 
 /* ───────── Submit Logic ───────── */
+const loading = ref(false)
+
 async function submit() {
   const errs = validateForm()
   if (errs.length) {
@@ -234,6 +243,7 @@ async function submit() {
       router.push({ name: 'employee-car-history' })
       return
     }
+
     const payload = buildOneOffPayload(form.value)
     const needsTicket = (form.value.stops || []).some(s => s.destination === 'Airport')
     if (needsTicket) {
@@ -246,6 +256,7 @@ async function submit() {
     } else {
       await api.post('/public/car-bookings', payload)
     }
+
     await Swal.fire({ icon: 'success', title: 'Submitted', timer: 1400, showConfirmButton: false })
     resetForm({ keepEmployee: true })
     router.push({ name: 'employee-car-history' })
@@ -259,7 +270,12 @@ async function submit() {
 
 /* ───────── Reset ───────── */
 function resetForm({ keepEmployee = false } = {}) {
-  const cur = { id: form.value.employeeId, name: form.value.name, dept: form.value.department, phone: form.value.contactNumber }
+  const cur = {
+    id: form.value.employeeId,
+    name: form.value.name,
+    dept: form.value.department,
+    phone: form.value.contactNumber
+  }
   form.value = {
     employeeId: keepEmployee ? cur.id : '',
     name: keepEmployee ? cur.name : '',
@@ -274,13 +290,22 @@ function resetForm({ keepEmployee = false } = {}) {
   }
 }
 
-/* ───────── Misc ───────── */
-const loading = ref(false)
+/* ───────── Mounted: handle ?tripDate= ───────── */
+onMounted(() => {
+  if (route.query.tripDate) {
+    form.value.tripDate = route.query.tripDate
+    Swal.fire({
+      icon: 'info',
+      title: 'Booking Date Loaded',
+      text: `Date automatically set to ${route.query.tripDate}`,
+      timer: 1500,
+      showConfirmButton: false
+    })
+  }
+})
+
+/* ───────── Watchers ───────── */
 watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeId', v) })
-function openSchedule() {
-  scheduleDate.value = form.value.tripDate || dayjs().format('YYYY-MM-DD')
-  showSchedule.value = true
-}
 </script>
 
 <template>
@@ -323,10 +348,6 @@ function openSchedule() {
       </v-card-text>
 
       <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
-        <v-btn size="small" variant="outlined" @click="openSchedule">
-          <v-icon start>mdi-calendar</v-icon> Schedule
-        </v-btn>
-
         <v-btn :loading="loading" size="small" class="px-4 ml-1" color="primary" @click="submit">
           <v-icon start>mdi-send</v-icon> Submit
         </v-btn>
@@ -335,27 +356,6 @@ function openSchedule() {
           <v-icon start>mdi-refresh</v-icon> Reset
         </v-btn>
       </v-toolbar>
-
-      <v-dialog v-model="showSchedule" max-width="1200">
-        <v-card class="rounded-lg">
-          <v-toolbar flat density="comfortable">
-            <v-toolbar-title class="font-weight-bold">Transport Schedule</v-toolbar-title>
-            <v-spacer />
-            <v-btn icon variant="text" @click="showSchedule = false"><v-icon>mdi-close</v-icon></v-btn>
-          </v-toolbar>
-          <v-divider />
-          <v-card-text class="pa-3">
-            <TransportScheduleCalendar
-              v-model="scheduleDate"
-              :max-car="MAX_CAR"
-              :max-msgr="MAX_MSGR"
-              start-hour="06"
-              end-hour="22"
-              :minute-step="30"
-            />
-          </v-card-text>
-        </v-card>
-      </v-dialog>
     </v-card>
   </v-container>
 </template>
@@ -363,6 +363,5 @@ function openSchedule() {
 <style scoped>
 .slim-card { border: 1px solid rgba(100,116,139,.16); }
 .slim-toolbar { background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); }
-.sticky-col { align-self:flex-start; }
-:deep(.v-dialog > .v-overlay__content) { width: 96%; }
+.sticky-col { align-self: flex-start; }
 </style>

@@ -17,6 +17,7 @@ const EmployeeHome        = () => import('@/views/employee/EmployeeHome.vue')
 const EmployeeRequestHist = () => import('@/views/employee/EmployeeRequestHistory.vue')
 const EmployeeCarBooking  = () => import('@/views/employee/carbooking/EmployeeCarBooking.vue')
 const EmployeeCarHistory  = () => import('@/views/employee/carbooking/EmployeeCarHistory.vue')
+const CarBookingSchedule  = () => import('@/views/employee/carbooking/sections/CarBookingSchedule.vue')
 
 // Admin (Food)
 const AdminLogin        = () => import('@/views/admin/AdminLogin.vue')
@@ -68,6 +69,7 @@ const router = createRouter({
         { name: 'employee-request-history', path: 'history',     component: EmployeeRequestHist },
         { name: 'employee-car-booking',     path: 'car-booking', component: EmployeeCarBooking },
         { name: 'employee-car-history',     path: 'car-history', component: EmployeeCarHistory },
+        { name: 'employee-car-schedule',    path: 'car-schedule',component: CarBookingSchedule},
       ]
     },
 

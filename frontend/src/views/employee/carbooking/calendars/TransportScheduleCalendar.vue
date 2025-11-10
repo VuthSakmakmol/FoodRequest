@@ -1,638 +1,325 @@
-<!-- views/employee/carbooking/carlendars/TransportScheduleCalendar.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
-import socket from '@/utils/socket'
 
-/* ---------- props ---------- */
+/* ───────── Router ───────── */
+const router = useRouter()
+
+/* ───────── Props ───────── */
 const props = defineProps({
   modelValue: { type: String, default: () => dayjs().format('YYYY-MM-DD') },
-  startHour:  { type: String, default: '06' },
-  endHour:    { type: String, default: '22' },
-  minuteStep: { type: Number, default: 30 },
   maxCar:     { type: Number, default: 3 },
-  maxMsgr:    { type: Number, default: 1 },
+  maxMsgr:    { type: Number, default: 1 }
 })
 const emit = defineEmits(['update:modelValue'])
 
-/* ---------- helpers ---------- */
-const toMin = (hhmm) => { const [h='0',m='0']=String(hhmm||'').split(':'); return (+h)*60+(+m) }
-const overlaps = (aS, aE, bS, bE) => aS < bE && bS < aE
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n))
-
-/* ---------- state ---------- */
+/* ───────── State ───────── */
+const currentMonth = ref(dayjs(props.modelValue))
 const selectedDate = ref(props.modelValue)
-watch(() => props.modelValue, v => { selectedDate.value = v || dayjs().format('YYYY-MM-DD') })
-watch(selectedDate, v => emit('update:modelValue', v))
+const loading = ref(false)
+const bookings = ref([])
 
-const loading   = ref(false)
-const err       = ref('')
-const info      = ref('')        // small hint showing which endpoint returned data
-const bookings  = ref([])
+/* ───────── Computed ───────── */
+const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
+const startOfMonth = computed(() => currentMonth.value.startOf('month'))
+const endOfMonth = computed(() => currentMonth.value.endOf('month'))
+const startOfGrid = computed(() => startOfMonth.value.startOf('week'))
+const endOfGrid = computed(() => endOfMonth.value.endOf('week'))
 
-/* fetched people for lane labels/capacity (normalized to loginId) */
-const drivers    = ref([])  // [{ _id: loginId, loginId, name }]
-const messengers = ref([])
-
-/* ---------- FILTERS ---------- */
-const STAT_LIST = ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','DELAYED','COMPLETED','CANCELLED']
-
-const filters = ref({
-  category: 'ALL',
-  status:   'ALL',
-  driverId: 'ALL',   // always loginId
-  q: '',
-  timeStart: '',
-  timeEnd:   '',
-  includeCancelled: false
-})
-
-/* min/max time */
-const dayStartHH = computed(() => String(props.startHour).padStart(2,'0'))
-const dayEndHH   = computed(()   => String(props.endHour).padStart(2,'0'))
-const timeMin = computed(() => `${dayStartHH.value}:00`)
-const timeMax = computed(() => `${dayEndHH.value}:00`)
-
-/* refetch when date or time window changes (other filters are client-side) */
-watch(selectedDate, () => {
-  filters.value.timeStart = ''
-  filters.value.timeEnd   = ''
-  fetchDay()
-})
-watch(() => [filters.value.timeStart, filters.value.timeEnd], () => fetchDay())
-
-/* ---------- Assignee options (normalized to loginId) ---------- */
-const driverOptions = computed(() => {
-  const dict = new Map()
-  for (const p of drivers.value)    dict.set(p.loginId, p.name || p.loginId)
-  for (const p of messengers.value) dict.set(p.loginId, p.name || p.loginId)
-  if (dict.size === 0) {
-    // build from current bookings so filters still useful
-    for (const b of bookings.value) {
-      const id = String(b?.assignment?.driverId || '').trim()
-      const nm = String(b?.assignment?.driverName || '').trim()
-      if (id) dict.set(id, nm || id)
-    }
+const days = computed(() => {
+  const arr = []
+  let d = startOfGrid.value
+  while (d.isBefore(endOfGrid.value) || d.isSame(endOfGrid.value, 'day')) {
+    arr.push(d)
+    d = d.add(1, 'day')
   }
-  const opts = Array.from(dict, ([loginId, title]) => ({ title, value: loginId }))
-    .sort((a,b) => a.title.localeCompare(b.title))
-  return [{ title:'ALL', value:'ALL' }, ...opts]
+  return arr
 })
 
-/* ---------- filtered bookings ---------- */
-const filteredBookings = computed(() => {
-  const f = filters.value
-  const hasWindow = f.timeStart && f.timeEnd && toMin(f.timeEnd) > toMin(f.timeStart)
-  const winS = hasWindow ? toMin(f.timeStart) : null
-  const winE = hasWindow ? toMin(f.timeEnd)   : null
-  const q = (f.q || '').trim().toLowerCase()
-
-  return bookings.value.filter(b => {
-    if (f.category !== 'ALL' && b.category !== f.category) return false
-    if (!f.includeCancelled && b.status === 'CANCELLED') return false
-    if (f.status !== 'ALL' && b.status !== f.status) return false
-    if (f.driverId !== 'ALL' && (b?.assignment?.driverId || '') !== f.driverId) return false
-    if (q) {
-      const emp = (b?.employee?.name || b.employeeId || '').toLowerCase()
-      const pur = (b?.purpose || '').toLowerCase()
-      const drv = (b?.assignment?.driverName || '').toLowerCase()
-      if (!emp.includes(q) && !pur.includes(q) && !drv.includes(q)) return false
-    }
-    if (hasWindow) {
-      const bs = toMin(b.timeStart), be = toMin(b.timeEnd)
-      if (!overlaps(winS, winE, bs, be)) return false
-    }
-    return true
-  })
-})
-
-/* ---------- geometry ---------- */
-const startMin = computed(() => Number(props.startHour)*60)
-const endMin   = computed(() => Number(props.endHour)*60)
-const totalMin = computed(() => endMin.value - startMin.value)
-const cols     = computed(() => Math.ceil(totalMin.value / props.minuteStep))
-const colLabels = computed(() => {
-  const out = []
-  for (let k = 0; k <= cols.value; k++) {
-    const m = startMin.value + k*props.minuteStep
-    const h = Math.floor(m/60), mm = m%60
-    out.push(`${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`)
-  }
-  return out
-})
-
-/* ---------- API ---------- */
-/* IMPORTANT: switch to the PUBLIC endpoint so auth isn’t required */
-async function fetchDay() {
-  if (!selectedDate.value) return
-  loading.value = true; err.value = ''; info.value = ''
+/* ───────── API ───────── */
+async function fetchMonth() {
+  loading.value = true
+  bookings.value = []
   try {
-    const { data } = await api.get('/public/transport/schedule', { params: { date: selectedDate.value }})
+    const { data } = await api.get('/public/transport/schedule', {
+      params: { month: currentMonth.value.format('YYYY-MM') }
+    })
     bookings.value = Array.isArray(data) ? data : []
-    info.value = `Loaded ${bookings.value.length} bookings via /public/transport/schedule`
-  } catch (e) {
-    // As a fallback, try the admin route if public route wasn't mounted yet
-    try {
-      const { data } = await api.get('/admin/car-bookings', { params: { date: selectedDate.value }})
-      bookings.value = Array.isArray(data) ? data : []
-      info.value = `Loaded ${bookings.value.length} bookings via /admin/car-bookings`
-    } catch (e2) {
-      err.value = e2?.response?.data?.message || e2?.message || 'Failed to load schedule'
-      bookings.value = []
-    }
+  } catch (err) {
+    console.error(err)
+    bookings.value = []
   } finally {
     loading.value = false
   }
 }
 
-/* Best-effort assignee directory (optional). If this fails, UI still works with fallback lanes. */
-async function fetchPeople() {
-  const normalize = (arr = []) => {
-    return (Array.isArray(arr) ? arr : []).map(u => {
-      const loginId = String(u.loginId || u._id || u.id || '').trim()
-      return { _id: loginId, loginId, name: u.name || u.fullName || loginId || '—' }
-    }).filter(u => !!u.loginId)
+/* ───────── Grouped by Date ───────── */
+const byDate = computed(() => {
+  const map = {}
+  for (const b of bookings.value) {
+    const d = dayjs(b.tripDate || b.date).format('YYYY-MM-DD')
+    if (!map[d]) map[d] = []
+    map[d].push(b)
   }
-  try {
-    const [drv, msg] = await Promise.all([
-      api.get('/admin/users', { params: { role: 'DRIVER',    isActive: true } }),
-      api.get('/admin/users', { params: { role: 'MESSENGER', isActive: true } }),
-    ])
-    drivers.value    = normalize(drv?.data)
-    messengers.value = normalize(msg?.data)
-  } catch {
-    drivers.value = []
-    messengers.value = []
-  }
-}
-
-/* ---------- realtime ---------- */
-function onDelta() { fetchDay() }
-onMounted(async () => {
-  await Promise.all([fetchDay(), fetchPeople()])
-  window.addEventListener('resize', updateCellWidth)
-  socket.on('carBooking:created', onDelta)
-  socket.on('carBooking:updated', onDelta)
-  socket.on('carBooking:deleted', onDelta)
-  socket.on('carBooking:status',  onDelta)
-  socket.on('carBooking:assigned',onDelta)
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateCellWidth)
-  socket.off('carBooking:created', onDelta)
-  socket.off('carBooking:updated', onDelta)
-  socket.off('carBooking:deleted', onDelta)
-  socket.off('carBooking:status',  onDelta)
-  socket.off('carBooking:assigned',onDelta)
+  return map
 })
 
-/* ---------- packing (assignee-aware) ---------- */
-const STAT_COLORS = {
-  PENDING:'#9CA3AF', ACCEPTED:'#EF4444', ON_ROAD:'#0EA5E9', ARRIVING:'#10B981',
-  COMPLETED:'#22C55E', DELAYED:'#F59E0B', CANCELLED:'#94A3B8',
+/* ───────── Navigation ───────── */
+function nextMonth() {
+  currentMonth.value = currentMonth.value.add(1, 'month')
+  fetchMonth()
+}
+function prevMonth() {
+  currentMonth.value = currentMonth.value.subtract(1, 'month')
+  fetchMonth()
+}
+function goToday() {
+  currentMonth.value = dayjs()
+  fetchMonth()
 }
 
-function asJob(b) {
-  return {
-    id: String(b._id),
-    start: clamp(toMin(b.timeStart), startMin.value, endMin.value),
-    end:   clamp(toMin(b.timeEnd),   startMin.value, endMin.value),
-    rawStart: b.timeStart,
-    rawEnd:   b.timeEnd,
-    status:   b.status,
-    emp:      b.employee?.name || b.employeeId || '',
-    assigneeId: String(b?.assignment?.driverId || ''), // loginId
+/* ───────── Click Handler ───────── */
+function selectDay(d) {
+  const dateStr = d.format('YYYY-MM-DD')
+  const bookingsForDay = byDate.value[dateStr]
+
+  if (bookingsForDay && bookingsForDay.length > 0) {
+    // ── show options: create new or see detail ──
+    Swal.fire({
+      icon: 'info',
+      title: `Bookings on ${dateStr}`,
+      html: `
+        <div style="text-align:left;max-height:240px;overflow:auto;padding:5px 0">
+          ${bookingsForDay.map(b => `
+            <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;">
+              <div><b>${b.employee?.name || b.employeeId || 'Unknown'}</b> (${b.category})</div>
+              <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
+              <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
+            </div>
+          `).join('')}
+        </div>`,
+      showDenyButton: true,
+      showCancelButton: true,
+      confirmButtonText: '➕ Create New',
+      denyButtonText: '🔍 See Details',
+      cancelButtonText: 'Close',
+      reverseButtons: true,
+      width: 480,
+    }).then(res => {
+      if (res.isConfirmed) {
+        // create new booking
+        router.push({ name: 'employee-car-booking', query: { tripDate: dateStr } })
+      } else if (res.isDenied) {
+        // show all details again (with more info)
+        Swal.fire({
+          icon: 'info',
+          title: `Schedule Details – ${dateStr}`,
+          html: `
+            <div style="text-align:left;max-height:300px;overflow:auto;">
+              ${bookingsForDay.map((b,i)=>`
+                <div style="border-bottom:1px solid #e5e7eb;padding:8px 0;">
+                  <div><b>#${i+1} ${b.employee?.name || b.employeeId}</b> (${b.category})</div>
+                  <div>🕒 ${b.timeStart || '--:--'} → ${b.timeEnd || '--:--'}</div>
+                  <div>🏁 Stops: ${(b.stops || []).map(s=>s.destination).join(', ') || 'N/A'}</div>
+                  <div>📞 ${b.customerContact || ''}</div>
+                  <div>🎯 ${b.purpose || ''}</div>
+                </div>
+              `).join('')}
+            </div>
+          `,
+          confirmButtonText: 'OK',
+          width: 520
+        })
+      }
+    })
+  } else {
+    // ── no bookings yet → offer to create ──
+    Swal.fire({
+      icon: 'question',
+      title: 'No bookings yet',
+      text: `Do you want to create a booking for ${dateStr}?`,
+      showCancelButton: true,
+      confirmButtonText: 'Yes, create booking',
+      cancelButtonText: 'No'
+    }).then(res => {
+      if (res.isConfirmed) {
+        router.push({
+          name: 'employee-car-booking',
+          query: { tripDate: dateStr }
+        })
+      }
+    })
   }
 }
 
-function packByAssignee(category, peopleList, fallbackCap) {
-  const src = filteredBookings.value.filter(b => b.category === category)
-  const items = src.map(asJob).filter(x => x.end > x.start)
-                   .sort((a,b) => a.start - b.start || a.end - b.end)
-
-  // If no people yet, return empty lanes sized by fallback so UI still shows rows
-  if (!peopleList || peopleList.length === 0) {
-    return {
-      lanes: Array.from({ length: fallbackCap }, () => []),
-      unassigned: items
-    }
-  }
-
-  // fixed row for each person by loginId
-  const idToIdx = new Map(peopleList.map((p, i) => [String(p.loginId || p._id || ''), i]))
-  const lanes = Array.from({ length: peopleList.length }, () => [])
-  const unassigned = []
-
-  for (const job of items) {
-    const idx = idToIdx.get(job.assigneeId)
-    if (idx === undefined) unassigned.push(job)
-    else lanes[idx].push(job)
-  }
-  return { lanes, unassigned }
-}
-
-const carCapacity = computed(() => drivers.value?.length ? drivers.value.length : props.maxCar)
-const msgCapacity = computed(() => messengers.value?.length ? messengers.value.length : props.maxMsgr)
-
-const carPack = computed(() => packByAssignee('Car', drivers.value, props.maxCar))
-const msgPack = computed(() => packByAssignee('Messenger', messengers.value, props.maxMsgr))
-
-/* position helpers */
-function leftPct(mins) {
-  const dx = clamp(mins - startMin.value, 0, totalMin.value)
-  return `${(dx / totalMin.value) * 100}%`
-}
-function widthPct(sMin, eMin) {
-  const w = clamp(eMin - sMin, 0, totalMin.value)
-  return `${(w / totalMin.value) * 100}%`
-}
-
-/* ---------- responsive timeline + synced header/body scroll ---------- */
-const cardRef = ref(null)
-const headerColsRef = ref(null)
-const bodyColsRef = ref(null)
-const cellW = ref(160) // 160 / 120 / 90
-const gapW  = 8
-const gridPx = computed(() => (cols.value * cellW.value) + ((cols.value - 1) * gapW))
-
-function updateCellWidth() {
-  const w = cardRef.value?.clientWidth || window.innerWidth
-  if (w < 700) cellW.value = 90
-  else if (w < 1100) cellW.value = 120
-  else cellW.value = 160
-}
-let removeScrollSync = null
-onMounted(async () => {
-  await nextTick()
-  updateCellWidth()
-  const h = headerColsRef.value
-  const b = bodyColsRef.value
-  if (h && b) {
-    const onH = () => { b.scrollLeft = h.scrollLeft }
-    const onB = () => { h.scrollLeft = b.scrollLeft }
-    h.addEventListener('scroll', onH)
-    b.addEventListener('scroll', onB)
-    removeScrollSync = () => {
-      h.removeEventListener('scroll', onH)
-      b.removeEventListener('scroll', onB)
-    }
-  }
-})
-onBeforeUnmount(() => {
-  if (removeScrollSync) removeScrollSync()
-})
-/* ---------- now-availability ---------- */
-const nowSlice = computed(() => {
-  const now = dayjs()
-  if (now.format('YYYY-MM-DD') !== selectedDate.value) return null
-  const m = now.hour()*60 + now.minute()
-  if (m < startMin.value || m >= endMin.value) return null
-  const slotStart = Math.floor((m - startMin.value)/props.minuteStep)*props.minuteStep + startMin.value
-  const slotEnd   = slotStart + props.minuteStep
-  const count = (cat) => bookings.value
-    .filter(b => b.category === cat && b.status !== 'CANCELLED')
-    .filter(b => overlaps(slotStart, slotEnd, toMin(b.timeStart), toMin(b.timeEnd))).length
-  return { start: slotStart, end: slotEnd, busyCar: count('Car'), busyMsgr: count('Messenger') }
-})
-const availCarNow  = computed(() => nowSlice.value ? Math.max(0, carCapacity.value - nowSlice.value.busyCar)  : null)
-const availMsgrNow = computed(() => nowSlice.value ? Math.max(0, msgCapacity.value - nowSlice.value.busyMsgr) : null)
-
-/* legend */
-const LEGEND = [
-  ['PENDING','Pending'],
-  ['ACCEPTED','Accepted'],
-  ['ON_ROAD','On the way'],
-  ['ARRIVING','Arriving'],
-  ['DELAYED','Delayed'],
-  ['COMPLETED','Completed'],
-  ['CANCELLED','Cancelled'],
-]
+/* ───────── Lifecycle ───────── */
+onMounted(fetchMonth)
 </script>
 
 <template>
-  <div ref="cardRef" class="transport-cal">
-    <!-- ================= FILTERS ================= -->
-    <div class="toolbar">
-      <div class="filters-grid">
-        <div class="fg-item fg-date">
-          <label>Date</label>
-          <div class="date-ctrl">
-            <button class="btn-icon" @click="selectedDate = dayjs(selectedDate).subtract(1,'day').format('YYYY-MM-DD')">‹</button>
-            <input class="input tall" type="date" :value="selectedDate" @input="e => selectedDate = e.target.value" />
-            <button class="btn-icon" @click="selectedDate = dayjs(selectedDate).add(1,'day').format('YYYY-MM-DD')">›</button>
-          </div>
-        </div>
+  <div class="calendar-wrapper">
+    <!-- Toolbar -->
+    <div class="calendar-toolbar">
+      <button class="btn-nav" @click="prevMonth">‹</button>
+      <div class="month-label">{{ monthLabel }}</div>
+      <button class="btn-nav" @click="nextMonth">›</button>
 
-        <div class="fg-item">
-          <label>Category</label>
-          <select class="input tall" v-model="filters.category">
-            <option>ALL</option><option>Car</option><option>Messenger</option>
-          </select>
-        </div>
-
-        <div class="fg-item">
-          <label>Status</label>
-          <select class="input tall" v-model="filters.status">
-            <option>ALL</option>
-            <option v-for="s in STAT_LIST" :key="s">{{ s }}</option>
-          </select>
-        </div>
-
-        <div class="fg-item">
-          <label>Assignee (Driver/Messenger)</label>
-          <select class="input tall" v-model="filters.driverId">
-            <option :value="'ALL'">ALL</option>
-            <option v-for="opt in driverOptions" :key="opt.value" :value="opt.value">{{ opt.title }}</option>
-          </select>
-        </div>
-
-        <div class="fg-item fg-span2">
-          <label>Search name / purpose / driver</label>
-          <input class="input tall" type="text" v-model="filters.q" placeholder="Search…" />
-        </div>
-
-        <div class="fg-item">
-          <label>From</label>
-          <input class="input tall" type="time" v-model="filters.timeStart" :min="timeMin" :max="timeMax" step="60">
-        </div>
-        <div class="fg-item">
-          <label>To</label>
-          <input class="input tall" type="time" v-model="filters.timeEnd" :min="timeMin" :max="timeMax" step="60">
-        </div>
-
-        <label class="fg-item checkbox">
-          <input type="checkbox" v-model="filters.includeCancelled" />
-          <span>Include cancelled</span>
-        </label>
-      </div>
-
-      <!-- tiny inline info so you can confirm data source quickly -->
-      <div v-if="info" class="hint">{{ info }}</div>
-    </div>
-
-    <!-- ================= Legend ================= -->
-    <div class="legend">
-      <div v-for="[k, label] in LEGEND" :key="k" class="legend-item">
-        <span class="dot" :style="{ background: STAT_COLORS[k] || '#999' }"></span>
-        <span class="lbl">{{ label }}</span>
+      <div class="toolbar-right">
+        <button class="btn-flat" @click="fetchMonth">REFRESH</button>
+        <button class="btn-flat today" @click="goToday">TODAY</button>
       </div>
     </div>
 
-    <div v-if="err" class="alert">{{ err }}</div>
+    <!-- Week header -->
+    <div class="week-header">
+      <div v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="w" class="week-cell">
+        {{ w }}
+      </div>
+    </div>
 
-    <!-- ================= Timeline header (synced scroll) ================= -->
-    <div class="grid header">
-      <div class="lane-col head sticky">Time</div>
-      <div class="cols" ref="headerColsRef">
-        <div class="cols-inner" :style="{ width: gridPx + 'px' }">
-          <div v-for="(lab, i) in colLabels" :key="i" class="col" :style="{ width: cellW + 'px' }">
-            <span class="tick" v-if="i < colLabels.length-1">{{ lab }}</span>
+    <!-- Calendar grid -->
+    <div class="calendar-grid">
+      <div
+        v-for="d in days"
+        :key="d.format('YYYY-MM-DD')"
+        class="day-cell"
+        :class="{
+          today: d.isSame(dayjs(), 'day'),
+          otherMonth: !d.isSame(currentMonth.value, 'month'),
+          selected: selectedDate === d.format('YYYY-MM-DD')
+        }"
+        @click="selectDay(d)"
+      >
+        <div class="day-number" :class="{ sunday: d.day() === 0 }">
+          {{ d.date() }}
+        </div>
+
+        <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
+          <div
+            v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
+            :key="i"
+            class="booking-chip"
+          >
+            {{ b.employee?.name || b.employeeId }}
+            <span class="count">({{ i + 1 }})</span>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ================= Cars ================= -->
-    <div v-if="filters.category === 'ALL' || filters.category === 'Car'">
-      <div class="section-title">🚗 Cars ({{ carCapacity }})</div>
-      <div class="grid">
-        <!-- fixed labels -->
-        <div class="lane-col sticky">
-          <div
-            v-for="(d, i) in (drivers.length ? drivers : Array.from({length: carCapacity}, (_,k)=>({name:`Car #${k+1}`})))"
-            :key="'car-lbl-'+(d._id || i)"
-            class="lane-label"
-          >{{ d.name || d.loginId || `Car #${i+1}` }}</div>
-        </div>
-
-        <div class="cols body" ref="bodyColsRef">
-          <div class="cols-inner" :style="{ width: gridPx + 'px' }">
-
-            <!-- ONE wrap per row: background + its overlay -->
-            <div v-for="(lane, li) in carPack.lanes" :key="'car-rowwrap-'+li" class="row-wrap">
-              <div class="row-bg"
-                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
-                <div v-for="c in cols" :key="'car-cell-'+li+'-'+c" class="cell"></div>
-              </div>
-
-              <div class="lane-overlay">
-                <div
-                  v-for="b in lane"
-                  :key="b.id"
-                  class="block"
-                  :style="{
-                    left: leftPct(b.start),
-                    width: widthPct(b.start, b.end),
-                    borderColor: STAT_COLORS[b.status] || '#888',
-                    background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
-                  }"
-                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
-                >
-                  <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
-                  <div class="block-text">
-                    <div class="t">{{ b.rawStart }}–{{ b.rawEnd }}</div>
-                    <div class="s">{{ b.status }}</div>
-                    <div class="p" v-if="b.emp">{{ b.emp }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- optional Unassigned row -->
-            <div v-if="carPack.unassigned.length" class="row-wrap">
-              <div class="row-bg"
-                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
-                <div v-for="c in cols" :key="'car-un-cell-'+c" class="cell"></div>
-              </div>
-              <div class="lane-overlay">
-                <div
-                  v-for="b in carPack.unassigned"
-                  :key="b.id"
-                  class="block"
-                  :style="{
-                    left: leftPct(b.start),
-                    width: widthPct(b.start, b.end),
-                    borderColor: STAT_COLORS[b.status] || '#888',
-                    background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
-                  }"
-                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
-                >
-                  <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
-                  <div class="block-text">
-                    <div class="t">{{ b.rawStart }}–{{ b.rawEnd }}</div>
-                    <div class="s">{{ b.status }}</div>
-                    <div class="p" v-if="b.emp">{{ b.emp }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div> <!-- cols-inner -->
-        </div> <!-- cols body -->
-      </div>
-    </div>
-
-    <!-- ================= Messenger ================= -->
-    <div v-if="filters.category === 'ALL' || filters.category === 'Messenger'">
-      <div class="section-title">🛵 Messenger ({{ msgCapacity }})</div>
-      <div class="grid">
-        <div class="lane-col sticky">
-          <div
-            v-for="(m, i) in (messengers.length ? messengers : Array.from({length: msgCapacity}, (_,k)=>({name:`Messenger #${k+1}`})))"
-            :key="'msg-lbl-'+(m._id || i)"
-            class="lane-label"
-          >{{ m.name || m.loginId || `Messenger #${i+1}` }}</div>
-        </div>
-
-        <div class="cols body">
-          <div class="cols-inner" :style="{ width: gridPx + 'px' }">
-
-            <div v-for="(lane, li) in msgPack.lanes" :key="'msg-rowwrap-'+li" class="row-wrap">
-              <div class="row-bg"
-                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
-                <div v-for="c in cols" :key="'msg-cell-'+li+'-'+c" class="cell"></div>
-              </div>
-
-              <div class="lane-overlay">
-                <div
-                  v-for="b in lane"
-                  :key="b.id"
-                  class="block"
-                  :style="{
-                    left: leftPct(b.start),
-                    width: widthPct(b.start, b.end),
-                    borderColor: STAT_COLORS[b.status] || '#888',
-                    background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
-                  }"
-                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
-                >
-                  <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
-                  <div class="block-text">
-                    <div class="t">{{ b.rawStart }}–{{ b.rawEnd }}</div>
-                    <div class="s">{{ b.status }}</div>
-                    <div class="p" v-if="b.emp">{{ b.emp }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div v-if="msgPack.unassigned.length" class="row-wrap">
-              <div class="row-bg"
-                   :style="{ gridTemplateColumns: `repeat(${cols}, ${cellW}px)`, columnGap: '8px' }">
-                <div v-for="c in cols" :key="'msg-un-cell-'+c" class="cell"></div>
-              </div>
-              <div class="lane-overlay">
-                <div
-                  v-for="b in msgPack.unassigned"
-                  :key="b.id"
-                  class="block"
-                  :style="{
-                    left: leftPct(b.start),
-                    width: widthPct(b.start, b.end),
-                    borderColor: STAT_COLORS[b.status] || '#888',
-                    background: (b.status==='CANCELLED' ? '#fff' : (STAT_COLORS[b.status] + '22'))
-                  }"
-                  :title="`${b.rawStart}–${b.rawEnd} • ${b.status}`"
-                >
-                  <div class="block-bar" :style="{ background: STAT_COLORS[b.status] || '#888' }"></div>
-                  <div class="block-text">
-                    <div class="t">{{ b.rawStart }}–{{ b.rawEnd }}</div>
-                    <div class="s">{{ b.status }}</div>
-                    <div class="p" v-if="b.emp">{{ b.emp }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div><!-- cols-inner -->
-        </div><!-- cols body -->
-      </div>
-    </div>
-
-    <!-- ================= chips ================= -->
-    <div class="nowchips">
-      <span v-if="availCarNow !== null" class="chip blue">🚗 Now: {{ availCarNow }} free</span>
-      <span v-if="availMsgrNow !== null" class="chip amber">🛵 Now: {{ availMsgrNow }} free</span>
-    </div>
-
-    <div v-if="loading" class="loader"></div>
+    <div v-if="loading" class="loader">Loading…</div>
   </div>
 </template>
 
 <style scoped>
-.transport-cal{ border:1px solid rgba(100,116,139,.16); border-radius:12px; background:#fff; overflow:hidden; font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial, 'Noto Sans'; }
+.calendar-wrapper {
+  border: 1px solid rgba(100,116,139,.16);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
 
-/* ───────── FILTERS ───────── */
-.toolbar{ background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); padding: 12px 14px 8px; }
-.filters-grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; align-items:end; }
-.fg-item{ display:flex; flex-direction:column; gap:6px; }
-.fg-item>label{ font-size:.86rem; color:#374151; font-weight:600; }
-.fg-date .date-ctrl{ display:flex; gap:8px; align-items:center; }
-.fg-span2{ grid-column: span 2; }
-@media (max-width: 720px){ .fg-span2{ grid-column: span 1; } }
+/* Toolbar */
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f5f7fb;
+  padding: 10px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 600;
+}
+.month-label { font-size: 1.1rem; color: #111827; }
+.btn-nav {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 18px;
+  width: 38px;
+  height: 38px;
+  cursor: pointer;
+}
+.btn-nav:hover { background: #f1f5f9; }
+.toolbar-right { display: flex; gap: 8px; }
+.btn-flat {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: .9rem;
+  cursor: pointer;
+}
+.btn-flat.today {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+}
 
-.hint{ margin-top:8px; font-size:.82rem; color:#334155; }
+/* Week header */
+.week-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.week-cell {
+  text-align: center;
+  font-weight: 700;
+  padding: 8px 0;
+  color: #334155;
+}
 
-.input{ width:100%; border:1px solid #cbd5e1; border-radius:8px; padding:8px 10px; font-size:.95rem; outline:none; background:#fff; }
-.input:focus{ border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.15); }
-.tall{ min-height:46px; }
+/* Grid */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.day-cell {
+  min-height: 110px;
+  border: 1px solid #e2e8f0;
+  padding: 6px 8px;
+  background: #fff;
+  position: relative;
+  transition: background .2s;
+  cursor: pointer;
+}
+.day-cell.otherMonth { background: #f9fafb; opacity: 0.5; }
+.day-cell.today { border: 2px solid #2563eb; }
+.day-cell.selected { outline: 2px solid #2563eb; }
 
-.btn-icon{ width:38px; height:38px; border-radius:8px; border:1px solid #cbd5e1; background:#fff; font-size:18px; line-height:1; cursor:pointer; }
-.btn-icon:hover{ background:#f3f4f6; }
+.day-number {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+.day-number.sunday { color: #dc2626; }
 
-.checkbox{ display:flex; align-items:center; gap:8px; padding-bottom:4px; }
-.checkbox input{ width:18px; height:18px; }
-
-/* ───────── LEGEND ───────── */
-.legend{ display:flex; flex-wrap:wrap; gap:10px; padding:10px 14px 6px; }
-.legend-item{ display:flex; align-items:center; gap:8px; color:#1f2937; }
-.dot{ width:12px; height:12px; border-radius:999px; display:inline-block; }
-.lbl{ font-size:.85rem; }
-
-.alert{ margin: 8px 14px; padding:8px 12px; border-left:4px solid #ef4444; background:#fee2e2; color:#991b1b; border-radius:6px; }
-
-/* ───────── TIMELINE ───────── */
-.section-title{ font-weight:800; padding:10px 14px; color:#111827; letter-spacing:.2px; }
-
-.grid{ display:grid; grid-template-columns: 180px 1fr; column-gap: 8px; padding: 0 14px 6px 14px; }
-.grid.header{ padding-top: 6px; }
-.sticky{ position: sticky; left:0; z-index:3; background:#fff; border-right:1px solid rgba(148,163,184,.25); }
-
-.lane-col{ display:flex; flex-direction:column; gap:10px; }
-.lane-col.head{ font-weight:700; color:#334155; display:flex; align-items:center; }
-.lane-label{ height:44px; display:flex; align-items:center; font-weight:600; color:#374151; padding-right:6px; }
-
-/* scroll containers */
-.cols{ position: relative; overflow-x:auto; overflow-y:hidden; padding-bottom:2px; }
-.cols::-webkit-scrollbar{ height:10px; }
-.cols::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:999px; }
-.cols-inner{ position: relative; }
-
-/* time header ticks */
-.grid.header .col{ display:inline-block; height:24px; margin-right:8px; position:relative; vertical-align:top; }
-.tick{ position:absolute; left:0; top:2px; font-size:.78rem; color:#475569; font-weight:600; }
-
-/* per-row wrap: background grid + overlay stacked */
-.row-wrap{ position:relative; height:44px; margin-bottom:10px; }
-.row-bg{ display:grid; gap:8px; height:44px; }
-.cell{ height:44px; border:1px dashed rgba(148,163,184,.35); background:#fff; border-radius:8px; }
-
-/* overlay blocks are absolutely positioned INSIDE the row-wrap */
-.lane-overlay{ position:absolute; inset:0; }
-.block{ position:absolute; top:2px; bottom:2px; border:2px solid; border-radius:10px; overflow:hidden; min-width:16px; background:#fff; }
-.block-bar{ position:absolute; left:0; top:0; bottom:0; width:6px; }
-.block-text{ position:absolute; left:10px; right:6px; top:2px; bottom:2px; display:flex; align-items:center; gap:10px; font-size:.82rem; font-weight:600; color:#111827; }
-.block-text .t{ min-width:86px; }
-.block-text .s{ opacity:.9; }
-.block-text .p{ margin-left:auto; font-weight:500; color:#334155; font-size:.78rem; }
-
-/* chips & loader */
-.nowchips{ padding: 6px 14px 12px; display:flex; gap:8px; flex-wrap:wrap; }
-.chip{ padding:6px 10px; border-radius:999px; font-size:.85rem; font-weight:600; color:#1f2937; }
-.chip.blue{ background:#e0f2fe; }
-.chip.amber{ background:#fef3c7; }
-
-.loader{ height:4px; margin:8px 14px 12px; background: linear-gradient(90deg, #e5e7eb, #94a3b8, #e5e7eb); background-size:200% 100%; animation: shimmer 1.2s infinite linear; border-radius:6px; }
-@keyframes shimmer{ 0%{background-position:0% 0} 100%{background-position:-200% 0} }
+.bookings { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+.booking-chip {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 6px;
+  padding: 2px 4px;
+  font-size: 0.8rem;
+  color: #064e3b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.count {
+  font-size: 0.75rem;
+  color: #047857;
+  margin-left: 3px;
+}
+.loader {
+  text-align: center;
+  padding: 10px;
+  color: #475569;
+  font-weight: 600;
+}
 </style>

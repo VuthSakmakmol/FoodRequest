@@ -38,6 +38,7 @@ const groups = [
     children: [
       { label: 'Book a Car',      icon: 'fa-solid fa-taxi', to: { name: 'employee-car-booking' } },
       { label: 'My Car Bookings', icon: 'fa-solid fa-list', to: { name: 'employee-car-history' } },
+      { label: 'Schedule',        icon: 'fa-solid fa-clock', to: { name: 'employee-car-schedule'} },
     ]
   }
 ]
