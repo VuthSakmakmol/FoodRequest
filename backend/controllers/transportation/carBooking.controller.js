@@ -14,6 +14,8 @@ const { ROOMS, emitToRoom } = require('../../utils/realtime');
 const { toMinutes, overlaps, isValidDate } = require('../../utils/time');
 const { notify } = require('../../services/transport.telegram.notify');
 
+const { io } = require('../../utils/realtime')
+
 const MAX_CAR  = 3;
 const MAX_MSGR = 1;
 
@@ -36,21 +38,28 @@ function parsePayload(req) {
   return req.body || {};
 }
 
+/* ───────────── Helper: pick identity safely ───────────── */
 function pickIdentityFrom(req) {
   const loginId =
-    req.user?.loginId ||
     req.headers['x-login-id'] ||
-    req.headers['x-user-id'] ||
-    req.query.driverId ||
+    req.user?.loginId ||
+    req.query.loginId ||
     req.session?.user?.loginId ||
     req.cookies?.loginId ||
-    '';
+    ''
   const role =
-    (req.user?.role || req.headers['x-role'] || req.query.role ||
-     req.session?.user?.role || req.cookies?.role || '')
-      .toString().toUpperCase();
+    (
+      req.headers['x-role'] ||
+      req.user?.role ||
+      req.query.role ||
+      req.session?.user?.role ||
+      req.cookies?.role ||
+      ''
+    )
+      .toString()
+      .toUpperCase()
 
-  return { loginId: String(loginId || ''), role };
+  return { loginId: String(loginId || ''), role }
 }
 
 /** Minimal delta payloads */
@@ -104,21 +113,18 @@ const shape = {
   }),
 };
 
-/** Fan-out to relevant rooms */
+/* ───────────── Helper: real-time broadcast ───────────── */
 function broadcast(io, doc, event, payload) {
-  if (!io || !doc) return;
-  const empId = String(doc.employeeId || doc.employee?.employeeId || '');
+  if (!io || !doc) return
+  const empId = String(doc.employeeId || doc.employee?.employeeId || '')
   const rooms = new Set([
     ROOMS.ADMINS,
-    ROOMS.CHEFS,
     empId && ROOMS.EMPLOYEE(empId),
-    ROOMS.BOOKING(String(doc._id)),
-  ]);
-  for (const r of rooms) {
-    if (!r) continue;
-    emitToRoom(io, r, event, payload);
-  }
+    ROOMS.BOOKING(String(doc._id))
+  ])
+  for (const r of rooms) if (r) emitToRoom(io, r, event, payload)
 }
+
 
 /* ───────── public ───────── */
 async function checkAvailability(req, res, next) {
@@ -277,6 +283,7 @@ async function updateStatus(req, res, next) {
 }
 
 /* ───────── admin assign booking ───────── */
+/* ───────── admin assign booking ───────── */
 async function assignBooking(req, res, next) {
   try {
     const io = req.io;
@@ -292,7 +299,7 @@ async function assignBooking(req, res, next) {
       autoAccept = true
     } = req.body || {};
 
-    if (!driverId) throw createError(400, 'driverId is required.');
+    if (!driverId) throw createError(400, 'driverId (or messengerId) is required.');
 
     // 🔧 Normalize driverId for consistency
     driverId = String(driverId).trim().toLowerCase();
@@ -300,25 +307,34 @@ async function assignBooking(req, res, next) {
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
-    // Attempt to resolve driver name from User model if missing
+    // Attempt to resolve driver/messenger name if not given
     let resolvedDriverName = driverName;
     if (!resolvedDriverName && User) {
       const u = await User.findOne({ loginId: driverId }).lean();
       if (u?.name) resolvedDriverName = u.name;
     }
 
-    // ── Prevent assignment clashes ──
+    // ───────── Prevent overlapping assignments ─────────
     const s = toMinutes(doc.timeStart), e = toMinutes(doc.timeEnd);
-    const others = await CarBooking.find({
+
+    const conflictQuery = {
       _id: { $ne: doc._id },
       tripDate: doc.tripDate,
-      'assignment.driverId': driverId,
       status: { $nin: ['CANCELLED'] }
-    }).lean();
+    };
 
-    const hasConflict = others.some(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd)));
+    // Check conflict field depending on category
+    if (doc.category === 'Messenger')
+      conflictQuery['assignment.messengerId'] = driverId;
+    else
+      conflictQuery['assignment.driverId'] = driverId;
+
+    const others = await CarBooking.find(conflictQuery).lean();
+    const hasConflict = others.some(b =>
+      overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
+    );
     if (hasConflict) {
-      return res.status(409).json({ message: 'Driver is already assigned during this time.' });
+      return res.status(409).json({ message: `${doc.category} already assigned during this time.` });
     }
 
     console.log('[assignBooking] applying assignment', {
@@ -326,21 +342,33 @@ async function assignBooking(req, res, next) {
       driverId,
       driverName: resolvedDriverName || driverName || '',
       vehicleName,
+      category: doc.category,
       autoAccept
     });
 
+    // ───────── Apply assignment ─────────
     doc.assignment = {
       driverId,
       driverName: resolvedDriverName || driverName || '',
-      vehicleId:  vehicleId || '',
+      vehicleId: vehicleId || '',
       vehicleName: vehicleName || '',
       notes: notes || '',
       assignedById: assignedById || '',
       assignedByName: assignedByName || '',
       assignedAt: new Date(),
       driverAck: 'PENDING',
-      driverAckAt: undefined
+      messengerAck: 'PENDING',
+      driverAckAt: undefined,
+      messengerAckAt: undefined
     };
+
+    // ✅ Special handling for Messenger bookings
+    if (doc.category === 'Messenger') {
+      doc.assignment.messengerId = driverId;
+      doc.assignment.messengerName = resolvedDriverName || driverName || '';
+      doc.assignment.driverId = '';
+      doc.assignment.driverName = '';
+    }
 
     // Auto accept → mark status as ACCEPTED
     if (autoAccept) {
@@ -353,29 +381,37 @@ async function assignBooking(req, res, next) {
 
     await doc.save();
 
-    // SOCKET broadcast
+    // ───────── Real-time broadcast ─────────
     broadcast(io, doc, 'carBooking:assigned', shape.assigned(doc));
     broadcast(io, doc, 'carBooking:status', shape.status(doc));
 
     console.log('[assignBooking] saved assignment', {
       bookingId: String(doc._id),
-      driverId: doc.assignment.driverId,
+      category: doc.category,
+      assignedId:
+        doc.category === 'Messenger'
+          ? doc.assignment.messengerId
+          : doc.assignment.driverId,
       status: doc.status
     });
 
-    // TELEGRAM notify
+    // ───────── Telegram notify ─────────
     try {
       await notify('ADMIN_ACCEPTED_ASSIGNED', {
         bookingId: doc._id,
-        byName: req.user?.name
+        byName: req.user?.name || assignedByName || 'System'
       });
     } catch (e) {
       console.error('[notify error] ADMIN_ACCEPTED_ASSIGNED', e?.message || e);
     }
 
     res.json(doc);
-  } catch (err) { next(err); }
+  } catch (err) {
+    console.error('[assignBooking error]', err);
+    next(err);
+  }
 }
+
 
 
 async function listAdmin(req, res, next) {
@@ -389,136 +425,124 @@ async function listAdmin(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/* ───────── driver/messenger view assigned bookings ───────── */
+/* ───────────── LIST FOR ASSIGNEE ───────────── */
 async function listForAssignee(req, res, next) {
   try {
-    const { loginId, role } = pickIdentityFrom(req);
-    if (!loginId) return res.json([]);
+    const { loginId, role } = pickIdentityFrom(req)
+    if (!loginId) return res.json([])
 
-    // 🔧 Normalize driverId same as assignBooking
-    const normId = String(loginId).trim().toLowerCase();
+    const { date, status } = req.query
+    const filter = {}
 
-    const { date, status } = req.query;
-
-    // Support both driver & messenger roles
-    const filter = {
-      $or: [
-        { 'assignment.driverId': normId },
-        { 'assignment.messengerId': normId } // for future messenger extension
+    if (role === 'DRIVER') {
+      filter.category = 'Car'
+      filter['assignment.driverId'] = loginId
+    } else if (role === 'MESSENGER') {
+      filter.$or = [
+        { category: 'Messenger', 'assignment.messengerId': loginId },
+        { category: 'Car', 'assignment.messengerId': loginId }
       ]
-    };
+    } else {
+      filter.employeeId = loginId
+    }
 
-    if (date) filter.tripDate = date;
-    if (status && status !== 'ALL') filter.status = status;
+    if (date) filter.tripDate = date
+    if (status && status !== 'ALL') filter.status = status
 
-    console.log('[listForAssignee]', { normId, role, filter });
+    // ✅ better log
+    console.log('[ListForAssignee]', JSON.stringify({ role, loginId, filter }, null, 2))
 
     const list = await CarBooking.find(filter)
-      .sort({ tripDate: 1, timeStart: 1 })
-      .lean();
+      .sort({ tripDate: -1, timeStart: 1 })
+      .lean()
 
-    res.json(list);
-  } catch (err) { next(err); }
+    res.json(list)
+  } catch (err) {
+    console.error('[ListForAssignee error]', err)
+    next(err)
+  }
 }
 
-/* ───────── driver acknowledgment ───────── */
+
+
+/* ───────────── DRIVER ACKNOWLEDGE ───────────── */
 async function driverAcknowledge(req, res, next) {
   try {
-    const io = req.io;
-    const { id } = req.params;
-    const { response } = req.body || {};
-    const normalized = String(response || '').toUpperCase();
-    if (!['ACCEPTED','DECLINED'].includes(normalized)) {
-      throw createError(400, 'response must be ACCEPTED or DECLINED');
-    }
+    const io = req.io
+    const { id } = req.params
+    const { response } = req.body || {}
+    const { loginId } = pickIdentityFrom(req)
+    const normalized = (response || '').toUpperCase()
 
-    const { loginId } = pickIdentityFrom(req);
-    if (!loginId) throw createError(401, 'Missing identity');
+    const doc = await CarBooking.findById(id)
+    if (!doc) throw createError(404, 'Booking not found')
+    if (String(doc.assignment?.driverId) !== String(loginId))
+      throw createError(403, 'Not allowed: not your booking')
 
-    const doc = await CarBooking.findById(id);
-    if (!doc) throw createError(404, 'Booking not found.');
+    doc.assignment.driverAck = normalized
+    doc.assignment.driverAckAt = new Date()
+    await doc.save()
 
-    if (String(doc.assignment?.driverId || '') !== String(loginId)) {
-      throw createError(403, 'Not allowed: not the assigned driver.');
-    }
-
-    // idempotent return if same
-    if (doc.assignment?.driverAck === normalized) {
-      // still echo current state to rooms so late subscribers get it
-      broadcast(io, doc, 'carBooking:driverAck', shape.driverAck(doc));
-      return res.json(doc);
-    }
-
-    doc.assignment = {
-      ...(doc.assignment || {}),
-      driverAck: normalized,
-      driverAckAt: new Date()
-    };
-    await doc.save();
-
-    // SOCKET (delta)
-    broadcast(io, doc, 'carBooking:driverAck', shape.driverAck(doc));
-
-    // TELEGRAM
-    try {
-      console.log('[notify] DRIVER_ACK', { bookingId: String(doc._id), response: normalized });
-      await notify('DRIVER_ACK', { bookingId: doc._id, response: normalized });
-    } catch (e) {
-      console.error('[notify error] DRIVER_ACK', e?.message || e);
-    }
-
-    res.json(doc);
-  } catch (err) { next(err); }
+    broadcast(io, doc, 'carBooking:driverAck', {
+      bookingId: String(doc._id),
+      response: normalized
+    })
+    res.json(doc)
+  } catch (err) {
+    next(err)
+  }
 }
 
-/* ───────── driver forward-only status ───────── */
+
+/* ───────────── DRIVER STATUS UPDATE ───────────── */
 async function driverUpdateStatus(req, res, next) {
   try {
-    const io = req.io;
-    const { id } = req.params;
-    const { status } = req.body || {};
-    const nextStatus = String(status || '').toUpperCase();
-    const allowed = ['ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED'];
-    if (!allowed.includes(nextStatus)) throw createError(400, 'Invalid status for driver.');
+    const io = req.io
+    const { id } = req.params
+    const { status } = req.body || {}
+    const { loginId, role } = pickIdentityFrom(req)
 
-    const { loginId } = pickIdentityFrom(req);
-    if (!loginId) throw createError(401, 'Missing identity');
+    // Validate input
+    if (!status) throw createError(400, 'Status is required.')
 
-    const doc = await CarBooking.findById(id);
-    if (!doc) throw createError(404, 'Booking not found.');
+    // Load booking
+    const doc = await CarBooking.findById(id)
+    if (!doc) throw createError(404, 'Booking not found.')
 
-    if (String(doc.assignment?.driverId || '') !== String(loginId)) {
-      throw createError(403, 'Not allowed: not the assigned driver.');
+    // Ensure this driver owns the booking
+    if (String(doc.assignment?.driverId) !== String(loginId)) {
+      throw createError(403, 'Not allowed: not your assigned booking.')
     }
 
-    if ((doc.assignment?.driverAck || 'PENDING') !== 'ACCEPTED') {
-      throw createError(400, 'Please accept the assignment first.');
-    }
+    // Apply new status
+    doc.status = status
+    doc.updatedAt = new Date()
+    await doc.save()
 
-    const from = doc.status || 'PENDING';
-    if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
-      throw createError(400, `Cannot change from ${from} to ${nextStatus}`);
-    }
+    // ───── SOCKET: real-time broadcast ─────
+    if (io) io.to(`booking:${id}`).emit('carBooking:status', { bookingId: id, status })
+    broadcast(io, doc, 'carBooking:status', { bookingId: id, status })
 
-    doc.status = nextStatus;
-    await doc.save();
+    console.log(`[driverUpdateStatus] ${loginId} → ${status} for ${id}`)
 
-    // SOCKET (delta)
-    broadcast(io, doc, 'carBooking:status', shape.status(doc));
-
-    console.log('[driverStatus] updated by driver', { bookingId: String(doc._id), newStatus: doc.status });
-
-    // TELEGRAM
+    // ───── TELEGRAM notify ─────
     try {
-      console.log('[notify] STATUS_CHANGED (driver)', { bookingId: String(doc._id), newStatus: doc.status });
-      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name });
-    } catch (e) {
-      console.error('[notify error] STATUS_CHANGED (driver)', e?.message || e);
+      await notify('STATUS_CHANGED', {
+        bookingId: doc._id,
+        newStatus: status,
+        byName: loginId,
+      })
+    } catch (err) {
+      console.error('[notify error] STATUS_CHANGED', err?.message || err)
     }
 
-    res.json(doc);
-  } catch (err) { next(err); }
+    res.json({ ok: true, message: 'Status updated', status })
+  } catch (err) {
+    console.error('Update status error', err)
+    next(err)
+  }
 }
+
 
 /* ───────── NEW: update (CRUD → U) ─────────
    Allows editing core fields; keeps your validations light and simple. */
@@ -585,6 +609,98 @@ async function deleteBooking(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/* ───────────── MESSENGER ACKNOWLEDGE ───────────── */
+async function messengerAcknowledge(req, res, next) {
+  try {
+    const io = req.io
+    const { id } = req.params
+    const { response } = req.body || {}
+    const { loginId } = pickIdentityFrom(req)
+    const normalized = (response || '').toUpperCase()
+
+    const doc = await CarBooking.findById(id)
+    if (!doc) throw createError(404, 'Booking not found')
+    if (String(doc.assignment?.messengerId) !== String(loginId))
+      throw createError(403, 'Not allowed: not your booking')
+
+    doc.assignment.messengerAck = normalized
+    doc.assignment.messengerAckAt = new Date()
+    await doc.save()
+
+    broadcast(io, doc, 'carBooking:messengerAck', {
+      bookingId: String(doc._id),
+      response: normalized
+    })
+    res.json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+
+/* ───────────── MESSENGER STATUS UPDATE ───────────── */
+async function messengerUpdateStatus(req, res, next) {
+  try {
+    const io = req.io
+    const { id } = req.params
+    const { status } = req.body || {}
+    const { loginId } = pickIdentityFrom(req)
+    const nextStatus = (status || '').toUpperCase()
+
+    const doc = await CarBooking.findById(id)
+    if (!doc) throw createError(404, 'Booking not found')
+    if (String(doc.assignment?.messengerId) !== String(loginId))
+      throw createError(403, 'Not allowed')
+
+    doc.status = nextStatus
+    await doc.save()
+    broadcast(io, doc, 'carBooking:status', { bookingId: doc._id, status: nextStatus })
+
+    // Telegram notify
+    await notify('STATUS_CHANGED', {
+      bookingId: doc._id,
+      newStatus: nextStatus,
+      byName: loginId
+    })
+
+    res.json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+
+// ─────────────────────────────
+// LIST all assigned messenger tasks
+// ─────────────────────────────
+async function listMessengerTasks(req, res) {
+  try {
+    const messengerId = req.query.messengerId || req.headers['x-login-id']
+    if (!messengerId) return res.status(400).json({ message: 'messengerId missing' })
+
+    const filter = {
+      $or: [
+        { category: 'Messenger', 'assignment.messengerId': messengerId },
+        { category: 'Car', 'assignment.messengerId': messengerId }
+      ]
+    }
+
+    if (req.query.date) filter.tripDate = req.query.date
+    if (req.query.status && req.query.status !== 'ALL') filter.status = req.query.status
+
+    const rows = await CarBooking.find(filter)
+      .sort({ tripDate: -1, timeStart: 1 })
+      .lean()
+
+    if (!rows.length) return res.status(404).json({ message: 'Not found' })
+    res.json(rows)
+  } catch (err) {
+    console.error('listMessengerTasks error', err)
+    res.status(500).json({ message: err.message || 'Internal error' })
+  }
+}
+
+
 module.exports = {
   checkAvailability,
   createBooking,
@@ -595,7 +711,10 @@ module.exports = {
   listForAssignee,
   driverAcknowledge,
   driverUpdateStatus,
+  messengerAcknowledge,
+  messengerUpdateStatus,
   updateBooking,
   deleteBooking,
-  listSchedulePublic
+  listSchedulePublic,
+  listMessengerTasks
 };

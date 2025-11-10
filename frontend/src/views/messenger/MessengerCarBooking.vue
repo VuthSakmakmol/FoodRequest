@@ -31,10 +31,11 @@ function detectIdentity() {
     localStorage.getItem('role') ||
     sessionStorage.getItem('role') ||
     readCookie('role') ||
-    'MESSENGER'
+    'MESSENGER' // ✅ default fallback
   ).toUpperCase()
   return { loginId, role }
 }
+
 const identity = ref(detectIdentity())
 
 const devLoginId = ref('')
@@ -101,8 +102,8 @@ async function loadList() {
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
 
-    const { data } = await api.get('/messenger/tasks', {
-      params,
+    const { data } = await api.get('/messenger/car-bookings', {
+      params: { messengerId: identity.value.loginId },
       headers: {
         'x-login-id': identity.value.loginId,
         'x-role': 'MESSENGER'
@@ -122,6 +123,26 @@ async function loadList() {
     loading.value = false
   }
 }
+
+async function updateStatus(item, newStatus) {
+  if (!item?._id || actLoading.value) return
+  actLoading.value = String(item._id)
+  try {
+    const { loginId, role } = identity.value || { loginId:'', role:'' }
+    await api.patch(`/messenger/car-bookings/${item._id}/status`,
+      { status: newStatus },
+      { headers: { 'x-login-id': loginId, 'x-role': role } })
+    item.status = newStatus
+    snackText.value = `Status updated → ${newStatus}`
+    snack.value = true
+  } catch (e) {
+    snackText.value = e?.response?.data?.message || e?.message || 'Update failed'
+    snack.value = true
+  } finally {
+    actLoading.value = ''
+  }
+}
+
 
 /* ───────── Filters + Helpers ───────── */
 const filtered = computed(() =>
@@ -145,7 +166,7 @@ async function sendAck(item, response) {
   actLoading.value = String(item._id)
   try {
     const { loginId, role } = identity.value || { loginId:'', role:'' }
-    await api.post(`/api/messenger/car-bookings/${item._id}/ack`,
+    await api.post(`/messenger/car-bookings/${item._id}/ack`,
       { response },
       { headers: { 'x-login-id': loginId, 'x-role': role } })
     item.assignment = { ...(item.assignment || {}), messengerAck: response, messengerAckAt: new Date().toISOString() }
@@ -260,19 +281,42 @@ watch([selectedDate, statusFilter], loadList)
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex justify-end" style="gap:6px;">
-                  <v-btn size="small" color="success" variant="flat"
-                    :loading="actLoading === String(item._id)"
-                    @click.stop="sendAck(item,'ACCEPTED')">
-                    <i class="fa-solid fa-check mr-1"></i> Accept
-                  </v-btn>
-                  <v-btn size="small" color="error" variant="tonal"
-                    :loading="actLoading === String(item._id)"
-                    @click.stop="sendAck(item,'DECLINED')">
-                    <i class="fa-solid fa-xmark mr-1"></i> Decline
-                  </v-btn>
+                <div class="d-flex justify-end flex-wrap" style="gap:6px;">
+                  <!-- ACK buttons (show only if still pending) -->
+                  <template v-if="(item.assignment?.messengerAck || 'PENDING') === 'PENDING'">
+                    <v-btn size="small" color="success" variant="flat"
+                      :loading="actLoading === String(item._id)"
+                      @click.stop="sendAck(item,'ACCEPTED')">
+                      <i class="fa-solid fa-check mr-1"></i> Accept
+                    </v-btn>
+                    <v-btn size="small" color="error" variant="tonal"
+                      :loading="actLoading === String(item._id)"
+                      @click.stop="sendAck(item,'DECLINED')">
+                      <i class="fa-solid fa-xmark mr-1"></i> Decline
+                    </v-btn>
+                  </template>
+
+                  <!-- Status updates (only after accepted) -->
+                  <template v-else>
+                    <v-menu>
+                      <template #activator="{ props }">
+                        <v-btn v-bind="props" color="primary" size="small" variant="flat">
+                          <i class="fa-solid fa-route mr-1"></i> Update Status
+                        </v-btn>
+                      </template>
+                      <v-list>
+                        <v-list-item
+                          v-for="s in ['ON_ROAD','ARRIVING','COMPLETED','DELAYED']"
+                          :key="s"
+                          @click="updateStatus(item, s)">
+                          <v-list-item-title>{{ s }}</v-list-item-title>
+                        </v-list-item>
+                      </v-list>
+                    </v-menu>
+                  </template>
                 </div>
               </template>
+
 
               <template #no-data>
                 <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">

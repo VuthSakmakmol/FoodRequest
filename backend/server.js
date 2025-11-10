@@ -98,15 +98,27 @@ app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'));
 // Static uploads
 app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || 'uploads')));
 
-// Transportation
-app.use('/api/car-bookings',        require('./routes/transportation/carBooking.routes'));
-app.use('/api/admin/car-bookings',  require('./routes/transportation/carBooking-admin.routes'));
-app.use('/api/admin',               require('./routes/admin-user.routes'));
-app.use('/api/driver',              require('./routes/transportation/carBooking-driver.routes'));
-// Optional alias for legacy callers
+// ─────────── Transportation ───────────
+
+// Employee + Public
+app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'));
 app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'));
+
+// Admin routes (management panel)
+app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'));
+app.use('/api/admin', require('./routes/admin-user.routes'));
+
+// Driver routes
+app.use('/api/driver', require('./routes/transportation/carBooking-driver.routes'));
+
+// Messenger routes
+app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.routes'));
+app.use('/api/messenger/car-bookings', require('./routes/transportation/carBooking-messenger.routes'))
+
+// Recurring engine
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'));
-app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
+app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'));
+
 
 // Public routes (holidays)
 app.use('/api/public', require('./routes/public-holidays.routes'));

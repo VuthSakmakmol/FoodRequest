@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
 
+/* ─────────────── STATE ─────────────── */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
@@ -12,51 +13,57 @@ const selectedDate = ref('')
 const statusFilter = ref('ALL')
 const qSearch      = ref('')
 
-/* Identity (same as before) */
+/* ─────────────── IDENTITY DETECTION ─────────────── */
 function readCookie(name) {
-  const m = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)'))
+  const m = document.cookie.match(
+    new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)')
+  )
   return m ? decodeURIComponent(m[1]) : ''
 }
+
 function detectIdentity() {
-  const c = []
-  try {
-    const u = JSON.parse(localStorage.getItem('auth:user') || '{}')
-    if (u && (u.loginId || u?.user?.loginId)) {
-      c.push({ loginId: String(u.loginId || u?.user?.loginId), role: String(u.role || u?.user?.role || '').toUpperCase() })
-    }
-  } catch {}
-  const flatLogin = localStorage.getItem('loginId')
-  const flatRole  = (localStorage.getItem('role') || '').toUpperCase()
-  if (flatLogin || flatRole) c.push({ loginId: String(flatLogin || ''), role: flatRole })
-
-  try {
-    const u2 = JSON.parse(sessionStorage.getItem('auth:user') || '{}')
-    if (u2 && (u2.loginId || u2?.user?.loginId)) {
-      c.push({ loginId: String(u2.loginId || u2?.user?.loginId), role: String(u2.role || u2?.user?.role || '').toUpperCase() })
-    }
-  } catch {}
-  const sLogin = sessionStorage.getItem('loginId')
-  const sRole  = (sessionStorage.getItem('role') || '').toUpperCase()
-  if (sLogin || sRole) c.push({ loginId: String(sLogin || ''), role: sRole })
-
-  const kLogin = readCookie('loginId')
-  const kRole  = (readCookie('role') || '').toUpperCase()
-  if (kLogin || kRole) c.push({ loginId: String(kLogin || ''), role: kRole })
-
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i)
+  const found = []
+  const tryParse = src => {
     try {
-      const v = JSON.parse(localStorage.getItem(k) || 'null')
-      const candLogin = v?.loginId || v?.user?.loginId || v?.me?.loginId
-      const candRole  = (v?.role || v?.user?.role || v?.me?.role || '').toUpperCase()
-      if (candLogin && candRole) { c.push({ loginId: String(candLogin), role: candRole }); break }
+      const u = JSON.parse(localStorage.getItem(src) || sessionStorage.getItem(src) || '{}')
+      if (u?.loginId || u?.user?.loginId)
+        found.push({
+          loginId: String(u.loginId || u?.user?.loginId),
+          role: String(u.role || u?.user?.role || '').toUpperCase(),
+        })
     } catch {}
   }
-  return c.find(x => x.loginId) || { loginId:'', role:'' }
+
+  tryParse('auth:user')
+  const lsLogin = localStorage.getItem('loginId')
+  const lsRole = (localStorage.getItem('role') || '').toUpperCase()
+  if (lsLogin || lsRole) found.push({ loginId: String(lsLogin || ''), role: lsRole })
+
+  const ssLogin = sessionStorage.getItem('loginId')
+  const ssRole = (sessionStorage.getItem('role') || '').toUpperCase()
+  if (ssLogin || ssRole) found.push({ loginId: String(ssLogin || ''), role: ssRole })
+
+  const ckLogin = readCookie('loginId')
+  const ckRole = (readCookie('role') || '').toUpperCase()
+  if (ckLogin || ckRole) found.push({ loginId: String(ckLogin || ''), role: ckRole })
+
+  for (let i = 0; i < localStorage.length; i++) {
+    try {
+      const v = JSON.parse(localStorage.getItem(localStorage.key(i)) || 'null')
+      const candLogin = v?.loginId || v?.user?.loginId || v?.me?.loginId
+      const candRole = (v?.role || v?.user?.role || v?.me?.role || '').toUpperCase()
+      if (candLogin && candRole) {
+        found.push({ loginId: String(candLogin), role: candRole })
+        break
+      }
+    } catch {}
+  }
+  return found.find(x => x.loginId) || { loginId: '', role: '' }
 }
+
 const identity = ref(detectIdentity())
 
-/* Dev identity bar */
+/* Dev override bar */
 const devLoginId = ref('')
 const devRole = ref('DRIVER')
 function useDevIdentity() {
@@ -67,46 +74,59 @@ function useDevIdentity() {
   loadList()
 }
 
-/* Columns: add Driver Resp., keep Actions wide */
+/* ─────────────── TABLE HEADERS ─────────────── */
+const roleLabel = computed(() =>
+  identity.value?.role === 'MESSENGER' ? 'Messenger Resp.' : 'Driver Resp.'
+)
 const headers = [
-  { title: 'Time',         key: 'time',       sortable: true,  width: 160 },
-  { title: 'Category',     key: 'category',   sortable: true,  width: 120 },
-  { title: 'Requester',    key: 'requester',  sortable: true,  width: 230 },
-  { title: 'Itinerary',    key: 'itinerary',  sortable: false },
-  { title: 'Pax',          key: 'passengers', sortable: true,  width: 70, align: 'center' },
-  { title: 'Status',       key: 'status',     sortable: true,  width: 150, align: 'end' },
-  { title: 'Driver Resp.', key: 'driverAck',  sortable: true,  width: 150, align: 'end' },
-  { title: '',             key: 'actions',    sortable: false, width: 330, align: 'end' },
+  { title: 'Time', key: 'time', width: 160 },
+  { title: 'Category', key: 'category', width: 120 },
+  { title: 'Requester', key: 'requester', width: 230 },
+  { title: 'Itinerary', key: 'itinerary' },
+  { title: 'Pax', key: 'passengers', width: 70, align: 'center' },
+  { title: 'Status', key: 'status', width: 150, align: 'end' },
+  { title: roleLabel.value, key: 'driverAck', width: 150, align: 'end' },
+  { title: '', key: 'actions', width: 330, align: 'end' },
 ]
 
-/* Status + Ack styles + FA icons */
-const statusColor = s => ({
-  PENDING:'grey', ASSIGNED:'blue-grey', ACCEPTED:'primary', ON_ROAD:'info',
-  ARRIVING:'teal', COMPLETED:'success', DELAYED:'warning', CANCELLED:'error', DECLINED:'error'
-}[s] || 'grey')
+/* ─────────────── ICONS / COLORS ─────────────── */
+const statusColor = s =>
+  ({
+    PENDING: 'grey',
+    ACCEPTED: 'primary',
+    ON_ROAD: 'info',
+    ARRIVING: 'teal',
+    COMPLETED: 'success',
+    DELAYED: 'warning',
+    CANCELLED: 'error',
+    DECLINED: 'error',
+  }[s] || 'grey')
 
-const statusFa = s => ({
-  PENDING:'fa-solid fa-hourglass-half',
-  ASSIGNED:'fa-solid fa-user-check',
-  ACCEPTED:'fa-solid fa-circle-check',
-  ON_ROAD:'fa-solid fa-truck-fast',
-  ARRIVING:'fa-solid fa-flag-checkered',
-  COMPLETED:'fa-solid fa-check-double',
-  DELAYED:'fa-solid fa-triangle-exclamation',
-  CANCELLED:'fa-solid fa-ban',
-  DECLINED:'fa-solid fa-circle-xmark'
-}[s] || 'fa-solid fa-hourglass-half')
+const statusFa = s =>
+  ({
+    PENDING: 'fa-solid fa-hourglass-half',
+    ACCEPTED: 'fa-solid fa-circle-check',
+    ON_ROAD: 'fa-solid fa-truck-fast',
+    ARRIVING: 'fa-solid fa-flag-checkered',
+    COMPLETED: 'fa-solid fa-check-double',
+    DELAYED: 'fa-solid fa-triangle-exclamation',
+    CANCELLED: 'fa-solid fa-ban',
+    DECLINED: 'fa-solid fa-circle-xmark',
+  }[s] || 'fa-solid fa-hourglass-half')
 
-const ackColor = s => ({ PENDING:'grey', ACCEPTED:'success', DECLINED:'error' }[s] || 'grey')
-const ackFa    = s => ({
-  PENDING:'fa-solid fa-circle-question',
-  ACCEPTED:'fa-solid fa-thumbs-up',
-  DECLINED:'fa-solid fa-thumbs-down'
-}[s] || 'fa-solid fa-circle-question')
+const ackColor = s => ({ PENDING: 'grey', ACCEPTED: 'success', DECLINED: 'error' }[s] || 'grey')
+const ackFa = s =>
+  ({
+    PENDING: 'fa-solid fa-circle-question',
+    ACCEPTED: 'fa-solid fa-thumbs-up',
+    DECLINED: 'fa-solid fa-thumbs-down',
+  }[s] || 'fa-solid fa-circle-question')
 
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
-  return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
+  return stops
+    .map(s => (s.destination === 'Other' ? s.destinationOther || 'Other' : s.destination))
+    .join(' → ')
 }
 function absUrl(u) {
   const base = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
@@ -115,84 +135,96 @@ function absUrl(u) {
   return `${base}${u.startsWith('/') ? '' : '/'}${u}`
 }
 
-/* Load + booking-room subscriptions */
+/* ─────────────── LOAD BOOKINGS ─────────────── */
 let leavePreviousRooms = null
 async function loadList() {
   loading.value = true
   error.value = ''
   try {
-    const { loginId, role } = identity.value || { loginId:'', role:'' }
-    const params = { driverId: loginId, role }
+    const { loginId, role } = identity.value || { loginId: '', role: '' }
+    const isMessenger = role === 'MESSENGER'
+    const basePath = isMessenger ? '/messenger/car-bookings' : '/driver/car-bookings'
+    const params = { role, loginId }
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
 
-    const { data } = await api.get('/driver/car-bookings', {
+    const { data } = await api.get(basePath, {
       params,
-      headers: { 'x-login-id': loginId || '', 'x-role': role || '' }
+      headers: { 'x-login-id': loginId || '', 'x-role': role || '' },
     })
+
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],
-      assignment: x.assignment || {}
+      assignment: x.assignment || {},
     }))
 
-    // Subscribe to booking:<id> rooms for all visible rows
-    try {
-      const ids = rows.value.map(r => String(r._id)).filter(Boolean)
-      // await the previous cleanup (it’s a function returned via a Promise)
-      if (typeof leavePreviousRooms === 'function') {
-        await leavePreviousRooms()
-        leavePreviousRooms = null
-      }
-      // IMPORTANT: await here to get the cleanup function
-      leavePreviousRooms = await subscribeBookingRooms(ids)
-    } catch {}
+    // join live socket rooms
+    const ids = rows.value.map(r => String(r._id)).filter(Boolean)
+    if (typeof leavePreviousRooms === 'function') {
+      await leavePreviousRooms()
+      leavePreviousRooms = null
+    }
+    leavePreviousRooms = await subscribeBookingRooms(ids)
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || 'Failed to load bookings'
-  } finally { loading.value = false }
+  } finally {
+    loading.value = false
+  }
 }
 
+/* ─────────────── FILTERED / SORTED ─────────────── */
 const filtered = computed(() =>
   (rows.value || [])
     .filter(r => {
       const term = qSearch.value.trim().toLowerCase()
       if (!term) return true
-      const hay = [r.employee?.name, r.employee?.department, r.employeeId, r.purpose, r.notes, prettyStops(r.stops)].join(' ').toLowerCase()
+      const hay = [
+        r.employee?.name,
+        r.employee?.department,
+        r.employeeId,
+        r.purpose,
+        r.notes,
+        prettyStops(r.stops),
+      ]
+        .join(' ')
+        .toLowerCase()
       return hay.includes(term)
     })
-    .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
+    .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 )
 
-/* Helpers to gate actions */
-const isMine = (it) =>
-  String(it?.assignment?.driverId || it?.driverId || it?.driverLoginId || '').toLowerCase() ===
-  String(identity.value?.loginId || '').toLowerCase()
+/* ─────────────── ACTION HELPERS ─────────────── */
+const isMine = it =>
+  String(
+    it?.assignment?.driverId || it?.assignment?.messengerId || it?.driverId || ''
+  ).toLowerCase() === String(identity.value?.loginId || '').toLowerCase()
 
-const canRespond = (it) => {
-  const ack = String(it?.assignment?.driverAck || '').toUpperCase()
-  return isMine(it) && !['ACCEPTED','DECLINED'].includes(ack)
+const canRespond = it => {
+  const ack =
+    identity.value?.role === 'MESSENGER'
+      ? String(it?.assignment?.messengerAck || '').toUpperCase()
+      : String(it?.assignment?.driverAck || '').toUpperCase()
+  return isMine(it) && !['ACCEPTED', 'DECLINED'].includes(ack)
 }
 
-/* driver can change status after ack ACCEPTED */
-const terminalStates = ['CANCELLED','COMPLETED']
+const terminalStates = ['CANCELLED', 'COMPLETED']
 const ALLOWED_NEXT = {
-  PENDING:   ['ACCEPTED','CANCELLED'],
-  ACCEPTED:  ['ON_ROAD','DELAYED','CANCELLED'],
-  ON_ROAD:   ['ARRIVING','DELAYED','CANCELLED'],
-  ARRIVING:  ['COMPLETED','DELAYED','CANCELLED'],
-  DELAYED:   ['ON_ROAD','ARRIVING','CANCELLED'],
-  COMPLETED: [],
-  CANCELLED: []
+  ACCEPTED: ['ON_ROAD', 'DELAYED', 'CANCELLED'],
+  ON_ROAD: ['ARRIVING', 'DELAYED', 'CANCELLED'],
+  ARRIVING: ['COMPLETED', 'DELAYED', 'CANCELLED'],
+  DELAYED: ['ON_ROAD', 'ARRIVING', 'CANCELLED'],
 }
-const nextStatusesFor = (from) => ALLOWED_NEXT[String(from || '').toUpperCase()] || []
-const canChangeStatus = (it) =>
+const nextStatusesFor = from => ALLOWED_NEXT[String(from || '').toUpperCase()] || []
+
+const canChangeStatus = it =>
   isMine(it) &&
-  (it?.assignment?.driverAck === 'ACCEPTED') &&
+  ((it?.assignment?.driverAck || it?.assignment?.messengerAck) === 'ACCEPTED') &&
   !terminalStates.includes(String(it?.status || '').toUpperCase())
 
-/* Driver actions: ack + status */
+/* ─────────────── ACTIONS ─────────────── */
 const actLoading = ref('')
-const statusLoading = ref('') // bookingId in-flight
+const statusLoading = ref('')
 const snack = ref(false)
 const snackText = ref('')
 
@@ -200,14 +232,18 @@ async function sendAck(item, response) {
   if (!item?._id || actLoading.value) return
   actLoading.value = String(item._id)
   try {
-    const { loginId, role } = identity.value || { loginId:'', role:'' }
-    await api.post(
-      `/driver/car-bookings/${item._id}/ack`,
-      { response },   // 'ACCEPTED' | 'DECLINED'
-      { headers: { 'x-login-id': loginId || '', 'x-role': role || '' } }
-    )
-    item.assignment = { ...(item.assignment || {}), driverAck: response, driverAckAt: new Date().toISOString() }
-    snackText.value = response === 'ACCEPTED' ? 'You acknowledged the assignment.' : 'You declined the assignment.'
+    const { loginId, role } = identity.value || { loginId: '', role: '' }
+    const isMessenger = role === 'MESSENGER'
+    const path = isMessenger
+      ? `/messenger/car-bookings/${item._id}/ack`
+      : `/driver/car-bookings/${item._id}/ack`
+
+    await api.post(path, { response }, { headers: { 'x-login-id': loginId, 'x-role': role } })
+    if (isMessenger)
+      item.assignment = { ...item.assignment, messengerAck: response, messengerAckAt: new Date() }
+    else item.assignment = { ...item.assignment, driverAck: response, driverAckAt: new Date() }
+
+    snackText.value = response === 'ACCEPTED' ? 'You accepted this task.' : 'You declined it.'
     snack.value = true
   } catch (e) {
     snackText.value = e?.response?.data?.message || e?.message || 'Action failed'
@@ -221,14 +257,13 @@ async function setDriverStatus(item, nextStatus) {
   if (!item?._id || statusLoading.value) return
   statusLoading.value = String(item._id)
   try {
-    const { loginId, role } = identity.value || { loginId:'', role:'' }
-    const prev = item.status
-    item.status = nextStatus // optimistic
-    await api.patch(
-      `/driver/car-bookings/${item._id}/status`,
-      { status: nextStatus },
-      { headers: { 'x-login-id': loginId || '', 'x-role': role || '' } }
-    )
+    const { loginId, role } = identity.value || { loginId: '', role: '' }
+    const path =
+      role === 'MESSENGER'
+        ? `/messenger/car-bookings/${item._id}/status`
+        : `/driver/car-bookings/${item._id}/status`
+    await api.patch(path, { status: nextStatus }, { headers: { 'x-login-id': loginId, 'x-role': role } })
+    item.status = nextStatus
     snackText.value = `Status updated to ${nextStatus}.`
     snack.value = true
   } catch (e) {
@@ -240,7 +275,7 @@ async function setDriverStatus(item, nextStatus) {
   }
 }
 
-/* Sockets: scoped event handlers */
+/* ─────────────── SOCKET HANDLERS ─────────────── */
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
@@ -248,38 +283,52 @@ function onStatus(p) {
 function onAssigned(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) {
-    it.assignment = { ...(it.assignment||{}), driverId: p.driverId, driverName: p.driverName, driverAck: 'PENDING' }
+    it.assignment = {
+      ...it.assignment,
+      driverId: p.driverId,
+      driverName: p.driverName,
+      messengerId: p.messengerId,
+      messengerName: p.messengerName,
+    }
   }
 }
-function onDriverAck(p) {
+function onAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
+  if (!it) return
+  if (p.response)
+    it.assignment = {
+      ...it.assignment,
+      driverAck: p.response,
+      messengerAck: p.response,
+    }
 }
 
-/* Mount/Unmount */
+/* ─────────────── LIFECYCLE ─────────────── */
 onMounted(() => {
-  try { subscribeRoleIfNeeded({ role: 'DRIVER' }) } catch {}
+  subscribeRoleIfNeeded(identity.value)
   loadList()
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
-  socket.on('carBooking:driverAck', onDriverAck)
+  socket.on('carBooking:driverAck', onAck)
+  socket.on('carBooking:messengerAck', onAck)
 })
 onBeforeUnmount(() => {
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
-  socket.off('carBooking:driverAck', onDriverAck)
-  if (typeof leavePreviousRooms === 'function') {
-    // fire-and-forget is fine; awaiting is nicer if this hook were async
-    leavePreviousRooms()
-    leavePreviousRooms = null
-  }})
+  socket.off('carBooking:driverAck', onAck)
+  socket.off('carBooking:messengerAck', onAck)
+  if (typeof leavePreviousRooms === 'function') leavePreviousRooms()
+})
 watch([selectedDate, statusFilter], loadList)
 
-/* Detail dialog */
 const detailOpen = ref(false)
 const detailItem = ref(null)
-function showDetails(item){ detailItem.value = item; detailOpen.value = true }
+function showDetails(item) {
+  detailItem.value = item
+  detailOpen.value = true
+}
 </script>
+
 
 <template>
   <v-container fluid class="pa-2">

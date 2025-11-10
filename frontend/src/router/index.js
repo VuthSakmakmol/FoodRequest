@@ -38,6 +38,8 @@ const DriverCarBooking  = () => import('@/views/driver/DriverCarBooking.vue')
 
 // Messenger
 const MessengerHome     = () => import('@/modules/messenger/Home.vue')
+const MessengerAssignment = () => import('@/views/messenger/MessengerCarBooking.vue')
+
 
 function homeByRole(role) {
   switch (role) {
@@ -116,7 +118,8 @@ const router = createRouter({
       component: MessengerLayout,
       meta: { requiresRole: ['MESSENGER'] },
       children: [
-        { name: 'messenger-home', path: '', component: MessengerHome }
+        { name: 'messenger-home', path: '', component: MessengerHome },
+        { name: 'messenger-assignment', path: '', component: MessengerAssignment },
       ]
     },
 
