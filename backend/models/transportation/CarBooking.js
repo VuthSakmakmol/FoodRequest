@@ -1,3 +1,4 @@
+//models/transportation/Carbooking.js
 const mongoose = require('mongoose')
 
 const StopSchema = new mongoose.Schema({

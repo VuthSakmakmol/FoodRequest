@@ -5,7 +5,7 @@ const fs = require('fs')
 const mongoose = require('mongoose')
 require('dotenv').config()
 
-// Adjust this require path if your model lives elsewhere
+// Adjust this path if model lives elsewhere
 const EmployeeDirectory = require('../models/EmployeeDirectory')
 
 const MONGO_URI = process.env.MONGO_URI
@@ -14,53 +14,37 @@ if (!MONGO_URI) {
   process.exit(1)
 }
 
-// Default JSON input path: projectRoot/staff1.json (put your exported JSON here)
+// Default JSON input path
 const DEFAULT_JSON = path.resolve(__dirname, '../staff1.json')
-
-// Optional: pass a custom file path: `node scripts/seedEmployees.js ./data/my_staff.json`
 const ARG_PATH = process.argv[2] ? path.resolve(process.argv[2]) : null
 const INPUT_PATH = ARG_PATH || DEFAULT_JSON
 
-/** Map a raw row (from JSON) into our canonical employee object */
+/* ───────── Normalize helper ───────── */
 function normalizeRow(row) {
   // ID
   const employeeId = String(
-    row.employeeId ??
-    row.EmployeeID ??
-    row.EMPLOYEE_ID ??
-    row.ID ??
-    row.Id ??
-    ''
+    row.employeeId ?? row.EmployeeID ?? row.EMPLOYEE_ID ?? row.ID ?? row.Id ?? ''
   ).trim()
 
   // Name
   const name = (
-    row.name ??
-    row.Name ??
-    row.FullName ??
-    row['Full Name'] ??
-    row['Employee Name'] ??
-    ''
+    row.name ?? row.Name ?? row.FullName ?? row['Full Name'] ?? row['Employee Name'] ?? ''
   ).toString().trim()
 
   // Department
   const department = (
-    row.department ??
-    row.Department ??
-    row.Dept ??
-    row['Department Name'] ??
-    'Unknown'
+    row.department ?? row.Department ?? row.Dept ?? row['Department Name'] ?? 'Unknown'
   ).toString().trim()
 
-  // Contact number (flexible: E.164 or local)
+  // Contact number
   const contactNumber = (
-    row.contactNumber ??
-    row.ContactNumber ??
-    row['Contact Number'] ??
-    row.Phone ??
-    row.Mobile ??
-    row['Phone Number'] ??
-    ''
+    row.contactNumber ?? row.ContactNumber ?? row['Contact Number'] ??
+    row.Phone ?? row.Mobile ?? row['Phone Number'] ?? ''
+  ).toString().trim()
+
+  // Telegram Chat ID (✅ added)
+  const telegramChatId = (
+    row.telegramChatId ?? row.TelegramChatId ?? row.telegram ?? ''
   ).toString().trim()
 
   // Active flag
@@ -74,11 +58,11 @@ function normalizeRow(row) {
     isActive = true
   }
 
-  // Return normalized record
-  return { employeeId, name, department, contactNumber, isActive }
+  // Return full normalized object
+  return { employeeId, name, department, contactNumber, isActive, telegramChatId }
 }
 
-/** Load employees array: prefer JSON file if present, else fallback array */
+/* ───────── Load source data ───────── */
 function loadEmployees() {
   if (fs.existsSync(INPUT_PATH)) {
     try {
@@ -553,7 +537,7 @@ function loadEmployees() {
     { employeeId: '51420303', name: 'Mao Malybella', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '51820275', name: 'Kim Sokreaksmey', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '51820386', name: 'Srun Rida', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
-    { employeeId: '51821047', name: 'Sot Sreynit', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
+    { employeeId: '51821047', name: 'Sot Sreynit', department: 'HR and Payroll', telegramChatId: '1055055243', isActive: true, contactNumber: '000000000' },
     { employeeId: '52020942', name: 'Suon Tithyamatinine', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52120446', name: 'Lit Sony', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52120644', name: 'Heng Soksang', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
@@ -567,8 +551,8 @@ function loadEmployees() {
     { employeeId: '52520078', name: 'Vat Sotheavy', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520240', name: 'Morm Soriya', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520244', name: 'Leng Puthy', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
-    { employeeId: '52520298', name: 'Lip Kimleang', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
-    { employeeId: '52520299', name: 'Say Somalin', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
+    { employeeId: '52520298', name: 'Lip Kimleang', department: 'HR and Payroll', telegramChatId: '613252332', isActive: true, contactNumber: '000000000' },
+    { employeeId: '52520299', name: 'Say Somalin', department: 'HR and Payroll', telegramChatId: '', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520351', name: 'Vuth Sakmakmol', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520651', name: 'Sok Sreyroth', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520684', name: 'Phin SamPhosh', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
@@ -719,13 +703,13 @@ function loadEmployees() {
 ]
 }
 
+/* ───────── Seeding runner ───────── */
 async function seed() {
   console.log('🔌 Connecting to MongoDB...')
   await mongoose.connect(MONGO_URI)
 
   const rawEmployees = loadEmployees()
 
-  // Filter + prepare ops
   const employees = []
   const skipped = []
 
@@ -738,20 +722,20 @@ async function seed() {
     employees.push(emp)
   }
 
-  if (employees.length === 0) {
+  if (!employees.length) {
     console.error('❌ No valid employees to seed.')
     if (skipped.length) console.error('Skipped examples:', skipped.slice(0, 3))
     await mongoose.disconnect()
     process.exit(1)
   }
 
-  // Upsert in bulk
+  // Bulk upsert (✅ ensures update of telegramChatId too)
   const ops = employees.map((emp) => ({
     updateOne: {
       filter: { employeeId: emp.employeeId },
       update: { $set: emp },
-      upsert: true,
-    },
+      upsert: true
+    }
   }))
 
   console.log(`🧱 Upserting ${ops.length} employees...`)
@@ -760,7 +744,7 @@ async function seed() {
   console.log('✅ Bulk result:', {
     matched: res.matchedCount,
     modified: res.modifiedCount,
-    upserted: res.upsertedCount || (res.upsertedIds ? Object.keys(res.upsertedIds).length : 0),
+    upserted: res.upsertedCount || (res.upsertedIds ? Object.keys(res.upsertedIds).length : 0)
   })
 
   if (skipped.length) {
@@ -774,6 +758,7 @@ async function seed() {
   console.log('🎉 Done seeding employees.')
 }
 
+/* ───────── Run ───────── */
 seed().catch(async (err) => {
   console.error('❌ Error seeding employees:', err)
   try { await mongoose.disconnect() } catch {}

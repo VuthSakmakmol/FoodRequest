@@ -16,6 +16,9 @@ const pax   = bk => `Pax: <b>${Number(bk.passengers || 1)}</b> | Category: ${esc
 const code  = bk => `#${esc(bk.shortCode || bk.requestId || bk._id)}`
 const cut   = (s, max=300) => (!s ? '' : (String(s).length>max ? `${String(s).slice(0,max-1)}…` : String(s)))
 
+/* ──────────────────────────────
+ * Group & Driver Messages (existing)
+ * ────────────────────────────── */
 function newRequestMsg(bk){
   const emp = bk.employee || {}
   const note = cut(bk.purpose || bk.notes)
@@ -86,6 +89,7 @@ function driverAssignmentDM(bk){
     code(bk)
   ].filter(Boolean).join('\n')
 }
+
 function driverStatusDM(bk, status){
   const s = String(status || bk.status || '').toUpperCase()
   return [
@@ -121,16 +125,83 @@ function driverAckConfirmDM(bk, response) {
   ].join('\n')
 }
 
+/* ──────────────────────────────
+ * 🧍 Employee Direct Messages (new)
+ * ────────────────────────────── */
+function employeeRequestDM(bk) {
+  return [
+    '✅ <b>Your booking request was received</b>',
+    `• ${span(bk)}`,
+    `• Destination: ${route(bk)}`,
+    `• ${pax(bk)}`,
+    code(bk),
+  ].join('\n')
+}
+
+function employeeAcceptedDM(bk) {
+  return [
+    '🚗 <b>Your booking was approved</b>',
+    `Driver: ${esc(bk.assignment?.driverName || '—')}`,
+    bk.assignment?.vehicleName ? `Vehicle: ${esc(bk.assignment.vehicleName)}` : null,
+    `Date: ${span(bk)}`,
+    `Route: ${route(bk)}`,
+    code(bk),
+  ].filter(Boolean).join('\n')
+}
+
+function employeeDeclinedDM(bk, reason, adminName) {
+  return [
+    '❌ <b>Your booking was declined</b>',
+    `Reason: ${esc(reason || '—')}`,
+    `By: ${esc(adminName || 'Admin')}`,
+    `Date: ${span(bk)}`,
+    `Route: ${route(bk)}`,
+    code(bk),
+  ].join('\n')
+}
+
+function employeeStatusDM(bk, status) {
+  const s = String(status || bk.status || '').toUpperCase()
+  return [
+    `🔔 <b>Trip status update:</b> ${esc(s)}`,
+    `• ${span(bk)}`,
+    `• ${route(bk)}`,
+    code(bk),
+  ].join('\n')
+}
+
+function employeeDriverAckDM(bk, response) {
+  const r = String(response || bk?.assignment?.driverAck || '').toUpperCase()
+  const label = r === 'ACCEPTED'
+    ? '✅ Driver has accepted your booking'
+    : r === 'DECLINED'
+      ? '⚠️ Driver declined your booking'
+      : `ℹ️ Driver response: ${r}`
+  return [
+    `${label}`,
+    `• ${span(bk)}`,
+    `• ${route(bk)}`,
+    code(bk),
+  ].join('\n')
+}
+
+/* ──────────────────────────────
+ * Exports
+ * ────────────────────────────── */
 module.exports = {
-  // ...keep existing exports
   newRequestMsg,
   declinedMsg,
   acceptedAssignedMsg,
   statusChangedMsg,
   driverAssignmentDM,
   driverStatusDM,
-  // 👇 add these two
   driverAckGroupMsg,
   driverAckConfirmDM,
-}
 
+  // 👇 Employee messages
+  employeeRequestDM,
+  employeeAcceptedDM,
+  employeeDeclinedDM,
+  employeeStatusDM,
+  employeeDriverAckDM,
+}
