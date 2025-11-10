@@ -276,24 +276,38 @@ async function updateStatus(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/* ───────── admin assign booking ───────── */
 async function assignBooking(req, res, next) {
   try {
     const io = req.io;
     const { id } = req.params;
-    const { driverId='', driverName='', vehicleId='', vehicleName='', notes='', assignedById='', assignedByName='', autoAccept=true } = req.body || {};
+    let {
+      driverId = '',
+      driverName = '',
+      vehicleId = '',
+      vehicleName = '',
+      notes = '',
+      assignedById = '',
+      assignedByName = '',
+      autoAccept = true
+    } = req.body || {};
 
     if (!driverId) throw createError(400, 'driverId is required.');
+
+    // 🔧 Normalize driverId for consistency
+    driverId = String(driverId).trim().toLowerCase();
 
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
+    // Attempt to resolve driver name from User model if missing
     let resolvedDriverName = driverName;
     if (!resolvedDriverName && User) {
       const u = await User.findOne({ loginId: driverId }).lean();
       if (u?.name) resolvedDriverName = u.name;
     }
 
-    // clash check for the same driver/time
+    // ── Prevent assignment clashes ──
     const s = toMinutes(doc.timeStart), e = toMinutes(doc.timeEnd);
     const others = await CarBooking.find({
       _id: { $ne: doc._id },
@@ -301,10 +315,13 @@ async function assignBooking(req, res, next) {
       'assignment.driverId': driverId,
       status: { $nin: ['CANCELLED'] }
     }).lean();
-    const hasConflict = others.some(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd)));
-    if (hasConflict) return res.status(409).json({ message: 'Driver is already assigned during this time.' });
 
-    console.log('[assign] applying assignment', {
+    const hasConflict = others.some(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd)));
+    if (hasConflict) {
+      return res.status(409).json({ message: 'Driver is already assigned during this time.' });
+    }
+
+    console.log('[assignBooking] applying assignment', {
       bookingId: String(doc._id),
       driverId,
       driverName: resolvedDriverName || driverName || '',
@@ -317,14 +334,15 @@ async function assignBooking(req, res, next) {
       driverName: resolvedDriverName || driverName || '',
       vehicleId:  vehicleId || '',
       vehicleName: vehicleName || '',
-      notes:      notes || '',
-      assignedById:   assignedById || '',
+      notes: notes || '',
+      assignedById: assignedById || '',
       assignedByName: assignedByName || '',
-      assignedAt:     new Date(),
+      assignedAt: new Date(),
       driverAck: 'PENDING',
       driverAckAt: undefined
     };
 
+    // Auto accept → mark status as ACCEPTED
     if (autoAccept) {
       const from = doc.status || 'PENDING';
       if (!FORWARD[from] || !FORWARD[from].has('ACCEPTED')) {
@@ -335,20 +353,22 @@ async function assignBooking(req, res, next) {
 
     await doc.save();
 
-    // SOCKET (assigned + status delta)
+    // SOCKET broadcast
     broadcast(io, doc, 'carBooking:assigned', shape.assigned(doc));
-    broadcast(io, doc, 'carBooking:status',   shape.status(doc));
+    broadcast(io, doc, 'carBooking:status', shape.status(doc));
 
-    console.log('[assign] saved & notifying', {
+    console.log('[assignBooking] saved assignment', {
       bookingId: String(doc._id),
-      status: doc.status,
-      driverId: doc.assignment.driverId
+      driverId: doc.assignment.driverId,
+      status: doc.status
     });
 
-    // TELEGRAM
+    // TELEGRAM notify
     try {
-      console.log('[notify] ADMIN_ACCEPTED_ASSIGNED', { bookingId: String(doc._id) });
-      await notify('ADMIN_ACCEPTED_ASSIGNED', { bookingId: doc._id, byName: req.user?.name });
+      await notify('ADMIN_ACCEPTED_ASSIGNED', {
+        bookingId: doc._id,
+        byName: req.user?.name
+      });
     } catch (e) {
       console.error('[notify error] ADMIN_ACCEPTED_ASSIGNED', e?.message || e);
     }
@@ -356,6 +376,7 @@ async function assignBooking(req, res, next) {
     res.json(doc);
   } catch (err) { next(err); }
 }
+
 
 async function listAdmin(req, res, next) {
   try {
@@ -368,18 +389,34 @@ async function listAdmin(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/* ───────── driver/messenger ───────── */
+/* ───────── driver/messenger view assigned bookings ───────── */
 async function listForAssignee(req, res, next) {
   try {
-    const { loginId } = pickIdentityFrom(req);
+    const { loginId, role } = pickIdentityFrom(req);
     if (!loginId) return res.json([]);
 
+    // 🔧 Normalize driverId same as assignBooking
+    const normId = String(loginId).trim().toLowerCase();
+
     const { date, status } = req.query;
-    const filter = { 'assignment.driverId': loginId };
+
+    // Support both driver & messenger roles
+    const filter = {
+      $or: [
+        { 'assignment.driverId': normId },
+        { 'assignment.messengerId': normId } // for future messenger extension
+      ]
+    };
+
     if (date) filter.tripDate = date;
     if (status && status !== 'ALL') filter.status = status;
 
-    const list = await CarBooking.find(filter).sort({ tripDate: 1, timeStart: 1 }).lean();
+    console.log('[listForAssignee]', { normId, role, filter });
+
+    const list = await CarBooking.find(filter)
+      .sort({ tripDate: 1, timeStart: 1 })
+      .lean();
+
     res.json(list);
   } catch (err) { next(err); }
 }
