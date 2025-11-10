@@ -451,8 +451,8 @@ async function createSeries () {
 .yesno-wrap{ display:flex; gap:8px; width:100%; }
 .yesno-btn{ flex:1 1 0; font-weight:700; text-transform:none; }
 .yes-on{ background:#16a34a !important; color:#fff !important; }
-.yes-off{ background:#e5f7ea !important; color:#065f46 !important; }
-.no-on{ background:#fca5a5 !important; color:#7f1d1d !important; }
+.yes-off{ background:#ebf4ed !important; color:#9bd7c6 !important; }
+.no-on{ background:#ee6161 !important; color:#a11b1b !important; }
 .no-off{ background:#e5e7eb !important; color:#111827 !important; }
 
 /* Compact switch */
