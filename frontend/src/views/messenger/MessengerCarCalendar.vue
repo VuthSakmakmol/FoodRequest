@@ -96,7 +96,7 @@ function showDayDetails(d) {
   const dateStr = d.format('YYYY-MM-DD')
   const list = byDate.value[dateStr]
   if (!list?.length) {
-    router.push({ name: 'messenger-car-booking', query: { date: dateStr } })
+    router.push({ name: 'messenger-assignment', query: { date: dateStr } })
     return
   }
 
@@ -124,7 +124,7 @@ function showDayDetails(d) {
     didOpen: () => {
       window.__selectMessengerBooking = (id, date) => {
         Swal.close()
-        router.push({ name: 'messenger-car-booking', query: { focus: id, date } })
+        router.push({ name: 'messenger-assignment', query: { focus: id, date } })
       }
     },
     willClose: () => { delete window.__selectMessengerBooking }

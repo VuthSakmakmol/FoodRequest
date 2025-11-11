@@ -3,11 +3,18 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
+import { useRoute, useRouter } from 'vue-router'
 
 /* ───────── State ───────── */
 const loading = ref(false)
 const error = ref('')
 const rows = ref([])
+
+const route = useRoute()
+const router = useRouter()
+const focusId = ref(route.query.focus || '')
+const focusDate = ref(route.query.date || '')
+
 
 const selectedDate = ref('')
 const statusFilter = ref('ALL')
@@ -143,6 +150,19 @@ async function updateStatus(item, newStatus) {
   }
 }
 
+function scrollToBooking(id) {
+  // Wait for DOM to update
+  setTimeout(() => {
+    const el = document.querySelector(`[data-row-id="${id}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('highlight-row')
+      setTimeout(() => el.classList.remove('highlight-row'), 2000)
+    }
+  }, 300)
+}
+
+
 
 /* ───────── Filters + Helpers ───────── */
 const filtered = computed(() =>
@@ -183,8 +203,13 @@ async function sendAck(item, response) {
 /* ───────── Lifecycle ───────── */
 onMounted(() => {
   subscribeRoleIfNeeded({ role: 'MESSENGER' })
-  loadList()
+  if (focusDate.value) selectedDate.value = focusDate.value  // pre-filter by date
+  loadList().then(() => {
+    // highlight or scroll after data loads
+    if (focusId.value) scrollToBooking(focusId.value)
+  })
 })
+
 onBeforeUnmount(() => { if (typeof leavePreviousRooms === 'function') leavePreviousRooms() })
 watch([selectedDate, statusFilter], loadList)
 </script>
@@ -281,7 +306,7 @@ watch([selectedDate, statusFilter], loadList)
               </template>
 
               <template #item.actions="{ item }">
-                <div class="d-flex justify-end flex-wrap" style="gap:6px;">
+                <div :data-row-id="item._id" class="d-flex justify-end flex-wrap" style="gap:6px;">
                   <!-- ACK buttons (show only if still pending) -->
                   <template v-if="(item.assignment?.messengerAck || 'PENDING') === 'PENDING'">
                     <v-btn size="small" color="success" variant="flat"
@@ -334,6 +359,16 @@ watch([selectedDate, statusFilter], loadList)
 </template>
 
 <style scoped>
+.highlight-row {
+  animation: flash 0.8s ease-in-out 3;
+  outline: 3px solid #4f46e5;
+  background-color: #eef2ff !important;
+}
+@keyframes flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 .messenger-section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
 .messenger-header { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background:#fff7f3; border-bottom: 1px solid #e6e8ee; }
 .hdr-title { display:flex; align-items:center; gap:10px; font-weight:800; color:#3b1e10; }
