@@ -4,6 +4,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useDisplay } from 'vuetify'
+import { useRoute, useRouter } from 'vue-router'
+import dayjs from 'dayjs'
 
 /* ───────── responsive helpers (for footer) ───────── */
 const { smAndDown } = useDisplay()
@@ -14,7 +16,10 @@ const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
 
-const selectedDate   = ref('')
+const route = useRoute()
+const router = useRouter()
+
+const selectedDate   = ref(dayjs().format('YYYY-MM-DD'))
 const statusFilter   = ref('ALL')
 const categoryFilter = ref('ALL')
 const qSearch        = ref('')
@@ -74,6 +79,11 @@ async function loadSchedule() {
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
   return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
+}
+
+function rowClass(item){
+  if (!item?.tripDate) return ''
+  return item.tripDate === selectedDate.value ? 'highlight-row' : ''
 }
 
 /* Colors + Icons */
@@ -158,6 +168,9 @@ function onDriverAck(p) {
 
 onMounted(() => {
   try { subscribeRoleIfNeeded({ role: 'ADMIN' }) } catch {}
+  if (route.query.date) {
+    selectedDate.value = route.query.date
+  }
   loadSchedule()
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
@@ -363,6 +376,7 @@ async function updateStatus(item, nextStatus){
               class="elevated"
               v-model:page="page"
               :items-per-page="itemsPerPage"
+              :row-class="rowClass"
             >
               <template #loading><v-skeleton-loader type="table-row@6" /></template>
 
@@ -680,6 +694,8 @@ async function updateStatus(item, nextStatus){
 </template>
 
 <style scoped>
+.highlight-row { background-color: #fff8e1 !important; /* soft yellow */ transition: background 0.3s ease; }
+.highlight-row:hover { background-color: #fffbeb !important; }
 .section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
 .hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background:#f5f7fb; border-bottom: 1px solid #e6e8ee; }
 .hero-left { display:flex; flex-direction:column; gap:6px; }

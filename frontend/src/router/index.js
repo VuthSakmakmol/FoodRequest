@@ -27,6 +27,7 @@ const AdminDashboard    = () => import('@/views/admin/AdminDashboard.vue')
 
 // Admin (Transportation)
 const AdminCarBooking   = () => import('@/views/admin/carbooking/AdminCarBooking.vue')
+const AdminCarCalendar  = () => import('@/views/admin/carBooking/TransportAdminCalendar.vue')
 
 // Chef (Food only; reuse admin calendar)
 const ChefFoodRequests  = () => import('@/views/chef/ChefFoodRequests.vue')
@@ -86,6 +87,7 @@ const router = createRouter({
         { name: 'admin-requests',      path: 'requests',      component: AdminFoodRequests },
         { name: 'admin-food-calendar', path: 'food-calendar', component: AdminFoodCalendar },
         { name: 'admin-car-booking',   path: 'car-booking',   component: AdminCarBooking },
+        { name: 'admin-car-calendar',  path: 'car-calendar',  component: AdminCarCalendar },
       ]
     },
 

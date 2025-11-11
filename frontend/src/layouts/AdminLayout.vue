@@ -21,6 +21,7 @@ const sections = [
     children: [
       { label: 'Requests', icon: 'fa-solid fa-list-check', to: { name: 'admin-requests' } },
       { label: 'Calendar', icon: 'fa-solid fa-calendar-days', to: { name: 'admin-food-calendar' } },
+      
     ],
   },
   {
@@ -29,6 +30,7 @@ const sections = [
     icon: 'fa-solid fa-car-side',
     children: [
       { label: 'Car Booking', icon: 'fa-solid fa-calendar-check', to: { name: 'admin-car-booking' } },
+      { label: 'Calendar', icon: 'fa-solid far-calendar-day', to: { name: 'admin-car-calendar' } },
     ],
   },
   // Uncomment if you bring dashboard back

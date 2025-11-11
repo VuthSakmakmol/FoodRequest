@@ -1,4 +1,4 @@
-<!-- views/employee/carBooking/calendars/TransportScheduleCalendar.vue -->
+<!-- src/views/admin/carbooking/TransportAdminCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -6,24 +6,13 @@ import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 
-/* ───────── Router ───────── */
 const router = useRouter()
 
-/* ───────── Props ───────── */
-const props = defineProps({
-  modelValue: { type: String, default: () => dayjs().format('YYYY-MM-DD') },
-  maxCar:     { type: Number, default: 3 },
-  maxMsgr:    { type: Number, default: 1 }
-})
-const emit = defineEmits(['update:modelValue'])
-
 /* ───────── State ───────── */
-const currentMonth = ref(dayjs(props.modelValue))
-const selectedDate = ref(props.modelValue)
+const currentMonth = ref(dayjs())
 const loading = ref(false)
 const bookings = ref([])
 
-/* ───────── Computed ───────── */
 const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
 const startOfMonth = computed(() => currentMonth.value.startOf('month'))
 const endOfMonth = computed(() => currentMonth.value.endOf('month'))
@@ -45,7 +34,7 @@ async function fetchMonth() {
   loading.value = true
   bookings.value = []
   try {
-    const { data } = await api.get('/public/transport/schedule', {
+    const { data } = await api.get('/admin/car-bookings', {
       params: { month: currentMonth.value.format('YYYY-MM') }
     })
     bookings.value = Array.isArray(data) ? data : []
@@ -57,7 +46,7 @@ async function fetchMonth() {
   }
 }
 
-/* ───────── Grouped by Date ───────── */
+/* ───────── Grouped ───────── */
 const byDate = computed(() => {
   const map = {}
   for (const b of bookings.value) {
@@ -69,91 +58,50 @@ const byDate = computed(() => {
 })
 
 /* ───────── Navigation ───────── */
-function nextMonth() {
-  currentMonth.value = currentMonth.value.add(1, 'month')
-  fetchMonth()
-}
-function prevMonth() {
-  currentMonth.value = currentMonth.value.subtract(1, 'month')
-  fetchMonth()
-}
-function goToday() {
-  currentMonth.value = dayjs()
-  fetchMonth()
-}
+function nextMonth(){ currentMonth.value = currentMonth.value.add(1,'month'); fetchMonth() }
+function prevMonth(){ currentMonth.value = currentMonth.value.subtract(1,'month'); fetchMonth() }
+function goToday(){ currentMonth.value = dayjs(); fetchMonth() }
 
 /* ───────── Click Handler ───────── */
-function selectDay(d) {
+function showDayDetails(d) {
   const dateStr = d.format('YYYY-MM-DD')
-  const bookingsForDay = byDate.value[dateStr]
-
-  if (bookingsForDay && bookingsForDay.length > 0) {
-    // ── show options: create new or see detail ──
+  const list = byDate.value[dateStr]
+  if (!list?.length) {
     Swal.fire({
       icon: 'info',
-      title: `Bookings on ${dateStr}`,
-      html: `
-        <div style="text-align:left;max-height:240px;overflow:auto;padding:5px 0">
-          ${bookingsForDay.map(b => `
-            <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;">
-              <div><b>${b.employee?.name || b.employeeId || 'Unknown'}</b> (${b.category})</div>
-              <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
-              <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
-            </div>
-          `).join('')}
-        </div>`,
-      showDenyButton: true,
-      showCancelButton: true,
-      confirmButtonText: '➕ Create New',
-      denyButtonText: '🔍 See Details',
-      cancelButtonText: 'Close',
-      reverseButtons: true,
-      width: 480,
-    }).then(res => {
-      if (res.isConfirmed) {
-        // create new booking
-        router.push({ name: 'employee-car-booking', query: { tripDate: dateStr } })
-      } else if (res.isDenied) {
-        // show all details again (with more info)
-        Swal.fire({
-          icon: 'info',
-          title: `Schedule Details – ${dateStr}`,
-          html: `
-            <div style="text-align:left;max-height:300px;overflow:auto;">
-              ${bookingsForDay.map((b,i)=>`
-                <div style="border-bottom:1px solid #e5e7eb;padding:8px 0;">
-                  <div><b>#${i+1} ${b.employee?.name || b.employeeId}</b> (${b.category})</div>
-                  <div>🕒 ${b.timeStart || '--:--'} → ${b.timeEnd || '--:--'}</div>
-                  <div>🏁 Stops: ${(b.stops || []).map(s=>s.destination).join(', ') || 'N/A'}</div>
-                  <div>📞 ${b.customerContact || ''}</div>
-                  <div>🎯 ${b.purpose || ''}</div>
-                </div>
-              `).join('')}
-            </div>
-          `,
-          confirmButtonText: 'OK',
-          width: 520
-        })
-      }
+      title: `No bookings on ${dateStr}`,
+      confirmButtonText: 'OK'
     })
-  } else {
-    // ── no bookings yet → offer to create ──
-    Swal.fire({
-      icon: 'question',
-      title: 'No bookings yet',
-      text: `Do you want to create a booking for ${dateStr}?`,
-      showCancelButton: true,
-      confirmButtonText: 'Yes, create booking',
-      cancelButtonText: 'No'
-    }).then(res => {
-      if (res.isConfirmed) {
-        router.push({
-          name: 'employee-car-booking',
-          query: { tripDate: dateStr }
-        })
-      }
-    })
+    return
   }
+
+  Swal.fire({
+    icon: 'info',
+    title: `Bookings on ${dateStr}`,
+    html: `
+      <div style="text-align:left;max-height:280px;overflow:auto;padding:5px 0">
+        ${list.map(b => `
+          <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer"
+               onclick="window.__selectBooking('${b._id}')">
+            <div><b>${b.employee?.name || b.employeeId}</b> (${b.category})</div>
+            <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
+            <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
+            <div>🚗 ${b.assignment?.driverName || 'Unassigned'}</div>
+          </div>
+        `).join('')}
+      </div>
+    `,
+    showConfirmButton: false,
+    showCloseButton: true,
+    width: 520,
+    didOpen: () => {
+        window.__selectBooking = (id) => {
+        Swal.close()
+        router.push({ name: 'admin-car-booking', query: { focus: id, date: dateStr } })
+        }
+    },
+    willClose: () => { delete window.__selectBooking }
+  })
 }
 
 /* ───────── Lifecycle ───────── */
@@ -162,26 +110,20 @@ onMounted(fetchMonth)
 
 <template>
   <div class="calendar-wrapper">
-    <!-- Toolbar -->
     <div class="calendar-toolbar">
       <button class="btn-nav" @click="prevMonth">‹</button>
       <div class="month-label">{{ monthLabel }}</div>
       <button class="btn-nav" @click="nextMonth">›</button>
-
       <div class="toolbar-right">
         <button class="btn-flat" @click="fetchMonth">REFRESH</button>
         <button class="btn-flat today" @click="goToday">TODAY</button>
       </div>
     </div>
 
-    <!-- Week header -->
     <div class="week-header">
-      <div v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="w" class="week-cell">
-        {{ w }}
-      </div>
+      <div v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="w" class="week-cell">{{ w }}</div>
     </div>
 
-    <!-- Calendar grid -->
     <div class="calendar-grid">
       <div
         v-for="d in days"
@@ -189,23 +131,17 @@ onMounted(fetchMonth)
         class="day-cell"
         :class="{
           today: d.isSame(dayjs(), 'day'),
-          otherMonth: !d.isSame(currentMonth.value, 'month'),
-          selected: selectedDate === d.format('YYYY-MM-DD')
+          otherMonth: !d.isSame(currentMonth.value, 'month')
         }"
-        @click="selectDay(d)"
+        @click="showDayDetails(d)"
       >
         <div class="day-number" :class="{ sunday: d.day() === 0 }">
           {{ d.date() }}
         </div>
 
         <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
-          <div
-            v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
-            :key="i"
-            class="booking-chip"
-          >
+          <div v-for="(b,i) in byDate[d.format('YYYY-MM-DD')]" :key="i" class="booking-chip">
             {{ b.employee?.name || b.employeeId }}
-            <span class="count">({{ i + 1 }})</span>
           </div>
         </div>
       </div>
@@ -216,6 +152,7 @@ onMounted(fetchMonth)
 </template>
 
 <style scoped>
+/* ───────── copied base styles from employee calendar ───────── */
 .calendar-wrapper {
   border: 1px solid rgba(100,116,139,.16);
   border-radius: 12px;
@@ -224,7 +161,6 @@ onMounted(fetchMonth)
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 
-/* Toolbar */
 .calendar-toolbar {
   display: flex;
   align-items: center;
@@ -260,7 +196,6 @@ onMounted(fetchMonth)
   border-color: #4f46e5;
 }
 
-/* Week header */
 .week-header {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -274,7 +209,6 @@ onMounted(fetchMonth)
   color: #334155;
 }
 
-/* Grid */
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -290,7 +224,6 @@ onMounted(fetchMonth)
 }
 .day-cell.otherMonth { background: #f9fafb; opacity: 0.5; }
 .day-cell.today { border: 2px solid #2563eb; }
-.day-cell.selected { outline: 2px solid #2563eb; }
 
 .day-number {
   font-weight: 700;
@@ -311,11 +244,6 @@ onMounted(fetchMonth)
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
-}
-.count {
-  font-size: 0.75rem;
-  color: #047857;
-  margin-left: 3px;
 }
 .loader {
   text-align: center;

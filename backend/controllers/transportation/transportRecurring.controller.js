@@ -1,4 +1,3 @@
-// backend/controllers/transportation/transportRecurring.controller.js
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const tz = require('dayjs/plugin/timezone');
@@ -9,7 +8,6 @@ const CarBooking = require('../../models/transportation/CarBooking');
 
 const { enumerateLocalDates, padTimeHHMM } = require('../../utils/datetime');
 const { getHolidaySet, isSunday } = require('../../utils/holidays');
-// const { expandSeries } = require('../../services/transportRecurring.engine'); // ⛔️ not used anymore
 const { notify } = require('../../services/transport.telegram.notify');
 
 const ZONE = 'Asia/Phnom_Penh';
@@ -36,7 +34,7 @@ async function createSeries(req, res) {
     }
     body.timeStart = padTimeHHMM(body.timeStart);
     body.timeEnd   = padTimeHHMM(body.timeEnd);
-    body.skipHolidays = asBool(body.skipHolidays);     // ✅ boolean normalization
+    body.skipHolidays = asBool(body.skipHolidays);
     body.category = body.category || 'Car';
     body.passengers = Number(body.passengers || 1);
     body.durationMin = Number(body.durationMin || 60);
@@ -73,10 +71,10 @@ async function createSeries(req, res) {
       body.endDate = e.format('YYYY-MM-DD');
     }
 
-    // Persist the series document first (so created bookings can reference seriesId)
+    // Persist the series document first
     const series = await Series.create(body);
 
-    // Enumerate dates and compute Holidays = ENV + (Sundays if skipHolidays)
+    // Enumerate dates and compute Holidays
     const days = enumerateLocalDates(series.startDate, series.endDate, ZONE);
     const holidayBase = await getHolidaySet();
     const holidays = new Set(holidayBase);
@@ -87,12 +85,16 @@ async function createSeries(req, res) {
     const keptDates    = days.filter(d => !holidays.has(d));
     const skippedDates = days.filter(d =>  holidays.has(d));
 
-    // Derive timeEnd if caller provided a duration instead of an explicit end
+    // Derive timeEnd if caller provided a duration instead of explicit end
     const timeEnd = series.timeEnd || addMinutes(series.timeStart, body.durationMin);
 
-    // Create bookings for kept dates
+    // --- NEW: skip creating duplicate for today's booking ---
+    const baseDate = dayjs(series.startDate).format('YYYY-MM-DD');
+
     const createdIds = [];
     for (const d of keptDates) {
+      if (d === baseDate) continue; // ⛔ Skip today (already has initial booking)
+
       const doc = await CarBooking.create({
         seriesId: series._id,
         employeeId: series.createdByEmp?.employeeId || '',
@@ -121,15 +123,18 @@ async function createSeries(req, res) {
         created: createdIds.length,
         skipped: skippedDates.length,
         sampleDates: skippedDates.slice(0, 5),
+        createdByEmp: series.createdByEmp || {}
       });
-    } catch {}
+    } catch (err) {
+      console.warn('[notify SERIES_CREATED failed]', err.message);
+    }
 
     return res.json({
       ok: true,
       seriesId: series._id,
       created: createdIds.length,
       skipped: skippedDates.length,
-      createdDates: keptDates,
+      createdDates: keptDates.filter(d => d !== baseDate),
       skippedDates
     });
   } catch (e) {
@@ -138,7 +143,7 @@ async function createSeries(req, res) {
 }
 
 /* ======================================================================== */
-/* PREVIEW series with the same rules used in createSeries                   */
+/* PREVIEW series with the same rules used in createSeries */
 async function preview(req, res) {
   try {
     const { start, end, timeStart, skipHolidays = 'true' } = req.query;
@@ -164,6 +169,7 @@ async function preview(req, res) {
 }
 
 /* ======================================================================== */
+/* CANCEL remaining future bookings in a recurring series */
 async function cancelRemaining(req, res) {
   try {
     const { id } = req.params;
@@ -179,7 +185,11 @@ async function cancelRemaining(req, res) {
       { $set: { status: 'CANCELLED', notes: 'Cancelled by recurring series' } }
     );
 
-    try { await notify('SERIES_CANCELLED', { seriesId: id, affected: upd.modifiedCount || 0 }); } catch {}
+    try { 
+      await notify('SERIES_CANCELLED', { seriesId: id, affected: upd.modifiedCount || 0 }); 
+    } catch (err) {
+      console.warn('[notify SERIES_CANCELLED failed]', err.message);
+    }
 
     return res.json({ ok: true, affected: upd.modifiedCount || 0 });
   } catch (e) {

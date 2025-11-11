@@ -128,7 +128,6 @@ async function notify(event, payload) {
       const text = [
         '🔁 <b>New Recurring Booking Series Created</b>',
         '======================================',
-        `🆔 Series ID: <code>${seriesId}</code>`,
         `✅ Created: <b>${created}</b> bookings`,
         `🛑 Skipped: <b>${skipped}</b> (holidays/Sundays)`,
         sampleDates?.length ? `📅 Example skipped: ${sampleDates.join(', ')}` : null,
@@ -167,7 +166,6 @@ async function notify(event, payload) {
       const text = [
         '⚠️ <b>Recurring Series Cancelled</b>',
         '======================================',
-        `🆔 Series ID: <code>${seriesId}</code>`,
         `🚫 Future bookings cancelled: <b>${affected}</b>`
       ].join('\n')
       await sendToTransportGroup(text)
