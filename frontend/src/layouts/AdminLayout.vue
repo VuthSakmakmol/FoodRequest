@@ -55,10 +55,12 @@ const initials = computed(() =>
 )
 function go(it){ if (it?.to) router.push(it.to) }
 function isActive(it){ return route.name === it?.to?.name }
-function logout(){
-  auth.logout()
-  router.push({ name: 'employee-request' }) // Admin logs out to Admin Login
+function logout() {
+  auth.logout()            // ✅ clears user, token, socket
+  localStorage.clear()     // ✅ optional: clears any other cached data (filters, prefs)
+  router.push({ name: 'employee-request' }) // ✅ correct redirect for admin
 }
+
 </script>
 
 <template>

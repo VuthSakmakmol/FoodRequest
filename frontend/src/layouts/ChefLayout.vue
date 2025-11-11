@@ -36,10 +36,12 @@ const initials = computed(() =>
 )
 function go(it){ if (it?.to) router.push(it.to) }
 function isActive(it){ return route.name === it?.to?.name }
-function logout(){
-  auth.logout()
-  router.push({ name: 'employee-request' })
+function logout() {
+  auth.logout()           // clears token, user, socket subscriptions
+  localStorage.clear()     // fully clear leftover cached data
+  router.push({ name: 'employee-request' }) // redirect to chef login
 }
+
 </script>
 
 <template>
