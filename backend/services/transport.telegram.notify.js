@@ -1,4 +1,3 @@
-// backend/services/transport.telegram.notify.js
 /* eslint-disable no-console */
 const CarBooking = require('../models/transportation/CarBooking')
 const { sendToTransportGroup, sendDM } = require('./transport.telegram.service')
@@ -20,13 +19,15 @@ async function notify(event, payload) {
 
   switch (event) {
     // ───────────────────────────────
+    // 🚗 NEW REQUEST CREATED
+    // ───────────────────────────────
     case 'REQUEST_CREATED': {
       const bk = await getBk(); if (!bk) return
 
-      // Group alert (unchanged)
+      // Group alert
       await sendToTransportGroup(msg.newRequestMsg(bk))
 
-      // DM employee (new)
+      // DM employee
       if (ENABLE_EMP_DM) {
         const empChat = await resolveEmployeeChatId(bk)
         if (DEBUG) console.log('[notify] resolved employee chatId', { empChat })
@@ -36,13 +37,15 @@ async function notify(event, payload) {
     }
 
     // ───────────────────────────────
+    // ❌ ADMIN DECLINED
+    // ───────────────────────────────
     case 'ADMIN_DECLINED': {
       const bk = await getBk(); if (!bk) return
 
-      // Group alert (unchanged)
+      // Group alert
       await sendToTransportGroup(msg.declinedMsg(bk, payload.reason, payload.byName))
 
-      // DM employee (new)
+      // DM employee
       if (ENABLE_EMP_DM) {
         const empChat = await resolveEmployeeChatId(bk)
         if (empChat) await sendDM(empChat, msg.employeeDeclinedDM(bk, payload.reason, payload.byName))
@@ -50,6 +53,8 @@ async function notify(event, payload) {
       return
     }
 
+    // ───────────────────────────────
+    // ✅ ADMIN ACCEPTED + ASSIGNED
     // ───────────────────────────────
     case 'ADMIN_ACCEPTED_ASSIGNED': {
       const bk = await getBk(); if (!bk) return
@@ -61,7 +66,7 @@ async function notify(event, payload) {
       const drvChat = await resolveAssignedDriverChatId(bk)
       if (drvChat) await sendDM(drvChat, msg.driverAssignmentDM(bk))
 
-      // DM employee (new)
+      // DM employee
       if (ENABLE_EMP_DM) {
         const empChat = await resolveEmployeeChatId(bk)
         if (empChat) await sendDM(empChat, msg.employeeAcceptedDM(bk))
@@ -69,6 +74,8 @@ async function notify(event, payload) {
       return
     }
 
+    // ───────────────────────────────
+    // 🔄 STATUS CHANGED
     // ───────────────────────────────
     case 'STATUS_CHANGED': {
       const bk = await getBk(); if (!bk) return
@@ -80,7 +87,7 @@ async function notify(event, payload) {
       const drvChat = await resolveAssignedDriverChatId(bk)
       if (drvChat) await sendDM(drvChat, msg.driverStatusDM(bk, payload.newStatus))
 
-      // DM employee (new)
+      // DM employee
       if (ENABLE_EMP_DM) {
         const empChat = await resolveEmployeeChatId(bk)
         if (empChat) await sendDM(empChat, msg.employeeStatusDM(bk, payload.newStatus))
@@ -88,6 +95,8 @@ async function notify(event, payload) {
       return
     }
 
+    // ───────────────────────────────
+    // 🚘 DRIVER ACKNOWLEDGE
     // ───────────────────────────────
     case 'DRIVER_ACK': {
       const bk = await CarBooking.findById(payload.bookingId).lean()
@@ -101,13 +110,76 @@ async function notify(event, payload) {
       const drvChat = await resolveAssignedDriverChatId(bk)
       if (drvChat) await sendDM(drvChat, msg.driverAckConfirmDM(bk, resp))
 
-      // DM employee (optional, to inform status)
+      // DM employee (optional)
       if (ENABLE_EMP_DM) {
         const empChat = await resolveEmployeeChatId(bk)
         if (empChat) await sendDM(empChat, msg.employeeDriverAckDM(bk, resp))
       }
       return
     }
+
+    // ───────────────────────────────
+    // 🔁 SERIES CREATED (Recurring Booking)
+    // ───────────────────────────────
+    case 'SERIES_CREATED': {
+      const { seriesId, created = 0, skipped = 0, sampleDates = [], createdByEmp = {} } = payload
+
+      // Group alert
+      const text = [
+        '🔁 <b>New Recurring Booking Series Created</b>',
+        '======================================',
+        `🆔 Series ID: <code>${seriesId}</code>`,
+        `✅ Created: <b>${created}</b> bookings`,
+        `🛑 Skipped: <b>${skipped}</b> (holidays/Sundays)`,
+        sampleDates?.length ? `📅 Example skipped: ${sampleDates.join(', ')}` : null,
+        '',
+        '🟢 All generated trips are status <b>PENDING</b>.'
+      ].filter(Boolean).join('\n')
+
+      await sendToTransportGroup(text)
+
+      // DM employee (summary)
+      if (ENABLE_EMP_DM && createdByEmp?.employeeId) {
+        try {
+          const empChat = await resolveEmployeeChatId({ employeeId: createdByEmp.employeeId })
+          if (empChat) {
+            const dmText = [
+              '🔁 <b>Your recurring transport request has been created</b>',
+              `• Created <b>${created}</b> bookings`,
+              `• Skipped <b>${skipped}</b> (holidays/Sundays)`,
+              sampleDates?.length ? `• Example skipped: ${sampleDates.join(', ')}` : null,
+              '✅ All trips are set to <b>PENDING</b>.',
+            ].filter(Boolean).join('\n')
+            await sendDM(empChat, dmText)
+          }
+        } catch (e) {
+          console.error('[notify error] SERIES_CREATED DM', e.message)
+        }
+      }
+      return
+    }
+
+    // ───────────────────────────────
+    // ⛔ SERIES CANCELLED (Recurring Booking)
+    // ───────────────────────────────
+    case 'SERIES_CANCELLED': {
+      const { seriesId, affected = 0 } = payload
+      const text = [
+        '⚠️ <b>Recurring Series Cancelled</b>',
+        '======================================',
+        `🆔 Series ID: <code>${seriesId}</code>`,
+        `🚫 Future bookings cancelled: <b>${affected}</b>`
+      ].join('\n')
+      await sendToTransportGroup(text)
+      return
+    }
+
+    // ───────────────────────────────
+    // default: do nothing
+    // ───────────────────────────────
+    default:
+      if (DEBUG) console.log('[notify] unhandled event', event)
+      return
   }
 }
 
