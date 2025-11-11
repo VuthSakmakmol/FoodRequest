@@ -429,28 +429,29 @@ async function listAdmin(req, res, next) {
 async function listForAssignee(req, res, next) {
   try {
     const { loginId, role } = pickIdentityFrom(req)
-    if (!loginId) return res.json([])
+    const driverId = req.query.driverId || loginId
+    if (!driverId) return res.json([])
 
     const { date, status } = req.query
     const filter = {}
 
     if (role === 'DRIVER') {
       filter.category = 'Car'
-      filter['assignment.driverId'] = loginId
+      filter['assignment.driverId'] = driverId
     } else if (role === 'MESSENGER') {
       filter.$or = [
-        { category: 'Messenger', 'assignment.messengerId': loginId },
-        { category: 'Car', 'assignment.messengerId': loginId }
+        { category: 'Messenger', 'assignment.messengerId': driverId },
+        { category: 'Car', 'assignment.messengerId': driverId }
       ]
     } else {
-      filter.employeeId = loginId
+      filter.employeeId = driverId
     }
 
     if (date) filter.tripDate = date
     if (status && status !== 'ALL') filter.status = status
 
-    // ✅ better log
-    console.log('[ListForAssignee]', JSON.stringify({ role, loginId, filter }, null, 2))
+    // 🧠 Add debug log
+    console.log('[ListForAssignee]', JSON.stringify({ role, loginId, driverId, filter }, null, 2))
 
     const list = await CarBooking.find(filter)
       .sort({ tripDate: -1, timeStart: 1 })
@@ -462,6 +463,7 @@ async function listForAssignee(req, res, next) {
     next(err)
   }
 }
+
 
 
 

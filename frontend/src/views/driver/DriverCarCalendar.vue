@@ -1,18 +1,33 @@
+<!-- views/driver/DriverCarCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
+import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-/* ───────── State ───────── */
+/* ───────── STATE ───────── */
 const currentMonth = ref(dayjs())
-const loading = ref(false)
 const bookings = ref([])
+const loading = ref(false)
+const identity = ref({ loginId: '', role: '' })
 
-/* ───────── Computed ───────── */
+/* ───────── DETECT IDENTITY ───────── */
+function detectIdentity() {
+  try {
+    const u = JSON.parse(localStorage.getItem('user') || localStorage.getItem('auth:user') || '{}')
+    const loginId = u?.id || u?.loginId || u?.user?.loginId || localStorage.getItem('loginId') || ''
+    const role = u?.role || u?.user?.role || localStorage.getItem('role') || 'DRIVER'
+    return { loginId, role: role.toUpperCase() }
+  } catch {
+    return { loginId: '', role: 'DRIVER' }
+  }
+}
+identity.value = detectIdentity()
+
+/* ───────── DATE COMPUTED ───────── */
 const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
 const startOfMonth = computed(() => currentMonth.value.startOf('month'))
 const endOfMonth = computed(() => currentMonth.value.endOf('month'))
@@ -31,49 +46,61 @@ const days = computed(() => {
 
 /* ───────── API ───────── */
 async function fetchMonth() {
+  const { loginId, role } = identity.value
+  console.log('[DriverCalendar] Fetching...', { loginId, role })
+  if (!loginId) return
+
   loading.value = true
   bookings.value = []
   try {
-    // ✅ Admin view: get all bookings (no driver filter)
-    const { data } = await api.get('/admin/car-bookings', {
-      headers: { 'x-role': 'ADMIN' },
+    const { data } = await api.get('/driver/car-bookings', {
+      params: { loginId, role },
+      headers: { 'x-login-id': loginId, 'x-role': role }
     })
-
+    console.log('Response data:', data)
     bookings.value = Array.isArray(data) ? data : []
+    console.log('Filtered bookings:', bookings.value.length)
   } catch (err) {
-    console.error('[fetchMonth] error', err)
+    console.error('[DriverCalendar] Error', err)
   } finally {
     loading.value = false
   }
 }
 
-/* ───────── Grouped by date ───────── */
+/* ───────── GROUP BY DATE ───────── */
 const byDate = computed(() => {
   const map = {}
   for (const b of bookings.value) {
-    const d = dayjs(b.tripDate || b.date).format('YYYY-MM-DD')
+    const d = dayjs(b.tripDate).format('YYYY-MM-DD')
     if (!map[d]) map[d] = []
     map[d].push(b)
   }
   return map
 })
 
-/* ───────── Navigation ───────── */
+/* ───────── STATUS COLORS ───────── */
+const statusColor = s =>
+  ({
+    PENDING: '#94a3b8',
+    ACCEPTED: '#3b82f6',
+    ON_ROAD: '#06b6d4',
+    ARRIVING: '#10b981',
+    COMPLETED: '#16a34a',
+    DELAYED: '#facc15',
+    CANCELLED: '#ef4444',
+  }[s] || '#94a3b8')
+
+/* ───────── NAVIGATION ───────── */
 function nextMonth() { currentMonth.value = currentMonth.value.add(1, 'month'); fetchMonth() }
 function prevMonth() { currentMonth.value = currentMonth.value.subtract(1, 'month'); fetchMonth() }
 function goToday() { currentMonth.value = dayjs(); fetchMonth() }
 
-/* ───────── Click Handler ───────── */
+/* ───────── DETAILS ───────── */
 function showDayDetails(d) {
   const dateStr = d.format('YYYY-MM-DD')
   const list = byDate.value[dateStr]
-
   if (!list?.length) {
-    Swal.fire({
-      icon: 'info',
-      title: `No bookings on ${dateStr}`,
-      confirmButtonText: 'OK'
-    })
+    router.push({ name: 'driver-car-booking', query: { date: dateStr } })
     return
   }
 
@@ -83,12 +110,14 @@ function showDayDetails(d) {
     html: `
       <div style="text-align:left;max-height:280px;overflow:auto;padding:5px 0">
         ${list.map(b => `
-          <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer"
-               onclick="window.__selectBooking('${b._id}')">
-            <div><b>${b.employee?.name || b.employeeId}</b> (${b.category})</div>
-            <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
+          <div
+            style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer"
+            onclick="window.__selectBooking('${b._id}', '${dateStr}')"
+          >
+            <div><b>${b.employee?.name || b.employeeId}</b></div>
+            <div>🕓 ${b.timeStart} - ${b.timeEnd}</div>
             <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
-            <div>🚗 ${b.assignment?.driverName || 'Unassigned'}</div>
+            <div>🚗 ${b.assignment?.driverName || 'Unassigned'} • <b>${b.status}</b></div>
           </div>
         `).join('')}
       </div>
@@ -97,19 +126,18 @@ function showDayDetails(d) {
     showCloseButton: true,
     width: 520,
     didOpen: () => {
-      window.__selectBooking = (id) => {
+      window.__selectBooking = (id, date) => {
         Swal.close()
-        router.push({ name: 'admin-car-booking', query: { focus: id, date: dateStr } })
+        router.push({ name: 'driver-car-booking', query: { focus: id, date } })
       }
     },
     willClose: () => { delete window.__selectBooking }
   })
 }
 
-/* ───────── Lifecycle ───────── */
+/* ───────── INIT ───────── */
 onMounted(fetchMonth)
 </script>
-
 
 <template>
   <div class="calendar-wrapper">
@@ -138,13 +166,16 @@ onMounted(fetchMonth)
         }"
         @click="showDayDetails(d)"
       >
-        <div class="day-number" :class="{ sunday: d.day() === 0 }">
-          {{ d.date() }}
-        </div>
+        <div class="day-number" :class="{ sunday: d.day() === 0 }">{{ d.date() }}</div>
 
         <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
-          <div v-for="(b,i) in byDate[d.format('YYYY-MM-DD')]" :key="i" class="booking-chip">
-            {{ b.employee?.name || b.employeeId }}
+          <div
+            v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
+            :key="i"
+            class="booking-chip"
+            :style="{ backgroundColor: statusColor(b.status) }"
+          >
+            {{ b.employee?.name || b.employeeId }} ({{ b.status }})
           </div>
         </div>
       </div>
@@ -155,7 +186,6 @@ onMounted(fetchMonth)
 </template>
 
 <style scoped>
-/* ───────── copied base styles from employee calendar ───────── */
 .calendar-wrapper {
   border: 1px solid rgba(100,116,139,.16);
   border-radius: 12px;
@@ -163,7 +193,6 @@ onMounted(fetchMonth)
   overflow: hidden;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
-
 .calendar-toolbar {
   display: flex;
   align-items: center;
@@ -193,29 +222,15 @@ onMounted(fetchMonth)
   font-size: .9rem;
   cursor: pointer;
 }
-.btn-flat.today {
-  background: #4f46e5;
-  color: #fff;
-  border-color: #4f46e5;
-}
-
+.btn-flat.today { background: #4f46e5; color: #fff; border-color: #4f46e5; }
 .week-header {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
 }
-.week-cell {
-  text-align: center;
-  font-weight: 700;
-  padding: 8px 0;
-  color: #334155;
-}
-
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-}
+.week-cell { text-align: center; font-weight: 700; padding: 8px 0; color: #334155; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 .day-cell {
   min-height: 110px;
   border: 1px solid #e2e8f0;
@@ -227,31 +242,18 @@ onMounted(fetchMonth)
 }
 .day-cell.otherMonth { background: #f9fafb; opacity: 0.5; }
 .day-cell.today { border: 2px solid #2563eb; }
-
-.day-number {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: #0f172a;
-}
+.day-number { font-weight: 700; font-size: 0.95rem; color: #0f172a; }
 .day-number.sunday { color: #dc2626; }
-
 .bookings { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
 .booking-chip {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
   border-radius: 6px;
   padding: 2px 4px;
   font-size: 0.8rem;
-  color: #064e3b;
+  color: #fff;
   font-weight: 600;
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
 }
-.loader {
-  text-align: center;
-  padding: 10px;
-  color: #475569;
-  font-weight: 600;
-}
+.loader { text-align: center; padding: 10px; color: #475569; font-weight: 600; }
 </style>

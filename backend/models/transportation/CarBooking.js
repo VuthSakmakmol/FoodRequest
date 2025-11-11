@@ -103,4 +103,5 @@ CarBookingSchema.methods.hasAirport = function () {
   return (this.stops || []).some(s => s.destination === 'Airport')
 }
 
-module.exports = mongoose.model('CarBooking', CarBookingSchema)
+module.exports = mongoose.model('CarBooking', CarBookingSchema, 'car_bookings')
+

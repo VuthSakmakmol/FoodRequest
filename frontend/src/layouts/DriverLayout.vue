@@ -21,6 +21,7 @@ const sections = [
     children: [
       { label: 'My Trips',         icon: 'fa-solid fa-route',          to: { name: 'driver-home' } },
       { label: 'Car Bookings',     icon: 'fa-solid fa-clipboard-list', to: { name: 'driver-car-booking' } }, // views/driver/DriverCarBooking.vue
+      { label: 'Calendar',         icon: 'fa-solid fa-calendar-days',  to: { name: 'driver-carlendar' } },
     ],
   },
 ]

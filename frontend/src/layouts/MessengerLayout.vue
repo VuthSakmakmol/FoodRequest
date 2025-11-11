@@ -12,6 +12,7 @@ const appTitle = 'Food Request — Messenger'
 const items = [
   { label: 'Home',    icon: 'mdi-motorbike',         to: { name:'messenger-home' } },
   { label: 'Your Assignment',  icon: 'fa-solid-assignment',  to: { name: 'messenger-assignment'} },
+  { label: 'Calendar', icon: 'fa-solid-calendar', to: { name: 'messenger-calendar' } },
   // Add more messenger pages later…
 ]
 

@@ -36,10 +36,12 @@ const ChefFoodCalendar  = AdminFoodCalendar // alias reuse
 // Driver
 const DriverHome        = () => import('@/modules/driver/Home.vue')
 const DriverCarBooking  = () => import('@/views/driver/DriverCarBooking.vue')
+const DriverCarCalendar  = () => import('@/views/driver/DriverCarCalendar.vue')
 
 // Messenger
 const MessengerHome     = () => import('@/modules/messenger/Home.vue')
 const MessengerAssignment = () => import('@/views/messenger/MessengerCarBooking.vue')
+const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
 
 function homeByRole(role) {
@@ -111,6 +113,7 @@ const router = createRouter({
       children: [
         { name: 'driver-home',         path: '',            component: DriverHome },
         { name: 'driver-car-booking',  path: 'car-booking', component: DriverCarBooking },
+        { name: 'driver-carlendar',path: 'calendar',    component: DriverCarCalendar },
       ]
     },
 
@@ -120,8 +123,9 @@ const router = createRouter({
       component: MessengerLayout,
       meta: { requiresRole: ['MESSENGER'] },
       children: [
-        { name: 'messenger-home', path: '', component: MessengerHome },
-        { name: 'messenger-assignment', path: '', component: MessengerAssignment },
+        { name: 'messenger-home',       path: '',             component: MessengerHome },
+        { name: 'messenger-assignment', path: 'assignment',   component: MessengerAssignment },
+        { name: 'messenger-calendar',   path: 'calendar',     component: MessengerCarCalendar },
       ]
     },
 

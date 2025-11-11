@@ -3,11 +3,14 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
-
+import { useRoute, useRouter } from 'vue-router'
 /* ─────────────── STATE ─────────────── */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
+
+const route = useRoute()
+const router = useRouter()
 
 const selectedDate = ref('')
 const statusFilter = ref('ALL')
@@ -306,6 +309,23 @@ function onAck(p) {
 /* ─────────────── LIFECYCLE ─────────────── */
 onMounted(() => {
   subscribeRoleIfNeeded(identity.value)
+  if (route.query?.date) {
+    selectedDate.value = String(route.query.date)
+  }
+
+  // Scroll to focused booking after load
+  watch(rows, () => {
+    const focusId = route.query?.focus
+    if (focusId) {
+      const el = document.querySelector(`[data-id="${focusId}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add('highlighted')
+        setTimeout(() => el.classList.remove('highlighted'), 2500)
+      }
+    }
+  })
+
   loadList()
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
@@ -396,8 +416,10 @@ function showDetails(item) {
               <template #loading><v-skeleton-loader type="table-row@6" /></template>
 
               <template #item.time="{ item }">
-                <div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
-                <div class="text-caption text-medium-emphasis">{{ item.tripDate }}</div>
+                <div :data-id="item._id">
+                  <div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
+                  <div class="text-caption text-medium-emphasis">{{ item.tripDate }}</div>
+                </div>
               </template>
 
               <template #item.category="{ item }">
@@ -591,6 +613,15 @@ function showDetails(item) {
 </template>
 
 <style scoped>
+.highlighted {
+  animation: flashHighlight 2s ease-in-out;
+  background: #e0f2fe !important;
+}
+@keyframes flashHighlight {
+  0% { background: #e0f2fe; }
+  100% { background: transparent; }
+}
+
 .driver-section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
 .driver-header { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: var(--surface, #f5f7fb); border-bottom: 1px solid #e6e8ee; }
 .hdr-left { display:flex; flex-direction:column; gap:6px; }

@@ -343,7 +343,7 @@ watch([selectedDate, statusFilter], loadList)
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .lbl { font-size:.78rem; color:#64748b; }
-.val { font-weight:600; }
+.val { font-weight:600; }z
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 .mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
