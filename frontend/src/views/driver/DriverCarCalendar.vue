@@ -106,18 +106,18 @@ function showDayDetails(d) {
 
   Swal.fire({
     icon: 'info',
-    title: `Bookings on ${dateStr}`,
+    title: `Driver Bookings on ${dateStr}`,
     html: `
       <div style="text-align:left;max-height:280px;overflow:auto;padding:5px 0">
         ${list.map(b => `
           <div
             style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer"
-            onclick="window.__selectBooking('${b._id}', '${dateStr}')"
+            onclick="window.__selectDriverBooking('${b._id}', '${dateStr}')"
           >
             <div><b>${b.employee?.name || b.employeeId}</b></div>
             <div>🕓 ${b.timeStart} - ${b.timeEnd}</div>
             <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
-            <div>🚗 ${b.assignment?.driverName || 'Unassigned'} • <b>${b.status}</b></div>
+            <div>🚗 ${(b.assignment?.driverName || 'Unassigned')} • <b>${b.status}</b></div>
           </div>
         `).join('')}
       </div>
@@ -126,14 +126,15 @@ function showDayDetails(d) {
     showCloseButton: true,
     width: 520,
     didOpen: () => {
-      window.__selectBooking = (id, date) => {
+      window.__selectDriverBooking = (id, date) => {
         Swal.close()
         router.push({ name: 'driver-car-booking', query: { focus: id, date } })
       }
     },
-    willClose: () => { delete window.__selectBooking }
+    willClose: () => { delete window.__selectDriverBooking }
   })
 }
+
 
 /* ───────── INIT ───────── */
 onMounted(fetchMonth)
