@@ -46,7 +46,7 @@ const User = require('../models/User')
 
     async function ensureAdmin() {
       const loginId  = process.env.ADMIN_LOGIN || 'admin'
-      const name     = process.env.ADMIN_NAME || 'Kitchen Admin'
+      const name     = process.env.ADMIN_NAME || 'Admin'
       const password = process.env.ADMIN_PASSWORD || 'Passw0rd!'
 
       const exists = await User.findOne({ loginId })
@@ -96,8 +96,8 @@ const User = require('../models/User')
     // If that’s driver01, do this:
     const drivers = [
       { loginId: 'driver01', name: 'Prius',   password: defaultPwd, telegramChatId: '537250678' },
-      // { loginId: 'driver02', name: 'Staria',   password: defaultPwd, telegramChatId: '1055055243' },
-      // { loginId: 'driver03', name: 'New Van', password: defaultPwd },
+      { loginId: 'driver02', name: 'Staria',   password: defaultPwd, telegramChatId: '1055055243' },
+      { loginId: 'driver03', name: 'New Van', password: defaultPwd },
     ]
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):

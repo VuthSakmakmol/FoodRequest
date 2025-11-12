@@ -62,7 +62,7 @@ const headers = [
   { title: 'Itinerary', key: 'itinerary' },
   { title: 'Pax', key: 'passengers', width: 70, align: 'center' },
   { title: 'Status', key: 'status', width: 150, align: 'end' },
-  { title: 'Messenger Ack', key: 'messengerAck', width: 150, align: 'end' },
+  { title: 'Messenger Ack', key: 'messengerAck', width: 190, align: 'end' },
   { title: '', key: 'actions', sortable: false, width: 330, align: 'end' },
 ]
 

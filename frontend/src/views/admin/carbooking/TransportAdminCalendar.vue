@@ -1,3 +1,4 @@
+<!-- src/views/admin/transport/TransportAdminCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -34,11 +35,9 @@ async function fetchMonth() {
   loading.value = true
   bookings.value = []
   try {
-    // ✅ Admin view: get all bookings (no driver filter)
     const { data } = await api.get('/admin/car-bookings', {
       headers: { 'x-role': 'ADMIN' },
     })
-
     bookings.value = Array.isArray(data) ? data : []
   } catch (err) {
     console.error('[fetchMonth] error', err)
@@ -57,6 +56,20 @@ const byDate = computed(() => {
   }
   return map
 })
+
+/* ───────── Status Colors ───────── */
+const statusColor = s =>
+  ({
+    PENDING: '#94a3b8',
+    ASSIGNED: '#64748b',
+    ACCEPTED: '#3b82f6',
+    ON_ROAD: '#06b6d4',
+    ARRIVING: '#10b981',
+    COMPLETED: '#16a34a',
+    DELAYED: '#facc15',
+    CANCELLED: '#ef4444',
+    DECLINED: '#b91c1c'
+  }[s] || '#94a3b8')
 
 /* ───────── Navigation ───────── */
 function nextMonth() { currentMonth.value = currentMonth.value.add(1, 'month'); fetchMonth() }
@@ -83,12 +96,14 @@ function showDayDetails(d) {
     html: `
       <div style="text-align:left;max-height:280px;overflow:auto;padding:5px 0">
         ${list.map(b => `
-          <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer"
+          <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;
+                      border-radius:6px;background:#f8fafc;cursor:pointer"
                onclick="window.__selectBooking('${b._id}')">
             <div><b>${b.employee?.name || b.employeeId}</b> (${b.category})</div>
             <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
             <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
-            <div>🚗 ${b.assignment?.driverName || 'Unassigned'}</div>
+            <div>🚗 ${(b.assignment?.driverName || 'Unassigned')}</div>
+            <div>Status: <b>${b.status}</b></div>
           </div>
         `).join('')}
       </div>
@@ -113,6 +128,7 @@ onMounted(fetchMonth)
 
 <template>
   <div class="calendar-wrapper">
+    <!-- Toolbar -->
     <div class="calendar-toolbar">
       <button class="btn-nav" @click="prevMonth">‹</button>
       <div class="month-label">{{ monthLabel }}</div>
@@ -123,10 +139,12 @@ onMounted(fetchMonth)
       </div>
     </div>
 
+    <!-- Week header -->
     <div class="week-header">
       <div v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="w" class="week-cell">{{ w }}</div>
     </div>
 
+    <!-- Calendar grid -->
     <div class="calendar-grid">
       <div
         v-for="d in days"
@@ -142,11 +160,32 @@ onMounted(fetchMonth)
           {{ d.date() }}
         </div>
 
+        <!-- colored chips -->
         <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
-          <div v-for="(b,i) in byDate[d.format('YYYY-MM-DD')]" :key="i" class="booking-chip">
-            {{ b.employee?.name || b.employeeId }}
+          <div
+            v-for="(b,i) in byDate[d.format('YYYY-MM-DD')]"
+            :key="i"
+            class="booking-chip"
+            :style="{ backgroundColor: statusColor(b.status) }"
+          >
+            {{ b.employee?.name || b.employeeId }} ({{ b.status }})
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="status-legend">
+      <div
+        v-for="(color, status) in {
+          PENDING:'#94a3b8', ASSIGNED:'#64748b', ACCEPTED:'#3b82f6',
+          ON_ROAD:'#06b6d4', ARRIVING:'#10b981', COMPLETED:'#16a34a',
+          DELAYED:'#facc15', CANCELLED:'#ef4444', DECLINED:'#b91c1c'
+        }"
+        :key="status"
+        class="legend-item"
+      >
+        <span class="legend-dot" :style="{ backgroundColor: color }"></span>{{ status }}
       </div>
     </div>
 
@@ -155,7 +194,6 @@ onMounted(fetchMonth)
 </template>
 
 <style scoped>
-/* ───────── copied base styles from employee calendar ───────── */
 .calendar-wrapper {
   border: 1px solid rgba(100,116,139,.16);
   border-radius: 12px;
@@ -163,7 +201,6 @@ onMounted(fetchMonth)
   overflow: hidden;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
-
 .calendar-toolbar {
   display: flex;
   align-items: center;
@@ -193,11 +230,7 @@ onMounted(fetchMonth)
   font-size: .9rem;
   cursor: pointer;
 }
-.btn-flat.today {
-  background: #4f46e5;
-  color: #fff;
-  border-color: #4f46e5;
-}
+.btn-flat.today { background: #4f46e5; color: #fff; border-color: #4f46e5; }
 
 .week-header {
   display: grid;
@@ -205,17 +238,8 @@ onMounted(fetchMonth)
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
 }
-.week-cell {
-  text-align: center;
-  font-weight: 700;
-  padding: 8px 0;
-  color: #334155;
-}
-
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-}
+.week-cell { text-align: center; font-weight: 700; padding: 8px 0; color: #334155; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 .day-cell {
   min-height: 110px;
   border: 1px solid #e2e8f0;
@@ -227,31 +251,35 @@ onMounted(fetchMonth)
 }
 .day-cell.otherMonth { background: #f9fafb; opacity: 0.5; }
 .day-cell.today { border: 2px solid #2563eb; }
-
-.day-number {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: #0f172a;
-}
+.day-number { font-weight: 700; font-size: 0.95rem; color: #0f172a; }
 .day-number.sunday { color: #dc2626; }
 
 .bookings { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
 .booking-chip {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
   border-radius: 6px;
   padding: 2px 4px;
   font-size: 0.8rem;
-  color: #064e3b;
+  color: #fff;
   font-weight: 600;
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
 }
-.loader {
-  text-align: center;
-  padding: 10px;
-  color: #475569;
-  font-weight: 600;
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+  font-size: 0.85rem;
+  color: #334155;
 }
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.2);
+}
+.loader { text-align: center; padding: 10px; color: #475569; font-weight: 600; }
 </style>
