@@ -183,7 +183,16 @@ onMounted(fetchMonth)
     </div>
 
     <div v-if="loading" class="loader">Loading…</div>
-  </div>
+    </div>
+        <div class="status-legend">
+        <div v-for="(color, status) in {
+          PENDING:'#94a3b8', ACCEPTED:'#3b82f6', ON_ROAD:'#06b6d4',
+          ARRIVING:'#10b981', COMPLETED:'#16a34a', DELAYED:'#facc15', CANCELLED:'#ef4444'
+        }" :key="status" class="legend-item">
+          <span class="legend-dot" :style="{ backgroundColor: color }"></span>{{ status }}
+        </div>
+      </div>
+
 </template>
 
 <style scoped>
@@ -257,4 +266,21 @@ onMounted(fetchMonth)
   white-space: nowrap;
 }
 .loader { text-align: center; padding: 10px; color: #475569; font-weight: 600; }
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+  font-size: 0.85rem;
+  color: #334155;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.2);
+}
+
 </style>

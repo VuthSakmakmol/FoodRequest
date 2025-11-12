@@ -1,4 +1,4 @@
-<!-- views/messenger/MessengerCarCalendar.vue -->
+<!-- src/views/messenger/MessengerCarCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import Swal from 'sweetalert2'
@@ -84,6 +84,7 @@ const statusColor = s =>
     COMPLETED: '#16a34a',
     DELAYED: '#facc15',
     CANCELLED: '#ef4444',
+    DECLINED: '#b91c1c',
   }[s] || '#94a3b8')
 
 /* ───────── NAVIGATION ───────── */
@@ -177,6 +178,17 @@ onMounted(fetchMonth)
       </div>
     </div>
 
+    <!-- ✅ Color legend bar -->
+    <div class="status-legend">
+      <div v-for="(color, status) in {
+        PENDING:'#94a3b8', ACCEPTED:'#3b82f6', ON_ROAD:'#06b6d4',
+        ARRIVING:'#10b981', COMPLETED:'#16a34a', DELAYED:'#facc15',
+        CANCELLED:'#ef4444', DECLINED:'#b91c1c'
+      }" :key="status" class="legend-item">
+        <span class="legend-dot" :style="{ backgroundColor: color }"></span>{{ status }}
+      </div>
+    </div>
+
     <div v-if="loading" class="loader">Loading…</div>
   </div>
 </template>
@@ -250,6 +262,22 @@ onMounted(fetchMonth)
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
+}
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+  font-size: 0.85rem;
+  color: #334155;
+}
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.2);
 }
 .loader { text-align: center; padding: 10px; color: #475569; font-weight: 600; }
 </style>

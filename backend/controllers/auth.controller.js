@@ -7,7 +7,7 @@ const signToken = (user) =>
   jwt.sign(
     { sub: String(user._id), role: user.role, id: user.loginId, name: user.name },
     process.env.JWT_SECRET,
-    { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
+    { expiresIn: '7h', issuer: 'food-app', audience: 'food-web' }
   )
 
 // Map portals -> allowed roles

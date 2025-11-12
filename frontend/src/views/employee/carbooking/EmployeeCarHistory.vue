@@ -5,7 +5,12 @@ import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket from '@/utils/socket'
 import { useDisplay } from 'vuetify'
+import { useRoute } from 'vue-router'
 
+const route = useRoute()
+
+const focusId = ref(route.query.focus || '')
+const focusDate = ref(route.query.date || '')
 const { smAndDown } = useDisplay()
 const isMobile = computed(() => smAndDown.value)
 
@@ -33,6 +38,19 @@ function openTicket(u){
   const url = absUrl(u)
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
+
+/* ——— Focus + highlight a booking row ——— */
+function scrollToBooking(id) {
+  setTimeout(() => {
+    const el = document.querySelector(`[data-row-id="${id}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('highlight-row')
+      setTimeout(() => el.classList.remove('highlight-row'), 2500)
+    }
+  }, 400) // small delay to wait table render
+}
+
 
 /* ——— Data table headers ——— */
 const headers = [
@@ -124,10 +142,14 @@ function onStatus(p) {
 }
 
 onMounted(() => {
-  loadSchedule()
+  if (focusDate.value) selectedDate.value = focusDate.value
+  loadSchedule().then(() => {
+    if (focusId.value) scrollToBooking(focusId.value)
+  })
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
 })
+
 onBeforeUnmount(() => {
   socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
@@ -267,10 +289,12 @@ watch([filtered, itemsPerPage], () => {
               </template>
 
               <template #item.actions="{ item }">
-                <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
-                  <template #prepend><i class="fa-solid fa-circle-info"></i></template>
-                  Details
-                </v-btn>
+                <div :data-row-id="item._id">
+                  <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
+                    <template #prepend><i class="fa-solid fa-circle-info"></i></template>
+                    Details
+                  </v-btn>
+                </div>
               </template>
 
               <!-- ✅ Responsive bottom footer with Font Awesome -->
@@ -466,4 +490,15 @@ watch([filtered, itemsPerPage], () => {
   .tf-left, .tf-middle, .tf-right { width: 100%; }
   .tf-right { justify-content: flex-end; }
 }
+
+/* ——— Highlight animation when coming from calendar ——— */
+.highlight-row {
+  animation: rowFlash 2.2s ease-in-out;
+}
+@keyframes rowFlash {
+  0%   { background-color: #fef9c3; }  /* light yellow */
+  50%  { background-color: #fef08a; }
+  100% { background-color: transparent; }
+}
+
 </style>

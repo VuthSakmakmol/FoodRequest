@@ -1,4 +1,4 @@
-<!-- views/employee/carBooking/calendars/TransportScheduleCalendar.vue -->
+<!-- src/views/employee/carBooking/calendars/TransportScheduleCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
@@ -68,6 +68,19 @@ const byDate = computed(() => {
   return map
 })
 
+/* ───────── Status Colors ───────── */
+const statusColor = s =>
+  ({
+    PENDING: '#94a3b8',
+    ACCEPTED: '#3b82f6',
+    ON_ROAD: '#06b6d4',
+    ARRIVING: '#10b981',
+    COMPLETED: '#16a34a',
+    DELAYED: '#facc15',
+    CANCELLED: '#ef4444',
+    DECLINED: '#b91c1c'
+  }[s] || '#94a3b8')
+
 /* ───────── Navigation ───────── */
 function nextMonth() {
   currentMonth.value = currentMonth.value.add(1, 'month')
@@ -88,56 +101,67 @@ function selectDay(d) {
   const bookingsForDay = byDate.value[dateStr]
 
   if (bookingsForDay && bookingsForDay.length > 0) {
-    // ── show options: create new or see detail ──
+    // 🟩 Show SweetAlert with list of bookings
     Swal.fire({
       icon: 'info',
       title: `Bookings on ${dateStr}`,
       html: `
-        <div style="text-align:left;max-height:240px;overflow:auto;padding:5px 0">
+        <div style="text-align:left;max-height:280px;overflow:auto;padding:5px 0">
           ${bookingsForDay.map(b => `
-            <div style="margin-bottom:6px;padding:6px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;">
+            <div
+              class="swal-booking"
+              data-id="${b._id}"
+              style="
+                margin-bottom:6px;
+                padding:8px;
+                border:1px solid #e2e8f0;
+                border-radius:8px;
+                background:#f8fafc;
+                cursor:pointer;
+                transition:background .2s;
+              "
+              onmouseover="this.style.background='#e0f2fe'"
+              onmouseout="this.style.background='#f8fafc'"
+            >
               <div><b>${b.employee?.name || b.employeeId || 'Unknown'}</b> (${b.category})</div>
               <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
               <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
+              <div>🚗 ${b.status}</div>
             </div>
           `).join('')}
-        </div>`,
-      showDenyButton: true,
-      showCancelButton: true,
-      confirmButtonText: '➕ Create New',
-      denyButtonText: '🔍 See Details',
-      cancelButtonText: 'Close',
-      reverseButtons: true,
+        </div>
+        <div style="margin-top:10px;">
+          <button id="createNewBtn" class="swal2-confirm swal2-styled" style="background:#4f46e5">
+            ➕ Create New
+          </button>
+        </div>
+      `,
+      showConfirmButton: false,
       width: 480,
-    }).then(res => {
-      if (res.isConfirmed) {
-        // create new booking
-        router.push({ name: 'employee-car-booking', query: { tripDate: dateStr } })
-      } else if (res.isDenied) {
-        // show all details again (with more info)
-        Swal.fire({
-          icon: 'info',
-          title: `Schedule Details – ${dateStr}`,
-          html: `
-            <div style="text-align:left;max-height:300px;overflow:auto;">
-              ${bookingsForDay.map((b,i)=>`
-                <div style="border-bottom:1px solid #e5e7eb;padding:8px 0;">
-                  <div><b>#${i+1} ${b.employee?.name || b.employeeId}</b> (${b.category})</div>
-                  <div>🕒 ${b.timeStart || '--:--'} → ${b.timeEnd || '--:--'}</div>
-                  <div>🏁 Stops: ${(b.stops || []).map(s=>s.destination).join(', ') || 'N/A'}</div>
-                  <div>📞 ${b.customerContact || ''}</div>
-                  <div>🎯 ${b.purpose || ''}</div>
-                </div>
-              `).join('')}
-            </div>
-          `,
-          confirmButtonText: 'OK',
-          width: 520
+      didOpen: () => {
+        // 🟩 Booking click → go to history
+        document.querySelectorAll('.swal-booking').forEach(el => {
+          el.addEventListener('click', () => {
+            const id = el.getAttribute('data-id')
+            Swal.close()
+            router.push({
+              name: 'employee-car-history',
+              query: { focus: id, date: dateStr }
+            })
+          })
+        })
+        // 🟦 Create New button
+        document.getElementById('createNewBtn').addEventListener('click', () => {
+          Swal.close()
+          router.push({
+            name: 'employee-car-booking',
+            query: { tripDate: dateStr }
+          })
         })
       }
     })
   } else {
-    // ── no bookings yet → offer to create ──
+    // 🟦 No booking yet → ask to create
     Swal.fire({
       icon: 'question',
       title: 'No bookings yet',
@@ -194,20 +218,33 @@ onMounted(fetchMonth)
         }"
         @click="selectDay(d)"
       >
-        <div class="day-number" :class="{ sunday: d.day() === 0 }">
-          {{ d.date() }}
-        </div>
+        <div class="day-number" :class="{ sunday: d.day() === 0 }">{{ d.date() }}</div>
 
         <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
           <div
             v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
             :key="i"
             class="booking-chip"
+            :style="{ backgroundColor: statusColor(b.status) }"
           >
-            {{ b.employee?.name || b.employeeId }}
-            <span class="count">({{ i + 1 }})</span>
+            {{ b.category }} ({{ b.status }})
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="status-legend">
+      <div
+        v-for="(color, status) in {
+          PENDING:'#94a3b8', ACCEPTED:'#3b82f6', ON_ROAD:'#06b6d4',
+          ARRIVING:'#10b981', COMPLETED:'#16a34a', DELAYED:'#facc15',
+          CANCELLED:'#ef4444', DECLINED:'#b91c1c'
+        }"
+        :key="status"
+        class="legend-item"
+      >
+        <span class="legend-dot" :style="{ backgroundColor: color }"></span>{{ status }}
       </div>
     </div>
 
@@ -223,8 +260,6 @@ onMounted(fetchMonth)
   overflow: hidden;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
-
-/* Toolbar */
 .calendar-toolbar {
   display: flex;
   align-items: center;
@@ -254,31 +289,16 @@ onMounted(fetchMonth)
   font-size: .9rem;
   cursor: pointer;
 }
-.btn-flat.today {
-  background: #4f46e5;
-  color: #fff;
-  border-color: #4f46e5;
-}
+.btn-flat.today { background: #4f46e5; color: #fff; border-color: #4f46e5; }
 
-/* Week header */
 .week-header {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
 }
-.week-cell {
-  text-align: center;
-  font-weight: 700;
-  padding: 8px 0;
-  color: #334155;
-}
-
-/* Grid */
-.calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-}
+.week-cell { text-align: center; font-weight: 700; padding: 8px 0; color: #334155; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
 .day-cell {
   min-height: 110px;
   border: 1px solid #e2e8f0;
@@ -290,37 +310,39 @@ onMounted(fetchMonth)
 }
 .day-cell.otherMonth { background: #f9fafb; opacity: 0.5; }
 .day-cell.today { border: 2px solid #2563eb; }
-.day-cell.selected { outline: 2px solid #2563eb; }
-
-.day-number {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: #0f172a;
-}
+.day-number { font-weight: 700; font-size: 0.95rem; color: #0f172a; }
 .day-number.sunday { color: #dc2626; }
-
 .bookings { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
 .booking-chip {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
   border-radius: 6px;
   padding: 2px 4px;
   font-size: 0.8rem;
-  color: #064e3b;
+  color: #fff;
   font-weight: 600;
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
 }
-.count {
-  font-size: 0.75rem;
-  color: #047857;
-  margin-left: 3px;
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 10px 0 14px;
+  font-size: 0.85rem;
+  color: #334155;
 }
-.loader {
-  text-align: center;
-  padding: 10px;
-  color: #475569;
-  font-weight: 600;
+.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,0,0,0.2);
+}
+.loader { text-align: center; padding: 10px; color: #475569; font-weight: 600; }
+
+/* SweetAlert inline booking hover */
+:deep(.swal-booking:hover) {
+  background-color: #e0f2fe !important;
 }
 </style>
