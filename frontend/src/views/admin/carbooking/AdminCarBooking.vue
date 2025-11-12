@@ -108,7 +108,13 @@ const ackFa  = s => ({
 }[s] || 'fa-solid fa-circle-question')
 
 /* Assigned chip helpers (fallback to request category for icon/color) */
-const assigneeName  = (it) => it?.assignment?.driverName || it?.assignment?.driverId || ''
+const assigneeName = (it) => {
+  if (!it?.assignment) return ''
+  if (it?.category === 'Messenger') {
+    return it.assignment.messengerName || it.assignment.messengerId || ''
+  }
+  return it.assignment.driverName || it.assignment.driverId || ''
+}
 const assigneeColor = (it) => (it?.category === 'Messenger' ? 'deep-orange' : 'indigo')
 const assigneeIconFA = (it) => (it?.category === 'Messenger' ? 'fa-motorcycle' : 'fa-car')
 
@@ -157,10 +163,24 @@ function onStatus(p) {
 function onAssigned(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) {
-    it.assignment = { ...(it.assignment||{}), driverId: p.driverId, driverName: p.driverName, driverAck: 'PENDING' }
+    // Merge everything we get
+    it.assignment = {
+      ...(it.assignment || {}),
+      driverId: p.driverId || '',
+      driverName: p.driverName || '',
+      messengerId: p.messengerId || it.assignment?.messengerId || '',
+      messengerName: p.messengerName || it.assignment?.messengerName || '',
+      driverAck: 'PENDING',
+    }
+    // If backend flipped the category, reflect it
+    if (p.status) it.status = p.status
+    if (p.category) it.category = p.category
+
+    // In case it was PENDING, accept
     if (it.status === 'PENDING') it.status = 'ACCEPTED'
   }
 }
+
 function onDriverAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }

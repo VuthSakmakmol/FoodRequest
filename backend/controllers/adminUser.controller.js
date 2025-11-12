@@ -39,18 +39,23 @@ exports.busyAssignees = async (req, res, next) => {
     const role = String(req.query.role || '').toUpperCase()
     const { date, start, end } = req.query
     if (!role || !date || !start || !end) return res.status(400).json({ message: 'role, date, start, end are required' })
+    if (!['DRIVER','MESSENGER'].includes(role)) return res.status(400).json({ message: 'Invalid role' })
 
     const [s, e] = [toMinutes(start), toMinutes(end)]
+    const idField = role === 'MESSENGER' ? 'assignment.messengerId' : 'assignment.driverId'
+    const selectFields = `${idField} timeStart timeEnd`
+
     const bookings = await CarBooking.find({
       tripDate: date,
       status: { $in: Array.from(BUSY_STATUSES) },
-      'assignment.driverId': { $ne: '' }
-    }).select('assignment.driverId timeStart timeEnd')
+      [idField]: { $ne: '' }
+    }).select(selectFields).lean()
 
     const busy = []
     for (const b of bookings) {
       if (overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))) {
-        busy.push(b.assignment.driverId)
+        const val = role === 'MESSENGER' ? b.assignment?.messengerId : b.assignment?.driverId
+        if (val) busy.push(val)
       }
     }
     res.json({ role, date, start, end, busy: Array.from(new Set(busy)) })
