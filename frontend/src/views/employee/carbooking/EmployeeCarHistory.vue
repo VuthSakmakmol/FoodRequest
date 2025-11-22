@@ -82,7 +82,9 @@ async function loadSchedule() {
 
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
-  return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
+  return stops
+    .map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination)
+    .join(' → ')
 }
 
 /* ——— Colors unchanged ——— */
@@ -104,11 +106,13 @@ const statusIconFA = s => ({
 
 // Many FA builds don’t have fa-badge-check in Free. Fallback:
 function fixFA(icon) {
-  return icon === 'fa-solid fa-badge-check' ? 'fa-solid fa-circle-check' : icon
+  return icon === 'fa-solid fa-badge-check'
+    ? 'fa-solid fa-circle-check'
+    : icon
 }
 
 const categoryIconFA = cat => (cat === 'Car' ? 'fa-solid fa-car' : 'fa-solid fa-motorcycle')
-const stopIconFA = dest => (dest === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot')
+const stopIconFA     = dest => (dest === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot')
 
 const filtered = computed(() => {
   const term = qSearch.value.trim().toLowerCase()
@@ -161,7 +165,10 @@ watch([selectedDate, statusFilter], loadSchedule)
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
-function onRowClick(_e, ctx){ const data = ctx?.item?.raw || ctx?.item || ctx; if (data) showDetails(data) }
+function onRowClick(_e, ctx){
+  const data = ctx?.item?.raw || ctx?.item || ctx
+  if (data) showDetails(data)
+}
 
 /* ——— Pagination (responsive + FA footer) ——— */
 const page = ref(1)
@@ -171,8 +178,12 @@ const pageCount = computed(() => {
   return Math.max(1, n || 1)
 })
 const totalItems = computed(() => filtered.value?.length || 0)
-const rangeStart = computed(() => totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0)
-const rangeEnd   = computed(() => Math.min(page.value * itemsPerPage.value, totalItems.value))
+const rangeStart = computed(() =>
+  totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0
+)
+const rangeEnd   = computed(() =>
+  Math.min(page.value * itemsPerPage.value, totalItems.value)
+)
 
 watch([filtered, itemsPerPage], () => {
   if (page.value > pageCount.value) page.value = pageCount.value
@@ -180,7 +191,7 @@ watch([filtered, itemsPerPage], () => {
 </script>
 
 <template>
-  <v-container fluid class="pa-2">
+  <v-container fluid class="pa-2 history-container">
     <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
       <div class="hero">
         <div class="hero-left">
@@ -196,7 +207,7 @@ watch([filtered, itemsPerPage], () => {
       </div>
 
       <div class="px-3 pb-3 pt-2">
-        <v-card flat class="soft-card glass mb-3">
+        <v-card flat class="soft-card glass mb-3 filters-card">
           <v-card-title class="subhdr">
             <i class="fa-solid fa-filter"></i><span>Filters</span>
             <v-spacer />
@@ -208,19 +219,44 @@ watch([filtered, itemsPerPage], () => {
           <v-card-text class="pt-0">
             <v-row dense>
               <v-col cols="12" md="3">
-                <v-text-field v-model="selectedDate" type="date" label="Date" variant="outlined" density="compact" hide-details />
+                <v-text-field
+                  v-model="selectedDate"
+                  type="date"
+                  label="Date"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
               </v-col>
               <v-col cols="6" md="3">
-                <v-select :items="['ALL','PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']"
-                          v-model="statusFilter" label="Status" variant="outlined" density="compact" hide-details />
+                <v-select
+                  :items="['ALL','PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']"
+                  v-model="statusFilter"
+                  label="Status"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
               </v-col>
               <v-col cols="6" md="3">
-                <v-select :items="['ALL','Car','Messenger']"
-                          v-model="categoryFilter" label="Category" variant="outlined" density="compact" hide-details />
+                <v-select
+                  :items="['ALL','Car','Messenger']"
+                  v-model="categoryFilter"
+                  label="Category"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
               </v-col>
               <v-col cols="12" md="3">
-                <v-text-field v-model="qSearch" label="Search requester / purpose / destination"
-                              variant="outlined" density="compact" hide-details clearable>
+                <v-text-field
+                  v-model="qSearch"
+                  label="Search requester / purpose / destination"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  clearable
+                >
                   <template #prepend-inner>
                     <i class="fa-solid fa-magnifying-glass"></i>
                   </template>
@@ -232,122 +268,178 @@ watch([filtered, itemsPerPage], () => {
 
         <v-card flat class="soft-card glass">
           <v-card-text>
-            <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
-
-            <v-data-table
-              :headers="headers"
-              :items="filtered"
-              :loading="loading"
-              item-key="_id"
-              density="comfortable"
-              class="elevated"
-              v-model:page="page"
-              :items-per-page="itemsPerPage"
-              @click:row="onRowClick"
+            <v-alert
+              v-if="error"
+              type="error"
+              variant="tonal"
+              border="start"
+              class="mb-3"
             >
-              <template #loading><v-skeleton-loader type="table-row@6" /></template>
+              {{ error }}
+            </v-alert>
 
-              <template #item.time="{ item }"><div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div></template>
+            <!-- table wrapper for horizontal scroll on small screens -->
+            <div class="table-wrapper">
+              <v-data-table
+                :headers="headers"
+                :items="filtered"
+                :loading="loading"
+                item-key="_id"
+                :density="isMobile ? 'compact' : 'comfortable'"
+                class="elevated car-history-table"
+                v-model:page="page"
+                :items-per-page="itemsPerPage"
+                @click:row="onRowClick"
+              >
+                <template #loading>
+                  <v-skeleton-loader type="table-row@6" />
+                </template>
 
-              <template #item.category="{ item }">
-                <v-chip :color="item.category === 'Car' ? 'primary' : 'orange'" size="small" label>
-                  <i :class="categoryIconFA(item.category)" class="mr-1"></i> {{ item.category }}
-                </v-chip>
-              </template>
-
-              <template #item.requester="{ item }">
-                <div class="d-flex align-center">
-                  <v-chip v-if="item.isMine" size="x-small" color="primary" variant="elevated" class="mr-2">Mine</v-chip>
-                  <div>
-                    <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
-                    <div class="text-caption text-medium-emphasis">{{ item.employee?.department || '—' }} • ID {{ item.employeeId }}</div>
+                <template #item.time="{ item }">
+                  <div class="mono">
+                    {{ item.timeStart }} – {{ item.timeEnd }}
                   </div>
-                </div>
-              </template>
+                </template>
 
-              <template #item.itinerary="{ item }">
-                <div class="truncate-2">
-                  {{ prettyStops(item.stops) }}
-                  <v-btn v-if="item.ticketUrl" size="x-small" color="indigo" variant="tonal" class="ml-2"
-                         @click.stop="openTicket(item.ticketUrl)">
-                    <template #prepend><i class="fa-solid fa-paperclip"></i></template>
-                    Ticket
-                  </v-btn>
-                </div>
-                <div class="text-caption mt-1" v-if="item.purpose || item.notes">
-                  <span class="text-medium-emphasis">Purpose:</span> {{ item.purpose || '—' }}
-                  <span v-if="item.notes"> • <span class="text-medium-emphasis">Notes:</span> {{ item.notes }}</span>
-                </div>
-              </template>
+                <template #item.category="{ item }">
+                  <v-chip
+                    :color="item.category === 'Car' ? 'primary' : 'orange'"
+                    size="small"
+                    label
+                  >
+                    <i :class="categoryIconFA(item.category)" class="mr-1"></i>
+                    {{ item.category }}
+                  </v-chip>
+                </template>
 
-              <template #item.passengers="{ item }"><div class="text-center">{{ item.passengers ?? 1 }}</div></template>
-
-              <template #item.status="{ item }">
-                <v-chip :color="statusColor(item.status)" size="small" label>
-                  <i :class="fixFA(statusIconFA(item.status))" class="mr-1"></i> {{ item.status }}
-                </v-chip>
-              </template>
-
-              <template #item.actions="{ item }">
-                <div :data-row-id="item._id">
-                  <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
-                    <template #prepend><i class="fa-solid fa-circle-info"></i></template>
-                    Details
-                  </v-btn>
-                </div>
-              </template>
-
-              <!-- ✅ Responsive bottom footer with Font Awesome -->
-              <template #bottom>
-                <div class="table-footer">
-                  <div class="tf-left">
-                    <div class="text-caption text-medium-emphasis d-none d-sm-inline">
-                      Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
-                    </div>
-                    <div class="text-caption text-medium-emphasis d-sm-none">
-                      {{ page }} / {{ pageCount }}
-                    </div>
-                  </div>
-
-                  <div class="tf-middle">
-                    <!-- Hide rows-per-page on phones to save space -->
-                    <v-select
-                      v-if="!isMobile"
-                      v-model="itemsPerPage"
-                      :items="[5,10,20,50]"
-                      density="compact"
-                      variant="outlined"
-                      hide-details
-                      style="max-width: 300px"
-                      label="Rows"
-                    />
-                  </div>
-
-                  <div class="tf-right">
-                    <v-pagination 
-                      v-model="page"
-                      :length="pageCount"
-                      :total-visible="isMobile ? 3 : 7"
-                      density="comfortable"
-                      
+                <template #item.requester="{ item }">
+                  <div class="d-flex align-center">
+                    <v-chip
+                      v-if="item.isMine"
+                      size="x-small"
+                      color="primary"
+                      variant="elevated"
+                      class="mr-2"
                     >
-                      <template #first>
-                        <i class="fa-solid fa-angles-left"></i>
-                      </template>
-                      <template #prev>
-                        <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
-                      </template>
-                      <template #next>
-                        <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
-                      </template>
-                      <template #last>
-                        <i class="fa-solid fa-angles-right"></i>
-                      </template>
-                    </v-pagination>
+                      Mine
+                    </v-chip>
+                    <div>
+                      <div class="font-weight-600">
+                        {{ item.employee?.name || '—' }}
+                      </div>
+                      <div class="text-caption text-medium-emphasis">
+                        {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </template>
-            </v-data-table>
+                </template>
+
+                <template #item.itinerary="{ item }">
+                  <div class="truncate-2">
+                    {{ prettyStops(item.stops) }}
+                    <v-btn
+                      v-if="item.ticketUrl"
+                      size="x-small"
+                      color="indigo"
+                      variant="tonal"
+                      class="ml-2"
+                      @click.stop="openTicket(item.ticketUrl)"
+                    >
+                      <template #prepend>
+                        <i class="fa-solid fa-paperclip"></i>
+                      </template>
+                      Ticket
+                    </v-btn>
+                  </div>
+                  <div class="text-caption mt-1" v-if="item.purpose || item.notes">
+                    <span class="text-medium-emphasis">Purpose:</span>
+                    {{ item.purpose || '—' }}
+                    <span v-if="item.notes">
+                      • <span class="text-medium-emphasis">Notes:</span> {{ item.notes }}
+                    </span>
+                  </div>
+                </template>
+
+                <template #item.passengers="{ item }">
+                  <div class="text-center">
+                    {{ item.passengers ?? 1 }}
+                  </div>
+                </template>
+
+                <template #item.status="{ item }">
+                  <v-chip :color="statusColor(item.status)" size="small" label>
+                    <i :class="fixFA(statusIconFA(item.status))" class="mr-1"></i>
+                    {{ item.status }}
+                  </v-chip>
+                </template>
+
+                <template #item.actions="{ item }">
+                  <div :data-row-id="item._id">
+                    <v-btn
+                      size="small"
+                      variant="tonal"
+                      color="primary"
+                      @click.stop="showDetails(item)"
+                    >
+                      <template #prepend>
+                        <i class="fa-solid fa-circle-info"></i>
+                      </template>
+                      Details
+                    </v-btn>
+                  </div>
+                </template>
+
+                <!-- ✅ Responsive bottom footer with Font Awesome -->
+                <template #bottom>
+                  <div class="table-footer">
+                    <div class="tf-left">
+                      <div class="text-caption text-medium-emphasis d-none d-sm-inline">
+                        Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                      </div>
+                      <div class="text-caption text-medium-emphasis d-sm-none">
+                        {{ page }} / {{ pageCount }}
+                      </div>
+                    </div>
+
+                    <div class="tf-middle">
+                      <!-- Hide rows-per-page on phones to save space -->
+                      <v-select
+                        v-if="!isMobile"
+                        v-model="itemsPerPage"
+                        :items="[5,10,20,50]"
+                        density="compact"
+                        variant="outlined"
+                        hide-details
+                        style="max-width: 300px"
+                        label="Rows"
+                      />
+                    </div>
+
+                    <div class="tf-right">
+                      <v-pagination
+                        v-model="page"
+                        :length="pageCount"
+                        :total-visible="isMobile ? 3 : 7"
+                        density="comfortable"
+                      >
+                        <template #first>
+                          <i class="fa-solid fa-angles-left"></i>
+                        </template>
+                        <template #prev>
+                          <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
+                        </template>
+                        <template #next>
+                          <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
+                        </template>
+                        <template #last>
+                          <i class="fa-solid fa-angles-right"></i>
+                        </template>
+                      </v-pagination>
+                    </div>
+                  </div>
+                </template>
+              </v-data-table>
+            </div>
           </v-card-text>
         </v-card>
       </div>
@@ -358,10 +450,17 @@ watch([filtered, itemsPerPage], () => {
       <v-card class="soft-card glass" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <v-chip :color="detailItem?.category === 'Car' ? 'primary' : 'orange'" size="small" label>
-              <i :class="categoryIconFA(detailItem?.category)" class="mr-1"></i> {{ detailItem?.category || '—' }}
+            <v-chip
+              :color="detailItem?.category === 'Car' ? 'primary' : 'orange'"
+              size="small"
+              label
+            >
+              <i :class="categoryIconFA(detailItem?.category)" class="mr-1"></i>
+              {{ detailItem?.category || '—' }}
             </v-chip>
-            <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
+            <span class="mono">
+              {{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}
+            </span>
           </div>
           <v-btn variant="text" @click="detailOpen = false" icon>
             <i class="fa-solid fa-xmark"></i>
@@ -372,8 +471,14 @@ watch([filtered, itemsPerPage], () => {
 
         <v-card-text>
           <v-row dense>
-            <v-col cols="12" md="6"><div class="lbl">Date</div><div class="val">{{ detailItem?.tripDate || '—' }}</div></v-col>
-            <v-col cols="12" md="6"><div class="lbl">Passengers</div><div class="val">{{ detailItem?.passengers ?? 1 }}</div></v-col>
+            <v-col cols="12" md="6">
+              <div class="lbl">Date</div>
+              <div class="val">{{ detailItem?.tripDate || '—' }}</div>
+            </v-col>
+            <v-col cols="12" md="6">
+              <div class="lbl">Passengers</div>
+              <div class="val">{{ detailItem?.passengers ?? 1 }}</div>
+            </v-col>
 
             <v-col cols="12" md="6">
               <div class="lbl">Requester</div>
@@ -386,20 +491,35 @@ watch([filtered, itemsPerPage], () => {
             </v-col>
 
             <v-col cols="12" md="6" v-if="detailItem?.customerContact">
-              <div class="lbl">Customer Contact</div><div class="val">{{ detailItem?.customerContact }}</div>
+              <div class="lbl">Customer Contact</div>
+              <div class="val">{{ detailItem?.customerContact }}</div>
             </v-col>
 
             <v-col cols="12">
               <div class="lbl">Itinerary</div>
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
-                  <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
+                  <div
+                    v-for="(s,i) in detailItem.stops"
+                    :key="i"
+                    class="stop"
+                  >
                     <i :class="stopIconFA(s.destination)" class="mr-1"></i>
                     <strong>#{{ i+1 }}:</strong>
-                    <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
-                    <a v-if="s.mapLink" :href="absUrl(s.mapLink)" target="_blank" rel="noopener" class="ml-2 text-decoration-none">
+                    <span>
+                      {{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}
+                    </span>
+                    <a
+                      v-if="s.mapLink"
+                      :href="absUrl(s.mapLink)"
+                      target="_blank"
+                      rel="noopener"
+                      class="ml-2 text-decoration-none"
+                    >
                       <v-btn size="x-small" variant="text" color="primary">
-                        <template #prepend><i class="fa-solid fa-link"></i></template>
+                        <template #prepend>
+                          <i class="fa-solid fa-link"></i>
+                        </template>
                         Map
                       </v-btn>
                     </a>
@@ -409,10 +529,12 @@ watch([filtered, itemsPerPage], () => {
               </div>
             </v-col>
 
-            <v-col cols="12" md="6"><div class="lbl">Status</div>
+            <v-col cols="12" md="6">
+              <div class="lbl">Status</div>
               <div class="val">
                 <v-chip :color="statusColor(detailItem?.status)" size="small" label>
-                  <i :class="fixFA(statusIconFA(detailItem?.status))" class="mr-1"></i> {{ detailItem?.status || '—' }}
+                  <i :class="fixFA(statusIconFA(detailItem?.status))" class="mr-1"></i>
+                  {{ detailItem?.status || '—' }}
                 </v-chip>
               </div>
             </v-col>
@@ -420,47 +542,105 @@ watch([filtered, itemsPerPage], () => {
             <v-col cols="12" md="6" v-if="detailItem?.ticketUrl">
               <div class="lbl">Ticket</div>
               <div class="val">
-                <a :href="absUrl(detailItem.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
+                <a
+                  :href="absUrl(detailItem.ticketUrl)"
+                  target="_blank"
+                  rel="noopener"
+                  class="text-decoration-none"
+                >
                   <v-btn size="small" color="indigo" variant="tonal">
-                    <template #prepend><i class="fa-solid fa-paperclip"></i></template>
+                    <template #prepend>
+                      <i class="fa-solid fa-paperclip"></i>
+                    </template>
                     VIEW TICKET
                   </v-btn>
                 </a>
               </div>
             </v-col>
 
-            <v-col cols="12" v-if="detailItem?.purpose || detailItem?.notes" class="mt-1">
+            <v-col
+              cols="12"
+              v-if="detailItem?.purpose || detailItem?.notes"
+              class="mt-1"
+            >
               <div class="lbl">Purpose & Notes</div>
               <div class="val">
-                <div><span class="text-medium-emphasis">Purpose:</span> {{ detailItem?.purpose || '—' }}</div>
-                <div v-if="detailItem?.notes"><span class="text-medium-emphasis">Notes:</span> {{ detailItem?.notes }}</div>
+                <div>
+                  <span class="text-medium-emphasis">Purpose:</span>
+                  {{ detailItem?.purpose || '—' }}
+                </div>
+                <div v-if="detailItem?.notes">
+                  <span class="text-medium-emphasis">Notes:</span>
+                  {{ detailItem?.notes }}
+                </div>
               </div>
             </v-col>
           </v-row>
         </v-card-text>
 
         <v-divider />
-        <v-card-actions class="justify-end"><v-btn variant="text" @click="detailOpen = false">Close</v-btn></v-card-actions>
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="detailOpen = false">Close</v-btn>
+        </v-card-actions>
       </v-card>
     </v-dialog>
   </v-container>
 </template>
 
 <style scoped>
-.section { background: linear-gradient(180deg, rgba(134,136,231,.06), rgba(16,185,129,.05)); border: 1px solid rgba(100,116,139,.18); }
-.hero { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%); color:#fff; }
+.section {
+  background: linear-gradient(180deg, rgba(134,136,231,.06), rgba(16,185,129,.05));
+  border: 1px solid rgba(100,116,139,.18);
+  border-radius: 16px;
+}
+.hero {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 14px 18px;
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color:#fff;
+}
 .hero-left { display:flex; flex-direction:column; gap:6px; }
 .hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
 .hero-sub { opacity:.92; font-size:.9rem; }
 
-.soft-card { border: 1px solid rgba(209,218,229,.14); border-radius: 14px; }
-.glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
+.soft-card {
+  border: 1px solid rgba(209,218,229,.14);
+  border-radius: 14px;
+}
+.glass {
+  background: rgba(255,255,255,.62);
+  backdrop-filter: blur(6px);
+}
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
 
-.elevated { border: 1px solid rgba(100,116,139,.14); border-radius: 12px; }
+.elevated {
+  border: 1px solid rgba(100,116,139,.14);
+  border-radius: 12px;
+}
 
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-.truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* table wrapper for horizontal scroll */
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* filters card slightly tighter */
+.filters-card {
+  margin-bottom: 12px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .lbl { font-size:.78rem; color:#64748b; }
 .val { font-weight:600; }
@@ -486,9 +666,47 @@ watch([filtered, itemsPerPage], () => {
 
 /* On very narrow screens, stretch footer sections to full width */
 @media (max-width: 600px){
-  .table-footer { padding: 10px 12px; gap:10px; }
-  .tf-left, .tf-middle, .tf-right { width: 100%; }
-  .tf-right { justify-content: flex-end; }
+  .history-container {
+    padding: 0 !important;      /* full-width content */
+  }
+
+  .section {
+    border: none;
+    border-radius: 0;
+  }
+
+  .hero {
+    border-radius: 0;
+    padding: 10px 14px;
+  }
+
+  .hero-title {
+    font-size: 0.95rem;
+    gap: 8px;
+  }
+
+  .soft-card {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .filters-card {
+    margin-bottom: 8px;
+  }
+
+  .table-footer {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+  .tf-left,
+  .tf-middle,
+  .tf-right {
+    width: 100%;
+  }
+  .tf-right {
+    justify-content: flex-end;
+  }
 }
 
 /* ——— Highlight animation when coming from calendar ——— */
@@ -500,5 +718,4 @@ watch([filtered, itemsPerPage], () => {
   50%  { background-color: #fef08a; }
   100% { background-color: transparent; }
 }
-
 </style>

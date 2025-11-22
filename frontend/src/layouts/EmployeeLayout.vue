@@ -213,7 +213,7 @@ function toggleAuth() {
   padding: 8px 12px;
   margin: 6px 8px 2px;
   color: var(--brand);
-  font-weight: 800;
+  font-weight: 700;
   border-radius: 10px;
   user-select: none;
   cursor: pointer;
@@ -234,7 +234,7 @@ function toggleAuth() {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(46,163,165,.12) inset;
 }
-.fa-fw { width: 1.25em; text-align: center; }
+.fa-fw { width: 1.05em; text-align: center; }
 .caret { color: var(--muted); }
 
 /* Main area */

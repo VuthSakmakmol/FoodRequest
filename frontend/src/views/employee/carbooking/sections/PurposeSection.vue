@@ -47,23 +47,29 @@ function onDestinationChange(row) {
               <v-select
                 :items="PURPOSES"
                 v-model="props.form.purpose"
-                label="Purpose"
                 variant="outlined"
                 density="compact"
                 hide-details
-              />
+              >
+                <template #label>
+                  Purpose<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
 
             <v-col cols="12">
               <v-textarea
                 v-model="props.form.notes"
-                label="Notes / Special Instructions"
                 auto-grow
                 rows="2"
                 variant="outlined"
                 density="compact"
                 hide-details
-              />
+              >
+                <template #label>
+                  Notes / Special Instructions<span class="required-star">*</span>
+                </template>
+              </v-textarea>
             </v-col>
           </v-row>
 
@@ -102,24 +108,52 @@ function onDestinationChange(row) {
                         <v-select
                           :items="destinationItems"
                           v-model="row.destination"
-                          :label="`Destination #${idx + 1}`"
                           variant="outlined"
                           density="compact"
                           hide-details
                           @update:model-value="onDestinationChange(row)"
-                        />
+                        >
+                          <template #label>
+                            Destination #{{ idx + 1 }}<span class="required-star">*</span>
+                          </template>
+                        </v-select>
                       </v-col>
 
                       <v-col v-if="row.destination === 'Other'" cols="12" md="4">
-                        <v-text-field v-model="row.destinationOther" label="Destination Name (Other)" variant="outlined" density="compact" hide-details />
+                        <v-text-field
+                          v-model="row.destinationOther"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                        >
+                          <template #label>
+                            Destination Name (Other)<span class="required-star">*</span>
+                          </template>
+                        </v-text-field>
                       </v-col>
 
                       <v-col v-if="row.destination === 'Other'" cols="12" md="4">
-                        <v-text-field v-model="row.mapLink" label="Google Maps Link" placeholder="https://maps.google.com/…" variant="outlined" density="compact" hide-details />
+                        <v-text-field
+                          v-model="row.mapLink"
+                          placeholder="https://maps.google.com/…"
+                          variant="outlined"
+                          density="compact"
+                          hide-details
+                        >
+                          <template #label>
+                            Google Maps Link<span class="required-star">*</span>
+                          </template>
+                        </v-text-field>
                       </v-col>
 
                       <v-col cols="12" md="auto" class="d-flex justify-end mt-2 mt-md-0">
-                        <v-btn color="error" variant="text" size="small" class="remove-btn" @click="removeStop(idx)">
+                        <v-btn
+                          color="error"
+                          variant="text"
+                          size="small"
+                          class="remove-btn"
+                          @click="removeStop(idx)"
+                        >
                           <i class="fa-solid fa-trash"></i>
                           <span class="ml-1">Remove</span>
                         </v-btn>
@@ -137,16 +171,73 @@ function onDestinationChange(row) {
 </template>
 
 <style scoped>
-.section { background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); border: 1px solid rgba(100,116,139,.18); }
-.hero { padding:14px 18px; background:linear-gradient(90deg,#5d7884,#9293d4 60%,#786e95); color:#fff; display:flex; align-items:center; gap:10px; font-weight:700; }
-.soft-card { border: 1px solid rgba(100,116,139,.14); border-radius:14px; }
-.glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
+.section {
+  background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border: 1px solid rgba(100,116,139,.18);
+  border-radius: 16px;
+}
+.hero {
+  padding:14px 18px;
+  background:linear-gradient(90deg,#5d7884,#9293d4 60%,#786e95);
+  color:#fff;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:700;
+}
+.soft-card {
+  border: 1px solid rgba(100,116,139,.14);
+  border-radius:14px;
+}
+.glass {
+  background: rgba(255,255,255,.62);
+  backdrop-filter: blur(6px);
+}
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
 .subhdr.between { justify-content:space-between; }
 .dashed { border:1px dashed rgba(100,116,139,.25); }
 .row-title { display:flex; align-items:center; gap:10px; }
-.row-title .num { width:22px; height:22px; border-radius:999px; background:linear-gradient(135deg,#22d3ee,#6366f1); color:#fff; display:flex; justify-content:center; align-items:center; font-size:12px; font-weight:800; }
+.row-title .num {
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  background:linear-gradient(135deg,#22d3ee,#6366f1);
+  color:#fff;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  font-size:12px;
+  font-weight:800;
+}
 .remove-btn { color:#ef4444; }
 .btn-grad { background:linear-gradient(90deg,#22d3ee,#6366f1); color:#fff; }
 .btn-grad:hover { filter:brightness(1.05); }
+
+/* 🔴 red, slightly bigger star for required fields */
+.required-star {
+  color: #fd0000;
+  font-size: 1.2em;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+/* 📱 Mobile: remove borders & stretch to edges to save space */
+@media (max-width: 600px) {
+  .section {
+    border: none;
+    border-radius: 0;
+    margin-left: -12px;  /* match v-container horizontal padding */
+    margin-right: -12px;
+  }
+
+  .hero {
+    border-radius: 0;
+  }
+
+  .soft-card {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
 </style>

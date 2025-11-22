@@ -96,9 +96,9 @@ const form = ref({
   timeStart: ''
 })
 
-/* ───────── Helpers ───────── */
+/* ───────── Helpers (demo capacity) ───────── */
 const demoBookings = ref([
-  { date: dayjs().format('YYYY-MM-DD'), category: 'Car', start: '07:00', end: '09:00' },
+  { date: dayjs().format('YYYY-MM-DD'), category: 'Car',       start: '07:00', end: '09:00' },
   { date: dayjs().format('YYYY-MM-DD'), category: 'Messenger', start: '08:00', end: '10:00' }
 ])
 
@@ -112,7 +112,7 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
 }
 
 const selectedStart = computed(() => toMinutes(form.value.startHour, form.value.startMinute))
-const selectedEnd = computed(() => toMinutes(form.value.endHour, form.value.endMinute))
+const selectedEnd   = computed(() => toMinutes(form.value.endHour, form.value.endMinute))
 
 const busyCar = computed(() => {
   if (!form.value.tripDate || !selectedStart.value || !selectedEnd.value) return 0
@@ -136,15 +136,19 @@ const availableCar = computed(() => Math.max(0, MAX_CAR - busyCar.value))
 const availableMsgr = computed(() => Math.max(0, MAX_MSGR - busyMsgr.value))
 const capacityExceeded = computed(() => {
   if (!selectedStart.value || !selectedEnd.value) return false
-  if (form.value.category === 'Car') return availableCar.value <= 0
+  if (form.value.category === 'Car')       return availableCar.value <= 0
   if (form.value.category === 'Messenger') return availableMsgr.value <= 0
   return false
 })
 
 /* ───────── Validation ───────── */
 const hasAirport = computed(() => (form.value.stops || []).some(s => s.destination === 'Airport'))
-const startTime = computed(() => form.value.startHour && form.value.startMinute ? `${form.value.startHour}:${form.value.startMinute}` : '')
-const endTime = computed(() => form.value.endHour && form.value.endMinute ? `${form.value.endHour}:${form.value.endMinute}` : '')
+const startTime = computed(() =>
+  form.value.startHour && form.value.startMinute ? `${form.value.startHour}:${form.value.startMinute}` : ''
+)
+const endTime = computed(() =>
+  form.value.endHour && form.value.endMinute ? `${form.value.endHour}:${form.value.endMinute}` : ''
+)
 
 function validateForm() {
   const f = form.value
@@ -309,7 +313,7 @@ watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeI
 </script>
 
 <template>
-  <v-container fluid class="pa-2">
+  <v-container fluid class="pa-2 book-container">
     <v-card class="rounded-lg slim-card" elevation="1">
       <v-card-text class="pa-3">
         <v-form @submit.prevent="submit">
@@ -361,7 +365,42 @@ watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeI
 </template>
 
 <style scoped>
-.slim-card { border: 1px solid rgba(100,116,139,.16); }
-.slim-toolbar { background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); }
+.slim-card {
+  border: 1px solid rgba(100,116,139,.16);
+  border-radius: 14px;
+}
+.slim-toolbar {
+  background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
+}
 .sticky-col { align-self: flex-start; }
+
+/* Slightly tighter inner padding overall */
+:deep(.slim-card > .v-card-text) {
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+/* 📱 Mobile: remove borders, full-width to phone edge, tighter paddings */
+@media (max-width: 600px) {
+  .book-container {
+    padding: 0 !important;          /* kill v-container padding */
+  }
+
+  .slim-card {
+    border: none;
+    border-radius: 0;
+  }
+
+  .slim-toolbar {
+    border-radius: 0;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  :deep(.slim-card > .v-card-text) {
+    padding: 8px 8px 6px;
+  }
+}
 </style>

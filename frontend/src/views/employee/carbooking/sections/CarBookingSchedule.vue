@@ -12,12 +12,6 @@ const scheduleDate = ref(dayjs().format('YYYY-MM-DD'))
 <template>
   <v-container fluid class="pa-2">
     <v-card class="rounded-lg" elevation="1">
-      <v-toolbar flat color="primary" density="comfortable" class="rounded-t-lg">
-        <v-toolbar-title class="text-white font-weight-bold">
-          <v-icon start>mdi-calendar</v-icon> Transport Schedule
-        </v-toolbar-title>
-      </v-toolbar>
-
       <v-card-text class="pa-3">
         <TransportScheduleCalendar
           v-model="scheduleDate"

@@ -427,6 +427,7 @@ async function createSeries () {
 .section { 
   background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
   border: 1px solid rgba(100,116,139,.18);
+  border-radius: 16px;
 }
 .hero { 
   display:flex; align-items:center; justify-content:space-between; 
@@ -491,8 +492,55 @@ async function createSeries () {
 .badge-holiday{ display:inline-flex; align-self:flex-start; margin-top:2px; padding:2px 8px; border-radius:8px; font-size:.75rem; font-weight:700; background:#fee2e2; color:#991b1b; }
 .badge-holiday.subtle{ background:#ffe4e6; color:#9f1239; opacity:.9; }
 
-/* Small screens */
-@media (max-width: 599px){
-  .preview-card{ min-height:104px; }
+/* 📱 Small screens: save space, full-width cards */
+@media (max-width: 600px){
+  .section {
+    border: none;
+    border-radius: 0;
+    margin-left: -12px;   /* match v-container padding */
+    margin-right: -12px;
+  }
+
+  .hero {
+    border-radius: 0;
+    padding: 10px 14px;
+  }
+
+  .soft-card {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .calendar-scroll {
+    padding: 4px 4px;
+  }
+
+  .week-header,
+  .preview-grid {
+    min-width: auto;
+  }
+
+  .week-header {
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
+    gap: 8px;
+  }
+
+  .preview-grid {
+    grid-template-columns: repeat(7, minmax(120px, 1fr));
+    column-gap: 8px;
+    row-gap: 8px;
+  }
+
+  .preview-card {
+    min-height: 90px;
+    padding: 8px 10px;
+    border-radius: 10px;
+  }
+
+  .pill {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+  }
 }
 </style>

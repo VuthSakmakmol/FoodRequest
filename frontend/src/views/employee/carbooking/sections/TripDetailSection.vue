@@ -134,7 +134,10 @@ async function refreshAvailability() {
 watch(() => [props.form.startHour, props.form.startMinute], validateTime)
 watch(() => [props.form.endHour, props.form.endMinute], validateTime)
 watch(() => [props.form.tripDate, props.form.category], refreshAvailability)
-watch(() => [props.form.startHour, props.form.startMinute, props.form.endHour, props.form.endMinute], refreshAvailability)
+watch(
+  () => [props.form.startHour, props.form.startMinute, props.form.endHour, props.form.endMinute],
+  refreshAvailability
+)
 onMounted(refreshAvailability)
 </script>
 
@@ -191,21 +194,27 @@ onMounted(refreshAvailability)
               <v-select
                 :items="CATEGORY"
                 v-model="props.form.category"
-                label="Category"
                 variant="outlined"
                 density="compact"
                 hide-details
-              />
+              >
+                <template #label>
+                  Category<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
-            <v-col cols="12" md="4">
+            <v-col cols="12" md="6">
               <v-text-field
                 v-model="props.form.tripDate"
                 type="date"
-                label="Confirm Date"
                 variant="outlined"
                 density="compact"
                 hide-details
-              />
+              >
+                <template #label>
+                  Confirm Date<span class="required-star">*</span>
+                </template>
+              </v-text-field>
             </v-col>
           </v-row>
         </v-card-text>
@@ -220,24 +229,83 @@ onMounted(refreshAvailability)
         <v-card-text class="pt-0">
           <v-row dense>
             <v-col cols="6" md="3">
-              <v-select :items="HOURS" v-model="props.form.startHour" label="Start Hour" variant="outlined" density="compact" hide-details />
+              <v-select
+                :items="HOURS"
+                v-model="props.form.startHour"
+                variant="outlined"
+                density="compact"
+                hide-details
+              >
+                <template #label>
+                  Start Hour<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
             <v-col cols="6" md="3">
-              <v-select :items="MINUTES" v-model="props.form.startMinute" label="Start Minute" variant="outlined" density="compact" hide-details />
+              <v-select
+                :items="MINUTES"
+                v-model="props.form.startMinute"
+                variant="outlined"
+                density="compact"
+                hide-details
+              >
+                <template #label>
+                  Start Minute<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
             <v-col cols="6" md="3">
-              <v-select :items="HOURS" v-model="props.form.endHour" label="End Hour" variant="outlined" density="compact" hide-details />
+              <v-select
+                :items="HOURS"
+                v-model="props.form.endHour"
+                variant="outlined"
+                density="compact"
+                hide-details
+              >
+                <template #label>
+                  End Hour<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
             <v-col cols="6" md="3">
-              <v-select :items="MINUTES" v-model="props.form.endMinute" label="End Minute" variant="outlined" density="compact" hide-details />
+              <v-select
+                :items="MINUTES"
+                v-model="props.form.endMinute"
+                variant="outlined"
+                density="compact"
+                hide-details
+              >
+                <template #label>
+                  End Minute<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
 
             <v-col v-if="isCarSelected" cols="12" md="4">
-              <v-select :items="['0', ...PASSENGER_OPTIONS]" v-model="props.form.passengers" label="Passengers" variant="outlined" density="compact" hide-details />
+              <v-select
+                :items="['0', ...PASSENGER_OPTIONS]"
+                v-model="props.form.passengers"
+                variant="outlined"
+                density="compact"
+                hide-details
+              >
+                <template #label>
+                  Passengers<span class="required-star">*</span>
+                </template>
+              </v-select>
             </v-col>
 
             <v-col cols="12" :md="isCarSelected ? 8 : 12">
-              <v-text-field v-model="props.form.customerContact" label="Customer Contact Number" variant="outlined" density="compact" hide-details />
+              <v-text-field
+                v-model="props.form.customerContact"
+                variant="outlined"
+                density="compact"
+                hide-details
+              >
+                <template #label>
+                  Customer Contact Number<span class="required-star">*</span>
+                </template>
+              </v-text-field>
             </v-col>
           </v-row>
         </v-card-text>
@@ -247,10 +315,73 @@ onMounted(refreshAvailability)
 </template>
 
 <style scoped>
-.section { background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); border: 1px solid rgba(100,116,139,.18); }
-.hero { padding:14px 18px; background:linear-gradient(90deg,#5d7884,#9293d4 60%,#786e95); color:#fff; font-weight:700; display:flex; align-items:center; gap:10px; }
-.soft-card { border:1px solid rgba(100,116,139,.14); border-radius:14px; }
-.glass { background:rgba(255,255,255,.62); backdrop-filter:blur(6px); }
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size:medium; }
-.cap-row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+.section {
+  background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border: 1px solid rgba(100,116,139,.18);
+  border-radius: 16px;
+}
+
+/* hero bar */
+.hero {
+  padding:14px 18px;
+  background:linear-gradient(90deg,#5d7884,#9293d4 60%,#786e95);
+  color:#fff;
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+/* cards */
+.soft-card {
+  border:1px solid rgba(100,116,139,.14);
+  border-radius:14px;
+}
+.glass {
+  background:rgba(255,255,255,.62);
+  backdrop-filter:blur(6px);
+}
+.subhdr {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:700;
+  font-size:medium;
+}
+.cap-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+/* 🔴 red, slightly bigger star for required fields */
+.required-star {
+  color: #ef4444;
+  font-size: 1.2em;
+  margin-left: 2px;
+  line-height: 1;
+}
+
+/* 📱 Mobile: remove borders & stretch to screen edge */
+@media (max-width: 600px) {
+  .section {
+    border: none;
+    border-radius: 0;
+    /* pull out of v-container padding so it touches phone edge */
+    margin-left: -12px;
+    margin-right: -12px;
+  }
+
+  .hero {
+    border-radius: 0;
+  }
+
+  .soft-card {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
 </style>
