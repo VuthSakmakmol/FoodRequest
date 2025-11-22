@@ -3,14 +3,14 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
+
 /* ─────────────── STATE ─────────────── */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
 
 const route = useRoute()
-const router = useRouter()
 
 const selectedDate = ref('')
 const statusFilter = ref('ALL')
@@ -81,16 +81,16 @@ function useDevIdentity() {
 const roleLabel = computed(() =>
   identity.value?.role === 'MESSENGER' ? 'Messenger Resp.' : 'Driver Resp.'
 )
-const headers = [
-  { title: 'Time', key: 'time', width: 160 },
-  { title: 'Category', key: 'category', width: 120 },
-  { title: 'Requester', key: 'requester', width: 230 },
-  { title: 'Itinerary', key: 'itinerary' },
-  { title: 'Pax', key: 'passengers', width: 70, align: 'center' },
-  { title: 'Status', key: 'status', width: 150, align: 'end' },
+const headers = computed(() => [
+  { title: 'Time',        key: 'time',       width: 160 },
+  { title: 'Category',    key: 'category',   width: 120 },
+  { title: 'Requester',   key: 'requester',  width: 230 },
+  { title: 'Itinerary',   key: 'itinerary' },
+  { title: 'Pax',         key: 'passengers', width: 70,  align: 'center' },
+  { title: 'Status',      key: 'status',     width: 150, align: 'end' },
   { title: roleLabel.value, key: 'driverAck', width: 150, align: 'end' },
-  { title: '', key: 'actions', width: 330, align: 'end' },
-]
+  { title: '',            key: 'actions',    width: 330, align: 'end' },
+])
 
 /* ─────────────── ICONS / COLORS ─────────────── */
 const statusColor = s =>
@@ -162,7 +162,6 @@ async function loadList() {
       assignment: x.assignment || {},
     }))
 
-    // join live socket rooms
     const ids = rows.value.map(r => String(r._id)).filter(Boolean)
     if (typeof leavePreviousRooms === 'function') {
       await leavePreviousRooms()
@@ -196,6 +195,26 @@ const filtered = computed(() =>
     })
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 )
+
+/* ─────────────── SIMPLE PAGINATION (no "items per page" select) ─────────────── */
+const page = ref(1)
+const itemsPerPage = 10
+
+const pageCount = computed(() => {
+  const n = Math.ceil((filtered.value?.length || 0) / itemsPerPage)
+  return Math.max(1, n || 1)
+})
+const totalItems = computed(() => filtered.value?.length || 0)
+const rangeStart = computed(() =>
+  totalItems.value ? (page.value - 1) * itemsPerPage + 1 : 0
+)
+const rangeEnd = computed(() =>
+  Math.min(page.value * itemsPerPage, totalItems.value)
+)
+
+watch(filtered, () => {
+  if (page.value > pageCount.value) page.value = pageCount.value
+})
 
 /* ─────────────── ACTION HELPERS ─────────────── */
 const isMine = it =>
@@ -313,7 +332,6 @@ onMounted(() => {
     selectedDate.value = String(route.query.date)
   }
 
-  // Scroll to focused booking after load
   watch(rows, () => {
     const focusId = route.query?.focus
     if (focusId) {
@@ -348,7 +366,6 @@ function showDetails(item) {
   detailOpen.value = true
 }
 </script>
-
 
 <template>
   <v-container fluid class="pa-2">
@@ -412,7 +429,17 @@ function showDetails(item) {
           <v-card-text>
             <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
 
-            <v-data-table :headers="headers" :items="filtered" :loading="loading" item-key="_id" density="comfortable" class="elevated">
+            <v-data-table
+              :headers="headers"
+              :items="filtered"
+              :loading="loading"
+              item-key="_id"
+              density="comfortable"
+              class="elevated"
+              v-model:page="page"
+              :items-per-page="itemsPerPage"
+              :hide-default-footer="true"
+            >
               <template #loading><v-skeleton-loader type="table-row@6" /></template>
 
               <template #item.time="{ item }">
@@ -443,7 +470,9 @@ function showDetails(item) {
                 </div>
               </template>
 
-              <template #item.passengers="{ item }"><div class="text-center">{{ item.passengers ?? 1 }}</div></template>
+              <template #item.passengers="{ item }">
+                <div class="text-center">{{ item.passengers ?? 1 }}</div>
+              </template>
 
               <template #item.status="{ item }">
                 <v-chip :color="statusColor(item.status)" size="small" label>
@@ -461,7 +490,7 @@ function showDetails(item) {
               <!-- ACTIONS -->
               <template #item.actions="{ item }">
                 <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
-                  <!-- Step 1: driver ack -->
+                  <!-- Step 1: driver/messenger ack -->
                   <template v-if="canRespond(item)">
                     <v-btn size="small" color="success" variant="flat"
                       :loading="actLoading === String(item._id)"
@@ -486,7 +515,11 @@ function showDetails(item) {
                       </template>
                       <v-list density="compact" min-width="220">
                         <v-list-subheader>Next status</v-list-subheader>
-                        <v-list-item v-for="s in nextStatusesFor(item.status)" :key="s" @click.stop="setDriverStatus(item, s)">
+                        <v-list-item
+                          v-for="s in nextStatusesFor(item.status)"
+                          :key="s"
+                          @click.stop="setDriverStatus(item, s)"
+                        >
                           <template #prepend><i :class="statusFa(s)"></i></template>
                           <v-list-item-title>{{ s }}</v-list-item-title>
                         </v-list-item>
@@ -504,6 +537,36 @@ function showDetails(item) {
                 <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">
                   No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
                 </v-sheet>
+              </template>
+
+              <!-- Custom footer: only next/prev icons, no "items per page" select -->
+              <template #bottom>
+                <div class="table-footer">
+                  <div class="tf-left text-caption text-medium-emphasis">
+                    {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                  </div>
+                  <div class="tf-right">
+                    <v-pagination
+                      v-model="page"
+                      :length="pageCount"
+                      :total-visible="5"
+                      density="comfortable"
+                    >
+                      <template #first>
+                        <i class="fa-solid fa-angles-left"></i>
+                      </template>
+                      <template #prev>
+                        <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #next>
+                        <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #last>
+                        <i class="fa-solid fa-angles-right"></i>
+                      </template>
+                    </v-pagination>
+                  </div>
+                </div>
               </template>
             </v-data-table>
           </v-card-text>
@@ -641,4 +704,24 @@ function showDetails(item) {
 /* small spacing helpers for FA icons */
 .mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
 .ml-2 { margin-left: .5rem; }
+
+/* custom footer */
+.table-footer{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding: 10px 16px;
+  border-top: 1px solid #e5e7eb;
+}
+.tf-left { min-width: 120px; }
+.tf-right { display:flex; align-items:center; }
+
+/* tighter pagination buttons */
+:deep(.v-pagination .v-btn){ min-width: 32px; }
+:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
+
+@media (max-width: 600px){
+  .table-footer { flex-direction: column; align-items:flex-start; }
+}
 </style>

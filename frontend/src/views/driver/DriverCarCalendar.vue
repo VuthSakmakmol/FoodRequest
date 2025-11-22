@@ -10,17 +10,30 @@ const router = useRouter()
 
 /* ───────── STATE ───────── */
 const currentMonth = ref(dayjs())
-const bookings = ref([])
-const loading = ref(false)
-const identity = ref({ loginId: '', role: '' })
+const bookings     = ref([])
+const loading      = ref(false)
+const identity     = ref({ loginId: '', role: '' })
 
 /* ───────── DETECT IDENTITY ───────── */
 function detectIdentity() {
   try {
-    const u = JSON.parse(localStorage.getItem('user') || localStorage.getItem('auth:user') || '{}')
-    const loginId = u?.id || u?.loginId || u?.user?.loginId || localStorage.getItem('loginId') || ''
-    const role = u?.role || u?.user?.role || localStorage.getItem('role') || 'DRIVER'
-    return { loginId, role: role.toUpperCase() }
+    const u = JSON.parse(
+      localStorage.getItem('user') ||
+      localStorage.getItem('auth:user') ||
+      '{}'
+    )
+    const loginId =
+      u?.id ||
+      u?.loginId ||
+      u?.user?.loginId ||
+      localStorage.getItem('loginId') ||
+      ''
+    const role =
+      u?.role ||
+      u?.user?.role ||
+      localStorage.getItem('role') ||
+      'DRIVER'
+    return { loginId, role: String(role).toUpperCase() }
   } catch {
     return { loginId: '', role: 'DRIVER' }
   }
@@ -28,11 +41,11 @@ function detectIdentity() {
 identity.value = detectIdentity()
 
 /* ───────── DATE COMPUTED ───────── */
-const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
+const monthLabel   = computed(() => currentMonth.value.format('MMMM YYYY'))
 const startOfMonth = computed(() => currentMonth.value.startOf('month'))
-const endOfMonth = computed(() => currentMonth.value.endOf('month'))
-const startOfGrid = computed(() => startOfMonth.value.startOf('week'))
-const endOfGrid = computed(() => endOfMonth.value.endOf('week'))
+const endOfMonth   = computed(() => currentMonth.value.endOf('month'))
+const startOfGrid  = computed(() => startOfMonth.value.startOf('week'))
+const endOfGrid    = computed(() => endOfMonth.value.endOf('week'))
 
 const days = computed(() => {
   const arr = []
@@ -47,19 +60,16 @@ const days = computed(() => {
 /* ───────── API ───────── */
 async function fetchMonth() {
   const { loginId, role } = identity.value
-  console.log('[DriverCalendar] Fetching...', { loginId, role })
   if (!loginId) return
 
   loading.value = true
   bookings.value = []
   try {
     const { data } = await api.get('/driver/car-bookings', {
-      params: { loginId, role },
+      params:  { loginId, role },
       headers: { 'x-login-id': loginId, 'x-role': role }
     })
-    console.log('Response data:', data)
     bookings.value = Array.isArray(data) ? data : []
-    console.log('Filtered bookings:', bookings.value.length)
   } catch (err) {
     console.error('[DriverCalendar] Error', err)
   } finally {
@@ -81,19 +91,19 @@ const byDate = computed(() => {
 /* ───────── STATUS COLORS ───────── */
 const statusColor = s =>
   ({
-    PENDING: '#94a3b8',
-    ACCEPTED: '#3b82f6',
-    ON_ROAD: '#06b6d4',
-    ARRIVING: '#10b981',
+    PENDING  : '#94a3b8',
+    ACCEPTED : '#3b82f6',
+    ON_ROAD  : '#06b6d4',
+    ARRIVING : '#10b981',
     COMPLETED: '#16a34a',
-    DELAYED: '#facc15',
-    CANCELLED: '#ef4444',
+    DELAYED  : '#facc15',
+    CANCELLED: '#ef4444'
   }[s] || '#94a3b8')
 
 /* ───────── NAVIGATION ───────── */
-function nextMonth() { currentMonth.value = currentMonth.value.add(1, 'month'); fetchMonth() }
-function prevMonth() { currentMonth.value = currentMonth.value.subtract(1, 'month'); fetchMonth() }
-function goToday() { currentMonth.value = dayjs(); fetchMonth() }
+function nextMonth()  { currentMonth.value = currentMonth.value.add(1, 'month'); fetchMonth() }
+function prevMonth()  { currentMonth.value = currentMonth.value.subtract(1, 'month'); fetchMonth() }
+function goToday()    { currentMonth.value = dayjs(); fetchMonth() }
 
 /* ───────── DETAILS ───────── */
 function showDayDetails(d) {
@@ -123,7 +133,7 @@ function showDayDetails(d) {
       </div>
     `,
     showConfirmButton: false,
-    showCloseButton: true,
+    showCloseButton : true,
     width: 520,
     didOpen: () => {
       window.__selectDriverBooking = (id, date) => {
@@ -135,152 +145,296 @@ function showDayDetails(d) {
   })
 }
 
-
 /* ───────── INIT ───────── */
 onMounted(fetchMonth)
 </script>
 
 <template>
-  <div class="calendar-wrapper">
-    <div class="calendar-toolbar">
-      <button class="btn-nav" @click="prevMonth">‹</button>
-      <div class="month-label">{{ monthLabel }}</div>
-      <button class="btn-nav" @click="nextMonth">›</button>
-      <div class="toolbar-right">
-        <button class="btn-flat" @click="fetchMonth">REFRESH</button>
-        <button class="btn-flat today" @click="goToday">TODAY</button>
+  <div class="calendar-page">
+    <div class="calendar-wrapper">
+      <!-- Toolbar -->
+      <div class="calendar-toolbar">
+        <button class="btn-nav" @click="prevMonth">‹</button>
+        <div class="month-label">{{ monthLabel }}</div>
+        <button class="btn-nav" @click="nextMonth">›</button>
+        <div class="toolbar-right">
+          <button class="btn-flat" @click="fetchMonth">REFRESH</button>
+          <button class="btn-flat today" @click="goToday">TODAY</button>
+        </div>
       </div>
-    </div>
 
-    <div class="week-header">
-      <div v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="w" class="week-cell">{{ w }}</div>
-    </div>
+      <!-- Week header -->
+      <div class="week-header">
+        <div
+          v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
+          :key="w"
+          class="week-cell"
+        >
+          {{ w }}
+        </div>
+      </div>
 
-    <div class="calendar-grid">
-      <div
-        v-for="d in days"
-        :key="d.format('YYYY-MM-DD')"
-        class="day-cell"
-        :class="{
-          today: d.isSame(dayjs(), 'day'),
-          otherMonth: !d.isSame(currentMonth.value, 'month')
-        }"
-        @click="showDayDetails(d)"
-      >
-        <div class="day-number" :class="{ sunday: d.day() === 0 }">{{ d.date() }}</div>
+      <!-- Calendar grid -->
+      <div class="calendar-grid">
+        <div
+          v-for="d in days"
+          :key="d.format('YYYY-MM-DD')"
+          class="day-cell"
+          :class="{
+            today     : d.isSame(dayjs(), 'day'),
+            otherMonth: !d.isSame(currentMonth.value, 'month')
+          }"
+          @click="showDayDetails(d)"
+        >
+          <div class="day-number" :class="{ sunday: d.day() === 0 }">
+            {{ d.date() }}
+          </div>
 
-        <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
-          <div
-            v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
-            :key="i"
-            class="booking-chip"
-            :style="{ backgroundColor: statusColor(b.status) }"
-          >
-            {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+          <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
+            <div
+              v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
+              :key="i"
+              class="booking-chip"
+              :style="{ backgroundColor: statusColor(b.status) }"
+            >
+              {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+            </div>
           </div>
         </div>
       </div>
+
+      <div v-if="loading" class="loader">Loading…</div>
     </div>
 
-    <div v-if="loading" class="loader">Loading…</div>
-    </div>
-        <div class="status-legend">
-        <div v-for="(color, status) in {
-          PENDING:'#94a3b8', ACCEPTED:'#3b82f6', ON_ROAD:'#06b6d4',
-          ARRIVING:'#10b981', COMPLETED:'#16a34a', DELAYED:'#facc15', CANCELLED:'#ef4444'
-        }" :key="status" class="legend-item">
-          <span class="legend-dot" :style="{ backgroundColor: color }"></span>{{ status }}
-        </div>
+    <!-- Legend (below card) -->
+    <div class="status-legend">
+      <div
+        v-for="(color, status) in {
+          PENDING:'#94a3b8',
+          ACCEPTED:'#3b82f6',
+          ON_ROAD:'#06b6d4',
+          ARRIVING:'#10b981',
+          COMPLETED:'#16a34a',
+          DELAYED:'#facc15',
+          CANCELLED:'#ef4444'
+        }"
+        :key="status"
+        class="legend-item"
+      >
+        <span class="legend-dot" :style="{ backgroundColor: color }"></span>
+        <span class="legend-label">{{ status }}</span>
       </div>
-
+    </div>
+  </div>
 </template>
 
 <style scoped>
+/* page container: a bit of air on desktop, edge on phone */
+.calendar-page {
+  padding: 8px 10px 12px;
+}
+@media (max-width: 600px) {
+  .calendar-page {
+    padding: 0;
+  }
+}
+
+/* main card */
 .calendar-wrapper {
   border: 1px solid rgba(100,116,139,.16);
   border-radius: 12px;
   background: #fff;
   overflow: hidden;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  max-width: 1100px;
+  margin: 0 auto;
 }
+@media (max-width: 600px) {
+  .calendar-wrapper {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+}
+
+/* toolbar */
 .calendar-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: #f5f7fb;
-  padding: 10px 16px;
+  padding: 8px 12px;
   border-bottom: 1px solid #e2e8f0;
   font-weight: 600;
 }
-.month-label { font-size: 1.1rem; color: #111827; }
+.month-label {
+  font-size: 1.05rem;
+  color: #111827;
+}
 .btn-nav {
   background: #fff;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 18px;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   cursor: pointer;
 }
-.btn-nav:hover { background: #f1f5f9; }
-.toolbar-right { display: flex; gap: 8px; }
+.btn-nav:hover {
+  background: #f1f5f9;
+}
+.toolbar-right {
+  display: flex;
+  gap: 6px;
+}
 .btn-flat {
   background: #fff;
   border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: .9rem;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: .8rem;
   cursor: pointer;
 }
-.btn-flat.today { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+.btn-flat.today {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+}
+
+@media (max-width: 600px) {
+  .calendar-toolbar {
+    padding: 6px 8px;
+  }
+  .month-label {
+    font-size: .95rem;
+  }
+  .btn-flat {
+    padding: 4px 8px;
+    font-size: .75rem;
+  }
+  .btn-nav {
+    width: 30px;
+    height: 30px;
+  }
+}
+
+/* week header */
 .week-header {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   background: #f8fafc;
   border-bottom: 1px solid #e2e8f0;
 }
-.week-cell { text-align: center; font-weight: 700; padding: 8px 0; color: #334155; }
-.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+.week-cell {
+  text-align: center;
+  font-weight: 700;
+  padding: 6px 0;
+  color: #334155;
+  font-size: 0.8rem;
+}
+
+/* grid */
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
 .day-cell {
-  min-height: 110px;
+  min-height: 100px;
   border: 1px solid #e2e8f0;
-  padding: 6px 8px;
+  padding: 4px 6px;
   background: #fff;
   position: relative;
-  transition: background .2s;
+  transition: background .15s;
   cursor: pointer;
 }
-.day-cell.otherMonth { background: #f9fafb; opacity: 0.5; }
-.day-cell.today { border: 2px solid #2563eb; }
-.day-number { font-weight: 700; font-size: 0.95rem; color: #0f172a; }
-.day-number.sunday { color: #dc2626; }
-.bookings { margin-top: 4px; display: flex; flex-direction: column; gap: 2px; }
+.day-cell.otherMonth {
+  background: #f9fafb;
+  opacity: 0.7;
+}
+.day-cell.today {
+  border: 2px solid #2563eb;
+}
+.day-cell:hover {
+  background: #f8fafc;
+}
+
+.day-number {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0f172a;
+}
+.day-number.sunday {
+  color: #dc2626;
+}
+
+.bookings {
+  margin-top: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .booking-chip {
   border-radius: 6px;
-  padding: 2px 4px;
-  font-size: 0.8rem;
+  padding: 1px 3px;
+  font-size: 0.7rem;
   color: #fff;
   font-weight: 600;
   text-overflow: ellipsis;
   overflow: hidden;
   white-space: nowrap;
 }
-.loader { text-align: center; padding: 10px; color: #475569; font-weight: 600; }
+
+@media (max-width: 600px) {
+  .day-cell {
+    min-height: 72px;
+    padding: 3px 4px;
+  }
+  .day-number {
+    font-size: 0.8rem;
+  }
+  .booking-chip {
+    font-size: 0.65rem;
+  }
+}
+
+/* loader */
+.loader {
+  text-align: center;
+  padding: 8px;
+  color: #475569;
+  font-weight: 600;
+}
+
+/* legend */
 .status-legend {
+  max-width: 1100px;
+  margin: 8px auto 10px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 10px;
-  margin: 10px 0 14px;
-  font-size: 0.85rem;
+  gap: 8px;
+  font-size: 0.8rem;
   color: #334155;
 }
-.legend-item { display: flex; align-items: center; gap: 6px; }
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 .legend-dot {
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   border: 1px solid rgba(0,0,0,0.2);
 }
+.legend-label {
+  white-space: nowrap;
+}
 
+@media (max-width: 600px) {
+  .status-legend {
+    margin: 6px 4px 10px;
+    font-size: 0.75rem;
+  }
+}
 </style>
