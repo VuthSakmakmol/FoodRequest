@@ -58,7 +58,7 @@ function isActive(it){ return route.name === it?.to?.name }
 function logout() {
   auth.logout()            // ✅ clears user, token, socket
   localStorage.clear()     // ✅ optional: clears any other cached data (filters, prefs)
-  router.push({ name: 'employee-request' }) // ✅ correct redirect for admin
+  router.push({ name: '/' }) // ✅ correct redirect for admin
 }
 
 </script>

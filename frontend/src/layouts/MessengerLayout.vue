@@ -41,7 +41,7 @@ function isActive(it){ return route.name === it?.to?.name }
 function logout() {
   auth.logout()           // clear token, user, socket
   localStorage.clear()     // clear all persisted data
-  router.push({ name: 'employee-request' }) // redirect to messenger login
+  router.push({ name: '/' }) // redirect to messenger login
 }
 </script>
 

@@ -1,26 +1,46 @@
 <!-- src/views/GreetingPage.vue -->
 <script setup>
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+
 const router = useRouter()
 
 const go = (name) => router.push({ name })
+
+const servicesRef = ref(null)
+const scrollToServices = () => {
+  if (servicesRef.value) {
+    servicesRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  } else {
+    // fallback: go to main food request page
+    go('employee-request')
+  }
+}
 </script>
 
 <template>
   <div class="page-wrap">
     <!-- HERO -->
     <header class="hero">
+      <div class="blob blob-1" />
+      <div class="blob blob-2" />
+
       <div class="hero-content">
         <h1 class="hero-title">
-          <span class="grad-text">Welcome to Trax Requestor System</span>
-
+          <span class="grad-text">Trax Requestor System</span>
         </h1>
         <p class="hero-sub">
           Order meals, book transportation, and manage tasks — all in one place.
+          <span class="km">សេវាកម្មទាំងអស់ ក្នុងប្រព័ន្ធតែមួយ</span>
         </p>
 
         <div class="hero-cta">
-          <v-btn size="large" color="white" class="cta-btn" @click="go('employee-request')">
+          <v-btn
+            size="large"
+            color="white"
+            class="cta-btn"
+            @click="scrollToServices"
+          >
             <i class="fa-solid fa-rocket mr-2" /> Get Started
             <span class="km ml-2">ចាប់ផ្តើម</span>
           </v-btn>
@@ -39,21 +59,100 @@ const go = (name) => router.push({ name })
         </div>
       </div>
 
-      <div class="hero-image">
-        <!-- You can replace this with your own asset in /public or a CDN -->
-        <v-img
-          src=""
-          alt="Office teamwork illustration"
-          cover
-          class="img-mask"
-        />
-      </div>
+
     </header>
 
-    <!-- CARDS -->
+    <!-- MAIN CONTENT -->
     <main class="content">
+      <!-- SERVICES SECTION -->
+      <section ref="servicesRef" class="services">
+        <v-container class="py-8">
+          <div class="services-header">
+            <h2 class="services-title">
+              Choose what you want to do today
+            </h2>
+          </div>
+
+          <v-row class="services-grid" dense>
+            <!-- Food Booking -->
+            <v-col cols="12" md="6">
+              <v-card
+                class="service-card"
+                rounded="xl"
+                elevation="4"
+                @click="go('employee-request')"
+              >
+                <div class="service-card-inner">
+                  <div class="icon-pill food">
+                    <i class="fa-solid fa-bowl-rice" />
+                  </div>
+                  <div class="service-text">
+                    <div class="service-label-row">
+                      <span class="service-label">Food Booking</span>
+                      <span class="service-chip">
+                        <i class="fa-solid fa-utensils mr-1" /> Canteen
+                      </span>
+                    </div>
+                    <div class="service-subtitle">
+                      Request meals, see order history, and track daily menu.
+                      <span class="km">
+                        កក់បាយ និងតាមដានការកក់របស់បុគ្គលិក។
+                      </span>
+                    </div>
+                    <div class="service-meta">
+                      <span><i class="fa-solid fa-clock mr-1" /> Less than 1 min</span>
+                      <span><i class="fa-solid fa-bell mr-1" /> Telegram alert</span>
+                    </div>
+                  </div>
+                  <div class="service-arrow">
+                    <i class="fa-solid fa-arrow-right-long" />
+                  </div>
+                </div>
+              </v-card>
+            </v-col>
+
+            <!-- Car Booking -->
+            <v-col cols="12" md="6">
+              <v-card
+                class="service-card"
+                rounded="xl"
+                elevation="4"
+                @click="go('employee-car-booking')" 
+              >
+                <div class="service-card-inner">
+                  <div class="icon-pill transport">
+                    <i class="fa-solid fa-car" />
+                  </div>
+                  <div class="service-text">
+                    <div class="service-label-row">
+                      <span class="service-label">Car Booking</span>
+                      <span class="service-chip">
+                        <i class="fa-solid fa-road mr-1" /> Transportation
+                      </span>
+                    </div>
+                    <div class="service-subtitle">
+                      Book company car or messenger, share destinations and time.
+                      <span class="km">
+                        កក់ឡានក្រុមហ៊ុន ឬ messenger សម្រាប់ដឹកឯកសារ និងទំនិញ។
+                      </span>
+                    </div>
+                    <div class="service-meta">
+                      <span><i class="fa-solid fa-circle-nodes mr-1" /> Real-time status</span>
+                      <span><i class="fa-solid fa-users mr-1" /> Driver &amp; Messenger app</span>
+                    </div>
+                  </div>
+                  <div class="service-arrow">
+                    <i class="fa-solid fa-arrow-right-long" />
+                  </div>
+                </div>
+              </v-card>
+            </v-col>
+          </v-row>
+        </v-container>
+      </section>
+
+      <!-- Feature strip (keep) -->
       <v-container class="py-6">
-        <!-- Feature strip -->
         <v-sheet class="feature-strip" rounded="lg" elevation="1">
           <div class="stripe">
             <div class="chip">
@@ -124,12 +223,6 @@ const go = (name) => router.push({ name })
   background-clip: text;
   color: transparent;
 }
-.hero-title .km {
-  display: block;
-  font-size: .55em;
-  font-weight: 700;
-  opacity: .95;
-}
 .hero-sub {
   margin: 8px 0 16px;
   font-size: clamp(14px, 1.4vw, 18px);
@@ -172,38 +265,144 @@ const go = (name) => router.push({ name })
               radial-gradient(circle at 30% 70%, #34d399, transparent 60%);
 }
 
-/* --- Content --- */
-.content { position: relative; margin-top: -16px; }
-.greet-grid { row-gap: 18px; }
+/* --- Services section --- */
+.services {
+  margin-top: -12px;
+}
+.services-header {
+  text-align: left;
+  margin-bottom: 14px;
+}
+.badge-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  background: rgba(15,23,42,.04);
+  color: #0f172a;
+}
+.services-title {
+  margin: 10px 0 4px;
+  font-size: clamp(20px, 2.2vw, 28px);
+  font-weight: 700;
+  color: #020617;
+}
+.services-sub {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #6b7280;
+  max-width: 520px;
+}
 
-.greet-card {
-  height: 100%;
-  border-radius: 16px;
-  overflow: hidden;
-  border: 1px solid rgba(2,6,23,.06);
-  backdrop-filter: blur(4px);
-  background: linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.8));
+.services-grid {
+  margin-top: 12px;
 }
-.card-title {
-  font-weight: 900;
-  display: flex; flex-direction: column;
-  gap: 2px;
+
+/* service card */
+.service-card {
+  cursor: pointer;
+  border-radius: 20px;
+  background: radial-gradient(circle at 0% 0%, #e0f2fe 0, transparent 55%),
+              radial-gradient(circle at 100% 0%, #ede9fe 0, transparent 55%),
+              #ffffff;
+  border: 1px solid rgba(15,23,42,.06);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
 }
-.card-title .km { font-size: .78rem; font-weight: 700; opacity: .8; }
-.card-text { opacity: .9; }
-.card-icon {
-  height: 84px;
-  display:flex; align-items:center; justify-content:center;
-  font-size: 34px; color: #fff;
+.service-card-inner {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 16px;
+  padding: 18px 20px;
+  align-items: center;
 }
-.card-icon.employee  { background: linear-gradient(90deg, #0ea5e9, #60a5fa); }
-.card-icon.admin     { background: linear-gradient(90deg, #7c3aed, #a78bfa); }
-.card-icon.driver    { background: linear-gradient(90deg, #14b8a6, #22d3ee); }
-.card-icon.messenger { background: linear-gradient(90deg, #fb923c, #f97316); }
+.service-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 34px rgba(15,23,42,.16);
+  border-color: rgba(59,130,246,.55);
+}
+
+.icon-pill {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  font-size: 24px;
+}
+.icon-pill.food {
+  background: linear-gradient(135deg,#f97316,#ef4444);
+}
+.icon-pill.transport {
+  background: linear-gradient(135deg,#22c55e,#14b8a6);
+}
+
+.service-text {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.service-label-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+}
+.service-label {
+  font-weight:800;
+  font-size:1.05rem;
+  color:#020617;
+}
+.service-chip {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  padding:3px 8px;
+  border-radius:999px;
+  font-size:.75rem;
+  font-weight:700;
+  background:rgba(15,23,42,.06);
+  color:#374151;
+}
+.service-subtitle {
+  font-size:0.9rem;
+  color:#4b5563;
+}
+.service-subtitle .km {
+  display:block;
+  font-size:0.85rem;
+  color:#6b7280;
+  margin-top:2px;
+}
+.service-meta {
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:4px;
+  font-size:0.8rem;
+  color:#6b7280;
+}
+.service-meta i {
+  color:#2563eb;
+}
+
+.service-arrow {
+  font-size:1.2rem;
+  color:#475569;
+}
+
+/* Content general */
+.content { position: relative; }
 
 /* Feature strip */
 .feature-strip {
-  margin-top: 24px;
+  margin-top: 8px;
   padding: 14px;
   background: linear-gradient(90deg, rgba(2,6,23,.02), rgba(2,6,23,.04));
   border: 1px solid rgba(2,6,23,.06);
@@ -234,6 +433,22 @@ const go = (name) => router.push({ name })
 .sep { opacity: .5; }
 
 /* Utility */
-.km { font-family: "Kantumruy Pro", system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Khmer OS Siemreap", sans-serif; }
-.mr-2 { margin-right: .5rem; } .ml-2 { margin-left: .5rem; }
+.km {
+  font-family: "Kantumruy Pro", system-ui, -apple-system, Segoe UI, Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", "Khmer OS Siemreap", sans-serif;
+}
+.mr-1 { margin-right: .25rem; }
+.mr-2 { margin-right: .5rem; }
+.ml-2 { margin-left: .5rem; }
+
+/* Mobile tweaks */
+@media (max-width: 768px) {
+  .service-card-inner {
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+  }
+  .service-arrow {
+    display:none;
+  }
+}
 </style>

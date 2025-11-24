@@ -40,7 +40,7 @@ function isActive(it){ return route.name === it?.to?.name }
 function logout() {
   auth.logout()            // ✅ clear token, user, socket
   localStorage.clear()     // ✅ optional: clear any leftover localStorage keys
-  router.push({ name: 'employee-request' }) // ✅ go back to driver login page
+  router.push({ name: '/' }) // ✅ go back to driver login page
 }
 
 </script>

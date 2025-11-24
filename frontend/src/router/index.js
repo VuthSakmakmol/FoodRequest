@@ -58,8 +58,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     // Public landing + default redirect
-    { name: 'greeting', path: '/greeting', component: GreetingPage, meta: { public: true } },
-    { path: '/', redirect: { name: 'employee-request' }, meta: { public: true } },
+    { name: '/', path: '/greeting', component: GreetingPage, meta: { public: true } },
+    { path: '/employee-request', redirect: { name: 'employee-request' }, meta: { public: true } },
 
     // Public admin login
     { name: 'admin-login', path: '/admin/login', component: AdminLogin, meta: { public: true } },
