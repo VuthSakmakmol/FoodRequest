@@ -34,18 +34,6 @@ const scrollToServices = () => {
           <span class="km">សេវាកម្មទាំងអស់ ក្នុងប្រព័ន្ធតែមួយ</span>
         </p>
 
-        <div class="hero-cta">
-          <v-btn
-            size="large"
-            color="white"
-            class="cta-btn"
-            @click="scrollToServices"
-          >
-            <i class="fa-solid fa-rocket mr-2" /> Get Started
-            <span class="km ml-2">ចាប់ផ្តើម</span>
-          </v-btn>
-        </div>
-
         <div class="quick-badges">
           <v-chip size="small" variant="elevated" color="cyan">
             <i class="fa-solid fa-bolt mr-2" /> Real-time

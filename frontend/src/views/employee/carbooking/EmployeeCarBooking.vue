@@ -19,16 +19,15 @@ import RecurringBookingSection from './sections/RecurringBookingSection.vue'
 
 /* ───────── Constants ───────── */
 const CATEGORY = ['Car', 'Messenger']
+const AIRPORT_DESTINATION = 'Techo International Airport'
 const LOCATIONS = [
-  'Airport',
+  'Techo International Airport',
   'DAMCO',
   'KN (WH)',
   'CARGOPORT ( OFFICE )',
   'Khai Nam',
   'DB ( OFFICE )',
   'BS',
-  'Techo International Airport',
-  'Buy SIM card ( Phone )',
   'KN  (OFFICE)',
   'CIMB Bank',
   'Sixplus Factory',
@@ -59,7 +58,24 @@ const LOCATIONS = [
   'S E C Mega factory  CO., LTD',
   
 ]
-const PURPOSES = ['Bring Customer', 'Pick up Customer', 'Meeting', 'Check quality in subcon']
+const PURPOSES = [
+  'Bring Customer', 
+  'Pick up Customer', 
+  'Meeting', 
+  'Check quality in subcon', 
+  'Release Document',
+  'Submit payment',
+  'Collect doc back',
+  'Revise Document',
+  'Send the fabric',
+  'Pick  parcel',
+  'Bring binding tape',
+  'Pick up Accessory',
+  'Pay for NSSF',
+  'Withdraw',
+  'Send Document TT',
+  'Pick up SGS inspector'
+]
 const PASSENGER_OPTIONS = Array.from({ length: 15 }, (_, i) => String(i + 1))
 const MAX_CAR = 3
 const MAX_MSGR = 1
@@ -178,7 +194,9 @@ const capacityExceeded = computed(() => {
 })
 
 /* ───────── Validation ───────── */
-const hasAirport = computed(() => (form.value.stops || []).some(s => s.destination === 'Airport'))
+const hasAirport = computed(() =>
+  (form.value.stops || []).some(s => s.destination === AIRPORT_DESTINATION)
+)
 const startTime = computed(() =>
   form.value.startHour && form.value.startMinute ? `${form.value.startHour}:${form.value.startMinute}` : ''
 )
@@ -270,6 +288,8 @@ async function submit() {
   }
   try {
     loading.value = true
+
+    // ───── Recurring ─────
     if (form.value.recurring) {
       const seriesPayload = buildRecurringSeriesPayload(form.value)
       const { data } = await api.post('/transport/recurring', seriesPayload)
@@ -277,15 +297,22 @@ async function submit() {
         icon: 'success',
         title: 'Recurring series created',
         html: `Created <b>${data.created}</b>, skipped <b>${(data.skipped || []).length}</b>.`,
-        timer: 1800, showConfirmButton: false
+        timer: 1800,
+        showConfirmButton: false
       })
       resetForm({ keepEmployee: true })
       router.push({ name: 'employee-car-history' })
       return
     }
 
+    // 👉 build payload for one-off
     const payload = buildOneOffPayload(form.value)
-    const needsTicket = (form.value.stops || []).some(s => s.destination === 'Airport')
+
+    // 👉 only require ticket for Techo International Airport
+    const needsTicket = (form.value.stops || []).some(
+      s => s.destination === AIRPORT_DESTINATION
+    )
+
     if (needsTicket) {
       const fd = new FormData()
       fd.append('data', JSON.stringify(payload))
@@ -307,6 +334,7 @@ async function submit() {
     loading.value = false
   }
 }
+
 
 /* ───────── Reset ───────── */
 function resetForm({ keepEmployee = false } = {}) {

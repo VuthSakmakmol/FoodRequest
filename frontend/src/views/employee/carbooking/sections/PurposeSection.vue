@@ -1,5 +1,8 @@
+<!-- src/views/employee/carbooking/sections/PurposeSection.vue -->
 <script setup>
 import { computed } from 'vue'
+
+const AIRPORT_DESTINATION = 'Techo International Airport'
 
 const props = defineProps({
   form: Object,
@@ -10,10 +13,14 @@ const props = defineProps({
 /* Destination handling */
 const destinationItems = computed(() => {
   const base = Array.isArray(props.LOCATIONS) ? props.LOCATIONS.slice() : []
-  if (!base.includes('Airport')) base.unshift('Airport')
+  if (!base.includes(AIRPORT_DESTINATION)) base.unshift(AIRPORT_DESTINATION)
   if (!base.includes('Other')) base.push('Other')
   return base
 })
+
+const hasAirport = computed(() =>
+  (props.form.stops || []).some(s => s.destination === AIRPORT_DESTINATION)
+)
 
 function addStop() {
   props.form.stops.push({ destination: '', destinationOther: '', mapLink: '' })
@@ -43,6 +50,7 @@ function onDestinationChange(row) {
       <v-card flat class="soft-card glass">
         <v-card-text class="pt-0">
           <v-row dense>
+            <!-- Purpose -->
             <v-col cols="12" class="mt-4">
               <v-select
                 :items="PURPOSES"
@@ -57,6 +65,7 @@ function onDestinationChange(row) {
               </v-select>
             </v-col>
 
+            <!-- Notes -->
             <v-col cols="12">
               <v-textarea
                 v-model="props.form.notes"
@@ -70,6 +79,26 @@ function onDestinationChange(row) {
                   Notes / Special Instructions<span class="required-star">*</span>
                 </template>
               </v-textarea>
+            </v-col>
+
+            <!-- Airplane ticket upload (only when airport selected) -->
+            <v-col v-if="hasAirport" cols="12">
+              <v-file-input
+                v-model="props.form.ticketFile"
+                variant="outlined"
+                density="compact"
+                accept="image/*,application/pdf"
+                prepend-icon="mdi-paperclip"
+                hide-details
+              >
+                <template #label>
+                  Airplane ticket (required for Techo International Airport)
+                  <span class="required-star">*</span>
+                </template>
+              </v-file-input>
+              <div class="text-caption text-error mt-1">
+                This file is required when your destination includes Techo International Airport.
+              </div>
             </v-col>
           </v-row>
 
@@ -213,7 +242,7 @@ function onDestinationChange(row) {
 .btn-grad { background:linear-gradient(90deg,#22d3ee,#6366f1); color:#fff; }
 .btn-grad:hover { filter:brightness(1.05); }
 
-/* 🔴 red, slightly bigger star for required fields */
+/* 🔴 red star */
 .required-star {
   color: #fd0000;
   font-size: 1.2em;
@@ -221,19 +250,17 @@ function onDestinationChange(row) {
   line-height: 1;
 }
 
-/* 📱 Mobile: remove borders & stretch to edges to save space */
+/* 📱 Mobile */
 @media (max-width: 600px) {
   .section {
     border: none;
     border-radius: 0;
-    margin-left: -12px;  /* match v-container horizontal padding */
+    margin-left: -12px;
     margin-right: -12px;
   }
-
   .hero {
     border-radius: 0;
   }
-
   .soft-card {
     border: none;
     border-radius: 0;

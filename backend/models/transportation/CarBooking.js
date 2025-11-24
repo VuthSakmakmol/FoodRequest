@@ -100,8 +100,11 @@ CarBookingSchema.path('stops').validate(function (stops) {
 
 /* ───────── Methods ───────── */
 CarBookingSchema.methods.hasAirport = function () {
-  return (this.stops || []).some(s => s.destination === 'Airport')
+  return (this.stops || []).some(
+    s => s.destination === 'Techo International Airport'
+  )
 }
+
 
 module.exports = mongoose.model('CarBooking', CarBookingSchema, 'car_bookings')
 

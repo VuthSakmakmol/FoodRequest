@@ -58,7 +58,7 @@ function isActive(it){ return route.name === it?.to?.name }
 /** Logout -> Greeting (public) */
 function toggleAuth() {
   if (auth.user) auth.logout()
-  router.push({ name: '/' })
+  router.push({ name: 'admin-login' })
 }
 </script>
 

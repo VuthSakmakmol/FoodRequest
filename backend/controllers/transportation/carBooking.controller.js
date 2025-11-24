@@ -13,6 +13,7 @@ try { Employee = require('../models/Employee'); } catch {
 const { ROOMS, emitToRoom } = require('../../utils/realtime');
 const { toMinutes, overlaps, isValidDate } = require('../../utils/time');
 const { notify } = require('../../services/transport.telegram.notify');
+const AIRPORT_DESTINATION = 'Techo International Airport'
 
 const { io } = require('../../utils/realtime')
 
@@ -200,14 +201,17 @@ async function createBooking(req, res, next) {
       if (st.destination === 'Other' && !st.destinationOther) throw createError(400, `Stop ${i+1}: destinationOther is required for "Other".`);
     }
 
-    const hasAirport = stops.some(st => st.destination === 'Airport');
+    const hasAirport = stops.some(st => st.destination === AIRPORT_DESTINATION);
     let ticketUrl = '';
     if (hasAirport) {
-      if (!req.file) throw createError(400, 'Airplane ticket is required for Airport destination.');
+      if (!req.file) {
+        throw createError(400, 'Airplane ticket is required for Techo International Airport destination.');
+      }
       ticketUrl = `/uploads/${req.file.filename}`;
     } else if (req.file) {
       ticketUrl = `/uploads/${req.file.filename}`;
     }
+
 
     const active = await CarBooking.find({ tripDate, category, status: { $nin: ['CANCELLED'] } }).lean();
     const overlapping = active.filter(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))).length;
