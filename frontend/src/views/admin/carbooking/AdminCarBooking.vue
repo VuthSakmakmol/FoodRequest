@@ -4,7 +4,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useDisplay } from 'vuetify'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import dayjs from 'dayjs'
 
 /* ───────── responsive helpers (for footer) ───────── */
@@ -17,7 +17,6 @@ const error   = ref('')
 const rows    = ref([])
 
 const route = useRoute()
-const router = useRouter()
 
 const selectedDate   = ref(dayjs().format('YYYY-MM-DD'))
 const statusFilter   = ref('ALL')
@@ -26,7 +25,7 @@ const qSearch        = ref('')
 
 const updating = ref({}) // { [bookingId]: boolean }
 
-/* Workflow (unchanged) */
+/* Workflow */
 const ALLOWED_NEXT = {
   PENDING:   ['ACCEPTED','CANCELLED'],
   ACCEPTED:  ['ON_ROAD','DELAYED','CANCELLED'],
@@ -43,7 +42,7 @@ const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace
 const absUrl = (u) => !u ? '' : (/^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u.startsWith('/')?'':'/'}${u}`)
 const openTicket = (u) => { const url = absUrl(u); if (url) window.open(url, '_blank', 'noopener,noreferrer') }
 
-/* Table */
+/* Table headers */
 const headers = [
   { title: 'Time',        key: 'time',       sortable: true,  width: 240 },
   { title: 'Category',    key: 'category',   sortable: true,  width: 120 },
@@ -107,7 +106,7 @@ const ackFa  = s => ({
   DECLINED:'fa-solid fa-thumbs-down'
 }[s] || 'fa-solid fa-circle-question')
 
-/* Assigned chip helpers (fallback to request category for icon/color) */
+/* Assigned chip helpers */
 const assigneeName = (it) => {
   if (!it?.assignment) return ''
   if (it?.category === 'Messenger') {
@@ -117,6 +116,13 @@ const assigneeName = (it) => {
 }
 const assigneeColor = (it) => (it?.category === 'Messenger' ? 'deep-orange' : 'indigo')
 const assigneeIconFA = (it) => (it?.category === 'Messenger' ? 'fa-motorcycle' : 'fa-car')
+
+/* Same logic as backend: has assignee or not */
+const hasAssignee = (it) => {
+  if (!it?.assignment) return false
+  if (it.category === 'Messenger') return !!it.assignment.messengerId
+  return !!it.assignment.driverId
+}
 
 /* Search/filter */
 const filtered = computed(() => {
@@ -134,7 +140,7 @@ const filtered = computed(() => {
     .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
-/* ───────── Pagination (same as EmployeeCarHistory) ───────── */
+/* ───────── Pagination ───────── */
 const page = ref(1)
 const itemsPerPage = ref(10)
 const pageCount = computed(() => {
@@ -176,7 +182,6 @@ function onAssigned(p) {
     if (it.status === 'PENDING') it.status = 'ACCEPTED'
   }
 }
-
 function onDriverAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
@@ -184,9 +189,7 @@ function onDriverAck(p) {
 
 onMounted(() => {
   try { subscribeRoleIfNeeded({ role: 'ADMIN' }) } catch {}
-  if (route.query.date) {
-    selectedDate.value = route.query.date
-  }
+  if (route.query.date) selectedDate.value = route.query.date
   loadSchedule()
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
@@ -207,13 +210,14 @@ const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 
-/* ───────── Assign flow (Role-flexible) ───────── */
+/* ───────── Assign flow ───────── */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
 const assignLoading = ref(false)
 const assignError = ref('')
 
 const assignRole = ref('DRIVER')
+const assignLockedRole = ref('DRIVER') // role allowed for this booking
 const people = ref([])
 const selectedLoginId = ref('')
 
@@ -226,7 +230,10 @@ const isBusy = (loginId) => {
 
 async function fetchFirstOk(requests) {
   for (const r of requests) {
-    try { const res = await r(); if (Array.isArray(res?.data)) return res.data } catch {}
+    try {
+      const res = await r()
+      if (Array.isArray(res?.data)) return res.data
+    } catch {}
   }
   return []
 }
@@ -275,7 +282,11 @@ async function loadPeopleAndAvailability(item) {
 function openAssignDialog(item) {
   assignTarget.value = item
   assignError.value = ''
-  assignRole.value = item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
+
+  const locked = item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
+  assignLockedRole.value = locked
+  assignRole.value = locked
+
   assignOpen.value = true
   loadPeopleAndAvailability(item)
 }
@@ -288,8 +299,14 @@ watch(assignRole, () => {
 
 async function submitAssign() {
   if (!assignTarget.value?._id) return
-  if (!selectedLoginId.value) { assignError.value = 'Please select exactly one card'; return }
-  if (isBusy(selectedLoginId.value)) { assignError.value = 'This person is busy in this window.'; return }
+  if (!selectedLoginId.value) {
+    assignError.value = 'Please select exactly one card'
+    return
+  }
+  if (isBusy(selectedLoginId.value)) {
+    assignError.value = 'This person is busy in this window.'
+    return
+  }
   assignLoading.value = true
   assignError.value = ''
   try {
@@ -315,7 +332,10 @@ async function submitAssign() {
 async function updateStatus(item, nextStatus){
   if (!item?._id || !nextStatus) return
   const allowed = nextStatuses(item.status)
-  if (!allowed.includes(nextStatus)) { error.value = `Cannot change from ${item.status} to ${nextStatus}`; return }
+  if (!allowed.includes(nextStatus)) {
+    error.value = `Cannot change from ${item.status} to ${nextStatus}`
+    return
+  }
   updating.value[item._id] = true
   try {
     item.status = nextStatus
@@ -335,11 +355,8 @@ async function updateStatus(item, nextStatus){
       <div class="hero">
         <div class="hero-left">
           <div class="hero-title">
-            <i class="fa-solid fa-steering-wheel"></i>
+            <i class="fa-solid fa-steering-wheel" />
             <span>Admin — Day Schedule (All Requests)</span>
-          </div>
-          <div class="hero-sub">
-            Admin can assign a <strong>Car Driver</strong> or a <strong>Messenger</strong> for any request.
           </div>
         </div>
       </div>
@@ -347,10 +364,10 @@ async function updateStatus(item, nextStatus){
       <div class="px-3 pb-3 pt-2">
         <v-card flat class="soft-card mb-3">
           <v-card-title class="subhdr">
-            <i class="fa-solid fa-filter"></i><span>Filters</span>
+            <i class="fa-solid fa-filter" /><span>Filters</span>
             <v-spacer />
             <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading">
-              <i class="fa-solid fa-rotate-right mr-1"></i> Refresh
+              <i class="fa-solid fa-rotate-right mr-1" /> Refresh
             </v-btn>
           </v-card-title>
           <v-card-text class="pt-0 pb-2 px-2">
@@ -395,7 +412,9 @@ async function updateStatus(item, nextStatus){
                   hide-details
                   clearable
                 >
-                  <template #prepend-inner><i class="fa-solid fa-magnifying-glass"></i></template>
+                  <template #prepend-inner>
+                    <i class="fa-solid fa-magnifying-glass" />
+                  </template>
                 </v-text-field>
               </v-col>
             </v-row>
@@ -439,7 +458,7 @@ async function updateStatus(item, nextStatus){
                     <i
                       class="fa-solid"
                       :class="item.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"
-                    ></i>
+                    />
                     <span class="ml-2">{{ item.category }}</span>
                   </v-chip>
                 </template>
@@ -466,7 +485,7 @@ async function updateStatus(item, nextStatus){
                       class="ml-2"
                       @click.stop="openTicket(item.ticketUrl)"
                     >
-                      <i class="fa-solid fa-paperclip mr-1"></i> Ticket
+                      <i class="fa-solid fa-paperclip mr-1" /> Ticket
                     </v-btn>
                   </div>
                 </template>
@@ -477,7 +496,7 @@ async function updateStatus(item, nextStatus){
 
                 <template #item.purpose="{ item }">
                   <div class="purpose-pill">
-                    <i class="fa-regular fa-lightbulb mr-2"></i>
+                    <i class="fa-regular fa-lightbulb mr-2" />
                     <span class="purpose-text">{{ item.purpose || '—' }}</span>
                   </div>
                 </template>
@@ -486,13 +505,13 @@ async function updateStatus(item, nextStatus){
                   <div class="d-flex align-center" style="gap:6px;">
                     <template v-if="assigneeName(item)">
                       <v-chip :color="assigneeColor(item)" size="small" class="assignee-chip" label>
-                        <i class="fa-solid mr-2" :class="assigneeIconFA(item)"></i>
+                        <i class="fa-solid mr-2" :class="assigneeIconFA(item)" />
                         {{ assigneeName(item) }}
                       </v-chip>
                     </template>
                     <template v-else>
                       <v-chip color="grey" size="small" variant="tonal" class="assignee-chip" label>
-                        <i class="fa-solid fa-user-slash mr-2"></i> Unassigned
+                        <i class="fa-solid fa-user-slash mr-2" /> Unassigned
                       </v-chip>
                     </template>
                   </div>
@@ -500,14 +519,14 @@ async function updateStatus(item, nextStatus){
 
                 <template #item.driverAck="{ item }">
                   <v-chip :color="ackColor(item.assignment?.driverAck || 'PENDING')" size="small" label>
-                    <i :class="ackFa(item.assignment?.driverAck || 'PENDING')" class="mr-1"></i>
+                    <i :class="ackFa(item.assignment?.driverAck || 'PENDING')" class="mr-1" />
                     {{ (item.assignment?.driverAck || 'PENDING') }}
                   </v-chip>
                 </template>
 
                 <template #item.status="{ item }">
                   <v-chip :color="statusColor(item.status)" size="small" label>
-                    <i :class="statusFa(item.status)" class="mr-1"></i>
+                    <i :class="statusFa(item.status)" class="mr-1" />
                     {{ item.status }}
                   </v-chip>
                 </template>
@@ -521,8 +540,9 @@ async function updateStatus(item, nextStatus){
                         variant="tonal"
                         color="primary"
                         :loading="!!updating[item._id]"
+                        :disabled="!hasAssignee(item)"
                       >
-                        <i class="fa-solid fa-arrows-rotate mr-2"></i> Update
+                        <i class="fa-solid fa-arrows-rotate mr-2" /> Update
                       </v-btn>
                     </template>
                     <v-list density="compact" min-width="260">
@@ -533,12 +553,12 @@ async function updateStatus(item, nextStatus){
                           :key="s"
                           @click.stop="updateStatus(item, s)"
                         >
-                          <template #prepend><i :class="statusFa(s)"></i></template>
+                          <template #prepend><i :class="statusFa(s)" /></template>
                           <v-list-item-title>{{ s }}</v-list-item-title>
                         </v-list-item>
                       </template>
                       <v-list-item v-else disabled>
-                        <template #prepend><i class="fa-solid fa-lock"></i></template>
+                        <template #prepend><i class="fa-solid fa-lock" /></template>
                         <v-list-item-title>No further changes</v-list-item-title>
                       </v-list-item>
                     </v-list>
@@ -551,7 +571,7 @@ async function updateStatus(item, nextStatus){
                     class="ml-1"
                     @click.stop="openAssignDialog(item)"
                   >
-                    <i class="fa-solid fa-id-badge mr-2"></i> Assign
+                    <i class="fa-solid fa-id-badge mr-2" /> Assign
                   </v-btn>
 
                   <v-btn
@@ -561,7 +581,7 @@ async function updateStatus(item, nextStatus){
                     class="ml-1"
                     @click.stop="showDetails(item)"
                   >
-                    <i class="fa-solid fa-circle-info mr-2"></i> Details
+                    <i class="fa-solid fa-circle-info mr-2" /> Details
                   </v-btn>
                 </template>
 
@@ -571,7 +591,6 @@ async function updateStatus(item, nextStatus){
                   </v-sheet>
                 </template>
 
-                <!-- ✅ Same custom responsive pagination footer -->
                 <template #bottom>
                   <div class="table-footer">
                     <div class="tf-left">
@@ -604,16 +623,16 @@ async function updateStatus(item, nextStatus){
                         density="comfortable"
                       >
                         <template #first>
-                          <i class="fa-solid fa-angles-left"></i>
+                          <i class="fa-solid fa-angles-left" />
                         </template>
                         <template #prev>
-                          <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
+                          <i class="fa-solid fa-angle-left" style="margin-top: 10px;" />
                         </template>
                         <template #next>
-                          <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
+                          <i class="fa-solid fa-angle-right" style="margin-top: 10px;" />
                         </template>
                         <template #last>
-                          <i class="fa-solid fa-angles-right"></i>
+                          <i class="fa-solid fa-angles-right" />
                         </template>
                       </v-pagination>
                     </div>
@@ -635,13 +654,13 @@ async function updateStatus(item, nextStatus){
               <i
                 class="fa-solid"
                 :class="detailItem?.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"
-              ></i>
+              />
               <span class="ml-2">{{ detailItem?.category || '—' }}</span>
             </v-chip>
             <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
           </div>
           <v-btn icon variant="text" @click="detailOpen = false">
-            <i class="fa-solid fa-xmark"></i>
+            <i class="fa-solid fa-xmark" />
           </v-btn>
         </v-card-title>
 
@@ -676,7 +695,7 @@ async function updateStatus(item, nextStatus){
                     <i
                       :class="s.destination === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot'"
                       class="mr-1"
-                    ></i>
+                    />
                     <strong>#{{ i+1 }}:</strong>
                     <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
                   </div>
@@ -689,7 +708,7 @@ async function updateStatus(item, nextStatus){
               <div class="lbl">Driver Response</div>
               <div class="val">
                 <v-chip :color="ackColor(detailItem?.assignment?.driverAck || 'PENDING')" size="small" label>
-                  <i :class="ackFa(detailItem?.assignment?.driverAck || 'PENDING')" class="mr-1"></i>
+                  <i :class="ackFa(detailItem?.assignment?.driverAck || 'PENDING')" class="mr-1" />
                   {{ detailItem?.assignment?.driverAck || 'PENDING' }}
                 </v-chip>
               </div>
@@ -705,7 +724,7 @@ async function updateStatus(item, nextStatus){
                   class="text-decoration-none"
                 >
                   <v-btn size="small" color="indigo" variant="tonal">
-                    <i class="fa-solid fa-paperclip mr-2"></i> VIEW TICKET
+                    <i class="fa-solid fa-paperclip mr-2" /> VIEW TICKET
                   </v-btn>
                 </a>
               </div>
@@ -737,11 +756,11 @@ async function updateStatus(item, nextStatus){
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <i class="fa-solid fa-id-badge"></i>
+            <i class="fa-solid fa-id-badge" />
             <span class="ml-2">Assign to Driver or Messenger</span>
           </div>
           <v-btn icon variant="text" @click="assignOpen = false">
-            <i class="fa-solid fa-xmark"></i>
+            <i class="fa-solid fa-xmark" />
           </v-btn>
         </v-card-title>
 
@@ -749,9 +768,25 @@ async function updateStatus(item, nextStatus){
 
         <v-card-text>
           <div class="d-flex align-center mb-3" style="gap:10px;">
-            <v-btn-toggle v-model="assignRole" mandatory density="comfortable" rounded="xl" divided>
-              <v-btn value="DRIVER"><i class="fa-solid fa-car mr-2"></i>Car Driver</v-btn>
-              <v-btn value="MESSENGER"><i class="fa-solid fa-motorcycle mr-2"></i>Messenger</v-btn>
+            <v-btn-toggle
+              v-model="assignRole"
+              mandatory
+              density="comfortable"
+              rounded="xl"
+              divided
+            >
+              <v-btn
+                value="DRIVER"
+                :disabled="assignLockedRole === 'MESSENGER'"
+              >
+                <i class="fa-solid fa-car mr-2" />Car Driver
+              </v-btn>
+              <v-btn
+                value="MESSENGER"
+                :disabled="assignLockedRole === 'DRIVER'"
+              >
+                <i class="fa-solid fa-motorcycle mr-2" />Messenger
+              </v-btn>
             </v-btn-toggle>
           </div>
 
@@ -789,14 +824,14 @@ async function updateStatus(item, nextStatus){
                 >
                   <v-card-text class="py-4">
                     <div class="d-flex align-center" style="gap:10px;">
-                      <v-avatar size="44"><i class="fa-solid fa-user"></i></v-avatar>
+                      <v-avatar size="44"><i class="fa-solid fa-user" /></v-avatar>
                       <div>
                         <div class="font-weight-700">{{ p.name }}</div>
                         <div class="text-caption text-medium-emphasis mono">
                           ID: {{ p.loginId }}
                         </div>
                         <div v-if="isBusy(p.loginId)" class="text-caption text-error mt-1">
-                          <i class="fa-solid fa-circle-exclamation mr-1"></i> Busy in this window
+                          <i class="fa-solid fa-circle-exclamation mr-1" /> Busy in this window
                         </div>
                       </div>
                     </div>
@@ -816,7 +851,7 @@ async function updateStatus(item, nextStatus){
             :loading="assignLoading"
             @click="submitAssign"
           >
-            <i class="fa-solid fa-check mr-2"></i> Assign & Accept
+            <i class="fa-solid fa-check mr-2" /> Assign & Accept
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -826,7 +861,6 @@ async function updateStatus(item, nextStatus){
 
 <style scoped>
 .admin-car-page {
-  /* we’ll override padding on mobile below */
 }
 
 .highlight-row {
@@ -837,7 +871,6 @@ async function updateStatus(item, nextStatus){
   background-color: #fffbeb !important;
 }
 
-/* Section + hero now match car-booking style, but admin flavor */
 .section {
   border: 1px solid rgba(100,116,139,.18);
   background: linear-gradient(180deg, rgba(134,136,231,.06), rgba(16,185,129,.05));
@@ -860,9 +893,7 @@ async function updateStatus(item, nextStatus){
   font-weight:800;
   color:#fff;
 }
-.hero-sub { color:rgba(255,255,255,0.9); font-size:.9rem; }
 
-/* Cards */
 .soft-card {
   border: 1px solid rgba(209,218,229,.14);
   border-radius: 12px;
@@ -876,14 +907,13 @@ async function updateStatus(item, nextStatus){
   color:#1f2a44;
 }
 
-/* Table + text helpers */
 .table-scroll {
   overflow-x: auto;
 }
 .elevated {
   border: 1px solid #e9ecf3;
   border-radius: 12px;
-  min-width: 880px; /* ensure horizontal scroll on small screens */
+  min-width: 880px;
 }
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
@@ -895,7 +925,6 @@ async function updateStatus(item, nextStatus){
   overflow: hidden;
 }
 
-/* Purpose styling */
 .purpose-pill {
   display:flex;
   align-items:center;
@@ -911,7 +940,6 @@ async function updateStatus(item, nextStatus){
   color:#30336b;
 }
 
-/* Detail view */
 .lbl { font-size:.78rem; color:#64748b; }
 .val { font-weight:600; }
 .purpose-detail { font-weight:500; font-size:1.05rem; }
@@ -926,7 +954,6 @@ async function updateStatus(item, nextStatus){
   white-space: pre-wrap;
 }
 
-/* Person card selection */
 .person-card {
   cursor: pointer;
   transition: transform .06s ease, box-shadow .06s ease, border-color .06s ease;
@@ -952,7 +979,6 @@ i.fa-solid, i.fa-regular { line-height: 1; }
 
 .assignee-chip { font-weight: 600; }
 
-/* ───────── Same responsive table footer as Employee ───────── */
 .table-footer{
   display:flex;
   align-items:center;
@@ -968,7 +994,6 @@ i.fa-solid, i.fa-regular { line-height: 1; }
 :deep(.v-pagination .v-btn){ min-width: 36px; }
 :deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
 
-/* 📱 Mobile: edge-to-edge & tighter spacing */
 @media (max-width: 600px){
   .admin-car-page {
     padding: 0 !important;

@@ -20,8 +20,44 @@ import RecurringBookingSection from './sections/RecurringBookingSection.vue'
 /* ───────── Constants ───────── */
 const CATEGORY = ['Car', 'Messenger']
 const LOCATIONS = [
-  'Airport', 'DAMCO (WH)', 'BS Printing', 'YMG',
-  'CIMB Bank (Tuek Thla)', 'Jtrust Bank', 'Yanlord', 'Other'
+  'Airport',
+  'DAMCO',
+  'KN (WH)',
+  'CARGOPORT ( OFFICE )',
+  'Khai Nam',
+  'DB ( OFFICE )',
+  'BS',
+  'Techo International Airport',
+  'Buy SIM card ( Phone )',
+  'KN  (OFFICE)',
+  'CIMB Bank',
+  'Sixplus Factory',
+  'XOTEX',
+  'IFB ( OFFICE )',
+  'DHL',
+  'HORIZON',
+  'Bangkok Bank',
+  'DSV (OFFICE)',
+  'ABA Bank',
+  'DAMCO (WH)',
+  'DAMCO (OFFICE)',
+  'KN ( WH)',
+  'DSV  (WH)',
+  'DB Schenker',
+  'CARGOPORT',
+  'SCAN GLOBAL',
+  'Hong leong hour (WH)',
+  'So Nguon (WH)',
+  'Khainam Bus',
+  'Acleda Bank',
+  'Kerry',
+  'Olair dry port',
+  'Avery',
+  'JGL Worldwide',
+  'PTT 271',
+  'Dyeing Company',
+  'S E C Mega factory  CO., LTD',
+  
 ]
 const PURPOSES = ['Bring Customer', 'Pick up Customer', 'Meeting', 'Check quality in subcon']
 const PASSENGER_OPTIONS = Array.from({ length: 15 }, (_, i) => String(i + 1))

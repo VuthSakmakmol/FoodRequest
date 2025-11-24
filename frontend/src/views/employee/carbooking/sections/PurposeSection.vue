@@ -104,7 +104,7 @@ function onDestinationChange(row) {
 
                   <v-expansion-panel-text>
                     <v-row dense class="align-center">
-                      <v-col cols="12" md="3">
+                      <v-col cols="12" md="12">
                         <v-select
                           :items="destinationItems"
                           v-model="row.destination"

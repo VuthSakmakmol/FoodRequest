@@ -42,6 +42,8 @@ function clampEndDateToMax(startStr, endStr, maxDays) {
   if (end.isAfter(maxEnd)) end = maxEnd
   return end.format('YYYY-MM-DD')
 }
+
+/* toggle recurring (used by switch) */
 function setRecurring(val) {
   if (!!props.form.recurring === val) return
   props.form.recurring = val
@@ -79,8 +81,8 @@ watch(() => props.form.endDate, (end) => {
 })
 
 /* ---------- server preview (holidays + Sundays) ---------- */
-const serverDates   = ref([])   // will-create dates from server
-const serverSkipped = ref([])   // holidays (incl. Sundays if skipHolidays=true)
+const serverDates   = ref([])
+const serverSkipped = ref([])
 const serverBusy    = ref(false)
 const serverErr     = ref('')
 
@@ -262,37 +264,32 @@ async function createSeries () {
           <span>Recurring Booking</span>
         </div>
       </div>
-      <!-- <div class="hero-right">
-        <v-btn
-          v-if="form.recurring"
-          size="small"
-          color="primary"
-          variant="flat"
-          @click="createSeries"
-        >
-          <i class="fa-solid fa-plus-circle mr-2"></i> Create Series
-        </v-btn>
-      </div> -->
     </div>
 
     <div class="px-3 pb-3 pt-2">
       <v-card flat class="soft-card glass">
         <v-card-text class="pt-2">
           <v-row dense>
-            <!-- ON/OFF -->
+            <!-- Recurring switch -->
             <v-col cols="12" md="4" lg="3">
-              <div class="yesno-wrap">
-                <v-btn size="small" class="yesno-btn" :class="form.recurring ? 'yes-on' : 'yes-off'" @click="setRecurring(true)">
-                  <i class="fa-solid fa-check"></i>&nbsp; YES
-                </v-btn>
-                <v-btn size="small" class="yesno-btn" :class="!form.recurring ? 'no-on' : 'no-off'" @click="setRecurring(false)">
-                  <i class="fa-solid fa-xmark"></i>&nbsp; NO
-                </v-btn>
-              </div>
+
+
+              <v-switch
+                :model-value="form.recurring"
+                @update:model-value="val => setRecurring(!!val)"
+                color="teal"
+                hide-details
+                :label="form.recurring ? 'On' : 'Off'"
+              />
+
               <div v-if="form.recurring" class="text-caption mt-2">
                 <template v-if="serverBusy">Checking with server…</template>
-                <template v-else-if="serverErr"><span style="color:#b91c1c">Server preview error:</span> {{ serverErr }}</template>
-                <template v-else-if="serverDates.length || serverSkipped.length">In sync with server holidays (incl. Sundays).</template>
+                <template v-else-if="serverErr">
+                  <span style="color:#b91c1c">Server preview error:</span> {{ serverErr }}
+                </template>
+                <template v-else-if="serverDates.length || serverSkipped.length">
+                  In sync with server holidays (incl. Sundays).
+                </template>
               </div>
             </v-col>
 
@@ -303,7 +300,12 @@ async function createSeries () {
                   <i class="fa-solid fa-calendar-check"></i>
                   <span>End Date</span>
                 </v-card-title>
-                <v-menu v-model="endDateMenu" :close-on-content-click="false" transition="scale-transition" offset-y>
+                <v-menu
+                  v-model="endDateMenu"
+                  :close-on-content-click="false"
+                  transition="scale-transition"
+                  offset-y
+                >
                   <template #activator="{ props: mprops }">
                     <v-text-field
                       v-bind="mprops"
@@ -346,8 +348,11 @@ async function createSeries () {
                 </v-card-title>
                 <v-switch
                   v-model="form.skipHolidays"
-                  inset color="teal" density="compact"
-                  hide-details class="switch-compact"
+                  inset
+                  color="teal"
+                  density="compact"
+                  hide-details
+                  class="switch-compact"
                   :label="form.skipHolidays ? 'Enabled' : 'Disabled'"
                 />
               </v-col>
@@ -360,9 +365,18 @@ async function createSeries () {
                 </v-card-title>
                 <div class="preview-header">
                   <div class="counts">
-                    <span class="pill total"><i class="fa-solid fa-list"></i> Total: {{ counts.total }}</span>
-                    <span class="pill create"><i class="fa-solid fa-circle-check"></i> Will create: {{ counts.create }}</span>
-                    <span class="pill skipped" v-if="form.skipHolidays"><i class="fa-solid fa-ban"></i> Skipped: {{ counts.skipped }}</span>
+                    <span class="pill total">
+                      <i class="fa-solid fa-list"></i> Total: {{ counts.total }}
+                    </span>
+                    <span class="pill create">
+                      <i class="fa-solid fa-circle-check"></i> Will create: {{ counts.create }}
+                    </span>
+                    <span
+                      v-if="form.skipHolidays"
+                      class="pill skipped"
+                    >
+                      <i class="fa-solid fa-ban"></i> Skipped: {{ counts.skipped }}
+                    </span>
                   </div>
                 </div>
               </v-col>
@@ -375,7 +389,15 @@ async function createSeries () {
                 </v-card-title>
 
                 <div class="calendar-scroll">
-                  <div class="week-header"><div v-for="w in weekHeader" :key="w" class="wkcell">{{ w }}</div></div>
+                  <div class="week-header">
+                    <div
+                      v-for="w in weekHeader"
+                      :key="w"
+                      class="wkcell"
+                    >
+                      {{ w }}
+                    </div>
+                  </div>
                   <div class="preview-grid">
                     <div
                       v-for="cell in gridCells"
@@ -395,23 +417,45 @@ async function createSeries () {
                             <div class="en">
                               <span class="wk">{{ cell.weekday }}</span>
                               <span class="date">{{ cell.date }}</span>
-                              <span v-if="cell.isSunday" class="sun-badge">Sun</span>
+                              <span
+                                v-if="cell.isSunday"
+                                class="sun-badge"
+                              >Sun</span>
                             </div>
                           </div>
                         </div>
                         <div class="status-row">
-                          <template v-if="cell.willCreate"><i class="fa-solid fa-circle-check"></i><span>Will create</span></template>
-                          <template v-else><i class="fa-solid fa-ban"></i><span>Skipped</span></template>
+                          <template v-if="cell.willCreate">
+                            <i class="fa-solid fa-circle-check"></i><span>Will create</span>
+                          </template>
+                          <template v-else>
+                            <i class="fa-solid fa-ban"></i><span>Skipped</span>
+                          </template>
                         </div>
-                        <div v-if="cell.isHoliday && form.skipHolidays" class="badge-holiday">Holiday</div>
-                        <div v-else-if="cell.isHoliday" class="badge-holiday subtle">Holiday</div>
+                        <div
+                          v-if="cell.isHoliday && form.skipHolidays"
+                          class="badge-holiday"
+                        >
+                          Holiday
+                        </div>
+                        <div
+                          v-else-if="cell.isHoliday"
+                          class="badge-holiday subtle"
+                        >
+                          Holiday
+                        </div>
                       </template>
                     </div>
                   </div>
                 </div>
 
-                <div v-if="!gridCells.length" class="text-caption mt-2">
-                  Set a <strong>Trip Date</strong>, a valid <strong>End Date</strong>, and the main form’s <strong>Start/End</strong> time to see the preview.
+                <div
+                  v-if="!gridCells.length"
+                  class="text-caption mt-2"
+                >
+                  Set a <strong>Trip Date</strong>, a valid
+                  <strong>End Date</strong>, and the main form’s
+                  <strong>Start/End</strong> time to see the preview.
                 </div>
               </v-col>
             </template>
@@ -423,7 +467,6 @@ async function createSeries () {
 </template>
 
 <style scoped>
-/* —— CarBooking visual style —— */
 .section { 
   background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
   border: 1px solid rgba(100,116,139,.18);
@@ -445,21 +488,8 @@ async function createSeries () {
 
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size: medium;}
 
-/* ===== Field label (kept where used) ===== */
-.field-label{ display:flex; align-items:center; gap:8px; font-weight:600; margin-bottom:6px; }
-
-/* YES/NO buttons */
-.yesno-wrap{ display:flex; gap:8px; width:100%; }
-.yesno-btn{ flex:1 1 0; font-weight:700; text-transform:none; }
-.yes-on{ background:#16a34a !important; color:#fff !important; }
-.yes-off{ background:#ebf4ed !important; color:#9bd7c6 !important; }
-.no-on{ background:#ee6161 !important; color:#a11b1b !important; }
-.no-off{ background:#e5e7eb !important; color:#111827 !important; }
-
-/* Compact switch */
 .switch-compact :deep(.v-selection-control){ margin-block:-6px; }
 
-/* Summary pills */
 .preview-header{ display:flex; align-items:center; justify-content:flex-start; margin:8px 0 10px; }
 .counts{ display:flex; flex-wrap:wrap; gap:8px; }
 .pill{ display:inline-flex; gap:6px; align-items:center; padding:6px 10px; border-radius:999px; font-size:.85rem; font-weight:600; }
@@ -467,77 +497,64 @@ async function createSeries () {
 .pill.create{ background:#ecfdf5; color:#065f46; }
 .pill.skipped{ background:#fef2f2; color:#991b1b; }
 
-/* Calendar wrapper */
 .calendar-scroll{ overflow-x:auto; -webkit-overflow-scrolling: touch; padding: 6px 12px; }
 .week-header, .preview-grid{ min-width: 860px; }
 .week-header{ display:grid; grid-template-columns:repeat(7, minmax(210px, 1fr)); gap: 14px; margin: 8px 0 8px; }
 .wkcell{ text-align:center; font-weight:700; font-size:.9rem; opacity:.85; }
 .preview-grid{ display:grid; grid-template-columns:repeat(7, minmax(210px, 1fr)); column-gap: 14px; row-gap: 14px; }
 
-/* Day cards */
 .preview-card{ border:1px solid rgba(100,116,139,.18); border-radius:16px; min-height:118px; padding:12px 14px; display:flex; flex-direction:column; gap:6px; background:#f9fafb; }
 .preview-card.spacer{ background:transparent; border-color:transparent; box-shadow:none; min-height:0; padding:0; }
 .preview-card.will-create{ background:#f6fffb; border-color:#bbf7d0; }
 .preview-card.will-skip{ background:#fff7f7; border-color:#fecaca; }
 .preview-card.is-holiday .date{ color:#dc2626; font-weight:700; }
 
-/* Card rows */
 .date-row, .status-row{ display:flex; align-items:center; gap:8px; }
 .date-wrap{ display:flex; flex-direction:column; gap:2px; }
 .en{ display:flex; align-items:center; gap:8px; font-weight:600; }
 .date{ font-weight:700; }
 
-/* Badges */
 .sun-badge{ background:#fee2e2; color:#b91c1c; border-radius:6px; padding:2px 6px; font-size:.72rem; font-weight:700; }
 .badge-holiday{ display:inline-flex; align-self:flex-start; margin-top:2px; padding:2px 8px; border-radius:8px; font-size:.75rem; font-weight:700; background:#fee2e2; color:#991b1b; }
 .badge-holiday.subtle{ background:#ffe4e6; color:#9f1239; opacity:.9; }
 
-/* 📱 Small screens: save space, full-width cards */
 @media (max-width: 600px){
   .section {
     border: none;
     border-radius: 0;
-    margin-left: -12px;   /* match v-container padding */
+    margin-left: -12px;
     margin-right: -12px;
   }
-
   .hero {
     border-radius: 0;
     padding: 10px 14px;
   }
-
   .soft-card {
     border: none;
     border-radius: 0;
     box-shadow: none;
   }
-
   .calendar-scroll {
     padding: 4px 4px;
   }
-
   .week-header,
   .preview-grid {
     min-width: auto;
   }
-
   .week-header {
     grid-template-columns: repeat(7, minmax(120px, 1fr));
     gap: 8px;
   }
-
   .preview-grid {
     grid-template-columns: repeat(7, minmax(120px, 1fr));
     column-gap: 8px;
     row-gap: 8px;
   }
-
   .preview-card {
     min-height: 90px;
     padding: 8px 10px;
     border-radius: 10px;
   }
-
   .pill {
     padding: 4px 8px;
     font-size: 0.8rem;

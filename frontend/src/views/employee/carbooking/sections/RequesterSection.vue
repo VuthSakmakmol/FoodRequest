@@ -27,11 +27,14 @@ function fillFromDirectory (id) {
 }
 
 /* On select / clear */
-function onEmployeeSelected (val) { fillFromDirectory(val); emit('updateEmployee', val) }
+function onEmployeeSelected (val) {
+  fillFromDirectory(val)
+  emit('updateEmployee', val)
+}
 function onClear () {
-  props.form.employeeId = ''
-  props.form.name = ''
-  props.form.department = ''
+  props.form.employeeId    = ''
+  props.form.name          = ''
+  props.form.department    = ''
   props.form.contactNumber = ''
   emit('updateEmployee', '')
 }
@@ -46,11 +49,10 @@ watch(
 
 <template>
   <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
-    <!-- Gradient header (match Section 2) -->
+    <!-- Gradient header -->
     <div class="hero">
       <div class="hero-left">
         <div class="hero-title">
-          <i class="fa-solid fa-user"></i>
           <span>Requester</span>
         </div>
       </div>
@@ -68,21 +70,32 @@ watch(
             variant="outlined"
             density="compact"
             hide-details="auto"
-            clearable
             @update:model-value="onEmployeeSelected"
-            @click:clear="onClear"
           >
-            <!-- custom label with red star -->
+            <!-- label with red star -->
             <template #label>
               Employee<span class="required-star">*</span>
             </template>
 
+            <!-- items -->
             <template #item="{ props: ip, item }">
               <v-list-item
                 v-bind="ip"
                 :title="item.raw.title"
                 :subtitle="item.raw.subtitle"
               />
+            </template>
+
+            <!-- 🔹 custom clear button using Font Awesome -->
+            <template #append-inner>
+              <button
+                v-if="props.form.employeeId"
+                type="button"
+                class="clear-btn"
+                @click.stop="onClear"
+              >
+                <i class="fa-solid fa-xmark"></i>
+              </button>
             </template>
           </v-autocomplete>
 
@@ -164,14 +177,36 @@ watch(
   backdrop-filter: blur(6px);
 }
 
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size: medium; }
+.subhdr {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-weight:700;
+  font-size: medium;
+}
 
-:deep(.v-field__clearable) { opacity: 1 !important; } /* keep the X visible */
+/* 🔹 Our custom Font Awesome clear button */
+.clear-btn {
+  border: none;
+  background: transparent;
+  padding: 0 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.clear-btn i {
+  font-size: 16px;
+  color: #64748b;           /* slate-500 style */
+}
+.clear-btn:hover i {
+  color: #ef4444;           /* red on hover */
+}
 
 /* 🔴 make the * red and a bit bigger */
 .required-star {
-  color: #ef4444;       /* red-500 style */
-  font-size: 20px;      /* slightly bigger than text */
+  color: #ef4444;
+  font-size: 20px;
   margin-left: 2px;
   line-height: 1;
 }
@@ -181,7 +216,7 @@ watch(
   .section {
     border: none;
     border-radius: 0;
-    margin-left: -12px;   /* match v-container padding */
+    margin-left: -12px;
     margin-right: -12px;
   }
 

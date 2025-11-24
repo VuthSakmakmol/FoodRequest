@@ -556,7 +556,7 @@ function loadEmployees() {
     { employeeId: '52520298', name: 'Lip Kimleang', department: 'HR and Payroll', telegramChatId: '613252332', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520299', name: 'Say Somalin', department: 'HR and Payroll', telegramChatId: '', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520351', name: 'Vuth Sakmakmol', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
-    { employeeId: '52520651', name: 'Sok Sreyroth', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
+    { employeeId: '52520651', name: 'Sok Sreyroth', department: 'HR and Payroll', isActive: true, telegramChatId: '537250678', contactNumber: '000000000' },
     { employeeId: '52520684', name: 'Phin SamPhosh', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520977', name: 'Thol Chhorla', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
 

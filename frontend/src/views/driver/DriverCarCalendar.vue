@@ -163,41 +163,44 @@ onMounted(fetchMonth)
         </div>
       </div>
 
-      <!-- Week header -->
-      <div class="week-header">
-        <div
-          v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
-          :key="w"
-          class="week-cell"
-        >
-          {{ w }}
-        </div>
-      </div>
-
-      <!-- Calendar grid -->
-      <div class="calendar-grid">
-        <div
-          v-for="d in days"
-          :key="d.format('YYYY-MM-DD')"
-          class="day-cell"
-          :class="{
-            today     : d.isSame(dayjs(), 'day'),
-            otherMonth: !d.isSame(currentMonth.value, 'month')
-          }"
-          @click="showDayDetails(d)"
-        >
-          <div class="day-number" :class="{ sunday: d.day() === 0 }">
-            {{ d.date() }}
+      <!-- Scrollable week header + grid -->
+      <div class="calendar-scroll">
+        <div class="calendar-inner">
+          <div class="week-header">
+            <div
+              v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
+              :key="w"
+              class="week-cell"
+            >
+              {{ w }}
+            </div>
           </div>
 
-          <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
+          <div class="calendar-grid">
             <div
-              v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
-              :key="i"
-              class="booking-chip"
-              :style="{ backgroundColor: statusColor(b.status) }"
+              v-for="d in days"
+              :key="d.format('YYYY-MM-DD')"
+              class="day-cell"
+              :class="{
+                today     : d.isSame(dayjs(), 'day'),
+                otherMonth: !d.isSame(currentMonth.value, 'month')
+              }"
+              @click="showDayDetails(d)"
             >
-              {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+              <div class="day-number" :class="{ sunday: d.day() === 0 }">
+                {{ d.date() }}
+              </div>
+
+              <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
+                <div
+                  v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
+                  :key="i"
+                  class="booking-chip"
+                  :style="{ backgroundColor: statusColor(b.status) }"
+                >
+                  {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -315,6 +318,19 @@ onMounted(fetchMonth)
   .btn-nav {
     width: 30px;
     height: 30px;
+  }
+}
+
+/* scroll container */
+.calendar-scroll {
+  overflow-x: auto;
+}
+.calendar-inner {
+  min-width: 900px; /* wider than small screens → can scroll left/right */
+}
+@media (max-width: 600px) {
+  .calendar-inner {
+    min-width: 750px; /* still scrollable but a bit tighter on phone */
   }
 }
 
