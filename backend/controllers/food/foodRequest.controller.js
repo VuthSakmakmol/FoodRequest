@@ -4,29 +4,37 @@ const dayjs = require('dayjs');
 const FoodRequest = require('../../models/food/FoodRequest');
 const RecurringTemplate = require('../../models/food/RecurringTemplate');
 const EmployeeDirectory = require('../../models/EmployeeDirectory');
-const User = require('../../models/User'); // 👈 NEW
+const User = require('../../models/User');
 const { emitCounterpart } = require('../../utils/realtime');
 
-// 🔔 Telegram notify (group)
+// 🔔 Telegram notify
 const { sendToAll } = require('../../services/telegram.service');
+// reuse transport DM sender (generic Telegram DM)
+const { sendDM } = require('../../services/transport.telegram.service');
+
 const {
+  // Group EN
   newRequestMsg,
   acceptedMsg,
   cookingMsg,
   readyMsg,
   deliveredMsg,
   cancelMsg,
-  // 👇 NEW: Khmer DM builders for chef
+  // Chef KH
   chefNewRequestDM,
   chefAcceptedDM,
   chefCookingDM,
   chefReadyDM,
   chefDeliveredDM,
   chefCancelDM,
+  // Employee EN
+  employeeNewRequestDM,
+  employeeAcceptedDM,
+  employeeCookingDM,
+  employeeReadyDM,
+  employeeDeliveredDM,
+  employeeCancelDM,
 } = require('../../services/telegram.messages');
-
-// DM sender (reuse transport telegram service)
-const { sendDM } = require('../../services/transport.telegram.service');
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(v);
 const normDate = (d) => { const v = new Date(d); return isNaN(v.getTime()) ? null : v };
@@ -49,40 +57,6 @@ const HOLIDAY_SET = new Set(
 // Khmer rule: Sunday = holiday; Saturday is NOT
 const isSunday = (dateStr) => dayjs(dateStr).day() === 0;
 const isHoliday = (dateStr) => isSunday(dateStr) || HOLIDAY_SET.has(dateStr);
-
-// 👇 NEW: env toggle for chef DMs
-const ENABLE_CHEF_DM = String(process.env.TELEGRAM_NOTIFY_CHEF_DM || 'true')
-  .toLowerCase() === 'true';
-
-// ───────── NEW: helpers for CHEF DMs ─────────
-async function listChefChatIds() {
-  const chefs = await User.find(
-    {
-      role: 'CHEF',
-      telegramChatId: { $exists: true, $ne: null, $ne: '' },
-      isActive: { $ne: false },
-    },
-    { loginId: 1, telegramChatId: 1 }
-  ).lean();
-
-  return chefs.map(c => ({
-    loginId: c.loginId,
-    chatId: String(c.telegramChatId),
-  }));
-}
-
-async function notifyChefs(textKh) {
-  if (!ENABLE_CHEF_DM || !textKh) return;
-  try {
-    const chefs = await listChefChatIds();
-    if (!chefs.length) return;
-    await Promise.allSettled(
-      chefs.map(c => sendDM(c.chatId, textKh))
-    );
-  } catch (e) {
-    console.warn('[Telegram] chef DM failed:', e?.message);
-  }
-}
 
 // ───────── helpers ─────────
 function coerceMenuCounts(input, qty) {
@@ -186,12 +160,63 @@ function clampEndDate(eatDate, endDate) {
   return e.format('YYYY-MM-DD');
 }
 
+/* ───────── Telegram helpers ───────── */
+
+// Get all active CHEF users with telegramChatId
+async function getChefChatIds() {
+  const chefs = await User.find(
+    {
+      role: 'CHEF',
+      isActive: true,
+      telegramChatId: { $exists: true, $ne: '' },
+    },
+    { telegramChatId: 1, loginId: 1 }
+  ).lean();
+
+  return chefs.map(u => String(u.telegramChatId));
+}
+
+// Send Khmer message to all chefs
+async function notifyChefs(text) {
+  if (!text) return;
+  try {
+    const ids = await getChefChatIds();
+    if (!ids.length) return;
+    await Promise.all(ids.map(id => sendDM(id, text)));
+  } catch (e) {
+    console.warn('[Telegram] chef DM failed:', e?.message);
+  }
+}
+
+// Send English message to employee (requester)
+async function notifyEmployeeByDoc(doc, builderFn) {
+  if (!doc || typeof builderFn !== 'function') return;
+  const empId = doc.employee?.employeeId;
+  if (!empId) return;
+
+  try {
+    const emp = await EmployeeDirectory.findOne(
+      { employeeId: empId, isActive: true },
+      { telegramChatId: 1, name: 1 }
+    ).lean();
+
+    if (!emp || !emp.telegramChatId) return;
+
+    const chatId = String(emp.telegramChatId);
+    const text = builderFn(doc);
+    if (!text) return;
+    await sendDM(chatId, text);
+  } catch (e) {
+    console.warn('[Telegram] employee DM failed:', e?.message);
+  }
+}
+
 // ───────── CREATE (public) ─────────
 exports.createRequest = async (req, res, next) => {
   try {
     const body = req.body;
 
-    // ---- validations (unchanged) ----
+    // ---- validations ----
     const employeeId = body?.employee?.employeeId || body.employeeId;
     if (!employeeId) return res.status(400).json({ message: 'Invalid Employee ID' });
 
@@ -302,12 +327,15 @@ exports.createRequest = async (req, res, next) => {
       }).lean();
 
       if (existing) {
-        const groupText = newRequestMsg(existing);
-        const chefText = chefNewRequestDM(existing);
         try {
-          await sendToAll(groupText);   // EN group
-          await notifyChefs(chefText);  // KH DMs
-        } catch (e) { console.warn('[Telegram] notify failed:', e?.message); }
+          await sendToAll(newRequestMsg(existing));
+          await notifyChefs(chefNewRequestDM(existing));
+          if (emp.telegramChatId) {
+            await sendDM(String(emp.telegramChatId), employeeNewRequestDM(existing));
+          }
+        } catch (e) {
+          console.warn('[Telegram] notify failed:', e?.message);
+        }
         emitCounterpart(req.io, 'foodRequest:created', existing);
         return res.status(200).json(existing);
       }
@@ -329,11 +357,14 @@ exports.createRequest = async (req, res, next) => {
       const doc = await FoodRequest.create(payload);
 
       try {
-        const groupText = newRequestMsg(doc);
-        const chefText = chefNewRequestDM(doc);
-        await sendToAll(groupText);
-        await notifyChefs(chefText);
-      } catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
+        await sendToAll(newRequestMsg(doc));
+        await notifyChefs(chefNewRequestDM(doc));
+        if (emp.telegramChatId) {
+          await sendDM(String(emp.telegramChatId), employeeNewRequestDM(doc));
+        }
+      } catch (e) {
+        console.warn('[Telegram] new request notify failed:', e?.message);
+      }
 
       emitCounterpart(req.io, 'foodRequest:created', doc);
       return res.status(201).json(doc);
@@ -348,11 +379,14 @@ exports.createRequest = async (req, res, next) => {
     });
 
     try {
-      const groupText = newRequestMsg(doc);
-      const chefText = chefNewRequestDM(doc);
-      await sendToAll(groupText);
-      await notifyChefs(chefText);
-    } catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
+      await sendToAll(newRequestMsg(doc));
+      await notifyChefs(chefNewRequestDM(doc));
+      if (emp.telegramChatId) {
+        await sendDM(String(emp.telegramChatId), employeeNewRequestDM(doc));
+      }
+    } catch (e) {
+      console.warn('[Telegram] new request notify failed:', e?.message);
+    }
 
     emitCounterpart(req.io, 'foodRequest:created', doc);
     return res.status(201).json(doc);
@@ -420,42 +454,43 @@ exports.updateStatus = async (req, res, next) => {
     // 🔔 Notify depending on status
     try {
       if (status === 'ACCEPTED') {
-        const groupText = acceptedMsg(doc);
-        const chefText = chefAcceptedDM(doc);
-        await sendToAll(groupText);
-        await notifyChefs(chefText);
+        await sendToAll(acceptedMsg(doc));
+        await notifyChefs(chefAcceptedDM(doc));
+        await notifyEmployeeByDoc(doc, employeeAcceptedDM);
       }
+
       if (status === 'COOKING') {
-        const groupText = cookingMsg(doc);
-        const chefText = chefCookingDM(doc);
-        await sendToAll(groupText);
-        await notifyChefs(chefText);
+        await sendToAll(cookingMsg(doc));
+        await notifyChefs(chefCookingDM(doc));
+        await notifyEmployeeByDoc(doc, employeeCookingDM);
       }
+
       if (status === 'READY') {
-        const groupText = readyMsg(doc);
-        const chefText = chefReadyDM(doc);
-        await sendToAll(groupText);
-        await notifyChefs(chefText);
+        await sendToAll(readyMsg(doc));
+        await notifyChefs(chefReadyDM(doc));
+        await notifyEmployeeByDoc(doc, employeeReadyDM);
       }
+
       if (status === 'DELIVERED') {
         const alreadyNotified = !!doc?.notified?.deliveredAt;
         if (!alreadyNotified) {
-          const groupText = deliveredMsg(doc);
-          const chefText = chefDeliveredDM(doc);
-          await sendToAll(groupText);
-          await notifyChefs(chefText);
+          await sendToAll(deliveredMsg(doc));
+          await notifyChefs(chefDeliveredDM(doc));
+          await notifyEmployeeByDoc(doc, employeeDeliveredDM);
+
           doc.notified = doc.notified || {};
           doc.notified.deliveredAt = new Date();
           await doc.save();
         }
       }
+
       if (status === 'CANCELED') {
         doc.cancelReason = reason || '';
         await doc.save();
-        const groupText = cancelMsg(doc);
-        const chefText = chefCancelDM(doc);
-        await sendToAll(groupText);
-        await notifyChefs(chefText);
+
+        await sendToAll(cancelMsg(doc));
+        await notifyChefs(chefCancelDM(doc));
+        await notifyEmployeeByDoc(doc, employeeCancelDM);
       }
     } catch (e) {
       console.warn('[Telegram] notify failed:', e?.message);
@@ -515,7 +550,7 @@ exports.updateRequest = async (req, res, next) => {
     if (dietaryOther !== undefined)    $set.dietaryOther = dietaryOther;
     if (specialInstructions !== undefined) $set.specialInstructions = specialInstructions;
 
-    // Recurring edit
+    // Recurring edit (UI provides endDate + skipHolidays only)
     if (recurring !== undefined) {
       if (recurring?.enabled) {
         const eatStr = dayjs($set.eatDate || current.eatDate).format('YYYY-MM-DD');

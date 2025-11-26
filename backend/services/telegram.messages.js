@@ -16,20 +16,6 @@ function safeNote(s, max = 600) {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t
 }
 
-/* ───────── status -> big colored circle ───────── */
-const STATUS_ICON = {
-  NEW: '🟦',
-  ACCEPTED: '🟢',
-  COOKING: '🟠',
-  READY: '🟡',
-  DELIVERED: '🟣',
-  CANCELED: '🔴',
-}
-const iconFor = (status) => {
-  const s = String(status || 'NEW').toUpperCase()
-  return STATUS_ICON[s] || '🟦'
-}
-
 /* ───────── base maps for KH display ───────── */
 const ORDER_TYPE_KH = {
   'Daily meal': 'អាហារប្រចាំថ្ងៃ',
@@ -72,6 +58,21 @@ const RECUR_FREQ_KH = {
   Daily: 'រៀងរាល់ថ្ងៃ',
   Weekly: 'រៀងរាល់សប្ដាហ៍',
   Monthly: 'រៀងរាល់ខែ',
+}
+
+/* ───────── status icons (big colored circles) ───────── */
+const STATUS_ICON = {
+  NEW: '🟢',        // green
+  ACCEPTED: '🟡',   // yellow
+  COOKING: '🔵',    // blue
+  READY: '🟣',      // purple
+  DELIVERED: '⚪',  // white
+  CANCELED: '🔴',   // red
+}
+
+function iconFor(status) {
+  const key = String(status || 'NEW').toUpperCase()
+  return STATUS_ICON[key] || '🔘'
 }
 
 /* helper mappers */
@@ -200,7 +201,9 @@ function linesForRecurring(recurring = {}) {
 function linesForStatusHistory(list = [], limit = 6) {
   if (!Array.isArray(list) || list.length === 0) return []
   const last = list.slice(-limit)
-  const rows = last.map(x => `• ${esc(x.status)} @ ${fmtDateTime(x.at)}${x.by ? ` by ${esc(x.by)}` : ''}`)
+  const rows = last.map(
+    x => `• ${esc(x.status)} @ ${fmtDateTime(x.at)}${x.by ? ` by ${esc(x.by)}` : ''}`
+  )
   return ['📜 History:', ...rows]
 }
 
@@ -282,7 +285,7 @@ function linesForDietaryCountsKh(doc) {
   return lines
 }
 
-/* KH: recurring (if you ever show it to chef later) */
+/* KH: recurring (for chef) */
 function linesForRecurringKh(recurring = {}) {
   const r = recurring || {}
   const out = []
@@ -305,10 +308,7 @@ function baseInfoKh(doc) {
   const orderTypeKh = mapOne(d.orderType, ORDER_TYPE_KH)
   const mealsKh = mapArray(d.meals, MEAL_KH)
   const locKindKh = loc.kind ? mapOne(loc.kind, LOCATION_KH) : ''
-  const locStr =
-    locKindKh ||
-    loc.kind ||
-    ''
+  const locStr = locKindKh || loc.kind || ''
 
   const lines = [
     `📌 លេខសំណើ៖ <code>${esc(d.requestId || d._id || '')}</code>`,
@@ -341,8 +341,6 @@ function newRequestMsg(doc) {
     `${icon} <b>New Food Request</b>`,
     '=============================',
     ...baseInfo(doc),
-    '-----------------------------',
-    ...linesForRecurring(doc.recurring || {}),
     '-----------------------------',
     `📊 Status: ${icon} <b>${esc(doc.status || 'NEW')}</b>`,
     ...linesForStatusHistory(doc.statusHistory, 6),
@@ -499,6 +497,80 @@ function chefCancelDM(doc) {
   ].filter(Boolean).join('\n')
 }
 
+/* ───────── Employee DMs (EN) ───────── */
+function employeeBaseLines(doc) {
+  const d = doc || {}
+  const loc = d.location || {}
+
+  return [
+    `📌 Request: <b>${esc(d.requestId || d._id || '')}</b>`,
+    `📅 Eat date: ${fmtDate(d.eatDate || d.serveDate)}`,
+    `⏰ Time: ${d.eatTimeStart ? esc(d.eatTimeStart) : '–'}${d.eatTimeEnd ? ` – ${esc(d.eatTimeEnd)}` : ''}`,
+    `🥗 Meals: ${esc(joinOrDash(d.meals))}`,
+    `👥 Quantity: <b>${toInt(d.quantity)}</b>`,
+    `🏠 Location: ${esc(loc.kind || '')}${loc.kind === 'Other' && loc.other ? ` (${esc(loc.other)})` : ''}`,
+  ]
+}
+
+function employeeNewRequestDM(doc) {
+  const icon = iconFor(doc.status || 'NEW')
+  return [
+    `${icon} <b>Your food request was created</b>`,
+    ...employeeBaseLines(doc),
+    `📊 Status: ${icon} <b>${esc(doc.status || 'NEW')}</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function employeeAcceptedDM(doc) {
+  const icon = iconFor('ACCEPTED')
+  return [
+    `${icon} <b>Your food request was accepted</b>`,
+    ...employeeBaseLines(doc),
+    `📊 Status: ${icon} <b>ACCEPTED</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function employeeCookingDM(doc) {
+  const icon = iconFor('COOKING')
+  return [
+    `${icon} <b>Your food is now being cooked</b>`,
+    ...employeeBaseLines(doc),
+    `📊 Status: ${icon} <b>COOKING</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function employeeReadyDM(doc) {
+  const icon = iconFor('READY')
+  return [
+    `${icon} <b>Your food is ready</b>`,
+    ...employeeBaseLines(doc),
+    `📊 Status: ${icon} <b>READY</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function employeeDeliveredDM(doc) {
+  const icon = iconFor('DELIVERED')
+  return [
+    `${icon} <b>Your food has been delivered</b>`,
+    ...employeeBaseLines(doc),
+    `📊 Final status: ${icon} <b>DELIVERED</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function employeeCancelDM(doc) {
+  const icon = iconFor('CANCELED')
+  const reasonLine = doc.cancelReason
+    ? `📝 Reason: ${esc(doc.cancelReason)}`
+    : null
+
+  return [
+    `${icon} <b>Your food request was canceled</b>`,
+    ...employeeBaseLines(doc),
+    reasonLine,
+    `📊 Final status: ${icon} <b>CANCELED</b>`,
+  ].filter(Boolean).join('\n')
+}
+
 module.exports = {
   // EN (group)
   newRequestMsg,
@@ -516,4 +588,12 @@ module.exports = {
   chefReadyDM,
   chefDeliveredDM,
   chefCancelDM,
+
+  // Employee DM (EN)
+  employeeNewRequestDM,
+  employeeAcceptedDM,
+  employeeCookingDM,
+  employeeReadyDM,
+  employeeDeliveredDM,
+  employeeCancelDM,
 }
