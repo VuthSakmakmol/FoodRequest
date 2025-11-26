@@ -103,8 +103,8 @@ const dateEnd = ref('')
 
 /* pagination */
 const page = ref(1)
-const itemsPerPage = ref(20)
-const itemsPerPageOptions = [20, 50, 100, 'All']
+const itemsPerPage = ref(10)
+const itemsPerPageOptions = [10, 20, 50, 100, 'All']
 
 /* expand/collapse per row */
 const expanded = ref(new Set())

@@ -52,7 +52,7 @@ const LOCATIONS = [
   { value: 'Other',        title: 'Other',        subtitle: 'ផ្សេងៗ' }
 ]
 
-/* 🔗 Eat date from route ?eatDate=YYYY-MM-DD + clamp to today if past */
+/* ───────── Eat date from route ?eatDate=YYYY-MM-DD + clamp to today if past ───────── */
 function applyEatDateFromRoute(qDate) {
   if (!qDate) return
   if (!/^\d{4}-\d{2}-\d{2}$/.test(qDate)) return
@@ -127,6 +127,61 @@ onMounted(() => {
 })
 watch(() => props.form.orderType, (v) => { props.form.orderType = stripBilingual(v) })
 watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual(v) })
+
+/* ───────── Meal disabling by current time (cut-off rules) ───────── */
+/**
+ * Cut-offs (only when Eat Date is TODAY):
+ *  - > 08:00  → Breakfast disabled
+ *  - > 10:00  → Lunch disabled
+ *  - > 15:00  → Dinner disabled
+ *  - Snack    → always enabled
+ */
+function isEatDateToday() {
+  const d = props.form.eatDate
+  if (!d) return false
+  return dayjs(d, 'YYYY-MM-DD', true).isSame(dayjs(), 'day')
+}
+function nowAfter(cutoffHHmm) {
+  const now = dayjs().format('HH:mm')
+  return now > cutoffHHmm
+}
+
+const disableBreakfast = computed(() =>
+  isEatDateToday() && nowAfter('08:00')
+)
+const disableLunch = computed(() =>
+  isEatDateToday() && nowAfter('10:00')
+)
+const disableDinner = computed(() =>
+  isEatDateToday() && nowAfter('15:00')
+)
+
+function isMealDisabled(m) {
+  if (!isEatDateToday()) return false
+  if (m === 'Breakfast') return disableBreakfast.value
+  if (m === 'Lunch')     return disableLunch.value
+  if (m === 'Dinner')    return disableDinner.value
+  // Snack or others → always enabled
+  return false
+}
+
+/* If a meal becomes disabled while selected → auto remove from form.meals */
+watch(
+  [disableBreakfast, disableLunch, disableDinner, () => props.form.eatDate],
+  () => {
+    let updated = [...(props.form.meals || [])]
+    if (disableBreakfast.value) {
+      updated = updated.filter(m => m !== 'Breakfast')
+    }
+    if (disableLunch.value) {
+      updated = updated.filter(m => m !== 'Lunch')
+    }
+    if (disableDinner.value) {
+      updated = updated.filter(m => m !== 'Dinner')
+    }
+    props.form.meals = updated
+  }
+)
 </script>
 
 <template>
@@ -316,6 +371,7 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
                 variant="tonal"
                 class="choice-btn two-line"
                 :class="{ active: form.meals.includes(m) }"
+                :disabled="isMealDisabled(m)"
                 @click="form.meals = form.meals.includes(m)
                   ? form.meals.filter(x => x !== m)
                   : [...form.meals, m]"

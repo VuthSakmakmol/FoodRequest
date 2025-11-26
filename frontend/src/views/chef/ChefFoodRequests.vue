@@ -92,13 +92,17 @@ const loading = ref(false)
 const rows = ref([])
 const q = ref('')
 const status = ref('ALL')
-const fromDate = ref('')
-const toDate = ref('')
+
+/* 🔹 DEFAULT: show only TODAY */
+const todayStr = dayjs().format('YYYY-MM-DD')
+const fromDate = ref(todayStr)
+const toDate = ref(todayStr)
+
 const showFilterDialog = ref(false)
 
 const page = ref(1)
-const perPage = ref(20)
-const perPageOptions = [20, 50, 100, 'All']
+const perPage = ref(10)
+const perPageOptions = [10,20, 50, 100, 'All']
 
 const statuses = ['ACTIVE','ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED','CANCELED']
 const COLOR = { NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }
@@ -203,6 +207,14 @@ async function applyInitialFocus() {
   }
 
   didInitialFocus.value = true
+
+  // 🔹 Auto-clear focus highlight after 5s
+  setTimeout(() => {
+    // only clear if still focusing same id (user didn't change focus)
+    if (focusedRowId.value === focusId.value) {
+      focusedRowId.value = ''
+    }
+  }, 5000)
 }
 
 async function load() {
@@ -235,6 +247,7 @@ onMounted(async () => {
   const qDate  = route.query.date
   if (qFocus) focusId.value = String(qFocus)
   if (qDate) {
+    // 🔹 If calendar passes a date, override “today” filter
     fromDate.value = String(qDate)
     toDate.value   = String(qDate)
   }
@@ -316,8 +329,9 @@ async function updateStatus(row, target) {
 function resetFilters() {
   q.value = ''
   status.value = 'ALL'
-  fromDate.value = ''
-  toDate.value = ''
+  const today = dayjs().format('YYYY-MM-DD')
+  fromDate.value = today
+  toDate.value = today
   page.value = 1
   load()
 }
@@ -426,6 +440,7 @@ async function exportExcel() {
 }
 </script>
 
+
 <template>
   <v-container fluid class="pa-2">
     <v-card elevation="1" class="rounded-lg">
@@ -490,7 +505,7 @@ async function exportExcel() {
           <div class="d-flex align-center gap-2">
             <v-text-field
               v-model="q" density="compact" placeholder="Search"
-              clearable hide-details variant="outlined" class="flex-grow-1"
+              clearable hide-details variant="outlined" class="flex-grow-1" 
               @keyup.enter="load"
             />
             <v-tooltip text="Refresh" location="bottom">

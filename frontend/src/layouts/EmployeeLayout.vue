@@ -29,7 +29,7 @@ const groups = [
     children: [
       { label: 'Request Meal', icon: 'fa-solid fa-bowl-food', to: { name: 'employee-request' } },
       { label: 'My Requests',  icon: 'fa-solid fa-clock-rotate-left', to: { name: 'employee-request-history' } },
-      { label: 'Calendar',     icon: 'fa-solid fa-clock', to: { name: 'employee-food-calendar'}}
+      { label: 'Calendar',     icon: 'fa-solid fa-clock', to: { name: 'employee-food-calendar'} }
     ]
   },
   {
@@ -53,8 +53,25 @@ const open = reactive(Object.fromEntries(
 const initials = computed(() =>
   (auth.user?.name || auth.user?.loginId || 'U').slice(0, 2).toUpperCase()
 )
-function go(it){ if (it?.to) router.push(it.to) }
-function isActive(it){ return route.name === it?.to?.name }
+
+function isActive(it) {
+  return route.name === it?.to?.name
+}
+
+/** Accordion: when click a section, close others, toggle this one */
+function handleSectionClick(key) {
+  const wasOpen = open[key]
+  Object.keys(open).forEach(k => { open[k] = false })
+  open[key] = !wasOpen
+}
+
+/** Click on label: navigate + auto-close sidebar */
+function handleNavClick(it) {
+  if (it?.to) {
+    router.push(it.to)
+  }
+  drawer.value = false
+}
 
 /** Logout -> Greeting (public) */
 function toggleAuth() {
@@ -108,8 +125,8 @@ function toggleAuth() {
 
         <v-list nav density="comfortable" class="list">
           <template v-for="g in groups" :key="g.key">
-            <!-- Section header acts as toggle (no extra activator row) -->
-            <div class="section-header" @click="open[g.key] = !open[g.key]">
+            <!-- Section header acts as toggle (accordion) -->
+            <div class="section-header" @click="handleSectionClick(g.key)">
               <div class="left">
                 <i :class="g.icon" class="fa-fw mr-2" />
                 <span>{{ g.header }}</span>
@@ -125,11 +142,12 @@ function toggleAuth() {
                   :active="isActive(it)"
                   rounded="lg"
                   class="nav-item"
-                  @click="go(it)"
+                  @click="handleNavClick(it)"
                 >
-                  <template #prepend><i :class="it.icon" class="fa-fw" /></template>
+                  <template #prepend>
+                    <i :class="it.icon" class="fa-fw" />
+                  </template>
                   <v-list-item-title class="ml-2">{{ it.label }}</v-list-item-title>
-                  <template #append></template>
                 </v-list-item>
               </div>
             </v-expand-transition>
