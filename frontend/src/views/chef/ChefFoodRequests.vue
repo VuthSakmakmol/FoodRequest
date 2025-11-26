@@ -1,6 +1,7 @@
 <!-- src/views/chef/ChefFoodRequests.vue -->
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import dayjs from 'dayjs'
 import Swal from 'sweetalert2'
 import api from '@/utils/api'
@@ -11,6 +12,12 @@ import * as XLSX from 'xlsx'
 
 const { mdAndUp } = useDisplay()
 const auth = useAuth()
+const route = useRoute()
+
+/* ───────── focus from calendar ───────── */
+const focusId = ref('')        // id coming from calendar ?focus=
+const focusedRowId = ref('')   // row currently highlighted
+const didInitialFocus = ref(false)
 
 /* ───────── Mini i18n (EN→KM for table/details only) ───────── */
 const KM = {
@@ -172,6 +179,32 @@ function removeRowById(id) {
   expanded.value.delete(id)
 }
 
+/* focus helper after data load */
+async function applyInitialFocus() {
+  if (!focusId.value || didInitialFocus.value) return
+
+  const idx = rows.value.findIndex(r => r._id === focusId.value)
+  if (idx === -1) return
+
+  // move to page that contains this row
+  if (perPage.value !== 'All') {
+    const size = typeof perPage.value === 'number' ? perPage.value : 20
+    page.value = Math.floor(idx / size) + 1
+  }
+
+  await nextTick()
+
+  focusedRowId.value = focusId.value
+  expanded.value = new Set([...expanded.value, focusId.value])
+
+  const el = document.querySelector(`tr[data-id="${focusId.value}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  didInitialFocus.value = true
+}
+
 async function load() {
   loading.value = true
   try {
@@ -186,6 +219,8 @@ async function load() {
     if (status.value === 'ACTIVE') list = list.filter(r => !['DELIVERED','CANCELED'].includes(r.status))
     rows.value = list.map(normalize)
     page.value = 1
+
+    await applyInitialFocus()
   } finally { loading.value = false }
 }
 
@@ -194,6 +229,15 @@ onMounted(async () => {
   if (!auth.user) await auth.fetchMe()
   localStorage.setItem('authRole', auth.user?.role || '')
   subscribeRoleIfNeeded()
+
+  // read query from calendar
+  const qFocus = route.query.focus
+  const qDate  = route.query.date
+  if (qFocus) focusId.value = String(qFocus)
+  if (qDate) {
+    fromDate.value = String(qDate)
+    toDate.value   = String(qDate)
+  }
 
   await load()
   socket.on('foodRequest:created', (doc) => doc && upsertRow(doc))
@@ -268,7 +312,7 @@ async function updateStatus(row, target) {
   }
 }
 
-/* ───────── mobile helpers ───────── */
+/* ───────── mobile helpers / export ───────── */
 function resetFilters() {
   q.value = ''
   status.value = 'ALL'
@@ -278,7 +322,6 @@ function resetFilters() {
   load()
 }
 
-/* ───────── Export to Excel (3 sheets) ───────── */
 const exporting = ref(false)
 
 function toMainRow(r) {
@@ -533,7 +576,10 @@ async function exportExcel() {
 
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
-                <tr>
+                <tr
+                  :data-id="r._id"
+                  :class="{ 'focused-row': r._id === focusedRowId }"
+                >
                   <td>
                     <v-chip :color="COLOR[r.status]" size="small" label>
                       <div class="chip-2l">
@@ -727,7 +773,15 @@ async function exportExcel() {
   line-height: 1;
 }
 
-/* ---------- NEW: Left alignment + comfy spacing + hover ---------- */
+/* ---------- NEW: focus row from calendar ---------- */
+.focused-row{
+  background: rgba(56,189,248,0.18) !important;
+}
+.focused-row td{
+  box-shadow: inset 0 0 0 1px rgba(14,165,233,0.9);
+}
+
+/* ---------- Left alignment + comfy spacing + hover ---------- */
 .align-left :deep(table thead th),
 .align-left :deep(table tbody td){ text-align: left !important; }
 

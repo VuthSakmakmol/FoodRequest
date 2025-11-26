@@ -1,6 +1,7 @@
 <!-- src/views/admin/AdminFoodRequests.vue -->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import dayjs from 'dayjs'
 import Swal from 'sweetalert2'
 import api from '@/utils/api'
@@ -10,7 +11,8 @@ import { useDisplay } from 'vuetify'
 import * as XLSX from 'xlsx'
 
 const { mdAndUp } = useDisplay()
-const auth = useAuth()
+const auth  = useAuth()
+const route = useRoute()
 
 /* ───────── Mini i18n (EN→KM for table/details only) ───────── */
 const KM = {
@@ -70,7 +72,6 @@ const ORDER_TYPE_KM_MAP = {
   'Visitor meal': 'អាហារភ្ញៀវ',
 }
 
-
 const mealKMRow = {
   Breakfast: 'អាហារពេលព្រឹក',
   Lunch: 'អាហារថ្ងៃត្រង់',
@@ -85,19 +86,22 @@ const mealListKM = (arr = []) => arr.map(m => mealKMRow[m] || m).join(', ')
 
 /* ───────── state ───────── */
 const loading = ref(false)
-const rows = ref([])
-const q = ref('')
-const status = ref('ALL')
+const rows    = ref([])
+const q       = ref('')
+const status  = ref('ALL')
 const fromDate = ref('')
-const toDate = ref('')
+const toDate   = ref('')
 const showFilterDialog = ref(false)
 
-const page = ref(1)
+const page    = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
 const statuses = ['ACTIVE','ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED','CANCELED']
-const COLOR = { NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }
+const COLOR = {
+  NEW:'grey', ACCEPTED:'primary', COOKING:'orange',
+  READY:'teal', DELIVERED:'green', CANCELED:'red'
+}
 
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({
@@ -196,6 +200,22 @@ onMounted(async () => {
   localStorage.setItem('authRole', auth.user?.role || '')
   subscribeRoleIfNeeded()
 
+  // 🔗 If navigated from AdminFoodCalendar, apply initial date + focus
+  const qDate = route.query.date
+  if (qDate) {
+    const dStr = dayjs(qDate).isValid()
+      ? dayjs(qDate).format('YYYY-MM-DD')
+      : String(qDate)
+    fromDate.value = dStr
+    toDate.value   = dStr
+  }
+  const focus = route.query.focus
+  if (focus) {
+    const s = new Set(expanded.value)
+    s.add(String(focus))
+    expanded.value = s
+  }
+
   await load()
   socket.on('foodRequest:created', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:updated', (doc) => doc && upsertRow(doc))
@@ -208,11 +228,37 @@ onBeforeUnmount(() => {
   socket.off('foodRequest:statusChanged')
   socket.off('foodRequest:deleted')
 })
+
 watch([q, status, fromDate, toDate], () => { page.value = 1; load() })
+
+// Also react if route query changes while we stay on this page
+watch(
+  () => route.query.date,
+  (val) => {
+    if (!val) return
+    const dStr = dayjs(val).isValid()
+      ? dayjs(val).format('YYYY-MM-DD')
+      : String(val)
+    fromDate.value = dStr
+    toDate.value   = dStr
+  }
+)
+watch(
+  () => route.query.focus,
+  (val) => {
+    if (!val) return
+    const s = new Set(expanded.value)
+    s.add(String(val))
+    expanded.value = s
+  }
+)
 
 /* ───────── paging ───────── */
 const totalItems = computed(() => rows.value.length)
-const totalPages = computed(() => perPage.value === 'All' ? 1 : Math.max(1, Math.ceil(totalItems.value / perPage.value)))
+const totalPages = computed(() => perPage.value === 'All'
+  ? 1
+  : Math.max(1, Math.ceil(totalItems.value / perPage.value))
+)
 const pagedRows = computed(() => {
   if (perPage.value === 'All') return rows.value
   const start = (page.value - 1) * perPage.value
@@ -222,11 +268,11 @@ const pagedRows = computed(() => {
 /* ───────── workflow ───────── */
 const nextSteps = (s) => {
   switch (s) {
-    case 'NEW': return ['ACCEPTED','CANCELED']
-    case 'ACCEPTED': return ['COOKING','CANCELED']
-    case 'COOKING': return ['READY','CANCELED']
-    case 'READY': return ['DELIVERED','CANCELED']
-    default: return []
+    case 'NEW':       return ['ACCEPTED','CANCELED']
+    case 'ACCEPTED':  return ['COOKING','CANCELED']
+    case 'COOKING':   return ['READY','CANCELED']
+    case 'READY':     return ['DELIVERED','CANCELED']
+    default:          return []
   }
 }
 async function updateStatus(row, target) {
@@ -515,26 +561,75 @@ async function exportExcel() {
 
       <v-card-text class="pa-0">
         <div class="table-wrap">
-          <!-- NEW: align-left + comfy-cells + row-hover -->
           <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
             <thead>
               <tr>
-                <th><div class="hdr-2l"><div class="en">{{ tkm('Status') }}</div><div class="km">{{ tkm('Status') }}</div></div></th>
-                <th style="width:320px;"><div class="hdr-2l"><div class="en">Actions</div><div class="km">{{ tkm('Actions') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Requester (ID & Name)</div><div class="km">{{ tkm('Requester (ID & Name)') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Order Date</div><div class="km">{{ tkm('Order Date') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Eat Date</div><div class="km">{{ tkm('Eat Date') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Time</div><div class="km">{{ tkm('Time') }}</div></div></th>
-                <th class="d-none d-sm-table-cell"><div class="hdr-2l"><div class="en">Dept</div><div class="km">{{ tkm('Dept') }}</div></div></th>
-                <th class="d-none d-md-table-cell"><div class="hdr-2l"><div class="en">Order Type</div><div class="km">{{ tkm('Type') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Meals</div><div class="km">អាហារ</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Qty</div><div class="km">{{ tkm('Qty') }}</div></div></th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">{{ tkm('Status') }}</div>
+                    <div class="km">{{ tkm('Status') }}</div>
+                  </div>
+                </th>
+                <th style="width:320px;">
+                  <div class="hdr-2l">
+                    <div class="en">Actions</div>
+                    <div class="km">{{ tkm('Actions') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Requester (ID & Name)</div>
+                    <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Order Date</div>
+                    <div class="km">{{ tkm('Order Date') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Eat Date</div>
+                    <div class="km">{{ tkm('Eat Date') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Time</div>
+                    <div class="km">{{ tkm('Time') }}</div>
+                  </div>
+                </th>
+                <th class="d-none d-sm-table-cell">
+                  <div class="hdr-2l">
+                    <div class="en">Dept</div>
+                    <div class="km">{{ tkm('Dept') }}</div>
+                  </div>
+                </th>
+                <th class="d-none d-md-table-cell">
+                  <div class="hdr-2l">
+                    <div class="en">Order Type</div>
+                    <div class="km">{{ tkm('Type') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Meals</div>
+                    <div class="km">អាហារ</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Qty</div>
+                    <div class="km">{{ tkm('Qty') }}</div>
+                  </div>
+                </th>
               </tr>
             </thead>
 
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
-                <tr>
+                <tr :class="{ 'highlight-row': route.query.focus === r._id }">
                   <td>
                     <v-chip :color="COLOR[r.status]" size="small" label>
                       <div class="chip-2l">
@@ -577,7 +672,10 @@ async function exportExcel() {
 
                   <td>
                     <div class="cell-2l">
-                      <div class="en">{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></div>
+                      <div class="en">
+                        {{ r.eatTimeStart || '—' }}
+                        <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
+                      </div>
                     </div>
                   </td>
 
@@ -671,8 +769,6 @@ async function exportExcel() {
 /* Tighter inputs */
 :deep(.v-field__input){ min-height: 36px; }
 
-
-
 /* Table min widths; shrink on phones */
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
 @media (max-width: 600px){
@@ -720,35 +816,33 @@ async function exportExcel() {
 }
 
 /* ---------- NEW: Left alignment + comfy spacing + hover ---------- */
-
-/* Force left alignment for headers/cells */
 .align-left :deep(table thead th),
 .align-left :deep(table tbody td){
   text-align: left !important;
 }
-
-/* Top/bottom breathing room for each td */
 .comfy-cells :deep(table tbody td){
   vertical-align: top;
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
-
-/* Also pad headers for balance */
 .comfy-cells :deep(table thead th){
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
-
-/* Hover color for normal rows (exclude expanded details row) */
 .row-hover :deep(table tbody tr:not(.details-row):hover){
   background: rgba(59,130,246,0.08);
   transition: background 120ms ease;
 }
-
-/* Keep inner components from centering inside cells */
 .min-width-table :deep(td > *){
   justify-content: flex-start !important;
   text-align: left !important;
 }
+
+/* Highlight focused row from calendar */
+.highlight-row{
+  background-color: #fff8e1 !important;
+}
+
+/* Small km margin helper */
+.ml-1{ margin-left: .25rem; }
 </style>

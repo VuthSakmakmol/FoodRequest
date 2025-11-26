@@ -31,7 +31,7 @@ const AdminCarCalendar  = () => import('@/views/admin/carBooking/TransportAdminC
 
 // Chef (Food only; reuse admin calendar)
 const ChefFoodRequests  = () => import('@/views/chef/ChefFoodRequests.vue')
-const ChefFoodCalendar  = AdminFoodCalendar // alias reuse
+const ChefFoodCalendar  = () => import('@/views/chef/ChefFoodCalendar.vue')
 
 // Driver
 const DriverHome         = () => import('@/modules/driver/Home.vue')

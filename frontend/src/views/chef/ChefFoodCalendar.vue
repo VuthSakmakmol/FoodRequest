@@ -1,4 +1,4 @@
-<!-- src/views/admin/AdminFoodCalendar.vue -->
+<!-- src/views/chef/ChefFoodCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -9,7 +9,7 @@ import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 
 const router = useRouter()
-const auth = useAuth()
+const auth   = useAuth()
 
 /* ───────── constants ───────── */
 const COLOR = {
@@ -20,6 +20,8 @@ const COLOR = {
   DELIVERED: '#16a34a',
   CANCELED:  '#ef4444',
 }
+
+const BASE = '/chef/food-requests'   // 🔹 Chef namespace
 
 /* ───────── state ───────── */
 const currentMonth = ref(dayjs())
@@ -119,21 +121,19 @@ async function loadMonth () {
     const from = startOfGrid.value.format('YYYY-MM-DD')
     const to   = endOfGrid.value.format('YYYY-MM-DD')
 
-    let { data } = await api.get('/admin/food-requests', {
-      params: { from, to }
-    })
+    let { data } = await api.get(BASE, { params: { from, to } })
 
     let list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
     // Fallback if server ignores from/to
     if (!Array.isArray(list) || list.length === 0) {
-      const resp2 = await api.get('/admin/food-requests')
+      const resp2 = await api.get(BASE)
       data = resp2.data
       list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
     }
 
     rows.value = (list || []).map(normalize)
   } catch (e) {
-    console.error('[AdminFoodCalendar] loadMonth error:', e)
+    console.error('[ChefFoodCalendar] loadMonth error:', e)
     rows.value = []
   } finally {
     loading.value = false
@@ -152,7 +152,7 @@ function removeRowById(id) {
   if (idx !== -1) rows.value.splice(idx, 1)
 }
 
-/* ───────── navigation (same as transport) ───────── */
+/* ───────── navigation ───────── */
 function nextMonth () {
   currentMonth.value = currentMonth.value.add(1, 'month')
 }
@@ -163,7 +163,7 @@ function goToday () {
   currentMonth.value = dayjs()
 }
 
-/* ───────── click handler (popup + route to AdminFoodRequests) ───────── */
+/* ───────── click handler (popup + route to ChefFoodRequests) ───────── */
 function showDayDetails (d) {
   const dateStr = d.format('YYYY-MM-DD')
   const list = dateList(dateStr)
@@ -193,13 +193,13 @@ function showDayDetails (d) {
                 background:#f8fafc;
                 cursor:pointer
               "
-               onclick="window.__selectFood('${r._id}')">
+               onclick="window.__selectChefFood('${r._id}')">
             <div><b>${(r.employee?.name || '').replace(/</g,'&lt;')}</b> (${r.orderType || '—'})</div>
-            <div>🕓 ${fmtTimeRange(r)}</div>
+            <div>🕓 ${'${'}'${'}'}</div>
             <div>🍱 Qty: ${r.quantity || 0}</div>
             <div>Status: <b>${r.status}</b></div>
           </div>
-        `
+        `.replace("${'${'}'${'}'}", fmtTimeRange(r)) // small trick to keep template literal simple
           )
           .join('')}
       </div>
@@ -208,26 +208,17 @@ function showDayDetails (d) {
     showCloseButton: true,
     width: 520,
     didOpen: () => {
-      // name must match your router: adjust if different
-      window.__selectFood = (id) => {
+      // Always go to chef-requests for chef calendar
+      window.__selectChefFood = (id) => {
         Swal.close()
-
-        // if this component is reused in Chef layout, send Chef to chef-requests
-        const role = auth.user?.role || localStorage.getItem('authRole') || ''
-        const targetRoute =
-          role === 'CHEF'
-            ? 'chef-requests'
-            : 'admin-requests'   // 👈 this matches your router
-
         router.push({
-          name: targetRoute,
+          name: 'chef-requests',
           query: { focus: id, date: dateStr }
         })
       }
-
     },
     willClose: () => {
-      delete window.__selectFood
+      delete window.__selectChefFood
     }
   })
 }
@@ -257,7 +248,7 @@ watch(currentMonth, () => loadMonth())
 
 <template>
   <div class="calendar-wrapper">
-    <!-- Header / toolbar (same family as Transportation) -->
+    <!-- Header / toolbar (same as Admin / Transport) -->
     <div class="calendar-hero">
       <div class="hero-controls">
         <button class="circle-btn" @click="prevMonth">
@@ -349,7 +340,7 @@ watch(currentMonth, () => loadMonth())
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 
-/* ── Gradient header (same family as transportation) ── */
+/* ── Gradient header ── */
 .calendar-hero {
   padding: 12px 18px;
   background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
@@ -417,7 +408,7 @@ watch(currentMonth, () => loadMonth())
   padding: 8px 10px 4px;
 }
 .calendar-inner {
-  min-width: 720px; /* scroll horizontally on narrow devices */
+  min-width: 720px;
 }
 
 /* week header + grid */
@@ -528,7 +519,6 @@ watch(currentMonth, () => loadMonth())
   font-weight: 600;
 }
 
-/* small screens: slightly shorter cells */
 @media (max-width: 600px) {
   .day-cell {
     min-height: 78px;

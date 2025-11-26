@@ -29,14 +29,10 @@ const triggerTime = computed(() => props.form.eatTimeStart || props.defaultMorni
 const timeValue = computed({
   get: () => props.form.eatTimeStart || '',
   set: (v) => {
-    const [h='07', m='00'] = String(v || '').split(':')
-    props.form.eatTimeStart = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+    const [h = '07', m = '00'] = String(v || '').split(':')
+    props.form.eatTimeStart = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   }
 })
-
-/* ---------- YES/NO visual states ---------- */
-const yesActive = computed(() => !!props.form.recurring)
-const noActive  = computed(() => !props.form.recurring)
 
 /* ---------- holiday logic (Sunday + supplied dates) ---------- */
 const holidaySet = computed(() => new Set(props.holidays || []))
@@ -73,8 +69,8 @@ function setRecurring(val) {
     const maxEnd = start.add(Math.max(props.maxDays - 1, 0), 'day')
     const curEnd = props.form.endDate ? dayjs(props.form.endDate) : start
     const end = !curEnd.isValid() || curEnd.isBefore(start) ? start
-              : curEnd.isAfter(maxEnd) ? maxEnd
-              : curEnd
+      : curEnd.isAfter(maxEnd) ? maxEnd
+      : curEnd
     props.form.endDate = end.format('YYYY-MM-DD')
   }
 }
@@ -82,7 +78,7 @@ function setRecurring(val) {
 function setEndDateAndRepeat(endDateStr) {
   if (!props.form.eatDate) return
   const clamped = clampEndDateToMax(props.form.eatDate, endDateStr, props.maxDays)
-  props.form.endDate   = clamped
+  props.form.endDate    = clamped
   props.form.repeatDays = daysBetweenInclusive(props.form.eatDate, clamped)
 }
 
@@ -115,7 +111,7 @@ const dateItems = computed(() => {
   const start = dayjs(props.form.eatDate).startOf('day')
   const end   = dayjs(props.form.endDate).startOf('day')
   let cur = start.clone()
-  while (cur.isBefore(end.add(1,'day'), 'day')) {
+  while (cur.isBefore(end.add(1, 'day'), 'day')) {
     const dStr = cur.format('YYYY-MM-DD')
     const holiday   = isHoliday(dStr)
     const willCreate = props.form.skipHolidays ? !holiday : true
@@ -170,28 +166,15 @@ const counts = computed(() => {
       <v-card flat class="soft-card glass">
         <v-card-text class="pt-2">
           <v-row dense>
-            <!-- Repeat ON/OFF -->
+            <!-- Recurring switch (same style as CarBooking) -->
             <v-col cols="12" md="4" lg="3">
-
-              <div class="yesno-wrap">
-                <v-btn
-                  size="small"
-                  class="yesno-btn"
-                  :class="form.recurring ? 'yes-on' : 'yes-off'"
-                  @click="setRecurring(true)"
-                >
-                  <i class="fa-solid fa-check"></i>&nbsp; YES
-                </v-btn>
-
-                <v-btn
-                  size="small"
-                  class="yesno-btn"
-                  :class="!form.recurring ? 'no-on' : 'no-off'"
-                  @click="setRecurring(false)"
-                >
-                  <i class="fa-solid fa-xmark"></i>&nbsp; NO
-                </v-btn>
-              </div>
+              <v-switch
+                :model-value="form.recurring"
+                @update:model-value="val => setRecurring(!!val)"
+                color="teal"
+                hide-details
+                :label="form.recurring ? 'On' : 'Off'"
+              />
             </v-col>
 
             <template v-if="form.recurring">
@@ -400,14 +383,6 @@ const counts = computed(() => {
   font-weight:600;
   margin-bottom:6px;
 }
-
-/* ===== YES/NO buttons (unchanged behavior) ===== */
-.yesno-wrap{ display:flex; gap:8px; width:100%; }
-.yesno-btn{ flex:1 1 0; font-weight:700; text-transform:none; }
-.yes-on{ background:#16a34a !important; color:#fff !important; }
-.yes-off{ background:#e5f7ea !important; color:#065f46 !important; }
-.no-on{ background:#fca5a5 !important; color:#7f1d1d !important; }
-.no-off{ background:#e5e7eb !important; color:#111827 !important; }
 
 /* ===== Compact switch ===== */
 .switch-compact :deep(.v-selection-control){ margin-block:-6px; }
