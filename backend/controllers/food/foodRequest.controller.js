@@ -4,13 +4,29 @@ const dayjs = require('dayjs');
 const FoodRequest = require('../../models/food/FoodRequest');
 const RecurringTemplate = require('../../models/food/RecurringTemplate');
 const EmployeeDirectory = require('../../models/EmployeeDirectory');
+const User = require('../../models/User'); // 👈 NEW
 const { emitCounterpart } = require('../../utils/realtime');
 
-// 🔔 Telegram notify (optional)
+// 🔔 Telegram notify (group)
 const { sendToAll } = require('../../services/telegram.service');
 const {
-  newRequestMsg, acceptedMsg, cookingMsg, readyMsg, deliveredMsg, cancelMsg
+  newRequestMsg,
+  acceptedMsg,
+  cookingMsg,
+  readyMsg,
+  deliveredMsg,
+  cancelMsg,
+  // 👇 NEW: Khmer DM builders for chef
+  chefNewRequestDM,
+  chefAcceptedDM,
+  chefCookingDM,
+  chefReadyDM,
+  chefDeliveredDM,
+  chefCancelDM,
 } = require('../../services/telegram.messages');
+
+// DM sender (reuse transport telegram service)
+const { sendDM } = require('../../services/transport.telegram.service');
 
 const isObjectId = (v) => mongoose.Types.ObjectId.isValid(v);
 const normDate = (d) => { const v = new Date(d); return isNaN(v.getTime()) ? null : v };
@@ -33,6 +49,40 @@ const HOLIDAY_SET = new Set(
 // Khmer rule: Sunday = holiday; Saturday is NOT
 const isSunday = (dateStr) => dayjs(dateStr).day() === 0;
 const isHoliday = (dateStr) => isSunday(dateStr) || HOLIDAY_SET.has(dateStr);
+
+// 👇 NEW: env toggle for chef DMs
+const ENABLE_CHEF_DM = String(process.env.TELEGRAM_NOTIFY_CHEF_DM || 'true')
+  .toLowerCase() === 'true';
+
+// ───────── NEW: helpers for CHEF DMs ─────────
+async function listChefChatIds() {
+  const chefs = await User.find(
+    {
+      role: 'CHEF',
+      telegramChatId: { $exists: true, $ne: null, $ne: '' },
+      isActive: { $ne: false },
+    },
+    { loginId: 1, telegramChatId: 1 }
+  ).lean();
+
+  return chefs.map(c => ({
+    loginId: c.loginId,
+    chatId: String(c.telegramChatId),
+  }));
+}
+
+async function notifyChefs(textKh) {
+  if (!ENABLE_CHEF_DM || !textKh) return;
+  try {
+    const chefs = await listChefChatIds();
+    if (!chefs.length) return;
+    await Promise.allSettled(
+      chefs.map(c => sendDM(c.chatId, textKh))
+    );
+  } catch (e) {
+    console.warn('[Telegram] chef DM failed:', e?.message);
+  }
+}
 
 // ───────── helpers ─────────
 function coerceMenuCounts(input, qty) {
@@ -201,20 +251,18 @@ exports.createRequest = async (req, res, next) => {
     };
 
     // ─────────────────────────────────────────────────────────────
-    // RECURRING FLOW: link the first occurrence to a template
+    // RECURRING FLOW
     // ─────────────────────────────────────────────────────────────
     if (body?.recurring?.enabled) {
       if (!body.endDate && !body.recurring.endDate) {
         return res.status(400).json({ message: 'End Date is required when Recurring = Yes' });
       }
 
-      // clamp end date to max allowed, ensure ISO
       const eatISO = dayjs(eatDate).format('YYYY-MM-DD');
       const endDateISO = clampEndDate(eatISO, body.recurring.endDate || body.endDate);
       const endDateObj = new Date(`${endDateISO}T00:00:00.000Z`);
       const skipHolidays = !!body.recurring.skipHolidays;
 
-      // 1) Create a template for this recurring schedule
       const tpl = await RecurringTemplate.create({
         owner: {
           employeeId: emp.employeeId,
@@ -243,25 +291,27 @@ exports.createRequest = async (req, res, next) => {
 
         timezone: 'Asia/Phnom_Penh',
         status: 'ACTIVE',
-        // move engine to tomorrow (prevent double-create today)
         nextRunAt: dayjs(eatDate).add(1, 'day').startOf('day').toDate(),
         skipDates: []
       });
 
-      // 2) If today's occurrence already exists (race), reuse it
-      const occurrenceDate = eatISO; // keep as 'YYYY-MM-DD' string per your schema
+      const occurrenceDate = eatISO;
       const existing = await FoodRequest.findOne({
         'recurring.templateId': tpl._id,
         'recurring.occurrenceDate': occurrenceDate
       }).lean();
 
       if (existing) {
-        try { await sendToAll(newRequestMsg(existing)); } catch (e) { console.warn('[Telegram] notify failed:', e?.message); }
+        const groupText = newRequestMsg(existing);
+        const chefText = chefNewRequestDM(existing);
+        try {
+          await sendToAll(groupText);   // EN group
+          await notifyChefs(chefText);  // KH DMs
+        } catch (e) { console.warn('[Telegram] notify failed:', e?.message); }
         emitCounterpart(req.io, 'foodRequest:created', existing);
         return res.status(200).json(existing);
       }
 
-      // 3) Create today's **linked** occurrence
       const payload = {
         ...baseDoc,
         recurring: {
@@ -272,30 +322,37 @@ exports.createRequest = async (req, res, next) => {
           parentId: null,
           source: 'RECURRING',
           templateId: tpl._id,
-          occurrenceDate // 'YYYY-MM-DD'
+          occurrenceDate
         }
       };
 
       const doc = await FoodRequest.create(payload);
 
-      try { await sendToAll(newRequestMsg(doc)); }
-      catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
+      try {
+        const groupText = newRequestMsg(doc);
+        const chefText = chefNewRequestDM(doc);
+        await sendToAll(groupText);
+        await notifyChefs(chefText);
+      } catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
 
       emitCounterpart(req.io, 'foodRequest:created', doc);
       return res.status(201).json(doc);
     }
 
     // ─────────────────────────────────────────────────────────────
-    // NON-RECURRING FLOW: manual one-off (no linkage fields)
+    // NON-RECURRING FLOW
     // ─────────────────────────────────────────────────────────────
     const doc = await FoodRequest.create({
       ...baseDoc,
       recurring: { enabled: false, frequency: null, endDate: null, skipHolidays: false, parentId: null, source: 'MANUAL' }
-      // NOTE: do NOT set templateId / occurrenceDate here
     });
 
-    try { await sendToAll(newRequestMsg(doc)); }
-    catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
+    try {
+      const groupText = newRequestMsg(doc);
+      const chefText = chefNewRequestDM(doc);
+      await sendToAll(groupText);
+      await notifyChefs(chefText);
+    } catch (e) { console.warn('[Telegram] new request notify failed:', e?.message); }
 
     emitCounterpart(req.io, 'foodRequest:created', doc);
     return res.status(201).json(doc);
@@ -362,13 +419,31 @@ exports.updateStatus = async (req, res, next) => {
 
     // 🔔 Notify depending on status
     try {
-      if (status === 'ACCEPTED') await sendToAll(acceptedMsg(doc));
-      if (status === 'COOKING')  await sendToAll(cookingMsg(doc));
-      if (status === 'READY')    await sendToAll(readyMsg(doc));
+      if (status === 'ACCEPTED') {
+        const groupText = acceptedMsg(doc);
+        const chefText = chefAcceptedDM(doc);
+        await sendToAll(groupText);
+        await notifyChefs(chefText);
+      }
+      if (status === 'COOKING') {
+        const groupText = cookingMsg(doc);
+        const chefText = chefCookingDM(doc);
+        await sendToAll(groupText);
+        await notifyChefs(chefText);
+      }
+      if (status === 'READY') {
+        const groupText = readyMsg(doc);
+        const chefText = chefReadyDM(doc);
+        await sendToAll(groupText);
+        await notifyChefs(chefText);
+      }
       if (status === 'DELIVERED') {
         const alreadyNotified = !!doc?.notified?.deliveredAt;
         if (!alreadyNotified) {
-          await sendToAll(deliveredMsg(doc));
+          const groupText = deliveredMsg(doc);
+          const chefText = chefDeliveredDM(doc);
+          await sendToAll(groupText);
+          await notifyChefs(chefText);
           doc.notified = doc.notified || {};
           doc.notified.deliveredAt = new Date();
           await doc.save();
@@ -377,7 +452,10 @@ exports.updateStatus = async (req, res, next) => {
       if (status === 'CANCELED') {
         doc.cancelReason = reason || '';
         await doc.save();
-        await sendToAll(cancelMsg(doc));
+        const groupText = cancelMsg(doc);
+        const chefText = chefCancelDM(doc);
+        await sendToAll(groupText);
+        await notifyChefs(chefText);
       }
     } catch (e) {
       console.warn('[Telegram] notify failed:', e?.message);
@@ -437,7 +515,7 @@ exports.updateRequest = async (req, res, next) => {
     if (dietaryOther !== undefined)    $set.dietaryOther = dietaryOther;
     if (specialInstructions !== undefined) $set.specialInstructions = specialInstructions;
 
-    // Recurring edit (UI provides endDate + skipHolidays only)
+    // Recurring edit
     if (recurring !== undefined) {
       if (recurring?.enabled) {
         const eatStr = dayjs($set.eatDate || current.eatDate).format('YYYY-MM-DD');

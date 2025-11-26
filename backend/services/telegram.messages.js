@@ -4,14 +4,82 @@ const dayjs = require('dayjs')
 /* ───────── helpers ───────── */
 function esc(s = '') { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
-// kept in case used by history; remove if you later decide to strip times from history too
 const fmtDateTime = d => (d ? dayjs(d).format('YYYY-MM-DD HH:mm') : '—')
 const fmtBool = v => (v ? 'Yes' : 'No')
 const joinOrDash = arr => (Array.isArray(arr) && arr.length ? arr.join(', ') : '—')
 const isObj = v => v && typeof v === 'object' && !Array.isArray(v)
 const toInt = v => (v == null ? 0 : Number(v) || 0)
 
-function safeNote(s, max = 600) { if (!s) return null; const t = String(s); return t.length > max ? `${t.slice(0, max - 1)}…` : t }
+function safeNote(s, max = 600) {
+  if (!s) return null
+  const t = String(s)
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t
+}
+
+/* ───────── status -> big colored circle ───────── */
+const STATUS_ICON = {
+  NEW: '🟦',
+  ACCEPTED: '🟢',
+  COOKING: '🟠',
+  READY: '🟡',
+  DELIVERED: '🟣',
+  CANCELED: '🔴',
+}
+const iconFor = (status) => {
+  const s = String(status || 'NEW').toUpperCase()
+  return STATUS_ICON[s] || '🟦'
+}
+
+/* ───────── base maps for KH display ───────── */
+const ORDER_TYPE_KH = {
+  'Daily meal': 'អាហារប្រចាំថ្ងៃ',
+  'Meeting catering': 'សេវាអាហារសម្រាប់ការប្រជុំ',
+  'Visitor meal': 'អាហារសម្រាប់ភ្ញៀវ',
+}
+
+const MEAL_KH = {
+  Breakfast: 'អាហារពេលព្រឹក',
+  Lunch: 'អាហារថ្ងៃត្រង់',
+  Dinner: 'អាហារពេលល្ងាច',
+  Snack: 'អាហារសម្រន់',
+}
+
+const MENU_KH = {
+  Standard: 'អាហារធម្មតា',
+  Vegetarian: 'អាហារមិនមានសាច់',
+  Vegan: 'អាហារបួស',
+  'No pork': 'អាហារគ្មានសាច់ជ្រូក',
+  'No beef': 'អាហារគ្មានសាច់គោ',
+}
+
+const ALLERGEN_KH = {
+  Peanut: 'សណ្តែកដី',
+  Shellfish: 'អាហារសមុទ្រ / សត្វសំបក',
+  Egg: 'ស៊ុត',
+  Gluten: 'ក្លុយតែន (ម្សៅមី)',
+  'Dairy/Lactose': 'ទឹកដោះគោ / ឡាក់តូស',
+  Soy: 'សណ្ដែក',
+  Others: 'ផ្សេងៗ',
+}
+
+const LOCATION_KH = {
+  'Meeting Room': 'បន្ទប់ប្រជុំ',
+  Canteen: 'កង់ទីន',
+  Other: 'ទីតាំងផ្សេងៗ',
+}
+
+const RECUR_FREQ_KH = {
+  Daily: 'រៀងរាល់ថ្ងៃ',
+  Weekly: 'រៀងរាល់សប្ដាហ៍',
+  Monthly: 'រៀងរាល់ខែ',
+}
+
+/* helper mappers */
+const mapOne = (val, dict) => (val && dict[val]) || val || ''
+const mapArray = (arr, dict) =>
+  Array.isArray(arr) && arr.length
+    ? arr.map(v => mapOne(v, dict)).join(', ')
+    : '—'
 
 /* ───────── counts logic (supports array OR object) ───────── */
 function menuMap(doc) {
@@ -76,7 +144,7 @@ function dietaryByMenu(doc) {
   return out
 }
 
-/* ───────── pretty sections ───────── */
+/* ───────── EN: pretty sections ───────── */
 function linesForMenuCounts(doc) {
   const m = menuMap(doc)
   if (!m.size) return ['🍱 Menu Counts: —']
@@ -90,7 +158,6 @@ function linesForMenuCounts(doc) {
     lines.push(`• ${esc(choice)} × <b>${toInt(cnt)}</b>`)
   }
   lines.push(`• <i>Total menus</i>: <b>${total}</b>`)
-  // NOTE: "Δ vs quantity" intentionally removed
   return lines
 }
 
@@ -137,7 +204,7 @@ function linesForStatusHistory(list = [], limit = 6) {
   return ['📜 History:', ...rows]
 }
 
-/* ───────── base info + builders ───────── */
+/* ───────── EN: base info for group ───────── */
 function baseInfo(doc) {
   const d = doc || {}
   const emp = d.employee || {}
@@ -166,78 +233,186 @@ function baseInfo(doc) {
   return lines
 }
 
-/* ───────── per-step messages (all steps covered) ───────── */
+/* ───────── KH: pretty sections for Chef DMs ───────── */
+function linesForMenuCountsKh(doc) {
+  const m = menuMap(doc)
+  if (!m.size) return ['🍱 ចំនួនម៉ឺនុយ៖ —']
+  const lines = ['🍱 ចំនួនម៉ឺនុយ៖']
+  const ordered = Array.from(m.entries()).sort(
+    (a, b) => (a[0] === 'Standard' ? -1 : b[0] === 'Standard' ? 1 : a[0].localeCompare(b[0]))
+  )
+  let total = 0
+  for (const [choice, cnt] of ordered) {
+    total += toInt(cnt)
+    const label = mapOne(choice, MENU_KH)
+    lines.push(`• ${esc(label)} × <b>${toInt(cnt)}</b>`)
+  }
+  lines.push(`• <i>សរុបម៉ឺនុយ</i>៖ <b>${total}</b>`)
+  return lines
+}
+
+function linesForDietaryCountsKh(doc) {
+  const g = dietaryByMenu(doc)
+  if (!g.size) {
+    const dietaryLabel = Array.isArray(doc?.dietary)
+      ? mapArray(doc.dietary, ALLERGEN_KH)
+      : '—'
+    const base = [`⚠️ អាឡែស៊ី៖ ${esc(dietaryLabel)}`]
+    if (doc?.dietaryOther) base.push(`• ផ្សេងៗ៖ ${esc(doc.dietaryOther)}`)
+    base.push('⚠️ ចំនួនអាហារផ្សេងៗ៖ —')
+    return base
+  }
+  const lines = ['⚠️ ចំនួនអាហារផ្សេងៗ (តាមម៉ឺនុយ)៖']
+  const orderedMenus = Array.from(g.keys()).sort(
+    (a, b) => (a === 'Standard' ? -1 : b === 'Standard' ? 1 : a.localeCompare(b))
+  )
+  for (const menu of orderedMenus) {
+    const inner = g.get(menu)
+    const parts = Array.from(inner.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([allergen, cnt]) => {
+        const label = mapOne(allergen, ALLERGEN_KH)
+        return `${esc(label)} × <b>${toInt(cnt)}</b>`
+      })
+    const sum = Array.from(inner.values()).reduce((s, v) => s + toInt(v), 0)
+    const menuLabel = mapOne(menu, MENU_KH)
+    lines.push(`• ${esc(menuLabel)} — ${parts.join(', ')} (សរុប៖ <b>${sum}</b>)`)
+  }
+  if (doc?.dietaryOther) lines.push(`• ផ្សេងៗ៖ ${esc(doc.dietaryOther)}`)
+  return lines
+}
+
+/* KH: recurring (if you ever show it to chef later) */
+function linesForRecurringKh(recurring = {}) {
+  const r = recurring || {}
+  const out = []
+  out.push(`🔁 កម្មង់ច្រើនថ្ងៃ៖ <b>${r.enabled ? 'បើក' : 'បិទ'}</b>`)
+  if (r.enabled) {
+    const freqLabel = mapOne(r.frequency, RECUR_FREQ_KH)
+    out.push(`• កម្រិតធ្វើម្ដងៗ៖ ${esc(freqLabel || '—')}`)
+    out.push(`• កាលបរិច្ឆេទបញ្ចប់៖ ${fmtDate(r.endDate)}`)
+    out.push(`• ត្រូវអាហារថ្ងៃឈប់សម្រាក៖ ${r.skipHolidays ? 'បាទ/ចាស' : 'ទេ'}`)
+  }
+  return out
+}
+
+/* ───────── KH: base info for Chef DMs ───────── */
+function baseInfoKh(doc) {
+  const d = doc || {}
+  const emp = d.employee || {}
+  const loc = d.location || {}
+
+  const orderTypeKh = mapOne(d.orderType, ORDER_TYPE_KH)
+  const mealsKh = mapArray(d.meals, MEAL_KH)
+  const locKindKh = loc.kind ? mapOne(loc.kind, LOCATION_KH) : ''
+  const locStr =
+    locKindKh ||
+    loc.kind ||
+    ''
+
+  const lines = [
+    `📌 លេខសំណើ៖ <code>${esc(d.requestId || d._id || '')}</code>`,
+    `👤 និយោជិក៖ <b>${esc(emp.name || '')}</b>${emp.employeeId ? ` (${esc(emp.employeeId)})` : ''}`,
+    `🏢 ផ្នែក៖ ${esc(emp.department || '')}`,
+    `📅 កាលបរិច្ឆេទកម្មង់៖ ${fmtDate(d.orderDate)}`,
+    `📅 កាលបរិច្ឆេទបរិភោគ៖ ${fmtDate(d.eatDate || d.serveDate)}`,
+    `⏰ ម៉ោង៖ ${d.eatTimeStart ? esc(d.eatTimeStart) : '–'}${d.eatTimeEnd ? ` – ${esc(d.eatTimeEnd)}` : ''}`,
+    `📋 ប្រភេទកម្មង់៖ ${esc(orderTypeKh || d.orderType || '')}`,
+    `🥗 មុខអាហារ៖ ${esc(mealsKh)}`,
+    `👥 ចំនួនមនុស្ស៖ <b>${toInt(d.quantity)}</b>`,
+    `🏠 ទីតាំង៖ ${esc(locStr)}${loc.kind === 'Other' && loc.other ? ` (${esc(loc.other)})` : ''}`,
+    `📦 ជម្រើសម៉ឺនុយ៖ ${esc(mapArray(d.menuChoices, MENU_KH))}`,
+    '-----------------------------',
+    ...linesForMenuCountsKh(d),
+    '-----------------------------',
+    ...linesForDietaryCountsKh(d),
+  ]
+  const notes = []
+  if (d.specialInstructions) notes.push(`📝 កំណត់ចំណាំ៖ ${esc(safeNote(d.specialInstructions))}`)
+  if (d.cancelReason) notes.push(`🚫 មូលហេតុបោះបង់៖ ${esc(d.cancelReason)}`)
+  if (notes.length) lines.push('-----------------------------', ...notes)
+  return lines
+}
+
+/* ───────── EN: per-step messages (group) ───────── */
 function newRequestMsg(doc) {
+  const icon = iconFor(doc.status || 'NEW')
   return [
-    '🍽️ <b>New Food Request</b>',
+    `${icon} <b>New Food Request</b>`,
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
     ...linesForRecurring(doc.recurring || {}),
     '-----------------------------',
-    `📊 Status: <b>${esc(doc.status || 'NEW')}</b>`,
+    `📊 Status: ${icon} <b>${esc(doc.status || 'NEW')}</b>`,
     ...linesForStatusHistory(doc.statusHistory, 6),
   ].filter(Boolean).join('\n')
 }
 
 function acceptedMsg(doc) {
+  const icon = iconFor('ACCEPTED')
   return [
-    '✅ <b>Request Accepted</b>',
+    `${icon} <b>Request Accepted</b>`,
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    '📊 Status: <b>ACCEPTED</b>',
+    `📊 Status: ${icon} <b>ACCEPTED</b>`,
     ...linesForStatusHistory(doc.statusHistory, 8),
   ].filter(Boolean).join('\n')
 }
 
 function cookingMsg(doc) {
+  const icon = iconFor('COOKING')
   return [
-    '👨‍🍳 <b>Cooking Started</b>',
+    `${icon} <b>Cooking Started</b>`,
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    '📊 Status: <b>COOKING</b>',
+    `📊 Status: ${icon} <b>COOKING</b>`,
     ...linesForStatusHistory(doc.statusHistory, 8),
   ].filter(Boolean).join('\n')
 }
 
 function readyMsg(doc) {
+  const icon = iconFor('READY')
   return [
-    '🟢 <b>Order Ready</b>',
+    `${icon} <b>Order Ready</b>`,
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    '📊 Status: <b>READY</b>',
+    `📊 Status: ${icon} <b>READY</b>`,
     ...linesForStatusHistory(doc.statusHistory, 8),
   ].filter(Boolean).join('\n')
 }
 
 function deliveredMsg(doc) {
+  const icon = iconFor('DELIVERED')
   return [
-    '📦 <b>Request Delivered</b>',
+    `${icon} <b>Request Delivered</b>`,
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    '📊 Final status: <b>DELIVERED</b>',
+    `📊 Final status: ${icon} <b>DELIVERED</b>`,
     ...linesForStatusHistory(doc.statusHistory, 8),
   ].filter(Boolean).join('\n')
 }
 
 function cancelMsg(doc) {
+  const icon = iconFor('CANCELED')
   return [
-    '❌ <b>Request Canceled</b>',
+    `${icon} <b>Request Canceled</b>`,
     '=============================',
     ...baseInfo(doc),
     '-----------------------------',
-    '📊 Final status: <b>CANCELED</b>',
+    `📊 Final status: ${icon} <b>CANCELED</b>`,
     ...linesForStatusHistory(doc.statusHistory, 8),
   ].filter(Boolean).join('\n')
 }
 
-/* ───────── dispatcher (use this to alert “all steps”) ───────── */
+/* ───────── EN: dispatcher (generic) ───────── */
 function statusUpdateMsg(doc) {
   const s = (doc?.status || 'NEW').toUpperCase()
+  const icon = iconFor(s)
   switch (s) {
     case 'NEW': return newRequestMsg(doc)
     case 'ACCEPTED': return acceptedMsg(doc)
@@ -246,17 +421,86 @@ function statusUpdateMsg(doc) {
     case 'DELIVERED': return deliveredMsg(doc)
     case 'CANCELED': return cancelMsg(doc)
     default: return [
-      `ℹ️ <b>Status Updated</b> → <b>${esc(s)}</b>`,
+      `${icon} <b>Status Updated</b> → <b>${esc(s)}</b>`,
       '=============================',
       ...baseInfo(doc),
       '-----------------------------',
-      `📊 Status: <b>${esc(s)}</b>`,
+      `📊 Status: ${icon} <b>${esc(s)}</b>`,
       ...linesForStatusHistory(doc.statusHistory, 6),
     ].filter(Boolean).join('\n')
   }
 }
 
+/* ───────── KH: Chef DMs per step ───────── */
+function chefNewRequestDM(doc) {
+  const icon = iconFor(doc.status || 'NEW')
+  return [
+    `${icon} <b>ការកម្មង់អាហារថ្មី</b>`,
+    '=============================',
+    ...baseInfoKh(doc),
+    '-----------------------------',
+    `📊 ស្ថានភាព៖ ${icon} <b>${esc(doc.status || 'NEW')}</b>`,
+    ...linesForRecurringKh(doc.recurring || {}),
+  ].filter(Boolean).join('\n')
+}
+
+function chefAcceptedDM(doc) {
+  const icon = iconFor('ACCEPTED')
+  return [
+    `${icon} <b>បានព្រមទទួលសំណើអាហារ</b>`,
+    '=============================',
+    ...baseInfoKh(doc),
+    '-----------------------------',
+    `📊 ស្ថានភាព៖ ${icon} <b>ACCEPTED</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function chefCookingDM(doc) {
+  const icon = iconFor('COOKING')
+  return [
+    `${icon} <b>កំពុងចម្អិនអាហារ</b>`,
+    '=============================',
+    ...baseInfoKh(doc),
+    '-----------------------------',
+    `📊 ស្ថានភាព៖ ${icon} <b>COOKING</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function chefReadyDM(doc) {
+  const icon = iconFor('READY')
+  return [
+    `${icon} <b>អាហារត្រៀមរួចរាល់</b>`,
+    '=============================',
+    ...baseInfoKh(doc),
+    '-----------------------------',
+    `📊 ស្ថានភាព៖ ${icon} <b>READY</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function chefDeliveredDM(doc) {
+  const icon = iconFor('DELIVERED')
+  return [
+    `${icon} <b>បានដឹកជញ្ជូនអាហាររួចរាល់</b>`,
+    '=============================',
+    ...baseInfoKh(doc),
+    '-----------------------------',
+    `📊 ស្ថានភាពចុងក្រោយ៖ ${icon} <b>DELIVERED</b>`,
+  ].filter(Boolean).join('\n')
+}
+
+function chefCancelDM(doc) {
+  const icon = iconFor('CANCELED')
+  return [
+    `${icon} <b>សំណើអាហារត្រូវបានបោះបង់</b>`,
+    '=============================',
+    ...baseInfoKh(doc),
+    '-----------------------------',
+    `📊 ស្ថានភាពចុងក្រោយ៖ ${icon} <b>CANCELED</b>`,
+  ].filter(Boolean).join('\n')
+}
+
 module.exports = {
+  // EN (group)
   newRequestMsg,
   acceptedMsg,
   cookingMsg,
@@ -264,4 +508,12 @@ module.exports = {
   deliveredMsg,
   cancelMsg,
   statusUpdateMsg,
+
+  // KH (chef DM)
+  chefNewRequestDM,
+  chefAcceptedDM,
+  chefCookingDM,
+  chefReadyDM,
+  chefDeliveredDM,
+  chefCancelDM,
 }

@@ -231,11 +231,12 @@ const canRespond = it => {
 }
 
 const terminalStates = ['CANCELLED', 'COMPLETED']
+// 🚫 remove CANCELLED from allowed next statuses (driver cannot cancel)
 const ALLOWED_NEXT = {
-  ACCEPTED: ['ON_ROAD', 'DELAYED', 'CANCELLED'],
-  ON_ROAD: ['ARRIVING', 'DELAYED', 'CANCELLED'],
-  ARRIVING: ['COMPLETED', 'DELAYED', 'CANCELLED'],
-  DELAYED: ['ON_ROAD', 'ARRIVING', 'CANCELLED'],
+  ACCEPTED: ['ON_ROAD', 'DELAYED'],
+  ON_ROAD: ['ARRIVING', 'DELAYED'],
+  ARRIVING: ['COMPLETED', 'DELAYED'],
+  DELAYED: ['ON_ROAD', 'ARRIVING'],
 }
 const nextStatusesFor = from => ALLOWED_NEXT[String(from || '').toUpperCase()] || []
 
@@ -265,7 +266,9 @@ async function sendAck(item, response) {
       item.assignment = { ...item.assignment, messengerAck: response, messengerAckAt: new Date() }
     else item.assignment = { ...item.assignment, driverAck: response, driverAckAt: new Date() }
 
-    snackText.value = response === 'ACCEPTED' ? 'You accepted this task.' : 'You declined it.'
+    snackText.value = response === 'ACCEPTED'
+      ? 'You accepted this task.'
+      : 'Response recorded.'
     snack.value = true
   } catch (e) {
     snackText.value = e?.response?.data?.message || e?.message || 'Action failed'
@@ -490,21 +493,16 @@ function showDetails(item) {
               <!-- ACTIONS -->
               <template #item.actions="{ item }">
                 <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
-                  <!-- Step 1: driver/messenger ack -->
+                  <!-- Step 1: driver/messenger ack (NO DECLINE) -->
                   <template v-if="canRespond(item)">
                     <v-btn size="small" color="success" variant="flat"
                       :loading="actLoading === String(item._id)"
                       @click.stop="sendAck(item,'ACCEPTED')">
                       <i class="fa-solid fa-check mr-1"></i> Accept
                     </v-btn>
-                    <v-btn size="small" color="error" variant="tonal"
-                      :loading="actLoading === String(item._id)"
-                      @click.stop="sendAck(item,'DECLINED')">
-                      <i class="fa-solid fa-xmark mr-1"></i> Decline
-                    </v-btn>
                   </template>
 
-                  <!-- Step 2: live status (after ack ACCEPTED) -->
+                  <!-- Step 2: live status (after ack ACCEPTED) – no CANCELLED -->
                   <template v-if="canChangeStatus(item)">
                     <v-menu location="bottom end">
                       <template #activator="{ props }">
@@ -641,11 +639,9 @@ function showDetails(item) {
         <v-divider />
         <v-card-actions class="justify-end" style="gap:8px;">
           <template v-if="detailItem && canRespond(detailItem)">
+            <!-- Driver can only accept here too -->
             <v-btn size="small" color="success" variant="flat" :loading="actLoading === String(detailItem?._id)" @click="sendAck(detailItem,'ACCEPTED')">
               <i class="fa-solid fa-check mr-1"></i> Accept
-            </v-btn>
-            <v-btn size="small" color="error" variant="tonal" :loading="actLoading === String(detailItem?._id)" @click="sendAck(detailItem,'DECLINED')">
-              <i class="fa-solid fa-xmark mr-1"></i> Decline
             </v-btn>
           </template>
           <template v-if="detailItem && canChangeStatus(detailItem)">

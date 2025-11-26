@@ -125,7 +125,7 @@ const scrollToServices = () => {
                       </span>
                     </div>
                     <div class="service-meta">
-                      <span><i class="fa-solid fa-circle-nodes mr-1" /> Real-time status</span>
+                      <!-- <span><i class="fa-solid fa-circle-nodes mr-1" /> Real-time status</span> -->
                       <span><i class="fa-solid fa-users mr-1" /> Driver &amp; Messenger app</span>
                     </div>
                   </div>
@@ -146,9 +146,9 @@ const scrollToServices = () => {
             <div class="chip">
               <i class="fa-brands fa-telegram" /> Telegram Alerts
             </div>
-            <div class="chip">
+            <!-- <div class="chip">
               <i class="fa-solid fa-chart-line" /> Live Dashboard
-            </div>
+            </div> -->
             <div class="chip">
               <i class="fa-solid fa-database" /> Secure Database
             </div>

@@ -70,7 +70,7 @@ function purposeLineKh(bk) {
 function customerContactLineKh(bk) {
   const c = (bk.customerContact || '').trim()
   if (!c) return null
-  return `• លេខទំនាក់ទំនងអតិថិជន៖ ${esc(c)}`
+  return `• លេខទំនាក់ទំនងរបស់ភ្ញៀវ៖ ${esc(c)}`
 }
 
 /* ──────────────────────────────

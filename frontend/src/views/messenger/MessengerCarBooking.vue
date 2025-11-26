@@ -204,7 +204,7 @@ async function sendAck (item, response) {
       messengerAck: response,
       messengerAckAt: new Date().toISOString()
     }
-    snackText.value = response === 'ACCEPTED' ? 'Acknowledged.' : 'Declined.'
+    snackText.value = response === 'ACCEPTED' ? 'Acknowledged.' : 'Response recorded.'
     snack.value = true
   } catch (e) {
     snackText.value = e?.response?.data?.message || e?.message || 'Action failed'
@@ -418,7 +418,7 @@ watch([selectedDate, statusFilter], loadList)
                   class="d-flex justify-end flex-wrap"
                   style="gap:6px;"
                 >
-                  <!-- ACK buttons (show only if still pending) -->
+                  <!-- ACK buttons (messenger can only ACCEPT) -->
                   <template
                     v-if="(item.assignment?.messengerAck || 'PENDING') === 'PENDING'"
                   >
@@ -431,18 +431,9 @@ watch([selectedDate, statusFilter], loadList)
                     >
                       <i class="fa-solid fa-check mr-1"></i> Accept
                     </v-btn>
-                    <v-btn
-                      size="small"
-                      color="error"
-                      variant="tonal"
-                      :loading="actLoading === String(item._id)"
-                      @click.stop="sendAck(item, 'DECLINED')"
-                    >
-                      <i class="fa-solid fa-xmark mr-1"></i> Decline
-                    </v-btn>
                   </template>
 
-                  <!-- Status updates (only after accepted/declined) -->
+                  <!-- Status updates (only after ack) – no CANCELLED option here -->
                   <template v-else>
                     <v-menu>
                       <template #activator="{ props }">
