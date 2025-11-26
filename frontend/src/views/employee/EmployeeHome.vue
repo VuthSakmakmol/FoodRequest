@@ -5,10 +5,11 @@ import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket from '@/utils/socket'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 
 const DEBUG = false
 const router = useRouter()
+const route  = useRoute()
 
 /* Sections */
 import RequesterSection from './sections/RequesterSection.vue'
@@ -34,7 +35,7 @@ const form = ref({
 
   orderType: 'Daily meal',
   meals: [],
-  eatDate: dayjs().format('YYYY-MM-DD'),
+  eatDate: dayjs().format('YYYY-MM-DD'),   // will be overridden by route if provided
 
   eatStartHour: '',
   eatStartMinute: '',
@@ -62,6 +63,17 @@ const form = ref({
   endDate: '',          // 'YYYY-MM-DD'
   skipHolidays: false,
 })
+
+/* 🔗 If calendar opened with ?eatDate=YYYY-MM-DD, apply it (no past dates) */
+const qEatDate = typeof route.query.eatDate === 'string' ? route.query.eatDate : ''
+if (qEatDate && /^\d{4}-\d{2}-\d{2}$/.test(qEatDate)) {
+  let d = dayjs(qEatDate, 'YYYY-MM-DD', true)
+  const today = dayjs().startOf('day')
+  if (!d.isValid() || d.isBefore(today, 'day')) {
+    d = today
+  }
+  form.value.eatDate = d.format('YYYY-MM-DD')
+}
 
 const loading = ref(false)
 const success = ref('')
@@ -151,7 +163,7 @@ function validateForm() {
   return errs
 }
 
-/* Builders */
+/* Builders (unchanged) */
 function buildMenuCountsArray(menuCountsObj) {
   const entries = Object.entries(menuCountsObj || {})
     .map(([choice, cnt]) => ({ choice, count: Number(cnt || 0) }))
@@ -209,7 +221,6 @@ function buildPayloadFromForm(f) {
 
     specialInstructions: f.specialInstructions || '',
 
-    // backend expects the nested recurring object
     recurring: {
       enabled: !!f.recurring,
       endDate: f.recurring ? (f.endDate || null) : null,
@@ -263,8 +274,8 @@ function resetForm({ keepEmployee = false } = {}) {
     meals: [],
     eatDate: dayjs().format('YYYY-MM-DD'),
 
-    eatStartHour:'', eatStartMinute:'',
-    eatEndHour:'',   eatEndMinute:'',
+    eatStartHour:'', eatStartMinute:'00',
+    eatEndHour:'',   eatEndMinute:'00',
     eatTimeStart: '',
 
     quantity: 1,
@@ -304,9 +315,7 @@ onMounted(() => {
 onBeforeUnmount(() => { socket.off('foodRequest:created'); window.removeEventListener('keydown', onHotkey) })
 function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit() }
 
-/* =========================================
-   Holidays (from backend) + recurring view
-   ========================================= */
+/* Holidays + recurring preview (unchanged from your version) */
 const customHolidaySet = ref(new Set())
 const holidaysLoading  = ref(false)
 
@@ -333,7 +342,6 @@ const timeLabel = computed(() => {
   return '—'
 })
 
-/** Simple summary of menu splits (Standard = qty - specials) */
 const menuSummary = computed(() => {
   const f = form.value
   const qty = Number(f.quantity || 0)
@@ -352,7 +360,6 @@ const menuSummary = computed(() => {
   return parts.join(', ') || ('Standard × ' + qty)
 })
 
-/** Build recurring preview list: includes holidays with status labels */
 const recurringList = computed(() => {
   const f = form.value
   if (!f.recurring || !f.eatDate || !f.endDate) return []
@@ -367,7 +374,7 @@ const recurringList = computed(() => {
     const isCustom = customHolidaySet.value.has(iso)
     const isHoliday = isSunday || isCustom
 
-    const included = !(f.skipHolidays && isHoliday) // if skipping, this day won't be created
+    const included = !(f.skipHolidays && isHoliday)
 
     out.push({
       iso,
@@ -377,8 +384,6 @@ const recurringList = computed(() => {
       qty: Number(f.quantity || 0),
       menus: menuSummary.value,
       location: f.location === 'Other' ? (f.locationOther || 'Other') : (f.location || '—'),
-
-      // preview meta
       isHoliday,
       isSunday,
       isCustom,
@@ -418,11 +423,13 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
             </v-col>
 
             <v-col cols="12" md="5">
+              <!-- 🔗 pass route down so OrderDetailSection can see ?eatDate=... -->
               <OrderDetailSection
                 :form="form"
                 :is-timed-order="isTimedOrder"
                 :needs-other-location="needsOtherLocation"
                 :MEALS="MEALS"
+                :r="route"
               />
             </v-col>
 
@@ -439,7 +446,7 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
               <RecurringBookingSection :form="form" :holidays="[...customHolidaySet]" />
             </v-col>
 
-            <!-- 🔁 Recurring daily detail preview -->
+            <!-- recurring preview table (unchanged) -->
             <v-col cols="12" v-if="form.recurring">
               <v-card class="rounded-lg mt-2" elevation="0" variant="outlined">
                 <v-toolbar flat density="compact">

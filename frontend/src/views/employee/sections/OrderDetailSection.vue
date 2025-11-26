@@ -8,12 +8,13 @@ const props = defineProps({
   isTimedOrder: Boolean,
   needsOtherLocation: Boolean,
   MEALS: Array,
+  // route object from parent
   r: Object
 })
 
 const eatDateMenu = ref(false)
 
-/* Hours/Minutes (unchanged) */
+/* Hours/Minutes */
 const HOURS = Array.from({ length: 23 }, (_, i) => String(i + 1).padStart(2, '0'))
 const MINUTES = ['00','30']
 
@@ -28,7 +29,10 @@ const timeError = computed(() => {
   return eatEndTime.value > eatStartTime.value ? '' : 'End time must be after start time'
 })
 
-/* Khmer labels for meals (unchanged) */
+/* 🔒 Min eat date = today (cannot choose yesterday/past) */
+const minEatDate = computed(() => dayjs().format('YYYY-MM-DD'))
+
+/* Khmer labels for meals */
 const MEAL_KM = {
   Breakfast: 'អាហារពេលព្រឹក',
   Lunch: 'អាហារថ្ងៃត្រង់',
@@ -36,7 +40,7 @@ const MEAL_KM = {
   Snack: 'អាហារសម្រន់'
 }
 
-/* Select data (unchanged) */
+/* Select data */
 const ORDER_TYPES = [
   { value: 'Daily meal',       title: 'Daily meal',       subtitle: 'អាហារប្រចាំថ្ងៃ' },
   { value: 'Meeting catering', title: 'Meeting catering', subtitle: 'អាហារប្រជុំ' },
@@ -48,11 +52,54 @@ const LOCATIONS = [
   { value: 'Other',        title: 'Other',        subtitle: 'ផ្សេងៗ' }
 ]
 
-/* Minutes default to '00' (unchanged) */
+/* 🔗 Eat date from route ?eatDate=YYYY-MM-DD + clamp to today if past */
+function applyEatDateFromRoute(qDate) {
+  if (!qDate) return
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(qDate)) return
+
+  let d = dayjs(qDate, 'YYYY-MM-DD', true)
+  if (!d.isValid()) return
+
+  const today = dayjs().startOf('day')
+  if (d.isBefore(today, 'day')) {
+    d = today
+  }
+  props.form.eatDate = d.format('YYYY-MM-DD')
+}
+
+/* Clamp any manual/other changes to not go to the past */
+watch(
+  () => props.form.eatDate,
+  (val) => {
+    if (!val) return
+    const todayStr = minEatDate.value
+    const d = dayjs(val, 'YYYY-MM-DD', true)
+    if (!d.isValid()) {
+      props.form.eatDate = todayStr
+      return
+    }
+    if (d.isBefore(dayjs(todayStr), 'day')) {
+      props.form.eatDate = todayStr
+    }
+  }
+)
+
+/* Minutes default + initial route sync */
 onMounted(() => {
   if (!props.form.eatStartMinute) props.form.eatStartMinute = '00'
   if (!props.form.eatEndMinute)   props.form.eatEndMinute   = '00'
+
+  const qDate = props.r?.query?.eatDate
+  applyEatDateFromRoute(qDate)
 })
+
+/* If route query changes (user clicks other date then open again in same session) */
+watch(
+  () => props.r?.query?.eatDate,
+  (newVal) => {
+    if (newVal) applyEatDateFromRoute(newVal)
+  }
+)
 
 watch(() => props.form.eatStartHour, (h) => {
   if (h && !props.form.eatStartMinute) props.form.eatStartMinute = '00'
@@ -61,7 +108,7 @@ watch(() => props.form.eatEndHour, (h) => {
   if (h && !props.form.eatEndMinute) props.form.eatEndMinute = '00'
 })
 
-/* Show “Other Location” (unchanged) */
+/* Show “Other Location” */
 const showOtherLocation = computed(() =>
   props.needsOtherLocation || String(props.form.location || '') === 'Other'
 )
@@ -69,7 +116,7 @@ watch(showOtherLocation, (visible) => {
   if (!visible) props.form.locationOther = ''
 })
 
-/* Normalize bilingual values (unchanged) */
+/* Normalize bilingual values (Daily meal - អាហារប្រចាំថ្ងៃ => Daily meal) */
 function stripBilingual(v) {
   if (typeof v === 'string' && v.includes(' - ')) return v.split(' - ')[0].trim()
   return v
@@ -116,7 +163,11 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
                     placeholder="YYYY-MM-DD"
                   />
                 </template>
-                <v-date-picker v-model="form.eatDate" @update:model-value="eatDateMenu = false" />
+                <v-date-picker
+                  v-model="form.eatDate"
+                  :min="minEatDate"    
+                  @update:model-value="eatDateMenu = false"
+                />
               </v-menu>
             </v-col>
 
@@ -199,10 +250,24 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
               <div class="mini-title">Eat Start</div>
               <v-row dense class="mt-1">
                 <v-col cols="6">
-                  <v-select v-model="form.eatStartHour" :items="HOURS" label="Hour" variant="outlined" density="compact" hide-details="auto" />
+                  <v-select
+                    v-model="form.eatStartHour"
+                    :items="HOURS"
+                    label="Hour"
+                    variant="outlined"
+                    density="compact"
+                    hide-details="auto"
+                  />
                 </v-col>
                 <v-col cols="6">
-                  <v-select v-model="form.eatStartMinute" :items="MINUTES" label="Minute" variant="outlined" density="compact" hide-details="auto" />
+                  <v-select
+                    v-model="form.eatStartMinute"
+                    :items="MINUTES"
+                    label="Minute"
+                    variant="outlined"
+                    density="compact"
+                    hide-details="auto"
+                  />
                 </v-col>
               </v-row>
             </v-col>
@@ -211,10 +276,25 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
               <div class="mini-title">Eat End</div>
               <v-row dense class="mt-1">
                 <v-col cols="6">
-                  <v-select v-model="form.eatEndHour" :items="HOURS" label="Hour" variant="outlined" density="compact" hide-details="auto" />
+                  <v-select
+                    v-model="form.eatEndHour"
+                    :items="HOURS"
+                    label="Hour"
+                    variant="outlined"
+                    density="compact"
+                    hide-details="auto"
+                  />
                 </v-col>
                 <v-col cols="6">
-                  <v-select v-model="form.eatEndMinute" :items="MINUTES" label="Minute" variant="outlined" density="compact" hide-details="auto" :error-messages="timeError" />
+                  <v-select
+                    v-model="form.eatEndMinute"
+                    :items="MINUTES"
+                    label="Minute"
+                    variant="outlined"
+                    density="compact"
+                    hide-details="auto"
+                    :error-messages="timeError"
+                  />
                 </v-col>
               </v-row>
             </v-col>
@@ -232,9 +312,13 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
           <v-row dense class="mt-1">
             <v-col cols="6" v-for="m in MEALS" :key="m">
               <v-btn
-                block variant="tonal" class="choice-btn two-line"
+                block
+                variant="tonal"
+                class="choice-btn two-line"
                 :class="{ active: form.meals.includes(m) }"
-                @click="form.meals = form.meals.includes(m) ? form.meals.filter(x => x !== m) : [...form.meals, m]"
+                @click="form.meals = form.meals.includes(m)
+                  ? form.meals.filter(x => x !== m)
+                  : [...form.meals, m]"
               >
                 <div class="label mt-2">
                   <div class="en">{{ m }}</div>
@@ -243,7 +327,9 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
               </v-btn>
             </v-col>
           </v-row>
-          <div v-if="!form.meals.length" class="text-error text-caption mt-1">Please select at least one meal</div>
+          <div v-if="!form.meals.length" class="text-error text-caption mt-1">
+            Please select at least one meal
+          </div>
         </v-card-text>
 
         <v-divider class="my-2" />
@@ -256,7 +342,15 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
         <v-card-text class="pt-0">
           <v-row dense class="mt-1">
             <v-col cols="12" sm="6">
-              <v-text-field v-model.number="form.quantity" type="number" min="1" label="Qty" suffix="People" variant="outlined" density="compact" />
+              <v-text-field
+                v-model.number="form.quantity"
+                type="number"
+                min="1"
+                label="Qty"
+                suffix="People"
+                variant="outlined"
+                density="compact"
+              />
             </v-col>
           </v-row>
         </v-card-text>
@@ -286,7 +380,6 @@ watch(() => props.form.location,  (v) => { props.form.location  = stripBilingual
 
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size: medium; }
 
-/* ——— Existing component styles (kept) ——— */
 .km{
   font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;

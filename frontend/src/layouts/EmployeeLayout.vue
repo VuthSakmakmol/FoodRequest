@@ -29,6 +29,7 @@ const groups = [
     children: [
       { label: 'Request Meal', icon: 'fa-solid fa-bowl-food', to: { name: 'employee-request' } },
       { label: 'My Requests',  icon: 'fa-solid fa-clock-rotate-left', to: { name: 'employee-request-history' } },
+      { label: 'Calendar',     icon: 'fa-solid fa-clock', to: { name: 'employee-food-calendar'}}
     ]
   },
   {

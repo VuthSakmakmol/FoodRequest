@@ -1,6 +1,7 @@
 <!-- src/views/employee/EmployeeRequestHistory.vue -->
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter'
@@ -13,6 +14,7 @@ import { useDisplay } from 'vuetify'
 dayjs.extend(isSameOrAfter)
 dayjs.extend(isSameOrBefore)
 
+const route = useRoute()
 const { mdAndUp } = useDisplay()
 
 /* ───────── Mini i18n (EN→KM display) ───────── */
@@ -124,6 +126,43 @@ function resetFilters() {
   load()
 }
 
+/* ───────── focus & highlight from calendar ───────── */
+const focusId = ref(route.query.focus ? String(route.query.focus) : '')
+const focusDate = ref(route.query.date ? String(route.query.date) : '')
+
+function applyFocusDateFilter() {
+  if (focusDate.value) {
+    dateStart.value = focusDate.value
+    dateEnd.value = focusDate.value
+  }
+}
+
+async function focusOnRowIfNeeded() {
+  if (!focusId.value) return
+
+  const idx = filteredRows.value.findIndex(r => r._id === focusId.value)
+  if (idx === -1) return
+
+  if (itemsPerPage.value !== 'All') {
+    const per = Number(itemsPerPage.value) || 20
+    page.value = Math.floor(idx / per) + 1
+  } else {
+    page.value = 1
+  }
+
+  await nextTick()
+
+  setTimeout(() => {
+    const el = document.querySelector(`[data-row-id="${focusId.value}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('highlight-row')
+      // keep highlight for 5s
+      setTimeout(() => el.classList.remove('highlight-row'), 5000)
+    }
+  }, 300)
+}
+
 /* ───────── helpers ───────── */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({ ...o, _id: String(o?._id || '') })
@@ -229,7 +268,6 @@ function exportExcel() {
     'Dietary': (r.dietary || []).join(', '),
     'Dietary Counts': JSON.stringify(r.dietaryCounts || []),
     'Dietary Other': r.dietaryOther || '',
-    // 🔁 updated recurring fields (no frequency)
     'Recurring Enabled': r.recurring?.enabled ? 'Yes' : 'No',
     'Recurring End Date': fmtDate(r.recurring?.endDate),
     'Skip Holidays': r.recurring?.skipHolidays ? 'Yes' : 'No',
@@ -268,10 +306,13 @@ function unregisterSocket() {
   socket.off('foodRequest:deleted')
 }
 
+/* ───────── lifecycle ───────── */
 onMounted(async () => {
   subscribeEmployeeIfNeeded()
+  applyFocusDateFilter()
   await load()
   registerSocket()
+  await focusOnRowIfNeeded()
 })
 onBeforeUnmount(() => { unregisterSocket() })
 watch([q, status, dateStart, dateEnd], () => load())
@@ -512,7 +553,8 @@ function dietaryByMenu(r) {
             </thead>
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
-                <tr>
+                <!-- add data-row-id so calendar can focus -->
+                <tr :data-row-id="r._id">
                   <td>
                     <v-chip :color="{ NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }[r.status]" size="small" label>
                       <div class="chip-2l">
@@ -615,6 +657,16 @@ function dietaryByMenu(r) {
 </template>
 
 <style scoped>
+/* highlight when focused from calendar */
+.highlight-row {
+  animation: rowFlash 5s ease-in-out;
+}
+@keyframes rowFlash {
+  0%   { background-color: #fef9c3; }
+  50%  { background-color: #fef08a; }
+  100% { background-color: transparent; }
+}
+
 .table-wrap{ overflow-x:auto; display:block; }
 
 /* Inputs a bit tighter */
