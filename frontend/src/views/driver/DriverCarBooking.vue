@@ -16,6 +16,20 @@ const selectedDate = ref('')
 const statusFilter = ref('ALL')
 const qSearch      = ref('')
 
+/* Khmer status options for filter (values still English for backend) */
+const statusOptions = [
+  { label: 'ទាំងអស់', value: 'ALL' },
+  { label: 'កំពុងរង់ចាំ', value: 'PENDING' },
+  { label: 'បានចាត់ចែង', value: 'ASSIGNED' },
+  { label: 'បានព្រមទទួល', value: 'ACCEPTED' },
+  { label: 'កំពុងធ្វើដំណើរ', value: 'ON_ROAD' },
+  { label: 'ជិតដល់គោលដៅ', value: 'ARRIVING' },
+  { label: 'បានបញ្ចប់', value: 'COMPLETED' },
+  { label: 'យឺតយ៉ាវ', value: 'DELAYED' },
+  { label: 'បានបោះបង់', value: 'CANCELLED' },
+  { label: 'បដិសេធ', value: 'DECLINED' },
+]
+
 /* ─────────────── IDENTITY DETECTION ─────────────── */
 function readCookie(name) {
   const m = document.cookie.match(
@@ -77,19 +91,49 @@ function useDevIdentity() {
   loadList()
 }
 
+/* ─────────────── LABEL MAPS (KH) ─────────────── */
+const STATUS_LABEL_KM = {
+  PENDING : 'កំពុងរង់ចាំ',
+  ASSIGNED: 'បានចាត់ចែង',
+  ACCEPTED: 'បានព្រមទទួល',
+  ON_ROAD : 'កំពុងធ្វើដំណើរ',
+  ARRIVING: 'ជិតដល់គោលដៅ',
+  COMPLETED: 'បានបញ្ចប់',
+  DELAYED : 'យឺតយ៉ាវ',
+  CANCELLED: 'បានបោះបង់',
+  DECLINED: 'បដិសេធ',
+}
+
+const ACK_LABEL_KM = {
+  PENDING : 'មិនទាន់ឆ្លើយ',
+  ACCEPTED: 'ព្រមទទួល',
+  DECLINED: 'បដិសេធ',
+}
+
+const CATEGORY_LABEL_KM = {
+  Car  : 'ឡាន',
+  Motor: 'ម៉ូតូ',
+}
+
+const statusLabel = s => STATUS_LABEL_KM[String(s || '').toUpperCase()] || s
+const ackLabel    = s => ACK_LABEL_KM[String(s || '').toUpperCase()] || s
+const categoryLabel = c => CATEGORY_LABEL_KM[c] || c
+
 /* ─────────────── TABLE HEADERS ─────────────── */
 const roleLabel = computed(() =>
-  identity.value?.role === 'MESSENGER' ? 'Messenger Resp.' : 'Driver Resp.'
+  identity.value?.role === 'MESSENGER'
+    ? 'ការឆ្លើយតបអ្នកដឹកសារ'
+    : 'ការឆ្លើយតបអ្នកបើកបរ'
 )
 const headers = computed(() => [
-  { title: 'Time',        key: 'time',       width: 160 },
-  { title: 'Category',    key: 'category',   width: 120 },
-  { title: 'Requester',   key: 'requester',  width: 230 },
-  { title: 'Itinerary',   key: 'itinerary' },
-  { title: 'Pax',         key: 'passengers', width: 70,  align: 'center' },
-  { title: 'Status',      key: 'status',     width: 150, align: 'end' },
-  { title: roleLabel.value, key: 'driverAck', width: 150, align: 'end' },
-  { title: '',            key: 'actions',    width: 330, align: 'end' },
+  { title: 'ម៉ោង',           key: 'time',       width: 160 },
+  { title: 'ប្រភេទ',         key: 'category',   width: 120 },
+  { title: 'អ្នកស្នើសុំ',    key: 'requester',  width: 230 },
+  { title: 'ផ្លូវដំណើរ',     key: 'itinerary' },
+  { title: 'អ្នកដំណើរ',      key: 'passengers', width: 70,  align: 'center' },
+  { title: 'ស្ថានភាព',      key: 'status',     width: 150, align: 'end' },
+  { title: roleLabel.value,   key: 'driverAck',  width: 150, align: 'end' },
+  { title: '',                key: 'actions',    width: 330, align: 'end' },
 ])
 
 /* ─────────────── ICONS / COLORS ─────────────── */
@@ -103,6 +147,7 @@ const statusColor = s =>
     DELAYED: 'warning',
     CANCELLED: 'error',
     DECLINED: 'error',
+    ASSIGNED: 'primary',
   }[s] || 'grey')
 
 const statusFa = s =>
@@ -115,6 +160,7 @@ const statusFa = s =>
     DELAYED: 'fa-solid fa-triangle-exclamation',
     CANCELLED: 'fa-solid fa-ban',
     DECLINED: 'fa-solid fa-circle-xmark',
+    ASSIGNED: 'fa-solid fa-user-tag',
   }[s] || 'fa-solid fa-hourglass-half')
 
 const ackColor = s => ({ PENDING: 'grey', ACCEPTED: 'success', DECLINED: 'error' }[s] || 'grey')
@@ -169,7 +215,7 @@ async function loadList() {
     }
     leavePreviousRooms = await subscribeBookingRooms(ids)
   } catch (e) {
-    error.value = e?.response?.data?.message || e?.message || 'Failed to load bookings'
+    error.value = e?.response?.data?.message || e?.message || 'មិនអាចផ្ទុកទិន្នន័យបាន'
   } finally {
     loading.value = false
   }
@@ -196,7 +242,7 @@ const filtered = computed(() =>
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 )
 
-/* ─────────────── SIMPLE PAGINATION (no "items per page" select) ─────────────── */
+/* ─────────────── SIMPLE PAGINATION ─────────────── */
 const page = ref(1)
 const itemsPerPage = 10
 
@@ -267,11 +313,11 @@ async function sendAck(item, response) {
     else item.assignment = { ...item.assignment, driverAck: response, driverAckAt: new Date() }
 
     snackText.value = response === 'ACCEPTED'
-      ? 'You accepted this task.'
-      : 'Response recorded.'
+      ? 'អ្នកបានព្រមទទួលភារកិច្ចនេះ។'
+      : 'បានកត់ត្រាការឆ្លើយតបរួចរាល់។'
     snack.value = true
   } catch (e) {
-    snackText.value = e?.response?.data?.message || e?.message || 'Action failed'
+    snackText.value = e?.response?.data?.message || e?.message || 'សកម្មភាពបរាជ័យ'
     snack.value = true
   } finally {
     actLoading.value = ''
@@ -289,11 +335,11 @@ async function setDriverStatus(item, nextStatus) {
         : `/driver/car-bookings/${item._id}/status`
     await api.patch(path, { status: nextStatus }, { headers: { 'x-login-id': loginId, 'x-role': role } })
     item.status = nextStatus
-    snackText.value = `Status updated to ${nextStatus}.`
+    snackText.value = `បានធ្វើបច្ចុប្បន្នភាពស្ថានភាពទៅ ${statusLabel(nextStatus)}។`
     snack.value = true
   } catch (e) {
     await loadList()
-    snackText.value = e?.response?.data?.message || e?.message || 'Failed to update status'
+    snackText.value = e?.response?.data?.message || e?.message || 'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន'
     snack.value = true
   } finally {
     statusLoading.value = ''
@@ -372,8 +418,7 @@ function showDetails(item) {
 
 <template>
   <v-container fluid class="pa-2">
-    <!-- identity bar -->
-
+    <!-- identity bar (dev only) -->
     <div v-if="!identity?.loginId" class="d-flex align-center mb-2" style="gap:8px;">
       <v-text-field v-model="devLoginId" label="loginId" density="compact" variant="outlined" style="max-width:220px;" hide-details />
       <v-select :items="['DRIVER','MESSENGER']" v-model="devRole" density="compact" variant="outlined" hide-details style="max-width:160px;" />
@@ -385,12 +430,12 @@ function showDetails(item) {
         <div class="hdr-left">
           <div class="hdr-title">
             <i class="fa-solid fa-clipboard-list"></i>
-            <span>Car Bookings</span>
+            <span>បញ្ជីការកក់រថយន្ត</span>
           </div>
         </div>
         <div class="hdr-actions">
           <v-btn size="small" :loading="loading" @click="loadList">
-            <i class="fa-solid fa-rotate-right mr-1"></i> REFRESH
+            <i class="fa-solid fa-rotate-right mr-1"></i> ផ្ទុកឡើងវិញ
           </v-btn>
         </div>
       </div>
@@ -399,21 +444,43 @@ function showDetails(item) {
         <!-- Filters -->
         <v-card flat class="soft-card mb-3">
           <v-card-title class="subhdr">
-            <i class="fa-solid fa-filter"></i><span>Filters</span>
+            <i class="fa-solid fa-filter"></i><span>តម្រង</span>
             <v-spacer />
           </v-card-title>
           <v-card-text class="pt-0">
             <v-row dense>
               <v-col cols="12" md="3">
-                <v-text-field v-model="selectedDate" type="date" label="Date (optional)" variant="outlined" density="compact" hide-details clearable />
+                <v-text-field
+                  v-model="selectedDate"
+                  type="date"
+                  label="កាលបរិច្ឆេទ (ស្រេចចិត្ត)"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  clearable
+                />
               </v-col>
               <v-col cols="6" md="3">
-                <v-select :items="['ALL','PENDING','ASSIGNED','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED','DECLINED']"
-                          v-model="statusFilter" label="Status" variant="outlined" density="compact" hide-details />
+                <v-select
+                  :items="statusOptions"
+                  v-model="statusFilter"
+                  item-title="label"
+                  item-value="value"
+                  label="ស្ថានភាព"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                />
               </v-col>
               <v-col cols="12" md="6">
-                <v-text-field v-model="qSearch" label="Search requester / purpose / destination"
-                              variant="outlined" density="compact" hide-details clearable>
+                <v-text-field
+                  v-model="qSearch"
+                  label="ស្វែងរកអ្នកស្នើសុំ / គោលបំណង / ទីតាំង"
+                  variant="outlined"
+                  density="compact"
+                  hide-details
+                  clearable
+                >
                   <template #prepend-inner>
                     <i class="fa-solid fa-magnifying-glass"></i>
                   </template>
@@ -450,20 +517,24 @@ function showDetails(item) {
               <template #item.category="{ item }">
                 <v-chip :color="item.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
                   <i class="fa-solid" :class="item.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"></i>
-                  <span class="ml-2">{{ item.category }}</span>
+                  <span class="ml-2">{{ categoryLabel(item.category) }}</span>
                 </v-chip>
               </template>
 
               <template #item.requester="{ item }">
                 <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
-                <div class="text-caption text-medium-emphasis">{{ item.employee?.department || '—' }} • ID {{ item.employeeId }}</div>
+                <div class="text-caption text-medium-emphasis">
+                  {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                </div>
               </template>
 
               <template #item.itinerary="{ item }">
                 <div class="truncate-2">{{ prettyStops(item.stops) }}</div>
                 <div class="mt-1" v-if="item.ticketUrl">
                   <a :href="absUrl(item.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
-                    <v-btn size="x-small" color="indigo" variant="tonal"><i class="fa-solid fa-paperclip mr-1"></i> Ticket</v-btn>
+                    <v-btn size="x-small" color="indigo" variant="tonal">
+                      <i class="fa-solid fa-paperclip mr-1"></i> សំបុត្រ
+                    </v-btn>
                   </a>
                 </div>
               </template>
@@ -474,14 +545,14 @@ function showDetails(item) {
 
               <template #item.status="{ item }">
                 <v-chip :color="statusColor(item.status)" size="small" label>
-                  <i :class="statusFa(item.status)" class="mr-1"></i> {{ item.status }}
+                  <i :class="statusFa(item.status)" class="mr-1"></i> {{ statusLabel(item.status) }}
                 </v-chip>
               </template>
 
               <template #item.driverAck="{ item }">
                 <v-chip :color="ackColor(item.assignment?.driverAck || 'PENDING')" size="small" label>
                   <i :class="ackFa(item.assignment?.driverAck || 'PENDING')" class="mr-1"></i>
-                  {{ (item.assignment?.driverAck || 'PENDING') }}
+                  {{ ackLabel(item.assignment?.driverAck || 'PENDING') }}
                 </v-chip>
               </template>
 
@@ -490,10 +561,14 @@ function showDetails(item) {
                 <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
                   <!-- Step 1: driver/messenger ack (NO DECLINE) -->
                   <template v-if="canRespond(item)">
-                    <v-btn size="small" color="success" variant="flat"
+                    <v-btn
+                      size="small"
+                      color="success"
+                      variant="flat"
                       :loading="actLoading === String(item._id)"
-                      @click.stop="sendAck(item,'ACCEPTED')">
-                      <i class="fa-solid fa-check mr-1"></i> Accept
+                      @click.stop="sendAck(item,'ACCEPTED')"
+                    >
+                      <i class="fa-solid fa-check mr-1"></i> យល់ព្រម
                     </v-btn>
                   </template>
 
@@ -501,34 +576,39 @@ function showDetails(item) {
                   <template v-if="canChangeStatus(item)">
                     <v-menu location="bottom end">
                       <template #activator="{ props }">
-                        <v-btn v-bind="props" size="small" variant="tonal" color="primary"
-                               :loading="statusLoading === String(item._id)">
-                          <i class="fa-solid fa-arrows-rotate mr-2"></i> Update Status
+                        <v-btn
+                          v-bind="props"
+                          size="small"
+                          variant="tonal"
+                          color="primary"
+                          :loading="statusLoading === String(item._id)"
+                        >
+                          <i class="fa-solid fa-arrows-rotate mr-2"></i> បន្ទាន់សម័យស្ថានភាព
                         </v-btn>
                       </template>
                       <v-list density="compact" min-width="220">
-                        <v-list-subheader>Next status</v-list-subheader>
+                        <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
                         <v-list-item
                           v-for="s in nextStatusesFor(item.status)"
                           :key="s"
                           @click.stop="setDriverStatus(item, s)"
                         >
                           <template #prepend><i :class="statusFa(s)"></i></template>
-                          <v-list-item-title>{{ s }}</v-list-item-title>
+                          <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
                         </v-list-item>
                       </v-list>
                     </v-menu>
                   </template>
 
                   <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
-                    <i class="fa-solid fa-circle-info mr-1"></i> Details
+                    <i class="fa-solid fa-circle-info mr-1"></i> ព័ត៌មានលម្អិត
                   </v-btn>
                 </div>
               </template>
 
               <template #no-data>
                 <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">
-                  No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
+                  មិនមានការកក់រថយន្តទេ<span v-if="selectedDate"> នៅថ្ងៃទី {{ selectedDate }}</span>។
                 </v-sheet>
               </template>
 
@@ -536,7 +616,7 @@ function showDetails(item) {
               <template #bottom>
                 <div class="table-footer">
                   <div class="tf-left text-caption text-medium-emphasis">
-                    {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                    {{ rangeStart }}–{{ rangeEnd }} នៃ {{ totalItems }}
                   </div>
                   <div class="tf-right">
                     <v-pagination
@@ -574,7 +654,7 @@ function showDetails(item) {
           <div class="d-flex align-center" style="gap:10px;">
             <v-chip :color="detailItem?.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
               <i class="fa-solid" :class="detailItem?.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"></i>
-              <span class="ml-2">{{ detailItem?.category || '—' }}</span>
+              <span class="ml-2">{{ categoryLabel(detailItem?.category || '') || '—' }}</span>
             </v-chip>
             <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
           </div>
@@ -586,21 +666,32 @@ function showDetails(item) {
         <v-divider />
         <v-card-text>
           <v-row dense>
-            <v-col cols="12" md="6"><div class="lbl">Date</div><div class="val">{{ detailItem?.tripDate || '—' }}</div></v-col>
-            <v-col cols="12" md="6"><div class="lbl">Passengers</div><div class="val">{{ detailItem?.passengers ?? 1 }}</div></v-col>
             <v-col cols="12" md="6">
-              <div class="lbl">Requester</div>
+              <div class="lbl">កាលបរិច្ឆេទ</div>
+              <div class="val">{{ detailItem?.tripDate || '—' }}</div>
+            </v-col>
+            <v-col cols="12" md="6">
+              <div class="lbl">អ្នកដំណើរ</div>
+              <div class="val">{{ detailItem?.passengers ?? 1 }}</div>
+            </v-col>
+            <v-col cols="12" md="6">
+              <div class="lbl">អ្នកស្នើសុំ</div>
               <div class="val">
                 {{ detailItem?.employee?.name || '—' }}
-                <div class="text-caption text-medium-emphasis">{{ detailItem?.employee?.department || '—' }} • ID {{ detailItem?.employeeId }}</div>
+                <div class="text-caption text-medium-emphasis">
+                  {{ detailItem?.employee?.department || '—' }} • ID {{ detailItem?.employeeId }}
+                </div>
               </div>
             </v-col>
             <v-col cols="12">
-              <div class="lbl">Itinerary</div>
+              <div class="lbl">ផ្លូវដំណើរ</div>
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
                   <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
-                    <i :class="s.destination === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot'" class="mr-1"></i>
+                    <i
+                      :class="s.destination === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot'"
+                      class="mr-1"
+                    ></i>
                     <strong>#{{ i+1 }}:</strong>
                     <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
                   </div>
@@ -610,21 +701,21 @@ function showDetails(item) {
             </v-col>
 
             <v-col cols="12" md="6">
-              <div class="lbl">Status</div>
+              <div class="lbl">ស្ថានភាព</div>
               <div class="val">
                 <v-chip :color="statusColor(detailItem?.status)" size="small" label>
                   <i :class="statusFa(detailItem?.status)" class="mr-1"></i>
-                  {{ detailItem?.status || '—' }}
+                  {{ statusLabel(detailItem?.status || '—') }}
                 </v-chip>
               </div>
             </v-col>
 
             <v-col cols="12" md="6">
-              <div class="lbl">Driver Response</div>
+              <div class="lbl">ការឆ្លើយតបអ្នកបើកបរ</div>
               <div class="val">
                 <v-chip :color="ackColor(detailItem?.assignment?.driverAck || 'PENDING')" size="small" label>
                   <i :class="ackFa(detailItem?.assignment?.driverAck || 'PENDING')" class="mr-1"></i>
-                  {{ detailItem?.assignment?.driverAck || 'PENDING' }}
+                  {{ ackLabel(detailItem?.assignment?.driverAck || 'PENDING') }}
                 </v-chip>
               </div>
             </v-col>
@@ -635,27 +726,43 @@ function showDetails(item) {
         <v-card-actions class="justify-end" style="gap:8px;">
           <template v-if="detailItem && canRespond(detailItem)">
             <!-- Driver can only accept here too -->
-            <v-btn size="small" color="success" variant="flat" :loading="actLoading === String(detailItem?._id)" @click="sendAck(detailItem,'ACCEPTED')">
-              <i class="fa-solid fa-check mr-1"></i> Accept
+            <v-btn
+              size="small"
+              color="success"
+              variant="flat"
+              :loading="actLoading === String(detailItem?._id)"
+              @click="sendAck(detailItem,'ACCEPTED')"
+            >
+              <i class="fa-solid fa-check mr-1"></i> យល់ព្រម
             </v-btn>
           </template>
           <template v-if="detailItem && canChangeStatus(detailItem)">
             <v-menu location="bottom end">
               <template #activator="{ props }">
-                <v-btn v-bind="props" size="small" variant="tonal" color="primary" :loading="statusLoading === String(detailItem?._id)">
-                  <i class="fa-solid fa-arrows-rotate mr-2"></i> Update Status
+                <v-btn
+                  v-bind="props"
+                  size="small"
+                  variant="tonal"
+                  color="primary"
+                  :loading="statusLoading === String(detailItem?._id)"
+                >
+                  <i class="fa-solid fa-arrows-rotate mr-2"></i> បន្ទាន់សម័យស្ថានភាព
                 </v-btn>
               </template>
               <v-list density="compact" min-width="220">
-                <v-list-subheader>Next status</v-list-subheader>
-                <v-list-item v-for="s in nextStatusesFor(detailItem.status)" :key="s" @click.stop="setDriverStatus(detailItem, s)">
+                <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
+                <v-list-item
+                  v-for="s in nextStatusesFor(detailItem.status)"
+                  :key="s"
+                  @click.stop="setDriverStatus(detailItem, s)"
+                >
                   <template #prepend><i :class="statusFa(s)"></i></template>
-                  <v-list-item-title>{{ s }}</v-list-item-title>
+                  <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
                 </v-list-item>
               </v-list>
             </v-menu>
           </template>
-          <v-btn variant="text" @click="detailOpen = false">Close</v-btn>
+          <v-btn variant="text" @click="detailOpen = false">បិទ</v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>

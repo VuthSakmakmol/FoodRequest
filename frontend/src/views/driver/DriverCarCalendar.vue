@@ -1,4 +1,4 @@
-<!-- views/driver/DriverCarCalendar.vue -->
+<!-- src/views/driver/DriverCarCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import Swal from 'sweetalert2'
@@ -88,17 +88,40 @@ const byDate = computed(() => {
   return map
 })
 
-/* ───────── STATUS COLORS ───────── */
-const statusColor = s =>
-  ({
-    PENDING  : '#94a3b8',
-    ACCEPTED : '#3b82f6',
-    ON_ROAD  : '#06b6d4',
-    ARRIVING : '#10b981',
-    COMPLETED: '#16a34a',
-    DELAYED  : '#facc15',
-    CANCELLED: '#ef4444'
-  }[s] || '#94a3b8')
+/* ───────── STATUS COLORS / LABELS (KH) ───────── */
+const STATUS_COLORS = {
+  PENDING  : '#94a3b8',
+  ACCEPTED : '#3b82f6',
+  ON_ROAD  : '#06b6d4',
+  ARRIVING : '#10b981',
+  COMPLETED: '#16a34a',
+  DELAYED  : '#facc15',
+  CANCELLED: '#ef4444'
+}
+
+const STATUS_LABEL_KM = {
+  PENDING  : 'កំពុងរង់ចាំ',
+  ACCEPTED : 'បានព្រមទទួល',
+  ON_ROAD  : 'កំពុងធ្វើដំណើរ',
+  ARRIVING : 'ជិតដល់គោលដៅ',
+  COMPLETED: 'បានបញ្ចប់',
+  DELAYED  : 'យឺតយ៉ាវ',
+  CANCELLED: 'បានបោះបង់'
+}
+
+const statusColor = s => STATUS_COLORS[s] || '#94a3b8'
+const statusLabel = s => STATUS_LABEL_KM[String(s || '').toUpperCase()] || s
+
+/* ───────── WEEKDAY LABELS (KH) ───────── */
+const WEEKDAYS = [
+  { key: 'sun', label: 'អាទិត្យ' },
+  { key: 'mon', label: 'ចន្ទ' },
+  { key: 'tue', label: 'អង្គារ' },
+  { key: 'wed', label: 'ពុធ' },
+  { key: 'thu', label: 'ព្រហស្បតិ៍' },
+  { key: 'fri', label: 'សុក្រ' },
+  { key: 'sat', label: 'សៅរ៍' }
+]
 
 /* ───────── NAVIGATION ───────── */
 function nextMonth()  { currentMonth.value = currentMonth.value.add(1, 'month'); fetchMonth() }
@@ -116,7 +139,7 @@ function showDayDetails(d) {
 
   Swal.fire({
     icon: 'info',
-    title: `Driver Bookings on ${dateStr}`,
+    title: `ការកក់រថយន្តថ្ងៃទី ${dateStr}`,
     html: `
       <div style="text-align:left;max-height:280px;overflow:auto;padding:5px 0">
         ${list.map(b => `
@@ -126,8 +149,8 @@ function showDayDetails(d) {
           >
             <div><b>${b.employee?.name || b.employeeId}</b></div>
             <div>🕓 ${b.timeStart} - ${b.timeEnd}</div>
-            <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
-            <div>🚗 ${(b.assignment?.driverName || 'Unassigned')} • <b>${b.status}</b></div>
+            <div>📍 ${(b.stops && b.stops[0]?.destination) || 'មិនមាន'}</div>
+            <div>🚗 ${(b.assignment?.driverName || 'មិនទាន់ចាត់ចែង')} • <b>${statusLabel(b.status)}</b></div>
           </div>
         `).join('')}
       </div>
@@ -158,8 +181,8 @@ onMounted(fetchMonth)
         <div class="month-label">{{ monthLabel }}</div>
         <button class="btn-nav" @click="nextMonth">›</button>
         <div class="toolbar-right">
-          <button class="btn-flat" @click="fetchMonth">REFRESH</button>
-          <button class="btn-flat today" @click="goToday">TODAY</button>
+          <button class="btn-flat" @click="fetchMonth">ផ្ទុកឡើងវិញ</button>
+          <button class="btn-flat today" @click="goToday">ថ្ងៃនេះ</button>
         </div>
       </div>
 
@@ -168,11 +191,11 @@ onMounted(fetchMonth)
         <div class="calendar-inner">
           <div class="week-header">
             <div
-              v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
-              :key="w"
+              v-for="w in WEEKDAYS"
+              :key="w.key"
               class="week-cell"
             >
-              {{ w }}
+              {{ w.label }}
             </div>
           </div>
 
@@ -198,7 +221,7 @@ onMounted(fetchMonth)
                   class="booking-chip"
                   :style="{ backgroundColor: statusColor(b.status) }"
                 >
-                  {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+                  {{ b.employee?.name || b.employeeId }} ({{ statusLabel(b.status) }})
                 </div>
               </div>
             </div>
@@ -206,26 +229,18 @@ onMounted(fetchMonth)
         </div>
       </div>
 
-      <div v-if="loading" class="loader">Loading…</div>
+      <div v-if="loading" class="loader">កំពុងផ្ទុក...</div>
     </div>
 
     <!-- Legend (below card) -->
     <div class="status-legend">
       <div
-        v-for="(color, status) in {
-          PENDING:'#94a3b8',
-          ACCEPTED:'#3b82f6',
-          ON_ROAD:'#06b6d4',
-          ARRIVING:'#10b981',
-          COMPLETED:'#16a34a',
-          DELAYED:'#facc15',
-          CANCELLED:'#ef4444'
-        }"
+        v-for="(color, status) in STATUS_COLORS"
         :key="status"
         class="legend-item"
       >
         <span class="legend-dot" :style="{ backgroundColor: color }"></span>
-        <span class="legend-label">{{ status }}</span>
+        <span class="legend-label">{{ STATUS_LABEL_KM[status] || status }}</span>
       </div>
     </div>
   </div>

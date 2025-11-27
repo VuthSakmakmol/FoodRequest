@@ -54,16 +54,6 @@ const scrollToServices = () => {
             <i class="fa-solid fa-right-to-bracket mr-2" />
             Login
           </v-btn>
-
-          <!-- optional secondary button, uses scrollToServices -->
-          <v-btn
-            class="cta-btn secondary"
-            variant="outlined"
-            color="white"
-            @click="scrollToServices"
-          >
-            Explore services
-          </v-btn>
         </div>
 
         <div class="quick-badges">

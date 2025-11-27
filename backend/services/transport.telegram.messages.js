@@ -1,4 +1,3 @@
-// backend/services/transport.telegram.messages.js
 const dayjs = require('dayjs')
 
 const esc = (s = '') =>
@@ -10,6 +9,9 @@ const span = (bk) =>
     bk.timeEnd ? `–${t(bk.timeEnd)}` : ''
   }`
 
+/* ──────────────────────────────
+ * Single / first stop helpers (kept for compatibility)
+ * ────────────────────────────── */
 const firstStop = (bk) => {
   const s = Array.isArray(bk.stops) && bk.stops[0]
   if (!s) return '—'
@@ -20,18 +22,72 @@ const firstStop = (bk) => {
   return esc(dst || '—')
 }
 
+// old route() kept in case other files use it
 const route = (bk) => firstStop(bk)
+
 const pax = (bk) =>
   `Pax: <b>${Number(bk.passengers || 1)}</b> | Category: ${esc(
     bk.category || 'Car'
   )}`
+
 const code = (bk) => `#${esc(bk.shortCode || bk.requestId || bk._id)}`
+
 const cut = (s, max = 300) =>
   !s
     ? ''
     : String(s).length > max
     ? `${String(s).slice(0, max - 1)}…`
     : String(s)
+
+/* ──────────────────────────────
+ * NEW: multi-stop formatting (EN + KH)
+ * ────────────────────────────── */
+
+/**
+ * Generic formatter for stops list with optional map links
+ *
+ * @param {Object} bk  booking
+ * @param {Object} opt options:
+ *    - label: heading label (e.g. 'Route' / 'ទិសដៅ')
+ *    - emoji: symbol before heading (e.g. '📍' or '•')
+ *    - includeMap: boolean, add map link if mapLink exists
+ */
+function formatStopsLines(bk, opt = {}) {
+  const { label = 'Route', emoji = '📍', includeMap = false } = opt
+  const stops = Array.isArray(bk.stops) ? bk.stops : []
+
+  if (!stops.length) {
+    return `${emoji} ${label}: —`
+  }
+
+  const lines = stops.map((s, idx) => {
+    const dst =
+      s.destination === 'Other' && s.destinationOther
+        ? s.destinationOther
+        : s.destination
+
+    let line = `#${idx + 1}: ${esc(dst || '—')}`
+
+    const rawUrl = (s.mapLink || '').trim()
+    if (includeMap && rawUrl) {
+      // clickable Map link in Telegram HTML
+      const safeUrl = esc(rawUrl)
+      line += ` (map: <a href="${safeUrl}">Map</a>)`
+    }
+
+    return `• ${line}`
+  })
+
+  return [`${emoji} ${label}:`, ...lines].join('\n')
+}
+
+// English version
+const stopsListEn = (bk, includeMap = true) =>
+  formatStopsLines(bk, { label: 'Route', emoji: '📍', includeMap })
+
+// Khmer label version (still uses #1, #2… and "Map" word)
+const stopsListKh = (bk, includeMap = true) =>
+  formatStopsLines(bk, { label: 'ទិសដៅ', emoji: '•', includeMap })
 
 /* ──────────────────────────────
  * Purpose mapping EN -> KH (for assignee only)
@@ -66,7 +122,7 @@ function purposeLineKh(bk) {
   return `• Purpose: ${esc(raw)}`
 }
 
-/* 👉 NEW: customer contact line in Khmer for assignees */
+/* 👉 customer contact line in Khmer for assignees */
 function customerContactLineKh(bk) {
   const c = (bk.customerContact || '').trim()
   if (!c) return null
@@ -89,12 +145,11 @@ function newRequestMsg(bk) {
     }`,
     `🏢 Department: ${esc(emp.department || '')}`,
     `📅 When: ${span(bk)}`,
-    `📍 Route: ${route(bk)}`,
     `👥 ${pax(bk)}`,
+    stopsListEn(bk, true),
     purpose ? `🎯 Purpose: ${esc(purpose)}` : null,
     notes ? `📝 Note: ${esc(notes)}` : null,
-    '-----------------------------',
-    
+    '-----------------------------'
   ]
     .filter(Boolean)
     .join('\n')
@@ -105,11 +160,10 @@ function declinedMsg(bk, reason, adminName) {
     '⛔ <b>Booking declined</b>',
     '=============================',
     `📅 When: ${span(bk)}`,
-    `📍 Route: ${route(bk)}`,
+    stopsListEn(bk, true),
     `🧾 Reason: ${esc(reason || '—')}`,
     `🔧 By: ${esc(adminName || 'Admin')}`,
-    '-----------------------------',
-    
+    '-----------------------------'
   ].join('\n')
 }
 
@@ -122,10 +176,9 @@ function acceptedAssignedMsg(bk) {
       ? `🚘 Vehicle: ${esc(bk.assignment.vehicleName)}`
       : null,
     `📅 When: ${span(bk)}`,
-    `📍 Route: ${route(bk)}`,
     `👥 ${pax(bk)}`,
-    '-----------------------------',
-    
+    stopsListEn(bk, true),
+    '-----------------------------'
   ]
     .filter(Boolean)
     .join('\n')
@@ -138,10 +191,9 @@ function statusChangedMsg(bk, status, byName) {
     '=============================',
     `👤 Driver: ${esc(bk.assignment?.driverName || '—')}`,
     `📅 When: ${span(bk)}`,
-    `📍 Route: ${route(bk)}`,
+    stopsListEn(bk, true),
     byName ? `🔧 By: ${esc(byName)}` : null,
-    '-----------------------------',
-    
+    '-----------------------------'
   ]
     .filter(Boolean)
     .join('\n')
@@ -158,15 +210,14 @@ function driverAssignmentDM(bk) {
   return [
     '📥 <b>ភារកិច្ចដឹកជញ្ជូនថ្មី</b>',
     `• ពេលវេលា៖ ${span(bk)}`,
-    `• ទិសដៅ៖ ${route(bk)}`,
+    stopsListKh(bk, true),
     purpose,
     contact,
     `• ${pax(bk)}`,
     bk.assignment?.vehicleName
       ? `• ឡាន៖ ${esc(bk.assignment.vehicleName)}`
       : null,
-    note ? `• កំណត់ចំណាំ៖ ${esc(note)}` : null,
-    
+    note ? `• កំណត់ចំណាំ៖ ${esc(note)}` : null
   ]
     .filter(Boolean)
     .join('\n')
@@ -180,10 +231,9 @@ function driverStatusDM(bk, status) {
   return [
     `🔔 <b>ស្ថានភាពថ្មី៖ ${esc(s)}</b>`,
     `• ពេលវេលា៖ ${span(bk)}`,
-    `• ទិសដៅ៖ ${route(bk)}`,
+    stopsListKh(bk, true),
     purpose,
-    contact,
-    
+    contact
   ]
     .filter(Boolean)
     .join('\n')
@@ -202,9 +252,8 @@ function driverAckGroupMsg(bk, response) {
     '=============================',
     `👤 Driver: ${esc(bk.assignment?.driverName || '—')}`,
     `📅 When: ${span(bk)}`,
-    `📍 Route: ${route(bk)}`,
-    '-----------------------------',
-    
+    stopsListEn(bk, true),
+    '-----------------------------'
   ].join('\n')
 }
 
@@ -224,10 +273,9 @@ function driverAckConfirmDM(bk, response) {
   return [
     `<b>${esc(label)}</b>`,
     `• ពេលវេលា៖ ${span(bk)}`,
-    `• ទិសដៅ៖ ${route(bk)}`,
+    stopsListKh(bk, true),
     purpose,
-    contact,
-    
+    contact
   ]
     .filter(Boolean)
     .join('\n')
@@ -240,9 +288,8 @@ function employeeRequestDM(bk) {
   return [
     '✅ <b>Your booking request was received</b>',
     `• ${span(bk)}`,
-    `• Destination: ${route(bk)}`,
     `• ${pax(bk)}`,
-    
+    stopsListEn(bk, true)
   ].join('\n')
 }
 
@@ -254,8 +301,7 @@ function employeeAcceptedDM(bk) {
       ? `Vehicle: ${esc(bk.assignment.vehicleName)}`
       : null,
     `Date: ${span(bk)}`,
-    `Route: ${route(bk)}`,
-    
+    stopsListEn(bk, true)
   ]
     .filter(Boolean)
     .join('\n')
@@ -267,9 +313,10 @@ function employeeDeclinedDM(bk, reason, adminName) {
     `Reason: ${esc(reason || '—')}`,
     `By: ${esc(adminName || 'Admin')}`,
     `Date: ${span(bk)}`,
-    `Route: ${route(bk)}`,
-    
-  ].join('\n')
+    stopsListEn(bk, true)
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 function employeeStatusDM(bk, status) {
@@ -277,8 +324,7 @@ function employeeStatusDM(bk, status) {
   return [
     `🔔 <b>Trip status update:</b> ${esc(s)}`,
     `• ${span(bk)}`,
-    `• ${route(bk)}`,
-    
+    stopsListEn(bk, true)
   ].join('\n')
 }
 
@@ -293,8 +339,7 @@ function employeeDriverAckDM(bk, response) {
   return [
     `${label}`,
     `• ${span(bk)}`,
-    `• ${route(bk)}`,
-    
+    stopsListEn(bk, true)
   ].join('\n')
 }
 
@@ -302,16 +347,25 @@ function employeeDriverAckDM(bk, response) {
  * Exports
  * ────────────────────────────── */
 module.exports = {
+  // helpers retained that might be used elsewhere
+  route,
+  firstStop,
+  pax,
+  code,
+
+  // group/admin messages
   newRequestMsg,
   declinedMsg,
   acceptedAssignedMsg,
   statusChangedMsg,
+  driverAckGroupMsg,
+
+  // driver / messenger DMs (KH)
   driverAssignmentDM,
   driverStatusDM,
-  driverAckGroupMsg,
   driverAckConfirmDM,
 
-  // Employee messages
+  // Employee messages (EN)
   employeeRequestDM,
   employeeAcceptedDM,
   employeeDeclinedDM,

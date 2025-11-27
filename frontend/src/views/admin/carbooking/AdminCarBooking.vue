@@ -698,6 +698,17 @@ async function updateStatus(item, nextStatus){
                     />
                     <strong>#{{ i+1 }}:</strong>
                     <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
+                    <a
+                      v-if="s.mapLink"
+                      :href="absUrl(s.mapLink)"
+                      target="_blank"
+                      rel="noopener"
+                      class="ml-2 text-decoration-none"
+                    >
+                      <v-btn size="x-small" variant="text" color="primary">
+                        <i class="fa-solid fa-link link-icon mr-1" /> Map
+                      </v-btn>
+                    </a>
                   </div>
                 </div>
                 <div v-else>—</div>
@@ -751,7 +762,7 @@ async function updateStatus(item, nextStatus){
       </v-card>
     </v-dialog>
 
-    <!-- Assign dialog -->
+    <!-- Assign dialog (unchanged) -->
     <v-dialog v-model="assignOpen" max-width="920">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
@@ -952,6 +963,11 @@ async function updateStatus(item, nextStatus){
   padding: 10px 12px;
   border-radius: 10px;
   white-space: pre-wrap;
+}
+
+/* bigger link icon for map */
+.link-icon {
+  font-size: 16px;
 }
 
 .person-card {

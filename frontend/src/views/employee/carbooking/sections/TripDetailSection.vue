@@ -303,7 +303,7 @@ onMounted(refreshAvailability)
                 hide-details
               >
                 <template #label>
-                  Customer Contact Number<span class="required-star">*</span>
+                  Customer Contact Number<span class="required-star"></span>
                 </template>
               </v-text-field>
             </v-col>

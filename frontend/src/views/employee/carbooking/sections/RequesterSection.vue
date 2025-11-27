@@ -106,7 +106,7 @@ watch(
                 readonly
                 variant="outlined"
                 density="compact"
-                hide-details
+                hide-details="auto"
               >
                 <template #label>
                   Name<span class="required-star">*</span>
@@ -120,7 +120,7 @@ watch(
                 readonly
                 variant="outlined"
                 density="compact"
-                hide-details
+                hide-details="auto"
               >
                 <template #label>
                   Department<span class="required-star">*</span>
@@ -131,10 +131,10 @@ watch(
             <v-col cols="12" md="6">
               <v-text-field
                 v-model="props.form.contactNumber"
-                readonly
+                type="tel"
                 variant="outlined"
                 density="compact"
-                hide-details
+                hide-details="auto"
               >
                 <template #label>
                   Contact Number<span class="required-star">*</span>

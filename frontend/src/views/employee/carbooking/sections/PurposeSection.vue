@@ -10,6 +10,12 @@ const props = defineProps({
   LOCATIONS: Array
 })
 
+/* Purpose handling: sort A → Z for easier scanning */
+const purposeItems = computed(() => {
+  const base = Array.isArray(props.PURPOSES) ? [...props.PURPOSES] : []
+  return base.sort((a, b) => String(a).localeCompare(String(b)))
+})
+
 /* Destination handling */
 const destinationItems = computed(() => {
   const base = Array.isArray(props.LOCATIONS) ? props.LOCATIONS.slice() : []
@@ -50,19 +56,23 @@ function onDestinationChange(row) {
       <v-card flat class="soft-card glass">
         <v-card-text class="pt-0">
           <v-row dense>
-            <!-- Purpose -->
+            <!-- Purpose: sorted + searchable -->
             <v-col cols="12" class="mt-4">
-              <v-select
-                :items="PURPOSES"
+              <v-autocomplete
                 v-model="props.form.purpose"
+                :items="purposeItems"
                 variant="outlined"
                 density="compact"
-                hide-details
+                hide-details="auto"
+                :menu-props="{ maxHeight: 320 }"
+                :rules="[
+                  v => !!v || 'Purpose is required'
+                ]"
               >
                 <template #label>
                   Purpose<span class="required-star">*</span>
                 </template>
-              </v-select>
+              </v-autocomplete>
             </v-col>
 
             <!-- Notes -->
@@ -73,10 +83,10 @@ function onDestinationChange(row) {
                 rows="2"
                 variant="outlined"
                 density="compact"
-                hide-details
+                hide-details="auto"
               >
                 <template #label>
-                  Notes / Special Instructions<span class="required-star">*</span>
+                  Notes / Special Instructions<span class="required-star"></span>
                 </template>
               </v-textarea>
             </v-col>
@@ -89,7 +99,7 @@ function onDestinationChange(row) {
                 density="compact"
                 accept="image/*,application/pdf"
                 prepend-icon="mdi-paperclip"
-                hide-details
+                hide-details="auto"
               >
                 <template #label>
                   Airplane ticket (required for Techo International Airport)
@@ -139,8 +149,11 @@ function onDestinationChange(row) {
                           v-model="row.destination"
                           variant="outlined"
                           density="compact"
-                          hide-details
+                          hide-details="auto"
                           @update:model-value="onDestinationChange(row)"
+                          :rules="[
+                            v => !!v || 'Destination is required'
+                          ]"
                         >
                           <template #label>
                             Destination #{{ idx + 1 }}<span class="required-star">*</span>
@@ -148,12 +161,16 @@ function onDestinationChange(row) {
                         </v-select>
                       </v-col>
 
-                      <v-col v-if="row.destination === 'Other'" cols="12" md="4">
+                      <!-- Required when destination = Other -->
+                      <v-col v-if="row.destination === 'Other'" cols="12" md="12">
                         <v-text-field
                           v-model="row.destinationOther"
                           variant="outlined"
                           density="compact"
-                          hide-details
+                          hide-details="auto"
+                          :rules="[
+                            v => row.destination !== 'Other' || !!(v && String(v).trim()) || 'Please enter destination name'
+                          ]"
                         >
                           <template #label>
                             Destination Name (Other)<span class="required-star">*</span>
@@ -161,13 +178,16 @@ function onDestinationChange(row) {
                         </v-text-field>
                       </v-col>
 
-                      <v-col v-if="row.destination === 'Other'" cols="12" md="4">
+                      <v-col v-if="row.destination === 'Other'" cols="12" md="12">
                         <v-text-field
                           v-model="row.mapLink"
                           placeholder="https://maps.google.com/…"
                           variant="outlined"
                           density="compact"
-                          hide-details
+                          hide-details="auto"
+                          :rules="[
+                            v => row.destination !== 'Other' || !!(v && String(v).trim()) || 'Google Maps link is required'
+                          ]"
                         >
                           <template #label>
                             Google Maps Link<span class="required-star">*</span>
