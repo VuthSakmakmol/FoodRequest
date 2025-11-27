@@ -373,12 +373,7 @@ function showDetails(item) {
 <template>
   <v-container fluid class="pa-2">
     <!-- identity bar -->
-    <v-alert
-      v-if="!identity?.loginId"
-      type="warning" variant="tonal" class="mb-2"
-      title="Dev identity not detected"
-      text="Enter your loginId (e.g., driver01) to load assigned bookings."
-    />
+
     <div v-if="!identity?.loginId" class="d-flex align-center mb-2" style="gap:8px;">
       <v-text-field v-model="devLoginId" label="loginId" density="compact" variant="outlined" style="max-width:220px;" hide-details />
       <v-select :items="['DRIVER','MESSENGER']" v-model="devRole" density="compact" variant="outlined" hide-details style="max-width:160px;" />

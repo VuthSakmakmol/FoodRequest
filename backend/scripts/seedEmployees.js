@@ -538,7 +538,7 @@ function loadEmployees() {
     { employeeId: '51220859', name: 'Sam Sambat', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '51420303', name: 'Mao Malybella', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '51820275', name: 'Kim Sokreaksmey', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
-    { employeeId: '51820386', name: 'Srun Rida', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
+    { employeeId: '51820386', name: 'Srun Rida', department: 'HR and Payroll', isActive: true, telegramChatId: '661186113', contactNumber: '000000000' },
     { employeeId: '51821047', name: 'Sot Sreynit', department: 'HR and Payroll', telegramChatId: '1055055243', isActive: true, contactNumber: '000000000' },
     { employeeId: '52020942', name: 'Suon Tithyamatinine', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '52120446', name: 'Lit Sony', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },

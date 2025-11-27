@@ -5,15 +5,24 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
+const servicesRef = ref(null)
+
+/* Small helper */
 const go = (name) => router.push({ name })
 
-const servicesRef = ref(null)
+/* Always target employee layout for actions */
+const goFood = () => go('employee-request')
+const goCar  = () => go('employee-car-booking')
+
+/* Login button → go to login page (from there they choose role/layout by account) */
+const goLogin = () => go('admin-login')
+
+/* Scroll to services; if missing, fallback to employee food page */
 const scrollToServices = () => {
   if (servicesRef.value) {
     servicesRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
   } else {
-    // fallback: go to main food request page
-    go('employee-request')
+    goFood()
   }
 }
 </script>
@@ -34,6 +43,29 @@ const scrollToServices = () => {
           <span class="km">សេវាកម្មទាំងអស់ ក្នុងប្រព័ន្ធតែមួយ</span>
         </p>
 
+        <!-- CTA: Login + (optional) scroll to services -->
+        <div class="hero-cta">
+          <v-btn
+            class="cta-btn mr-2"
+            color="white"
+            variant="elevated"
+            @click="goLogin"
+          >
+            <i class="fa-solid fa-right-to-bracket mr-2" />
+            Login
+          </v-btn>
+
+          <!-- optional secondary button, uses scrollToServices -->
+          <v-btn
+            class="cta-btn secondary"
+            variant="outlined"
+            color="white"
+            @click="scrollToServices"
+          >
+            Explore services
+          </v-btn>
+        </div>
+
         <div class="quick-badges">
           <v-chip size="small" variant="elevated" color="cyan">
             <i class="fa-solid fa-bolt mr-2" /> Real-time
@@ -46,8 +78,6 @@ const scrollToServices = () => {
           </v-chip>
         </div>
       </div>
-
-
     </header>
 
     <!-- MAIN CONTENT -->
@@ -68,7 +98,7 @@ const scrollToServices = () => {
                 class="service-card"
                 rounded="xl"
                 elevation="4"
-                @click="go('employee-request')"
+                @click="goFood"
               >
                 <div class="service-card-inner">
                   <div class="icon-pill food">
@@ -105,7 +135,7 @@ const scrollToServices = () => {
                 class="service-card"
                 rounded="xl"
                 elevation="4"
-                @click="go('employee-car-booking')" 
+                @click="goCar"
               >
                 <div class="service-card-inner">
                   <div class="icon-pill transport">
@@ -125,12 +155,81 @@ const scrollToServices = () => {
                       </span>
                     </div>
                     <div class="service-meta">
-                      <!-- <span><i class="fa-solid fa-circle-nodes mr-1" /> Real-time status</span> -->
                       <span><i class="fa-solid fa-users mr-1" /> Driver &amp; Messenger app</span>
                     </div>
                   </div>
                   <div class="service-arrow">
                     <i class="fa-solid fa-arrow-right-long" />
+                  </div>
+                </div>
+              </v-card>
+            </v-col>
+
+            <!-- Meeting Room Booking (in development) -->
+            <v-col cols="12" md="6">
+              <v-card
+                class="service-card disabled"
+                rounded="xl"
+                elevation="2"
+              >
+                <div class="service-card-inner">
+                  <div class="icon-pill meeting">
+                    <i class="fa-solid fa-people-roof" />
+                  </div>
+                  <div class="service-text">
+                    <div class="service-label-row">
+                      <span class="service-label">Meeting Room Booking</span>
+                      <span class="service-chip dev-chip">
+                        <i class="fa-solid fa-wrench mr-1" /> In development
+                      </span>
+                    </div>
+                    <div class="service-subtitle">
+                      Book meeting rooms for internal discussions and visitors.
+                      <span class="km">
+                        In development process.
+                      </span>
+                    </div>
+                    <div class="service-meta">
+                      <span><i class="fa-solid fa-hourglass-half mr-1" /> Coming soon</span>
+                    </div>
+                  </div>
+                  <div class="service-arrow">
+                    <i class="fa-solid fa-lock" />
+                  </div>
+                </div>
+              </v-card>
+            </v-col>
+
+            <!-- Leave Request for Expat (in development) -->
+            <v-col cols="12" md="6">
+              <v-card
+                class="service-card disabled"
+                rounded="xl"
+                elevation="2"
+              >
+                <div class="service-card-inner">
+                  <div class="icon-pill leave">
+                    <i class="fa-solid fa-home" />
+                  </div>
+                  <div class="service-text">
+                    <div class="service-label-row">
+                      <span class="service-label">Leave Request (Expat)</span>
+                      <span class="service-chip dev-chip">
+                        <i class="fa-solid fa-wrench mr-1" /> In development
+                      </span>
+                    </div>
+                    <div class="service-subtitle">
+                      Submit and track leave requests for expatriate employees.
+                      <span class="km">
+                        In development process.
+                      </span>
+                    </div>
+                    <div class="service-meta">
+                      <span><i class="fa-solid fa-hourglass-half mr-1" /> Coming soon</span>
+                    </div>
+                  </div>
+                  <div class="service-arrow">
+                    <i class="fa-solid fa-lock" />
                   </div>
                 </div>
               </v-card>
@@ -146,9 +245,6 @@ const scrollToServices = () => {
             <div class="chip">
               <i class="fa-brands fa-telegram" /> Telegram Alerts
             </div>
-            <!-- <div class="chip">
-              <i class="fa-solid fa-chart-line" /> Live Dashboard
-            </div> -->
             <div class="chip">
               <i class="fa-solid fa-database" /> Secure Database
             </div>
@@ -218,18 +314,24 @@ const scrollToServices = () => {
 }
 .hero-sub .km { display: block; opacity: .9; }
 
-.hero-cta { margin: 12px 0 18px; }
+/* CTA buttons */
+.hero-cta { margin: 12px 0 18px; display:flex; flex-wrap:wrap; gap:8px; }
 .cta-btn {
   font-weight: 700;
   color: #0f172a !important;
   box-shadow: 0 6px 22px rgba(0,0,0,.2);
 }
+.cta-btn.secondary {
+  box-shadow: none;
+}
+
+/* badges */
 .quick-badges {
   display: flex; gap: 8px; flex-wrap: wrap;
   margin-top: 8px;
 }
 
-/* HERO image */
+/* HERO image placeholder class kept but unused */
 .hero-image { position: relative; z-index: 2; min-height: 240px; }
 .img-mask {
   border-radius: 18px;
@@ -261,32 +363,12 @@ const scrollToServices = () => {
   text-align: left;
   margin-bottom: 14px;
 }
-.badge-main {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  background: rgba(15,23,42,.04);
-  color: #0f172a;
-}
 .services-title {
   margin: 10px 0 4px;
   font-size: clamp(20px, 2.2vw, 28px);
   font-weight: 700;
   color: #020617;
 }
-.services-sub {
-  margin: 0;
-  font-size: 0.92rem;
-  color: #6b7280;
-  max-width: 520px;
-}
-
 .services-grid {
   margin-top: 12px;
 }
@@ -314,6 +396,19 @@ const scrollToServices = () => {
   border-color: rgba(59,130,246,.55);
 }
 
+/* disabled/coming soon cards */
+.service-card.disabled {
+  cursor: not-allowed;
+  opacity: .65;
+  filter: grayscale(.1);
+  box-shadow: none;
+}
+.service-card.disabled:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: rgba(15,23,42,.06);
+}
+
 .icon-pill {
   width: 54px;
   height: 54px;
@@ -329,6 +424,12 @@ const scrollToServices = () => {
 }
 .icon-pill.transport {
   background: linear-gradient(135deg,#22c55e,#14b8a6);
+}
+.icon-pill.meeting {
+  background: linear-gradient(135deg,#6366f1,#22c55e);
+}
+.icon-pill.leave {
+  background: linear-gradient(135deg,#f97316,#0ea5e9);
 }
 
 .service-text {
@@ -357,6 +458,10 @@ const scrollToServices = () => {
   font-weight:700;
   background:rgba(15,23,42,.06);
   color:#374151;
+}
+.service-chip.dev-chip {
+  background: rgba(248,113,113,.14);
+  color: #b91c1c;
 }
 .service-subtitle {
   font-size:0.9rem;

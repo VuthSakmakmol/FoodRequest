@@ -18,7 +18,7 @@ const sections = [
     header: 'Messenger',
     icon: 'fa-solid fa-motorcycle',
     children: [
-      { label: 'Home',             icon: 'fa-solid fa-house',         to: { name: 'messenger-home' } },
+      // { label: 'Home',             icon: 'fa-solid fa-house',         to: { name: 'messenger-home' } },
       { label: 'Your Assignments', icon: 'fa-solid fa-list-check',    to: { name: 'messenger-assignment' } },
       { label: 'Calendar',         icon: 'fa-solid fa-calendar-days', to: { name: 'messenger-calendar' } },
     ],

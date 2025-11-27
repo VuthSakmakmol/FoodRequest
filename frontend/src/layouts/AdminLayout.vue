@@ -21,7 +21,6 @@ const sections = [
     children: [
       { label: 'Requests', icon: 'fa-solid fa-list-check', to: { name: 'admin-requests' } },
       { label: 'Calendar', icon: 'fa-solid fa-calendar-days', to: { name: 'admin-food-calendar' } },
-      
     ],
   },
   {
@@ -30,10 +29,10 @@ const sections = [
     icon: 'fa-solid fa-car-side',
     children: [
       { label: 'Car Booking', icon: 'fa-solid fa-calendar-check', to: { name: 'admin-car-booking' } },
-      { label: 'Calendar', icon: 'fa-solid fa-calendar-days', to: { name: 'admin-car-calendar' } },
+      { label: 'Calendar',    icon: 'fa-solid fa-calendar-days',  to: { name: 'admin-car-calendar' } },
     ],
   },
-  // Uncomment if you bring dashboard back
+  // If you bring dashboard back:
   // {
   //   key: 'overview',
   //   header: 'Overview',
@@ -56,11 +55,10 @@ const initials = computed(() =>
 function go(it){ if (it?.to) router.push(it.to) }
 function isActive(it){ return route.name === it?.to?.name }
 function logout() {
-  auth.logout()            // ✅ clears user, token, socket
-  localStorage.clear()     // ✅ optional: clears any other cached data (filters, prefs)
-  router.push({ name: 'greeting' }) // ✅ correct redirect for admin
+  auth.logout()            // clears auth store + token/user keys
+  localStorage.clear()     // optional: clears any extra cached stuff
+  router.push({ name: 'greeting' })
 }
-
 </script>
 
 <template>
@@ -129,7 +127,6 @@ function logout() {
                 >
                   <template #prepend><i :class="it.icon" class="fa-fw" /></template>
                   <v-list-item-title>{{ it.label }}</v-list-item-title>
-                  <template #append></template>
                 </v-list-item>
               </div>
             </v-expand-transition>

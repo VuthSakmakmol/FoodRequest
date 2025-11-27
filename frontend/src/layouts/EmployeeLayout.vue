@@ -19,7 +19,8 @@ const groups = [
     header: 'Home',
     icon: 'fa-solid fa-house',
     children: [
-      { label: 'Greeting', icon: 'fa-solid fa-handshake', to: { name: '/' } },
+      // ✅ use route name 'greeting'
+      { label: 'Greeting', icon: 'fa-solid fa-handshake', to: { name: 'greeting' } },
     ]
   },
   {
@@ -76,7 +77,7 @@ function handleNavClick(it) {
 /** Logout -> Greeting (public) */
 function toggleAuth() {
   if (auth.user) auth.logout()
-  router.push({ name: 'admin-login' })
+  router.push({ name: 'greeting' })
 }
 </script>
 

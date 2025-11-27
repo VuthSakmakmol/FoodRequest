@@ -38,9 +38,9 @@ async function submit() {
     if (role === 'CHEF') {
       router.push({ name: 'chef-requests' })
     } else if (role === 'DRIVER') {
-      router.push({ name: 'driver-home' })
+      router.push({ name: 'driver-car-booking' })
     } else if (role === 'MESSENGER') {
-      router.push({ name: 'messenger-home' })
+      router.push({ name: 'messenger-assignment' })
     } else {
       router.push({ name: 'admin-requests' }) // ADMIN fallback
     }

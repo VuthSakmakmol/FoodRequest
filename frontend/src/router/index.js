@@ -13,12 +13,12 @@ const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
 const GreetingPage    = () => import('@/views/GreetingPage.vue')
 
 // Employee
-const EmployeeHome        = () => import('@/views/employee/EmployeeHome.vue')
-const EmployeeRequestHist = () => import('@/views/employee/EmployeeRequestHistory.vue')
-const EmployeeFoodCalendar= () => import('@/views/employee/EmployeeFoodCalendar.vue')
-const EmployeeCarBooking  = () => import('@/views/employee/carbooking/EmployeeCarBooking.vue')
-const EmployeeCarHistory  = () => import('@/views/employee/carbooking/EmployeeCarHistory.vue')
-const CarBookingSchedule  = () => import('@/views/employee/carbooking/sections/CarBookingSchedule.vue')
+const EmployeeHome         = () => import('@/views/employee/EmployeeHome.vue')
+const EmployeeRequestHist  = () => import('@/views/employee/EmployeeRequestHistory.vue')
+const EmployeeFoodCalendar = () => import('@/views/employee/EmployeeFoodCalendar.vue')
+const EmployeeCarBooking   = () => import('@/views/employee/carbooking/EmployeeCarBooking.vue')
+const EmployeeCarHistory   = () => import('@/views/employee/carbooking/EmployeeCarHistory.vue')
+const CarBookingSchedule   = () => import('@/views/employee/carbooking/sections/CarBookingSchedule.vue')
 
 // Admin (Food)
 const AdminLogin        = () => import('@/views/admin/AdminLogin.vue')
@@ -28,57 +28,54 @@ const AdminDashboard    = () => import('@/views/admin/AdminDashboard.vue')
 
 // Admin (Transportation)
 const AdminCarBooking   = () => import('@/views/admin/carbooking/AdminCarBooking.vue')
-const AdminCarCalendar  = () => import('@/views/admin/carBooking/TransportAdminCalendar.vue')
+const AdminCarCalendar  = () => import('@/views/admin/carbooking/TransportAdminCalendar.vue')
 
-// Chef (Food only; reuse admin calendar)
+// Chef
 const ChefFoodRequests  = () => import('@/views/chef/ChefFoodRequests.vue')
 const ChefFoodCalendar  = () => import('@/views/chef/ChefFoodCalendar.vue')
 
 // Driver
-const DriverHome         = () => import('@/modules/driver/Home.vue')
-const DriverCarBooking   = () => import('@/views/driver/DriverCarBooking.vue')
-const DriverCarCalendar  = () => import('@/views/driver/DriverCarCalendar.vue')
+const DriverCarBooking  = () => import('@/views/driver/DriverCarBooking.vue')
+const DriverCarCalendar = () => import('@/views/driver/DriverCarCalendar.vue')
 
 // Messenger
-const MessengerHome        = () => import('@/modules/messenger/Home.vue')
 const MessengerAssignment  = () => import('@/views/messenger/MessengerCarBooking.vue')
 const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
+// 🔹 Decide "home" route by role
 function homeByRole(role) {
   switch (role) {
-    case 'ADMIN':     return { name: 'admin-requests' }
-    case 'CHEF':      return { name: 'chef-requests' }
-    case 'DRIVER':    return { name: 'driver-home' }
-    case 'MESSENGER': return { name: 'messenger-home' }
-    default:          return { name: 'employee-request' }
+    case 'ADMIN':
+    case 'ROOT_ADMIN':
+      return { name: 'admin-requests' }
+    case 'CHEF':
+      return { name: 'chef-requests' }
+    case 'DRIVER':
+      return { name: 'driver-car-booking' }
+    case 'MESSENGER':
+      return { name: 'messenger-assignment' }
+    default:
+      return { name: 'employee-request' }
   }
 }
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    // 🌟 Public landing (main welcome)
+    // 🌟 Public landing
     {
       path: '/',
       name: 'greeting',
       component: GreetingPage,
       meta: { public: true }
     },
-    // Optional alias /greeting -> /
     {
       path: '/greeting',
       redirect: { name: 'greeting' },
       meta: { public: true }
     },
 
-    // Old direct link support
-    {
-      path: '/employee-request',
-      redirect: { name: 'employee-request' },
-      meta: { public: true }
-    },
-
-    // Public admin login
+    // Public login
     {
       name: 'admin-login',
       path: '/admin/login',
@@ -86,26 +83,26 @@ const router = createRouter({
       meta: { public: true }
     },
 
-    // Employee area
+    // Employee area  ✅ SPECIAL: public-style, no meta.requiresRole
     {
       path: '/employee',
       component: EmployeeLayout,
       children: [
         { path: '', redirect: { name: 'employee-request' } },
-        { name: 'employee-request',         path: 'request',      component: EmployeeHome },
-        { name: 'employee-request-history', path: 'history',      component: EmployeeRequestHist },
-        { name: 'employee-food-calendar',   path: 'food-calendar',component: EmployeeFoodCalendar},
-        { name: 'employee-car-booking',     path: 'car-booking',  component: EmployeeCarBooking },
-        { name: 'employee-car-history',     path: 'car-history',  component: EmployeeCarHistory },
-        { name: 'employee-car-schedule',    path: 'car-schedule', component: CarBookingSchedule }
+        { name: 'employee-request',         path: 'request',       component: EmployeeHome },
+        { name: 'employee-request-history', path: 'history',       component: EmployeeRequestHist },
+        { name: 'employee-food-calendar',   path: 'food-calendar', component: EmployeeFoodCalendar },
+        { name: 'employee-car-booking',     path: 'car-booking',   component: EmployeeCarBooking },
+        { name: 'employee-car-history',     path: 'car-history',   component: EmployeeCarHistory },
+        { name: 'employee-car-schedule',    path: 'car-schedule',  component: CarBookingSchedule }
       ]
     },
 
-    // Admin area (ADMIN only)
+    // Admin area (ADMIN + ROOT_ADMIN)
     {
       path: '/admin',
       component: AdminLayout,
-      meta: { requiresRole: ['ADMIN'] },
+      meta: { requiresRole: ['ADMIN', 'ROOT_ADMIN'] },
       children: [
         { path: '', redirect: { name: 'admin-requests' } },
         { name: 'admin-dashboard',     path: 'dashboard',     component: AdminDashboard },
@@ -116,7 +113,7 @@ const router = createRouter({
       ]
     },
 
-    // Chef area (CHEF only)
+    // Chef (CHEF)
     {
       path: '/chef',
       component: ChefLayout,
@@ -128,31 +125,31 @@ const router = createRouter({
       ]
     },
 
-    // Driver area
+    // Driver (DRIVER)
     {
       path: '/driver',
       component: DriverLayout,
       meta: { requiresRole: ['DRIVER'] },
       children: [
-        { name: 'driver-home',        path: '',            component: DriverHome },
+        { path: '', redirect: { name: 'driver-car-booking' } },
         { name: 'driver-car-booking', path: 'car-booking', component: DriverCarBooking },
-        { name: 'driver-carlendar',   path: 'calendar',    component: DriverCarCalendar } // keep name to match your existing uses
+        { name: 'driver-carlendar',   path: 'calendar',    component: DriverCarCalendar }
       ]
     },
 
-    // Messenger area
+    // Messenger (MESSENGER)
     {
       path: '/messenger',
       component: MessengerLayout,
       meta: { requiresRole: ['MESSENGER'] },
       children: [
-        { name: 'messenger-home',       path: '',           component: MessengerHome },
+        { path: '', redirect: { name: 'messenger-assignment' } },
         { name: 'messenger-assignment', path: 'assignment', component: MessengerAssignment },
         { name: 'messenger-calendar',   path: 'calendar',   component: MessengerCarCalendar }
       ]
     },
 
-    // 404 fallback → greeting
+    // 404 → greeting
     {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'greeting' },
@@ -161,26 +158,52 @@ const router = createRouter({
   ]
 })
 
+// 🔐 Global guard
 router.beforeEach((to) => {
   const auth = useAuth()
+  const role = auth.user?.role
+  const isPublic = to.meta?.public === true
+  const requiredRoles = to.meta?.requiresRole || null
+  const isEmployeeArea = to.path.startsWith('/employee')
 
-  // If logged in, keep them out of admin-login
-  if (to.name === 'admin-login' && auth.user?.role) {
-    return homeByRole(auth.user.role)
+  // 1. Logged in & visiting greeting/login → send to homeByRole
+  if (role && (to.name === 'greeting' || to.name === 'admin-login')) {
+    const target = homeByRole(role)
+    if (target.name !== to.name) {
+      return target
+    }
+    return true
   }
 
-  // Public routes pass through
-  if (to.meta?.public) return true
+  // 2. Employee area special rules
+  if (isEmployeeArea) {
+    // Guests (no login) → allowed
+    if (!auth.token || !role) return true
 
-  // Role-protected routes
-  const allowed = to.meta?.requiresRole
-  if (allowed) {
-    if (!auth.token || !auth.user) {
+    // Real employees → allowed
+    if (role === 'EMPLOYEE') return true
+
+    // Logged in but other roles → go back to their layout
+    const target = homeByRole(role)
+    if (target.name !== to.name) return target
+    return true
+  }
+
+  // 3. Public routes → always allowed
+  if (isPublic) return true
+
+  // 4. Non-public routes (admin/chef/driver/messenger) require login
+  if (!auth.token || !role) {
+    if (to.name !== 'greeting') {
       return { name: 'greeting' }
     }
-    if (!allowed.includes(auth.user.role)) {
-      return homeByRole(auth.user.role)
-    }
+    return true
+  }
+
+  // 5. Role-specific restrictions
+  if (requiredRoles && !requiredRoles.includes(role)) {
+    const target = homeByRole(role)
+    if (target.name !== to.name) return target
   }
 
   return true

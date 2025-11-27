@@ -83,28 +83,28 @@ const User = require('../models/User')
     }
 
     /* ---------- data ---------- */
-    const defaultPwd = process.env.USER_DEFAULT_PASSWORD || 'Passw0rd!'
+    const defaultPwd = process.env.USER_DEFAULT_PASSWORD || '123456'
 
     // Example chefs
     const chefs = [
-      { loginId: 'chef01', name: 'Chef One', password: defaultPwd, telegramChatId: '' },
-      { loginId: 'chef02', name: 'Chef Two', password: defaultPwd },
+      { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '' },
+      { loginId: '002', name: 'Chef Two', password: defaultPwd },
     ]
 
     // 👉 Put driver/messenger chat IDs here when you have them.
     // You said one driver(messenger) chat ID is 537250678 — attach it to the right user(s).
     // If that’s driver01, do this:
     const drivers = [
-      { loginId: 'driver01', name: 'Prius',   password: defaultPwd, telegramChatId: '1055055243' },
-      { loginId: 'driver02', name: 'Staria',   password: defaultPwd, telegramChatId: '1385447458' },
-      { loginId: 'driver03', name: 'New Van', password: defaultPwd, telegramChatId: '1763789850' },
+      { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '1055055243' },
+      { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '1385447458' },
+      { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '1763789850' },
     ]
 
-
+    // bong nith  1055055243 
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):
     const messengers = [
-      { loginId: 'messenger01', name: 'Messenger One',   password: defaultPwd  , telegramChatId: '537250678' },
+      { loginId: '111', name: 'Messenger One',   password: defaultPwd  , telegramChatId: '537250678' },
     ]
 
     /* ---------- run ---------- */

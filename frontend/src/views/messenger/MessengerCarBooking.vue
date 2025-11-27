@@ -244,15 +244,7 @@ watch([selectedDate, statusFilter], loadList)
 <template>
   <!-- edge on phone, light padding desktop -->
   <v-container fluid class="messenger-page">
-    <!-- Dev Identity Bar -->
-    <v-alert
-      v-if="!identity?.loginId"
-      type="warning"
-      variant="tonal"
-      class="mb-2"
-      title="Dev identity not detected"
-      text="Enter your loginId (e.g., messenger01) to load assigned jobs."
-    />
+
     <div
       v-if="!identity?.loginId"
       class="d-flex align-center mb-2"
