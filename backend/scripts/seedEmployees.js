@@ -528,11 +528,7 @@ function loadEmployees() {
     { employeeId: '52520296', name: 'Phon Sreynin', department: 'Accounting & Financial', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520582', name: 'Vann Vipha', department: 'Accounting & Financial', isActive: true, contactNumber: '000000000' },
     { employeeId: '52520624', name: 'Vorn Sothean', department: 'Accounting & Financial', isActive: true, contactNumber: '000000000' },
-
-    { employeeId: '5252062411', name: 'Mouey Kimhak', department: 'Accounting & Financial',  telegramChatId: '1102968377', isActive: true, contactNumber: '000000000' },
-
     { employeeId: '52420820', name: 'Chorn Lakena', department: 'Adminstration', isActive: true, contactNumber: '000000000' },
-
     { employeeId: '51220018', name: 'Pok Map', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '51220831', name: 'Yorn Sokhim', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },
     { employeeId: '51220859', name: 'Sam Sambat', department: 'HR and Payroll', isActive: true, contactNumber: '000000000' },

@@ -1,3 +1,4 @@
+// backend/services/transport.telegram.messages.js
 const dayjs = require('dayjs')
 
 const esc = (s = '') =>
@@ -51,9 +52,18 @@ const cut = (s, max = 300) =>
  *    - label: heading label (e.g. 'Route' / 'ទិសដៅ')
  *    - emoji: symbol before heading (e.g. '📍' or '•')
  *    - includeMap: boolean, add map link if mapLink exists
+ *    - mapLabel: text before URL (e.g. 'map' / 'ផែនទី')
+ *    - mapLinkText: anchor text (e.g. 'Map' / 'ផែនទី')
  */
 function formatStopsLines(bk, opt = {}) {
-  const { label = 'Route', emoji = '📍', includeMap = false } = opt
+  const {
+    label = 'Route',
+    emoji = '📍',
+    includeMap = false,
+    mapLabel = 'map',
+    mapLinkText = 'Map'
+  } = opt
+
   const stops = Array.isArray(bk.stops) ? bk.stops : []
 
   if (!stops.length) {
@@ -70,9 +80,8 @@ function formatStopsLines(bk, opt = {}) {
 
     const rawUrl = (s.mapLink || '').trim()
     if (includeMap && rawUrl) {
-      // clickable Map link in Telegram HTML
       const safeUrl = esc(rawUrl)
-      line += ` (map: <a href="${safeUrl}">Map</a>)`
+      line += ` (${esc(mapLabel)}: <a href="${safeUrl}">${esc(mapLinkText)}</a>)`
     }
 
     return `• ${line}`
@@ -81,19 +90,56 @@ function formatStopsLines(bk, opt = {}) {
   return [`${emoji} ${label}:`, ...lines].join('\n')
 }
 
-// English version
+// English version (for group + employee)
 const stopsListEn = (bk, includeMap = true) =>
-  formatStopsLines(bk, { label: 'Route', emoji: '📍', includeMap })
+  formatStopsLines(bk, {
+    label: 'Route',
+    emoji: '📍',
+    includeMap,
+    mapLabel: 'map',
+    mapLinkText: 'Map'
+  })
 
-// Khmer label version (still uses #1, #2… and "Map" word)
+// Khmer label version for driver/messenger
 const stopsListKh = (bk, includeMap = true) =>
-  formatStopsLines(bk, { label: 'ទិសដៅ', emoji: '•', includeMap })
+  formatStopsLines(bk, {
+    label: 'ទិសដៅ',
+    emoji: '•',
+    includeMap,
+    mapLabel: 'ផែនទី',
+    mapLinkText: 'ផែនទី'
+  })
+
+/* ──────────────────────────────
+ * Khmer helpers for driver/messenger
+ * ────────────────────────────── */
+
+const CATEGORY_KH = {
+  Car: 'ឡាន',
+  Messenger: 'អ្នកបញ្ជូនឯកសារ'
+}
+
+const paxKh = (bk) => {
+  const catKh = CATEGORY_KH[bk.category] || bk.category || 'Car'
+  return `អ្នកដំណើរ: <b>${Number(bk.passengers || 1)}</b> | ប្រភេទ: ${esc(catKh)}`
+}
+
+const STATUS_KH = {
+  PENDING: 'កំពុងរង់ចាំ',
+  ACCEPTED: 'ទទួលយក',
+  ON_ROAD: 'កំពុងធ្វើដំណើរ',
+  ARRIVING: 'កំពុងដល់ក្បែរគោលដៅ',
+  COMPLETED: 'បញ្ចប់ដំណើរ',
+  DELAYED: 'ពន្យារពេល',
+  CANCELLED: 'បោះបង់'
+}
 
 /* ──────────────────────────────
  * Purpose mapping EN -> KH (for assignee only)
  * ────────────────────────────── */
 const PURPOSE_KH = {
-  'Bring Customer': 'នាំភ្ញៀវមកក្រុមហ៊ុន',
+  'Bring & Pick up': 'នាំទៅ និង ចាំទទួល',
+  'Bring Customer': 'ទៅយកភ្ញៀវមកក្រុមហ៊ុន',
   'Pick up Customer': 'ទៅទទួលភ្ញៀវ',
   Meeting: 'ទៅប្រជុំការងារ',
   'Check quality in subcon': 'ទៅពិនិត្យគុណភាពនៅរោងចក្រ Subcon',
@@ -213,7 +259,7 @@ function driverAssignmentDM(bk) {
     stopsListKh(bk, true),
     purpose,
     contact,
-    `• ${pax(bk)}`,
+    `• ${paxKh(bk)}`,
     bk.assignment?.vehicleName
       ? `• ឡាន៖ ${esc(bk.assignment.vehicleName)}`
       : null,
@@ -225,11 +271,12 @@ function driverAssignmentDM(bk) {
 
 function driverStatusDM(bk, status) {
   const s = String(status || bk.status || '').toUpperCase()
+  const labelKh = STATUS_KH[s] || s
   const purpose = purposeLineKh(bk)
   const contact = customerContactLineKh(bk)
 
   return [
-    `🔔 <b>ស្ថានភាពថ្មី៖ ${esc(s)}</b>`,
+    `🔔 <b>ស្ថានភាពថ្មី៖ ${esc(labelKh)}</b>`,
     `• ពេលវេលា៖ ${span(bk)}`,
     stopsListKh(bk, true),
     purpose,

@@ -1,725 +1,471 @@
-<!-- src/employee/carbooking/EmployeeCarHistory.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket from '@/utils/socket'
-import { useDisplay } from 'vuetify'
-import { useRoute } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'   // ✅ useRoute added
 
+/* ───────── Router ───────── */
+const router = useRouter()
 const route = useRoute()
+const DEBUG = true
 
-const focusId = ref(route.query.focus || '')
-const focusDate = ref(route.query.date || '')
-const { smAndDown } = useDisplay()
-const isMobile = computed(() => smAndDown.value)
+/* ───────── Sections ───────── */
+import RequesterSection from './sections/RequesterSection.vue'
+import TripDetailSection from './sections/TripDetailSection.vue'
+import PurposeSection from './sections/PurposeSection.vue'
+import RecurringBookingSection from './sections/RecurringBookingSection.vue'
 
-const loading = ref(false)
-const error   = ref('')
-const rows    = ref([])
-
-const selectedDate   = ref(dayjs().format('YYYY-MM-DD'))
-const statusFilter   = ref('ALL')
-const categoryFilter = ref('ALL')
-const qSearch        = ref('')
-
-const meId = ref(localStorage.getItem('employeeId') || '')
-
-/* ——— Build absolute URL to API origin for /uploads links ——— */
-const API_ORIGIN = (api.defaults.baseURL || '')
-  .replace(/\/api\/?$/,'')
-  .replace(/\/$/,'')
-function absUrl(u) {
-  if (!u) return ''
-  if (/^https?:\/\//i.test(u)) return u
-  return `${API_ORIGIN}${u.startsWith('/') ? '' : '/'}${u}`
-}
-function openTicket(u){
-  const url = absUrl(u)
-  if (url) window.open(url, '_blank', 'noopener,noreferrer')
-}
-
-/* ——— Focus + highlight a booking row ——— */
-function scrollToBooking(id) {
-  setTimeout(() => {
-    const el = document.querySelector(`[data-row-id="${id}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('highlight-row')
-      setTimeout(() => el.classList.remove('highlight-row'), 2500)
-    }
-  }, 400)
-}
-
-/* ——— Data table headers ——— */
-const headers = [
-  { title: 'Time',        key: 'time',       sortable: true,  width: 140 },
-  { title: 'Category',    key: 'category',   sortable: true,  width: 120 },
-  { title: 'Requester',   key: 'requester',  sortable: true,  width: 220 },
-  { title: 'Itinerary',   key: 'itinerary',  sortable: false },
-  { title: 'Pax',         key: 'passengers', sortable: true,  width: 70, align: 'center' },
-  { title: 'Status',      key: 'status',     sortable: true,  width: 150, align: 'end' },
-  { title: '',            key: 'actions',    sortable: false, width: 120, align: 'end' }
+/* ───────── Constants ───────── */
+const CATEGORY = ['Car', 'Messenger']
+const AIRPORT_DESTINATION = 'Techo International Airport'
+const LOCATIONS = [
+  'Techo International Airport',
+  'DAMCO',
+  'KN (WH)',
+  'CARGOPORT ( OFFICE )',
+  'Khai Nam',
+  'DB ( OFFICE )',
+  'BS',
+  'KN  (OFFICE)',
+  'CIMB Bank',
+  'Sixplus Factory',
+  'XOTEX',
+  'IFB ( OFFICE )',
+  'DHL',
+  'HORIZON',
+  'Bangkok Bank',
+  'DSV (OFFICE)',
+  'ABA Bank',
+  'DAMCO (WH)',
+  'DAMCO (OFFICE)',
+  'KN ( WH)',
+  'DSV  (WH)',
+  'DB Schenker',
+  'CARGOPORT',
+  'SCAN GLOBAL',
+  'Hong leong hour (WH)',
+  'So Nguon (WH)',
+  'Khainam Bus',
+  'Acleda Bank',
+  'Kerry',
+  'Olair dry port',
+  'Avery',
+  'JGL Worldwide',
+  'PTT 271',
+  'Dyeing Company',
+  'S E C Mega factory  CO., LTD',
+  
 ]
+const PURPOSES = [
+  'Bring & Pick up',
+  'Bring Customer', 
+  'Pick up Customer', 
+  'Meeting', 
+  'Check quality in subcon', 
+  'Release Document',
+  'Submit payment',
+  'Collect doc back',
+  'Revise Document',
+  'Send the fabric',
+  'Pick  parcel',
+  'Bring binding tape',
+  'Pick up Accessory',
+  'Pay for NSSF',
+  'Withdraw',
+  'Send Document TT',
+  'Pick up SGS inspector'
+]
+const PASSENGER_OPTIONS = Array.from({ length: 15 }, (_, i) => String(i + 1))
+const MAX_CAR = 3
+const MAX_MSGR = 1
 
-/* ——— Load schedule ——— */
-async function loadSchedule() {
-  loading.value = true
-  error.value = ''
+/* ───────── Employees ───────── */
+const employees = ref([])
+const loadingEmployees = ref(false)
+
+async function loadEmployees() {
+  loadingEmployees.value = true
   try {
-    const params = { date: selectedDate.value }
-    if (statusFilter.value !== 'ALL') params.status = statusFilter.value
-    const { data } = await api.get('/admin/car-bookings', { params })
-    rows.value = (Array.isArray(data) ? data : []).map(x => ({
-      ...x,
-      isMine: meId.value && String(x.employeeId) === String(meId.value),
+    const { data } = await api.get('/public/employees', { params: { activeOnly: true } })
+    employees.value = (Array.isArray(data) ? data : []).map(e => ({
+      employeeId: String(e.employeeId || ''),
+      name: String(e.name || ''),
+      department: String(e.department || ''),
+      contactNumber: String(e.contactNumber || ''),
+      isActive: !!e.isActive
     }))
+    const savedId = localStorage.getItem('employeeId') || ''
+    if (savedId && !form.value.employeeId) {
+      const exists = employees.value.some(e => String(e.employeeId) === String(savedId))
+      if (exists) {
+        form.value.employeeId = savedId
+        onEmployeeSelected(savedId)
+      }
+    } else if (form.value.employeeId) {
+      onEmployeeSelected(form.value.employeeId)
+    }
   } catch (e) {
-    error.value = e?.response?.data?.message || e?.message || 'Failed to load schedule'
-  } finally { loading.value = false }
-}
-
-function prettyStops(stops = []) {
-  if (!stops.length) return '—'
-  return stops
-    .map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination)
-    .join(' → ')
-}
-
-/* ——— Colors unchanged ——— */
-const statusColor = s => ({
-  PENDING:'grey', ACCEPTED:'primary', ON_ROAD:'info', ARRIVING:'teal',
-  COMPLETED:'success', DELAYED:'warning', CANCELLED:'error'
-}[s] || 'grey')
-
-/* ——— Font Awesome icon classes ——— */
-const statusIconFA = s => ({
-  PENDING:   'fa-solid fa-hourglass-half',
-  ACCEPTED:  'fa-solid fa-circle-check',
-  ON_ROAD:   'fa-solid fa-truck-fast',
-  ARRIVING:  'fa-solid fa-flag-checkered',
-  COMPLETED: 'fa-solid fa-badge-check', // fallback below if not available
-  DELAYED:   'fa-solid fa-triangle-exclamation',
-  CANCELLED: 'fa-solid fa-ban'
-}[s] || 'fa-solid fa-hourglass-half')
-
-// Many FA builds don’t have fa-badge-check in Free. Fallback:
-function fixFA(icon) {
-  return icon === 'fa-solid fa-badge-check'
-    ? 'fa-solid fa-circle-check'
-    : icon
-}
-
-const categoryIconFA = cat => (cat === 'Car' ? 'fa-solid fa-car' : 'fa-solid fa-motorcycle')
-const stopIconFA     = dest => (dest === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot')
-
-const filtered = computed(() => {
-  const term = qSearch.value.trim().toLowerCase()
-  return (rows.value || [])
-    .filter(r => categoryFilter.value === 'ALL' || r.category === categoryFilter.value)
-    .filter(r => {
-      if (!term) return true
-      const hay = [
-        r.employee?.name, r.employee?.department, r.employeeId,
-        r.purpose, r.notes, prettyStops(r.stops)
-      ].join(' ').toLowerCase()
-      return hay.includes(term)
-    })
-    .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
-})
-
-function onCreated(doc) {
-  if (!doc?.tripDate || doc.tripDate !== selectedDate.value) return
-  const exists = rows.value.some(x => String(x._id) === String(doc._id))
-  if (!exists) {
-    rows.value.push({
-      ...doc,
-      isMine: meId.value && String(doc.employeeId) === String(meId.value),
-      stops: doc.stops || []
-    })
+    console.error('Failed to load employees', e)
+  } finally {
+    loadingEmployees.value = false
   }
 }
-function onStatus(p) {
-  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) it.status = p.status
+loadEmployees()
+
+function onEmployeeSelected(val) {
+  const emp = employees.value.find(e => String(e.employeeId) === String(val))
+  if (DEBUG) console.log('👆 selected id:', val, '→ emp:', emp)
+  form.value.name = emp?.name || ''
+  form.value.department = emp?.department || ''
+  form.value.contactNumber = emp?.contactNumber || ''
 }
 
-onMounted(() => {
-  if (focusDate.value) selectedDate.value = focusDate.value
-  loadSchedule().then(() => {
-    if (focusId.value) scrollToBooking(focusId.value)
+/* ───────── Form State ───────── */
+const form = ref({
+  employeeId: '',
+  name: '',
+  department: '',
+  contactNumber: '',
+
+  category: 'Car',
+  tripDate: dayjs().format('YYYY-MM-DD'),
+  stops: [{ destination: '', destinationOther: '', mapLink: '' }],
+
+  startHour: '', startMinute: '',
+  endHour: '', endMinute: '',
+  passengers: '1',
+  customerContact: '',
+
+  purpose: '',
+  notes: '',
+  ticketFile: null,
+
+  recurring: false,
+  frequency: '',
+  endDate: '',
+  skipHolidays: false,
+  timeStart: ''
+})
+
+/* ───────── Helpers (demo capacity) ───────── */
+const demoBookings = ref([
+  { date: dayjs().format('YYYY-MM-DD'), category: 'Car',       start: '07:00', end: '09:00' },
+  { date: dayjs().format('YYYY-MM-DD'), category: 'Messenger', start: '08:00', end: '10:00' }
+])
+
+function toMinutes(h, m) {
+  const H = Number(h || 0)
+  const M = Number(m || 0)
+  return H * 60 + M
+}
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd
+}
+
+const selectedStart = computed(() => toMinutes(form.value.startHour, form.value.startMinute))
+const selectedEnd   = computed(() => toMinutes(form.value.endHour, form.value.endMinute))
+
+const busyCar = computed(() => {
+  if (!form.value.tripDate || !selectedStart.value || !selectedEnd.value) return 0
+  return demoBookings.value.filter(b =>
+    b.date === form.value.tripDate &&
+    b.category === 'Car' &&
+    overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
+  ).length
+})
+
+const busyMsgr = computed(() => {
+  if (!form.value.tripDate || !selectedStart.value || !selectedEnd.value) return 0
+  return demoBookings.value.filter(b =>
+    b.date === form.value.tripDate &&
+    b.category === 'Messenger' &&
+    overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
+  ).length
+})
+
+const availableCar = computed(() => Math.max(0, MAX_CAR - busyCar.value))
+const availableMsgr = computed(() => Math.max(0, MAX_MSGR - busyMsgr.value))
+const capacityExceeded = computed(() => {
+  if (!selectedStart.value || !selectedEnd.value) return false
+  if (form.value.category === 'Car')       return availableCar.value <= 0
+  if (form.value.category === 'Messenger') return availableMsgr.value <= 0
+  return false
+})
+
+/* ───────── Validation ───────── */
+const hasAirport = computed(() =>
+  (form.value.stops || []).some(s => s.destination === AIRPORT_DESTINATION)
+)
+const startTime = computed(() =>
+  form.value.startHour && form.value.startMinute ? `${form.value.startHour}:${form.value.startMinute}` : ''
+)
+const endTime = computed(() =>
+  form.value.endHour && form.value.endMinute ? `${form.value.endHour}:${form.value.endMinute}` : ''
+)
+
+function validateForm() {
+  const f = form.value
+  const errs = []
+  if (!f.employeeId) errs.push('• Employee is required')
+  if (!f.category) errs.push('• Category is required')
+  if (!f.tripDate) errs.push('• Date is required')
+  if (!f.stops?.length) errs.push('• At least one destination is required')
+  f.stops.forEach((s, idx) => {
+    if (!s.destination) errs.push(`• Destination #${idx + 1} is required`)
+    if (s.destination === 'Other' && !s.destinationOther)
+      errs.push(`• Destination #${idx + 1}: Please enter Destination Name`)
   })
-  socket.on('carBooking:created', onCreated)
-  socket.on('carBooking:status', onStatus)
-})
-
-onBeforeUnmount(() => {
-  socket.off('carBooking:created', onCreated)
-  socket.off('carBooking:status', onStatus)
-})
-
-watch([selectedDate, statusFilter], loadSchedule)
-
-/* ——— Details dialog ——— */
-const detailOpen = ref(false)
-const detailItem = ref(null)
-function showDetails(item){ detailItem.value = item; detailOpen.value = true }
-function onRowClick(_e, ctx){
-  const data = ctx?.item?.raw || ctx?.item || ctx
-  if (data) showDetails(data)
+  if (!startTime.value) errs.push('• Start time is required')
+  if (!endTime.value) errs.push('• End time is required')
+  if (startTime.value && endTime.value && endTime.value <= startTime.value)
+    errs.push('• End time must be after Start')
+  if (!f.passengers) errs.push('• Number of passengers is required')
+  if (!f.purpose) errs.push('• Purpose is required')
+  if (hasAirport.value && !f.ticketFile) errs.push('• Please attach the airplane ticket (required for Airport)')
+  if (capacityExceeded.value) {
+    const kind = f.category === 'Car' ? 'car' : 'messenger'
+    errs.push(`• No ${kind} available for the selected time window.`)
+  }
+  return errs
 }
 
-/* ——— Pagination (responsive + FA footer) ——— */
-const page = ref(1)
-const itemsPerPage = ref(10)
-const pageCount = computed(() => {
-  const n = Math.ceil((filtered.value?.length || 0) / (itemsPerPage.value || 10))
-  return Math.max(1, n || 1)
-})
-const totalItems = computed(() => filtered.value?.length || 0)
-const rangeStart = computed(() =>
-  totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0
-)
-const rangeEnd   = computed(() =>
-  Math.min(page.value * itemsPerPage.value, totalItems.value)
-)
+/* ───────── Payload Builders ───────── */
+function buildOneOffPayload(f) {
+  return {
+    employeeId: f.employeeId,
+    category: f.category,
+    tripDate: f.tripDate,
+    stops: (f.stops || []).map(s => ({
+      destination: s.destination,
+      destinationOther: s.destination === 'Other' ? (s.destinationOther || '') : '',
+      mapLink: s.mapLink || ''
+    })),
+    timeStart: startTime.value || null,
+    timeEnd: endTime.value || null,
+    passengers: Number(f.passengers || 1),
+    customerContact: f.customerContact || '',
+    purpose: f.purpose,
+    notes: f.notes || ''
+  }
+}
 
-watch([filtered, itemsPerPage], () => {
-  if (page.value > pageCount.value) page.value = pageCount.value
+function buildRecurringSeriesPayload(f) {
+  return {
+    category: f.category,
+    startDate: f.tripDate,
+    endDate: f.endDate,
+    timeStart: f.timeStart || startTime.value,
+    timeEnd: endTime.value,
+    timezone: 'Asia/Phnom_Penh',
+    skipHolidays: !!f.skipHolidays,
+    passengers: Number(f.passengers || 1),
+    customerContact: f.customerContact || '',
+    stops: (f.stops || []).map(s => ({
+      destination: s.destination,
+      destinationOther: s.destination === 'Other' ? (s.destinationOther || '') : '',
+      mapLink: s.mapLink || ''
+    })),
+    purpose: f.purpose || '',
+    notes: f.notes || '',
+    createdByEmp: {
+      employeeId: String(f.employeeId || ''),
+      name: f.name || '',
+      department: f.department || '',
+      contactNumber: f.contactNumber || ''
+    }
+  }
+}
+
+/* ───────── Submit Logic ───────── */
+const loading = ref(false)
+
+async function submit() {
+  const errs = validateForm()
+  if (errs.length) {
+    await Swal.fire({ icon: 'warning', title: 'Please fix the following', html: errs.join('<br>') })
+    return
+  }
+  try {
+    loading.value = true
+
+    // ───── Recurring ─────
+    if (form.value.recurring) {
+      const seriesPayload = buildRecurringSeriesPayload(form.value)
+      const { data } = await api.post('/transport/recurring', seriesPayload)
+      await Swal.fire({
+        icon: 'success',
+        title: 'Recurring series created',
+        html: `Created <b>${data.created}</b>, skipped <b>${(data.skipped || []).length}</b>.`,
+        timer: 1800,
+        showConfirmButton: false
+      })
+      resetForm({ keepEmployee: true })
+      router.push({ name: 'employee-car-history' })
+      return
+    }
+
+    // 👉 build payload for one-off
+    const payload = buildOneOffPayload(form.value)
+
+    // 👉 only require ticket for Techo International Airport
+    const needsTicket = (form.value.stops || []).some(
+      s => s.destination === AIRPORT_DESTINATION
+    )
+
+    if (needsTicket) {
+      const fd = new FormData()
+      fd.append('data', JSON.stringify(payload))
+      const file = form.value.ticketFile
+      if (!file) throw new Error('Airplane ticket is required.')
+      fd.append('ticket', file)
+      await api.post('/public/car-bookings', fd)
+    } else {
+      await api.post('/public/car-bookings', payload)
+    }
+
+    await Swal.fire({ icon: 'success', title: 'Submitted', timer: 1400, showConfirmButton: false })
+    resetForm({ keepEmployee: true })
+    router.push({ name: 'employee-car-history' })
+  } catch (e) {
+    const msg = e?.response?.data?.error || e?.response?.data?.message || e?.message || 'Submission failed.'
+    await Swal.fire({ icon: 'error', title: 'Failed', text: msg })
+  } finally {
+    loading.value = false
+  }
+}
+
+
+/* ───────── Reset ───────── */
+function resetForm({ keepEmployee = false } = {}) {
+  const cur = {
+    id: form.value.employeeId,
+    name: form.value.name,
+    dept: form.value.department,
+    phone: form.value.contactNumber
+  }
+  form.value = {
+    employeeId: keepEmployee ? cur.id : '',
+    name: keepEmployee ? cur.name : '',
+    department: keepEmployee ? cur.dept : '',
+    contactNumber: keepEmployee ? cur.phone : '',
+    category: 'Car',
+    tripDate: dayjs().format('YYYY-MM-DD'),
+    stops: [{ destination: '', destinationOther: '', mapLink: '' }],
+    startHour: '', startMinute: '', endHour: '', endMinute: '',
+    passengers: '1', customerContact: '', purpose: '', notes: '', ticketFile: null,
+    recurring: false, frequency: '', endDate: '', skipHolidays: false, timeStart: ''
+  }
+}
+
+/* ───────── Mounted: handle ?tripDate= ───────── */
+onMounted(() => {
+  if (route.query.tripDate) {
+    form.value.tripDate = route.query.tripDate
+    Swal.fire({
+      icon: 'info',
+      title: 'Booking Date Loaded',
+      text: `Date automatically set to ${route.query.tripDate}`,
+      timer: 1500,
+      showConfirmButton: false
+    })
+  }
 })
+
+/* ───────── Watchers ───────── */
+watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeId', v) })
 </script>
 
 <template>
-  <v-container fluid class="pa-2 history-container">
-    <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
-      <div class="hero">
-        <div class="hero-left">
-          <div class="hero-title">
-            <i class="fa-solid fa-calendar-check"></i>
-            <span>Day Schedule — All Requests</span>
-          </div>
-        </div>
-        <div class="hero-right d-none d-sm-flex">
-          <v-chip size="small" color="primary" label class="mr-1">Mine</v-chip>
-          <v-chip size="small" label>Others</v-chip>
-        </div>
-      </div>
-
-      <div class="px-3 pb-3 pt-2">
-        <v-card flat class="soft-card glass mb-3 filters-card">
-          <v-card-title class="subhdr">
-            <i class="fa-solid fa-filter"></i><span>Filters</span>
-            <v-spacer />
-            <v-btn size="small" @click="loadSchedule" :loading="loading">
-              <template #prepend><i class="fa-solid fa-rotate-right"></i></template>
-              Refresh
-            </v-btn>
-          </v-card-title>
-          <v-card-text class="pt-0">
-            <v-row dense>
-              <v-col cols="12" md="3">
-                <v-text-field
-                  v-model="selectedDate"
-                  type="date"
-                  label="Date"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select
-                  :items="['ALL','PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']"
-                  v-model="statusFilter"
-                  label="Status"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select
-                  :items="['ALL','Car','Messenger']"
-                  v-model="categoryFilter"
-                  label="Category"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-text-field
-                  v-model="qSearch"
-                  label="Search requester / purpose / destination"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                >
-                  <template #prepend-inner>
-                    <i class="fa-solid fa-magnifying-glass"></i>
-                  </template>
-                </v-text-field>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-
-        <v-card flat class="soft-card glass">
-          <v-card-text>
-            <v-alert
-              v-if="error"
-              type="error"
-              variant="tonal"
-              border="start"
-              class="mb-3"
-            >
-              {{ error }}
-            </v-alert>
-
-            <!-- table wrapper for horizontal scroll on small screens -->
-            <div class="table-wrapper">
-              <v-data-table
-                :headers="headers"
-                :items="filtered"
-                :loading="loading"
-                item-key="_id"
-                :density="isMobile ? 'compact' : 'comfortable'"
-                class="elevated car-history-table"
-                v-model:page="page"
-                :items-per-page="itemsPerPage"
-                @click:row="onRowClick"
-              >
-                <template #loading>
-                  <v-skeleton-loader type="table-row@6" />
-                </template>
-
-                <template #item.time="{ item }">
-                  <div class="mono">
-                    {{ item.timeStart }} – {{ item.timeEnd }}
-                  </div>
-                </template>
-
-                <template #item.category="{ item }">
-                  <v-chip
-                    :color="item.category === 'Car' ? 'primary' : 'orange'"
-                    size="small"
-                    label
-                  >
-                    <i :class="categoryIconFA(item.category)" class="mr-1"></i>
-                    {{ item.category }}
-                  </v-chip>
-                </template>
-
-                <template #item.requester="{ item }">
-                  <div class="d-flex align-center">
-                    <v-chip
-                      v-if="item.isMine"
-                      size="x-small"
-                      color="primary"
-                      variant="elevated"
-                      class="mr-2"
-                    >
-                      Mine
-                    </v-chip>
-                    <div>
-                      <div class="font-weight-600">
-                        {{ item.employee?.name || '—' }}
-                      </div>
-                      <div class="text-caption text-medium-emphasis">
-                        {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
-                      </div>
-                    </div>
-                  </div>
-                </template>
-
-                <template #item.itinerary="{ item }">
-                  <div class="truncate-2">
-                    {{ prettyStops(item.stops) }}
-                    <v-btn
-                      v-if="item.ticketUrl"
-                      size="x-small"
-                      color="indigo"
-                      variant="tonal"
-                      class="ml-2"
-                      @click.stop="openTicket(item.ticketUrl)"
-                    >
-                      <template #prepend>
-                        <i class="fa-solid fa-paperclip"></i>
-                      </template>
-                      Ticket
-                    </v-btn>
-                  </div>
-                  <div class="text-caption mt-1" v-if="item.purpose || item.notes">
-                    <span class="text-medium-emphasis">Purpose:</span>
-                    {{ item.purpose || '—' }}
-                    <span v-if="item.notes">
-                      • <span class="text-medium-emphasis">Notes:</span> {{ item.notes }}
-                    </span>
-                  </div>
-                </template>
-
-                <template #item.passengers="{ item }">
-                  <div class="text-center">
-                    {{ item.passengers ?? 1 }}
-                  </div>
-                </template>
-
-                <template #item.status="{ item }">
-                  <v-chip :color="statusColor(item.status)" size="small" label>
-                    <i :class="fixFA(statusIconFA(item.status))" class="mr-1"></i>
-                    {{ item.status }}
-                  </v-chip>
-                </template>
-
-                <template #item.actions="{ item }">
-                  <div :data-row-id="item._id">
-                    <v-btn
-                      size="small"
-                      variant="tonal"
-                      color="primary"
-                      @click.stop="showDetails(item)"
-                    >
-                      <template #prepend>
-                        <i class="fa-solid fa-circle-info"></i>
-                      </template>
-                      Details
-                    </v-btn>
-                  </div>
-                </template>
-
-                <!-- ✅ Responsive bottom footer with Font Awesome -->
-                <template #bottom>
-                  <div class="table-footer">
-                    <div class="tf-left">
-                      <div class="text-caption text-medium-emphasis d-none d-sm-inline">
-                        Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
-                      </div>
-                      <div class="text-caption text-medium-emphasis d-sm-none">
-                        {{ page }} / {{ pageCount }}
-                      </div>
-                    </div>
-
-                    <div class="tf-middle">
-                      <!-- Hide rows-per-page on phones to save space -->
-                      <v-select
-                        v-if="!isMobile"
-                        v-model="itemsPerPage"
-                        :items="[5,10,20,50]"
-                        density="compact"
-                        variant="outlined"
-                        hide-details
-                        style="max-width: 300px"
-                        label="Rows"
-                      />
-                    </div>
-
-                    <div class="tf-right">
-                      <v-pagination
-                        v-model="page"
-                        :length="pageCount"
-                        :total-visible="isMobile ? 3 : 7"
-                        density="comfortable"
-                      >
-                        <template #first>
-                          <i class="fa-solid fa-angles-left"></i>
-                        </template>
-                        <template #prev>
-                          <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
-                        </template>
-                        <template #next>
-                          <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
-                        </template>
-                        <template #last>
-                          <i class="fa-solid fa-angles-right"></i>
-                        </template>
-                      </v-pagination>
-                    </div>
-                  </div>
-                </template>
-              </v-data-table>
-            </div>
-          </v-card-text>
-        </v-card>
-      </div>
-    </v-sheet>
-
-    <!-- Details dialog -->
-    <v-dialog v-model="detailOpen" max-width="820">
-      <v-card class="soft-card glass" rounded="lg">
-        <v-card-title class="d-flex align-center justify-space-between">
-          <div class="d-flex align-center" style="gap:10px;">
-            <v-chip
-              :color="detailItem?.category === 'Car' ? 'primary' : 'orange'"
-              size="small"
-              label
-            >
-              <i :class="categoryIconFA(detailItem?.category)" class="mr-1"></i>
-              {{ detailItem?.category || '—' }}
-            </v-chip>
-            <span class="mono">
-              {{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}
-            </span>
-          </div>
-          <v-btn variant="text" @click="detailOpen = false" icon>
-            <i class="fa-solid fa-xmark"></i>
-          </v-btn>
-        </v-card-title>
-
-        <v-divider />
-
-        <v-card-text>
+  <v-container fluid class="pa-2 book-container">
+    <v-card class="rounded-lg slim-card" elevation="1">
+      <v-card-text class="pa-3">
+        <v-form @submit.prevent="submit">
           <v-row dense>
-            <v-col cols="12" md="6">
-              <div class="lbl">Date</div>
-              <div class="val">{{ detailItem?.tripDate || '—' }}</div>
-            </v-col>
-            <v-col cols="12" md="6">
-              <div class="lbl">Passengers</div>
-              <div class="val">{{ detailItem?.passengers ?? 1 }}</div>
-            </v-col>
-
-            <v-col cols="12" md="6">
-              <div class="lbl">Requester</div>
-              <div class="val">
-                {{ detailItem?.employee?.name || '—' }}
-                <div class="text-caption text-medium-emphasis">
-                  {{ detailItem?.employee?.department || '—' }} • ID {{ detailItem?.employeeId }}
-                </div>
-              </div>
+            <v-col cols="12" md="4">
+              <RequesterSection
+                :form="form"
+                :employees="employees"
+                :loading-employees="loadingEmployees"
+                @updateEmployee="onEmployeeSelected"
+              />
             </v-col>
 
-            <v-col cols="12" md="6" v-if="detailItem?.customerContact">
-              <div class="lbl">Customer Contact</div>
-              <div class="val">{{ detailItem?.customerContact }}</div>
+            <v-col cols="12" md="5">
+              <TripDetailSection
+                :form="form"
+                :CATEGORY="CATEGORY"
+                :LOCATIONS="LOCATIONS"
+                :PASSENGER_OPTIONS="PASSENGER_OPTIONS"
+              />
+            </v-col>
+
+            <v-col cols="12" md="3" class="sticky-col">
+              <PurposeSection
+                :form="form"
+                :PURPOSES="PURPOSES"
+                :LOCATIONS="LOCATIONS"
+              />
             </v-col>
 
             <v-col cols="12">
-              <div class="lbl">Itinerary</div>
-              <div class="val">
-                <div v-if="(detailItem?.stops || []).length" class="stops">
-                  <div
-                    v-for="(s,i) in detailItem.stops"
-                    :key="i"
-                    class="stop"
-                  >
-                    <i :class="stopIconFA(s.destination)" class="mr-1"></i>
-                    <strong>#{{ i+1 }}:</strong>
-                    <span>
-                      {{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}
-                    </span>
-                    <a
-                      v-if="s.mapLink"
-                      :href="absUrl(s.mapLink)"
-                      target="_blank"
-                      rel="noopener"
-                      class="ml-2 text-decoration-none"
-                    >
-                      <v-btn size="x-small" variant="text" color="primary">
-                        <template #prepend>
-                          <i class="fa-solid fa-link link-icon"></i>
-                        </template>
-                        Map
-                      </v-btn>
-                    </a>
-                  </div>
-                </div>
-                <div v-else>—</div>
-              </div>
-            </v-col>
-
-            <v-col cols="12" md="6">
-              <div class="lbl">Status</div>
-              <div class="val">
-                <v-chip :color="statusColor(detailItem?.status)" size="small" label>
-                  <i :class="fixFA(statusIconFA(detailItem?.status))" class="mr-1"></i>
-                  {{ detailItem?.status || '—' }}
-                </v-chip>
-              </div>
-            </v-col>
-
-            <v-col cols="12" md="6" v-if="detailItem?.ticketUrl">
-              <div class="lbl">Ticket</div>
-              <div class="val">
-                <a
-                  :href="absUrl(detailItem.ticketUrl)"
-                  target="_blank"
-                  rel="noopener"
-                  class="text-decoration-none"
-                >
-                  <v-btn size="small" color="indigo" variant="tonal">
-                    <template #prepend>
-                      <i class="fa-solid fa-paperclip"></i>
-                    </template>
-                    VIEW TICKET
-                  </v-btn>
-                </a>
-              </div>
-            </v-col>
-
-            <v-col
-              cols="12"
-              v-if="detailItem?.purpose || detailItem?.notes"
-              class="mt-1"
-            >
-              <div class="lbl">Purpose & Notes</div>
-              <div class="val">
-                <div>
-                  <span class="text-medium-emphasis">Purpose:</span>
-                  {{ detailItem?.purpose || '—' }}
-                </div>
-                <div v-if="detailItem?.notes">
-                  <span class="text-medium-emphasis">Notes:</span>
-                  {{ detailItem?.notes }}
-                </div>
-              </div>
+              <RecurringBookingSection :form="form" />
             </v-col>
           </v-row>
-        </v-card-text>
+        </v-form>
+      </v-card-text>
 
-        <v-divider />
-        <v-card-actions class="justify-end">
-          <v-btn variant="text" @click="detailOpen = false">Close</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+      <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
+        <v-btn :loading="loading" size="small" class="px-4 ml-1" color="primary" @click="submit">
+          <v-icon start>mdi-send</v-icon> Submit
+        </v-btn>
+
+        <v-btn variant="text" size="small" class="ml-1" color="error" :disabled="loading" @click="resetForm()">
+          <v-icon start>mdi-refresh</v-icon> Reset
+        </v-btn>
+      </v-toolbar>
+    </v-card>
   </v-container>
 </template>
 
 <style scoped>
-.section {
-  background: linear-gradient(180deg, rgba(134,136,231,.06), rgba(16,185,129,.05));
-  border: 1px solid rgba(100,116,139,.18);
-  border-radius: 16px;
-}
-.hero {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding: 14px 18px;
-  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
-  color:#fff;
-}
-.hero-left { display:flex; flex-direction:column; gap:6px; }
-.hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
-.hero-sub { opacity:.92; font-size:.9rem; }
-
-.soft-card {
-  border: 1px solid rgba(209,218,229,.14);
+.slim-card {
+  border: 1px solid rgba(100,116,139,.16);
   border-radius: 14px;
 }
-.glass {
-  background: rgba(255,255,255,.62);
-  backdrop-filter: blur(6px);
+.slim-toolbar {
+  background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 14px;
 }
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
+.sticky-col { align-self: flex-start; }
 
-.elevated {
-  border: 1px solid rgba(100,116,139,.14);
-  border-radius: 12px;
-}
-
-/* table wrapper for horizontal scroll */
-.table-wrapper {
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+/* Slightly tighter inner padding overall */
+:deep(.slim-card > .v-card-text) {
+  padding-top: 10px;
+  padding-bottom: 8px;
 }
 
-/* filters card slightly tighter */
-.filters-card {
-  margin-bottom: 12px;
-}
-
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-}
-.truncate-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.lbl { font-size:.78rem; color:#64748b; }
-.val { font-weight:600; }
-.stops { display:flex; flex-direction:column; gap:6px; }
-.stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-
-/* bigger link icon for Map */
-.link-icon {
-  font-size: 16px;
-}
-
-/* ——— Responsive table footer ——— */
-.table-footer{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  padding: 12px 16px;
-  flex-wrap: wrap;
-}
-.tf-left { min-width: 120px; }
-.tf-middle { display:flex; align-items:center; }
-.tf-right { display:flex; align-items:center; }
-
-/* tighter pagination buttons and icon alignment */
-:deep(.v-pagination .v-btn){ min-width: 36px; }
-:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
-
-/* On very narrow screens, stretch footer sections to full width */
-@media (max-width: 600px){
-  .history-container {
-    padding: 0 !important;
+/* 📱 Mobile: remove borders, full-width to phone edge, tighter paddings */
+@media (max-width: 600px) {
+  .book-container {
+    padding: 0 !important;          /* kill v-container padding */
   }
 
-  .section {
+  .slim-card {
     border: none;
     border-radius: 0;
   }
 
-  .hero {
+  .slim-toolbar {
     border-radius: 0;
-    padding: 10px 14px;
+    padding-left: 8px !important;
+    padding-right: 8px !important;
   }
 
-  .hero-title {
-    font-size: 0.95rem;
-    gap: 8px;
+  :deep(.slim-card > .v-card-text) {
+    padding: 8px 8px 6px;
   }
-
-  .soft-card {
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-  }
-
-  .filters-card {
-    margin-bottom: 8px;
-  }
-
-  .table-footer {
-    padding: 8px 10px;
-    gap: 8px;
-  }
-  .tf-left,
-  .tf-middle,
-  .tf-right {
-    width: 100%;
-  }
-  .tf-right {
-    justify-content: flex-end;
-  }
-}
-
-/* ——— Highlight animation when coming from calendar ——— */
-.highlight-row {
-  animation: rowFlash 2.2s ease-in-out;
-}
-@keyframes rowFlash {
-  0%   { background-color: #fef9c3; }
-  50%  { background-color: #fef08a; }
-  100% { background-color: transparent; }
 }
 </style>

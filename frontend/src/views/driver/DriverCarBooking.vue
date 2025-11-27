@@ -122,8 +122,8 @@ const categoryLabel = c => CATEGORY_LABEL_KM[c] || c
 /* ─────────────── TABLE HEADERS ─────────────── */
 const roleLabel = computed(() =>
   identity.value?.role === 'MESSENGER'
-    ? 'ការឆ្លើយតបអ្នកដឹកសារ'
-    : 'ការឆ្លើយតបអ្នកបើកបរ'
+    ? 'អ្នកបើកម៉ូតូ'
+    : 'អ្នកបើកឡាន'
 )
 const headers = computed(() => [
   { title: 'ម៉ោង',           key: 'time',       width: 160 },
@@ -171,12 +171,21 @@ const ackFa = s =>
     DECLINED: 'fa-solid fa-thumbs-down',
   }[s] || 'fa-solid fa-circle-question')
 
+/* destination text helper (English names from DB, but formatted clearly) */
+function destText(s = {}) {
+  return s.destination === 'Other'
+    ? s.destinationOther || 'Other'
+    : s.destination
+}
+
+/* Khmer-friendly multi-stop display */
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
   return stops
-    .map(s => (s.destination === 'Other' ? s.destinationOther || 'Other' : s.destination))
-    .join(' → ')
+    .map((s, i) => `#${i + 1}: ${destText(s)}`)
+    .join(' • ')
 }
+
 function absUrl(u) {
   const base = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
   if (!u) return ''
@@ -529,7 +538,10 @@ function showDetails(item) {
               </template>
 
               <template #item.itinerary="{ item }">
-                <div class="truncate-2">{{ prettyStops(item.stops) }}</div>
+                <div class="truncate-2">
+                  <span class="text-medium-emphasis">គោលដៅ៖ </span>
+                  {{ prettyStops(item.stops) }}
+                </div>
                 <div class="mt-1" v-if="item.ticketUrl">
                   <a :href="absUrl(item.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
                     <v-btn size="x-small" color="indigo" variant="tonal">
@@ -684,7 +696,7 @@ function showDetails(item) {
               </div>
             </v-col>
             <v-col cols="12">
-              <div class="lbl">ផ្លូវដំណើរ</div>
+              <div class="lbl">ផ្លូវដំណើរ / គោលដៅ</div>
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
                   <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
@@ -693,7 +705,18 @@ function showDetails(item) {
                       class="mr-1"
                     ></i>
                     <strong>#{{ i+1 }}:</strong>
-                    <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
+                    <span>{{ destText(s) }}</span>
+                    <a
+                      v-if="s.mapLink"
+                      :href="absUrl(s.mapLink)"
+                      target="_blank"
+                      rel="noopener"
+                      class="ml-2 text-decoration-none"
+                    >
+                      <v-btn size="x-small" variant="text" color="primary">
+                        <i class="fa-solid fa-link mr-1"></i> ផែនទី
+                      </v-btn>
+                    </a>
                   </div>
                 </div>
                 <div v-else>—</div>

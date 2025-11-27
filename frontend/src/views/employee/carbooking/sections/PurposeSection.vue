@@ -16,12 +16,18 @@ const purposeItems = computed(() => {
   return base.sort((a, b) => String(a).localeCompare(String(b)))
 })
 
-/* Destination handling */
+/* Destination handling: A→Z, with "Other" always at the bottom */
 const destinationItems = computed(() => {
-  const base = Array.isArray(props.LOCATIONS) ? props.LOCATIONS.slice() : []
-  if (!base.includes(AIRPORT_DESTINATION)) base.unshift(AIRPORT_DESTINATION)
+  const base = Array.isArray(props.LOCATIONS) ? [...props.LOCATIONS] : []
+
+  if (!base.includes(AIRPORT_DESTINATION)) base.push(AIRPORT_DESTINATION)
   if (!base.includes('Other')) base.push('Other')
-  return base
+
+  // sort everything except "Other"
+  const others = base.filter(x => x !== 'Other')
+  others.sort((a, b) => String(a).localeCompare(String(b)))
+
+  return [...others, 'Other']
 })
 
 const hasAirport = computed(() =>
@@ -65,9 +71,8 @@ function onDestinationChange(row) {
                 density="compact"
                 hide-details="auto"
                 :menu-props="{ maxHeight: 320 }"
-                :rules="[
-                  v => !!v || 'Purpose is required'
-                ]"
+                :rules="[ v => !!v || 'Purpose is required' ]"
+                clearable
               >
                 <template #label>
                   Purpose<span class="required-star">*</span>
@@ -116,12 +121,6 @@ function onDestinationChange(row) {
 
           <!-- Destination -->
           <v-card flat class="mb-2 soft-card glass">
-            <v-card-title class="subhdr between">
-              <v-btn size="x-small" class="btn-grad" @click="addStop">
-                <i class="fa-solid fa-plus"></i>&nbsp; Add destination
-              </v-btn>
-            </v-card-title>
-
             <v-card-text class="pt-0">
               <v-expansion-panels variant="accordion" density="compact">
                 <v-expansion-panel
@@ -144,21 +143,22 @@ function onDestinationChange(row) {
                   <v-expansion-panel-text>
                     <v-row dense class="align-center">
                       <v-col cols="12" md="12">
-                        <v-select
-                          :items="destinationItems"
+                        <!-- 🔍 Destination as autocomplete (search + scroll) -->
+                        <v-autocomplete
                           v-model="row.destination"
+                          :items="destinationItems"
                           variant="outlined"
                           density="compact"
                           hide-details="auto"
+                          clearable
+                          :menu-props="{ maxHeight: 320 }"
                           @update:model-value="onDestinationChange(row)"
-                          :rules="[
-                            v => !!v || 'Destination is required'
-                          ]"
+                          :rules="[ v => !!v || 'Destination is required' ]"
                         >
                           <template #label>
                             Destination #{{ idx + 1 }}<span class="required-star">*</span>
                           </template>
-                        </v-select>
+                        </v-autocomplete>
                       </v-col>
 
                       <!-- Required when destination = Other -->
@@ -169,7 +169,10 @@ function onDestinationChange(row) {
                           density="compact"
                           hide-details="auto"
                           :rules="[
-                            v => row.destination !== 'Other' || !!(v && String(v).trim()) || 'Please enter destination name'
+                            v =>
+                              row.destination !== 'Other' ||
+                              !!(v && String(v).trim()) ||
+                              'Please enter destination name'
                           ]"
                         >
                           <template #label>
@@ -186,7 +189,10 @@ function onDestinationChange(row) {
                           density="compact"
                           hide-details="auto"
                           :rules="[
-                            v => row.destination !== 'Other' || !!(v && String(v).trim()) || 'Google Maps link is required'
+                            v =>
+                              row.destination !== 'Other' ||
+                              !!(v && String(v).trim()) ||
+                              'Google Maps link is required'
                           ]"
                         >
                           <template #label>
@@ -210,6 +216,12 @@ function onDestinationChange(row) {
                     </v-row>
                   </v-expansion-panel-text>
                 </v-expansion-panel>
+
+                <v-card-title class="subhdr between">
+                  <v-btn size="x-small" class="btn-grad" @click="addStop">
+                    <i class="fa-solid fa-plus"></i>&nbsp; Add destination
+                  </v-btn>
+                </v-card-title>
               </v-expansion-panels>
             </v-card-text>
           </v-card>
@@ -262,7 +274,6 @@ function onDestinationChange(row) {
 .btn-grad { background:linear-gradient(90deg,#22d3ee,#6366f1); color:#fff; }
 .btn-grad:hover { filter:brightness(1.05); }
 
-/* 🔴 red star */
 .required-star {
   color: #fd0000;
   font-size: 1.2em;
@@ -270,7 +281,6 @@ function onDestinationChange(row) {
   line-height: 1;
 }
 
-/* 📱 Mobile */
 @media (max-width: 600px) {
   .section {
     border: none;

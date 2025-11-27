@@ -6,6 +6,7 @@ import api from '@/utils/api'
 import socket from '@/utils/socket'
 import { useDisplay } from 'vuetify'
 import { useRoute } from 'vue-router'
+import Swal from 'sweetalert2'
 
 const route = useRoute()
 
@@ -24,6 +25,9 @@ const categoryFilter = ref('ALL')
 const qSearch        = ref('')
 
 const meId = ref(localStorage.getItem('employeeId') || '')
+
+/* cancel state */
+const cancelLoading = ref('')
 
 /* ——— Build absolute URL to API origin for /uploads links ——— */
 const API_ORIGIN = (api.defaults.baseURL || '')
@@ -60,7 +64,7 @@ const headers = [
   { title: 'Itinerary',   key: 'itinerary',  sortable: false },
   { title: 'Pax',         key: 'passengers', sortable: true,  width: 70, align: 'center' },
   { title: 'Status',      key: 'status',     sortable: true,  width: 150, align: 'end' },
-  { title: '',            key: 'actions',    sortable: false, width: 120, align: 'end' }
+  { title: '',            key: 'actions',    sortable: false, width: 140, align: 'end' }
 ]
 
 /* ——— Load schedule ——— */
@@ -129,6 +133,57 @@ const filtered = computed(() => {
     .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
+/* ——— Cancel rules ——— */
+function canCancel(item) {
+  const st = String(item.status || '').toUpperCase()
+
+  // Cannot cancel once the trip is basically in progress or done
+  if (['ON_ROAD','ARRIVING','COMPLETED','CANCELLED'].includes(st)) return false
+
+  // Allow cancel for today or future
+  if (!item.tripDate) return true
+  const tripDay = dayjs(item.tripDate).startOf('day')
+  const today   = dayjs().startOf('day')
+  return tripDay.isSame(today, 'day') || tripDay.isAfter(today, 'day')
+}
+
+async function cancelBooking(item) {
+  if (!item?._id || !item.isMine || !canCancel(item)) return
+
+  const { isConfirmed } = await Swal.fire({
+    title: 'Cancel this booking?',
+    text: 'Are you sure you want to cancel this booking?',
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'Yes, cancel it',
+    cancelButtonText: 'No'
+  })
+
+  if (!isConfirmed) return
+
+  cancelLoading.value = String(item._id)
+  try {
+    // adjust endpoint if your backend uses another route
+    await api.post(`/employee/car-bookings/${item._id}/cancel`)
+    // optimistic update
+    item.status = 'CANCELLED'
+
+    await Swal.fire({
+      icon: 'success',
+      title: 'Cancelled',
+      text: 'Your booking has been cancelled.',
+      timer: 1500,
+      showConfirmButton: false
+    })
+  } catch (e) {
+    error.value = e?.response?.data?.message || e?.message || 'Failed to cancel booking'
+    await loadSchedule()
+  } finally {
+    cancelLoading.value = ''
+  }
+}
+
+/* ——— Socket events ——— */
 function onCreated(doc) {
   if (!doc?.tripDate || doc.tripDate !== selectedDate.value) return
   const exists = rows.value.some(x => String(x._id) === String(doc._id))
@@ -374,7 +429,24 @@ watch([filtered, itemsPerPage], () => {
                 </template>
 
                 <template #item.actions="{ item }">
-                  <div :data-row-id="item._id">
+                  <div :data-row-id="item._id" class="d-flex justify-end" style="gap:6px;">
+                    <!-- Cancel (only my bookings) -->
+                    <v-btn
+                      v-if="item.isMine"
+                      size="small"
+                      variant="text"
+                      color="error"
+                      :disabled="!canCancel(item)"
+                      :loading="cancelLoading === String(item._id)"
+                      @click.stop="cancelBooking(item)"
+                    >
+                      <template #prepend>
+                        <i class="fa-solid fa-ban"></i>
+                      </template>
+                      Cancel
+                    </v-btn>
+
+                    <!-- Details -->
                     <v-btn
                       size="small"
                       variant="tonal"
