@@ -154,7 +154,6 @@ function showDayDetails(d) {
   const dateStr = d.format('YYYY-MM-DD')
   const list = byDate.value[dateStr]
   if (!list?.length) {
-    // No bookings → jump directly to list view with that date
     router.push({ name: 'driver-car-booking', query: { date: dateStr } })
     return
   }
@@ -197,19 +196,26 @@ onMounted(fetchMonth)
 <template>
   <div class="calendar-page">
     <div class="calendar-wrapper">
-      <!-- Toolbar -->
+      <!-- HERO TOOLBAR -->
       <div class="calendar-toolbar">
         <button class="btn-nav" @click="prevMonth">
           <v-icon icon="mdi-chevron-left" size="20" />
         </button>
-        <div class="month-label">{{ monthLabel }}</div>
+
+        <div class="month-label">
+          {{ monthLabel }}
+        </div>
+
         <button class="btn-nav" @click="nextMonth">
           <v-icon icon="mdi-chevron-right" size="20" />
         </button>
-        <div class="toolbar-right">
-          <button class="btn-flat" @click="fetchMonth">ផ្ទុកឡើងវិញ</button>
-          <button class="btn-flat today" @click="goToday">ថ្ងៃនេះ</button>
-        </div>
+
+        <button class="btn-flat" @click="fetchMonth">
+          ផ្ទុកឡើងវិញ
+        </button>
+        <button class="btn-flat today" @click="goToday">
+          ថ្ងៃនេះ
+        </button>
       </div>
 
       <!-- Scrollable week header + grid -->
@@ -273,51 +279,41 @@ onMounted(fetchMonth)
 </template>
 
 <style scoped>
-/* page container: a bit of air on desktop, edge on phone */
+/* full-bleed inside layout */
 .calendar-page {
-  padding: 8px 10px 12px;
-}
-@media (max-width: 600px) {
-  .calendar-page {
-    padding: 0;
-  }
+  padding: 0;
 }
 
-/* main card */
+/* main card flush with edges */
 .calendar-wrapper {
   border: 1px solid rgba(100,116,139,.16);
-  border-radius: 12px;
+  border-radius: 0;
   background: #fff;
   overflow: hidden;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-@media (max-width: 600px) {
-  .calendar-wrapper {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-  }
+  width: 100%;
+  margin: 0;
 }
 
-/* toolbar */
+/* HERO TOOLBAR */
 .calendar-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #f5f7fb;
-  padding: 8px 12px;
-  border-bottom: 1px solid #e2e8f0;
-  font-weight: 600;
+  display:flex;
+  align-items:flex-end;
+  gap:10px;
+  padding: 14px 18px;
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color:#ffffff;
+  border-bottom: 1px solid rgba(255,255,255,.28);
+  flex-wrap:wrap;
 }
 .month-label {
   font-size: 1.05rem;
-  color: #111827;
+  font-weight: 700;
+  color:#ffffff;
 }
 .btn-nav {
-  background: #fff;
-  border: 1px solid #cbd5e1;
+  background: rgba(255,255,255,0.16);
+  border: 1px solid rgba(15,23,42,0.18);
   border-radius: 999px;
   width: 34px;
   height: 34px;
@@ -325,42 +321,44 @@ onMounted(fetchMonth)
   display:flex;
   align-items:center;
   justify-content:center;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.35);
 }
 .btn-nav:hover {
-  background: #f1f5f9;
-}
-.toolbar-right {
-  display: flex;
-  gap: 6px;
+  background: rgba(255,255,255,0.26);
 }
 .btn-flat {
-  background: #fff;
-  border: 1px solid #cbd5e1;
+  background: rgba(255,255,255,0.20);
+  border: 1px solid rgba(15,23,42,0.16);
   border-radius: 999px;
-  padding: 5px 10px;
+  padding: 5px 12px;
   font-size: .8rem;
   cursor: pointer;
+  font-weight: 600;
+  color:#0f172a;
+  box-shadow: 0 1px 3px rgba(15,23,42,0.28);
 }
 .btn-flat.today {
-  background: #4f46e5;
-  color: #fff;
-  border-color: #4f46e5;
+  background: #22c55e;
+  border-color: #16a34a;
+  color:#ffffff;
 }
 
 @media (max-width: 600px) {
   .calendar-toolbar {
-    padding: 6px 8px;
+    flex-direction: column;
+    align-items:flex-start;
+    padding: 10px 12px;
   }
   .month-label {
     font-size: .95rem;
   }
-  .btn-flat {
-    padding: 4px 8px;
-    font-size: .75rem;
-  }
   .btn-nav {
     width: 30px;
     height: 30px;
+  }
+  .btn-flat {
+    padding: 4px 10px;
+    font-size: .75rem;
   }
 }
 
@@ -369,11 +367,11 @@ onMounted(fetchMonth)
   overflow-x: auto;
 }
 .calendar-inner {
-  min-width: 900px; /* wider than small screens → can scroll left/right */
+  min-width: 900px;
 }
 @media (max-width: 600px) {
   .calendar-inner {
-    min-width: 750px; /* still scrollable but a bit tighter on phone */
+    min-width: 750px;
   }
 }
 
@@ -466,8 +464,8 @@ onMounted(fetchMonth)
 
 /* legend */
 .status-legend {
-  max-width: 1100px;
-  margin: 8px auto 10px;
+  width: 100%;
+  margin: 8px 8px 10px;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;

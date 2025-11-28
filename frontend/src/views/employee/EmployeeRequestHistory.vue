@@ -351,453 +351,523 @@ function dietaryByMenu(r) {
 </script>
 
 <template>
-  <v-container fluid class="pa-2">
-    <v-card class="rounded-lg slim-card" elevation="1">
-      <!-- Desktop / Tablet toolbar -->
-      <v-toolbar v-if="mdAndUp" flat density="comfortable" class="py-2">
-        <v-toolbar-title class="text-subtitle-1 font-weight-bold">
-          <div class="title-2l">
-            <span class="en">My Requests</span>
-            <span class="km">{{ tkm('My Requests') }}</span>
-          </div>
-        </v-toolbar-title>
-        <v-spacer />
-        <v-text-field
-          v-model="q" density="compact"
-          :placeholder="tkm('Search (type, menu, note, requester)')"
-          clearable hide-details variant="outlined" class="mr-2" style="max-width:260px"
-          @keyup.enter="load"
-        />
-        <!-- Desktop select -->
-        <v-select
-          v-model="status"
-          :items="statuses"
-          density="compact"
-          :label="tkm('Status')"
-          hide-details
-          variant="outlined"
-          class="mr-2"
-          style="max-width:160px"
-        >
-          <template #selection="{ item }">
-            <span>{{ item.title || item.value || item }}</span>
-            <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
-          </template>
-
-          <!-- prevent duplicate by clearing default title/subtitle -->
-          <template #item="{ props: sp, item }">
-            <v-list-item v-bind="sp" :title="undefined" :subtitle="undefined">
-              <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
-              <v-list-item-subtitle class="km">
-                {{ tkm(item.title || item.value || item) }}
-              </v-list-item-subtitle>
-            </v-list-item>
-          </template>
-        </v-select>
-        <v-text-field
-          v-model="dateStart" type="date" density="compact" :label="tkm('From')"
-          hide-details variant="outlined" class="mr-2" style="max-width:160px"
-        />
-        <v-text-field
-          v-model="dateEnd" type="date" density="compact" :label="tkm('To')"
-          hide-details variant="outlined" class="mr-2" style="max-width:160px"
-        />
-
-        <v-tooltip text="Refresh" location="bottom">
-          <template #activator="{ props }">
-            <v-btn
-              v-bind="props"
-              :loading="loading"
-              icon
-              color="primary"
-              class="mr-2"
-              @click="load"
-              aria-label="Refresh"
-              title="Refresh"
-            >
-              <i class="fa-solid fa-rotate-right"></i>
-            </v-btn>
-          </template>
-        </v-tooltip>
-
-        <v-tooltip text="Export Excel" location="bottom">
-          <template #activator="{ props }">
-            <v-btn
-              v-bind="props"
-              icon
-              color="success"
-              variant="flat"
-              @click="exportExcel"
-              aria-label="Export Excel"
-              title="Export Excel"
-            >
-              <i class="fa-regular fa-file-excel"></i>
-            </v-btn>
-          </template>
-        </v-tooltip>
-
-        <v-tooltip text="Filters" location="bottom">
-          <template #activator="{ props }">
-            <v-btn
-              v-bind="props"
-              icon
-              variant="flat"
-              color="secondary"
-              class="ml-1"
-              @click="showFilterDialog = true"
-              aria-label="Filters"
-              title="Filters"
-            >
-              <i class="fa-solid fa-filter"></i>
-            </v-btn>
-          </template>
-        </v-tooltip>
-      </v-toolbar>
-
-      <v-divider />
-
-      <!-- Mobile search + Refresh + Filters -->
-      <v-sheet v-if="!mdAndUp" class="px-3 pt-3 pb-1 bg-transparent">
-        <div class="d-flex align-center gap-2">
+  <v-container fluid class="pa-2 employee-reqhistory-page">
+    <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
+        <!-- Filters inline in header (desktop/tablet only) -->
+        <div class="hero" v-if="mdAndUp">
           <v-text-field
-            v-model="q" density="compact" :placeholder="tkm('Search (type, menu, note, requester)')"
-            clearable hide-details variant="outlined" class="flex-grow-1"
+            v-model="q"
+            density="compact"
+            :placeholder="tkm('Search (type, menu, note, requester)')"
+            clearable
+            hide-details
+            variant="outlined"
+            class="hf-field hf-search"
             @keyup.enter="load"
+          >
+            <template #prepend-inner>
+              <v-icon icon="mdi-magnify" size="18" />
+            </template>
+          </v-text-field>
+
+          <v-select
+            v-model="status"
+            :items="statuses"
+            density="compact"
+            :label="tkm('Status')"
+            hide-details
+            variant="outlined"
+            class="hf-field hf-status"
+          >
+            <template #selection="{ item }">
+              <span>{{ item.title || item.value || item }}</span>
+              <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
+            </template>
+
+            <template #item="{ props: sp, item }">
+              <v-list-item v-bind="sp" :title="undefined" :subtitle="undefined">
+                <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
+                <v-list-item-subtitle class="km">
+                  {{ tkm(item.title || item.value || item) }}
+                </v-list-item-subtitle>
+              </v-list-item>
+            </template>
+          </v-select>
+
+          <v-text-field
+            v-model="dateStart"
+            type="date"
+            density="compact"
+            :label="tkm('From')"
+            hide-details
+            variant="outlined"
+            class="hf-field hf-date"
           />
-          <v-tooltip text="Refresh" location="bottom">
-            <template #activator="{ props }">
+          <v-text-field
+            v-model="dateEnd"
+            type="date"
+            density="compact"
+            :label="tkm('To')"
+            hide-details
+            variant="outlined"
+            class="hf-field hf-date"
+          />
+
+          <v-btn
+            :loading="loading"
+            icon
+            size="small"
+            color="white"
+            variant="flat"
+            class="hf-icon hf-icon-btn"
+            @click="load"
+            aria-label="Refresh"
+            title="Refresh"
+          >
+            <v-icon icon="mdi-refresh" size="18" />
+          </v-btn>
+
+
+          <v-btn
+            icon
+            size="small"
+            color="white"
+            variant="flat"
+            class="hf-icon hf-icon-btn"
+            :loading="false"
+            @click="exportExcel"
+            aria-label="Export Excel"
+            title="Export Excel"
+          >
+            <v-icon icon="mdi-file-excel" size="18" />
+          </v-btn>
+        </div>
+
+
+      <div class="px-3 pb-3 pt-3">
+        <v-card class="rounded-lg soft-card" elevation="1">
+          <!-- Mobile search + filter button -->
+          <v-sheet v-if="!mdAndUp" class="px-3 pt-3 pb-1 mobile-hero">
+            <div class="d-flex align-center gap-2">
+              <v-text-field
+                v-model="q"
+                density="compact"
+                :placeholder="tkm('Search (type, menu, note, requester)')"
+                clearable
+                hide-details
+                variant="outlined"
+                class="flex-grow-1"
+                @keyup.enter="load"
+              >
+                <template #prepend-inner>
+                  <v-icon icon="mdi-magnify" size="18" />
+                </template>
+              </v-text-field>
+
               <v-btn
-                v-bind="props"
                 :loading="loading"
                 icon
                 variant="tonal"
+                size="small"
                 @click="load"
                 aria-label="Refresh"
                 title="Refresh"
-                size="small"
                 style="margin: 4px;"
               >
-                <i class="fa-solid fa-rotate-right"></i>
+                <v-icon icon="mdi-refresh" size="18" />
               </v-btn>
-            </template>
-          </v-tooltip>
-          <v-btn
-            variant="tonal"
-            color="primary"
-            @click="showFilterDialog = true"
-          >
-            {{ tkm('Filters') }}
-          </v-btn>
-        </div>
-      </v-sheet>
 
-      <!-- Filters dialog for mobile -->
-      <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
-        <v-card>
-          <v-toolbar density="comfortable" color="primary" class="text-white">
-            <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
-            <v-toolbar-title>{{ tkm('Filters') }}</v-toolbar-title>
-            <v-spacer />
-            <v-btn variant="text" class="text-white" @click="resetFilters">
-              <v-icon start>mdi-restore</v-icon> {{ tkm('Reset') }}
-            </v-btn>
-          </v-toolbar>
+              <v-btn
+                variant="tonal"
+                color="primary"
+                size="small"
+                class="ml-1"
+                @click="showFilterDialog = true"
+              >
+                <v-icon icon="mdi-filter-variant" size="18" class="mr-1" />
+                {{ tkm('Filters') }}
+              </v-btn>
+            </div>
+          </v-sheet>
 
-          <v-card-text>
-            <v-row dense>
-              <v-col cols="12">
-                <v-select
-                  v-model="status"
-                  :items="statuses"
-                  :label="tkm('Status')"
-                  variant="outlined"
-                  density="comfortable"
-                  hide-details
-                >
-                  <template #selection="{ item }">
-                    <span>{{ item.title || item.value || item }}</span>
-                    <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
-                  </template>
-                  <template #item="{ props: sp, item }">
-                    <v-list-item v-bind="sp" :title="undefined" :subtitle="undefined">
-                      <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
-                      <v-list-item-subtitle class="km">
-                        {{ tkm(item.title || item.value || item) }}
-                      </v-list-item-subtitle>
-                    </v-list-item>
-                  </template>
-                </v-select>
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="dateStart"
-                  type="date"
-                  :label="tkm('From')"
-                  variant="outlined"
-                  density="comfortable"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field
-                  v-model="dateEnd"
-                  type="date"
-                  :label="tkm('To')"
-                  variant="outlined"
-                  density="comfortable"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-select
-                  v-model="itemsPerPage"
-                  :items="itemsPerPageOptions"
-                  :label="tkm('Rows per page')"
-                  variant="outlined"
-                  density="comfortable"
-                  hide-details
-                />
-              </v-col>
-            </v-row>
-          </v-card-text>
+          <v-divider v-if="!mdAndUp" />
 
-          <v-card-actions class="px-4 pb-4">
-            <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">{{ tkm('Close') }}</v-btn>
-            <v-spacer />
-            <v-btn color="primary" @click="showFilterDialog=false; load()">{{ tkm('Apply') }}</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
+          <!-- Filters dialog for mobile -->
+          <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
+            <v-card>
+              <v-toolbar density="comfortable" color="primary" class="text-white">
+                <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false">
+                  <v-icon icon="mdi-close" />
+                </v-btn>
+                <v-toolbar-title>{{ tkm('Filters') }}</v-toolbar-title>
+                <v-spacer />
+                <v-btn variant="text" class="text-white" @click="resetFilters">
+                  <v-icon start icon="mdi-restore" />
+                  {{ tkm('Reset') }}
+                </v-btn>
+              </v-toolbar>
 
-      <v-card-text class="pa-0">
-        <div class="table-wrap">
-          <!-- align-left + comfy-cells + row-hover -->
-          <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
-            <thead>
-              <tr>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Status</div>
-                    <div class="km">{{ tkm('Status') }}</div>
-                  </div>
-                </th>
-                <th style="width: 120px;">
-                  <div class="hdr-2l">
-                    <div class="en">Details</div>
-                    <div class="km">{{ tkm('Details') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Requester (ID & Name)</div>
-                    <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Order Date</div>
-                    <div class="km">{{ tkm('Order Date') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Eat Date</div>
-                    <div class="km">{{ tkm('Eat Date') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Time</div>
-                    <div class="km">{{ tkm('Time') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Order Type</div>
-                    <div class="km">{{ tkm('Order Type') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Meal(s)</div>
-                    <div class="km">{{ tkm('Meal(s)') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Qty</div>
-                    <div class="km">{{ tkm('Qty') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Location</div>
-                    <div class="km">{{ tkm('Location') }}</div>
-                  </div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="r in pagedRows" :key="r._id">
-                <!-- data-row-id so calendar can focus -->
-                <tr :data-row-id="r._id">
-                  <td>
-                    <v-chip
-                      :color="{
-                        NEW:'grey',
-                        ACCEPTED:'primary',
-                        COOKING:'orange',
-                        READY:'teal',
-                        DELIVERED:'green',
-                        CANCELED:'red'
-                      }[r.status]"
-                      size="small"
-                      label
+              <v-card-text>
+                <v-row dense>
+                  <v-col cols="12">
+                    <v-select
+                      v-model="status"
+                      :items="statuses"
+                      :label="tkm('Status')"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details
                     >
-                      <div class="chip-2l">
-                        <div class="en">{{ r.status }}</div>
-                        <div class="km">{{ tkm(r.status) }}</div>
+                      <template #selection="{ item }">
+                        <span>{{ item.title || item.value || item }}</span>
+                        <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
+                      </template>
+                      <template #item="{ props: sp, item }">
+                        <v-list-item v-bind="sp" :title="undefined" :subtitle="undefined">
+                          <v-list-item-title>{{ item.title || item.value || item }}</v-list-item-title>
+                          <v-list-item-subtitle class="km">
+                            {{ tkm(item.title || item.value || item) }}
+                          </v-list-item-subtitle>
+                        </v-list-item>
+                      </template>
+                    </v-select>
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-text-field
+                      v-model="dateStart"
+                      type="date"
+                      :label="tkm('From')"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-text-field
+                      v-model="dateEnd"
+                      type="date"
+                      :label="tkm('To')"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details
+                    />
+                  </v-col>
+                  <v-col cols="12" sm="6">
+                    <v-select
+                      v-model="itemsPerPage"
+                      :items="itemsPerPageOptions"
+                      :label="tkm('Rows per page')"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details
+                    />
+                  </v-col>
+                </v-row>
+              </v-card-text>
+
+              <v-card-actions class="px-4 pb-4">
+                <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">
+                  {{ tkm('Close') }}
+                </v-btn>
+                <v-spacer />
+                <v-btn color="primary" @click="showFilterDialog=false; load()">
+                  {{ tkm('Apply') }}
+                </v-btn>
+              </v-card-actions>
+            </v-card>
+          </v-dialog>
+
+          <v-card-text class="pa-0">
+            <div class="table-wrap">
+              <!-- align-left + comfy-cells + row-hover -->
+              <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
+                <thead>
+                  <tr>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Status</div>
+                        <div class="km">{{ tkm('Status') }}</div>
                       </div>
-                    </v-chip>
-                  </td>
-                  <td>
-                    <v-btn
-                      size="small"
-                      variant="text"
-                      color="secondary"
-                      @click="toggleExpanded(r._id)"
-                    >
-                      {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
-                      <span class="km ml-1">
-                        ({{ isExpanded(r._id) ? 'លាក់' : tkm('Details') }})
-                      </span>
-                    </v-btn>
-                  </td>
-                  <td>
-                    {{ r?.employee?.employeeId || '—' }}
-                    <span v-if="r?.employee?.name"> — {{ r.employee.name }}</span>
-                  </td>
-                  <td>{{ fmtDate(r.orderDate) }}</td>
-                  <td>{{ fmtDate(r.eatDate) }}</td>
-                  <td>
-                    {{ r.eatTimeStart || '—' }}
-                    <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
-                  </td>
+                    </th>
+                    <th style="width: 120px;">
+                      <div class="hdr-2l">
+                        <div class="en">Details</div>
+                        <div class="km">{{ tkm('Details') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Requester (ID & Name)</div>
+                        <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Order Date</div>
+                        <div class="km">{{ tkm('Order Date') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Eat Date</div>
+                        <div class="km">{{ tkm('Eat Date') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Time</div>
+                        <div class="km">{{ tkm('Time') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Order Type</div>
+                        <div class="km">{{ tkm('Order Type') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Meal(s)</div>
+                        <div class="km">{{ tkm('Meal(s)') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Qty</div>
+                        <div class="km">{{ tkm('Qty') }}</div>
+                      </div>
+                    </th>
+                    <th>
+                      <div class="hdr-2l">
+                        <div class="en">Location</div>
+                        <div class="km">{{ tkm('Location') }}</div>
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="r in pagedRows" :key="r._id">
+                    <!-- data-row-id so calendar can focus -->
+                    <tr :data-row-id="r._id">
+                      <td>
+                        <v-chip
+                          :color="{
+                            NEW:'grey',
+                            ACCEPTED:'primary',
+                            COOKING:'orange',
+                            READY:'teal',
+                            DELIVERED:'green',
+                            CANCELED:'red'
+                          }[r.status]"
+                          size="small"
+                          label
+                        >
+                          <div class="chip-2l">
+                            <div class="en">{{ r.status }}</div>
+                            <div class="km">{{ tkm(r.status) }}</div>
+                          </div>
+                        </v-chip>
+                      </td>
+                      <td>
+                        <v-btn
+                          size="small"
+                          variant="text"
+                          color="secondary"
+                          @click="toggleExpanded(r._id)"
+                        >
+                          <v-icon
+                            :icon="isExpanded(r._id) ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+                            size="18"
+                            class="mr-1"
+                          />
+                          {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
+                          <span class="km ml-1">
+                            ({{ isExpanded(r._id) ? 'លាក់' : tkm('Details') }})
+                          </span>
+                        </v-btn>
+                      </td>
+                      <td>
+                        {{ r?.employee?.employeeId || '—' }}
+                        <span v-if="r?.employee?.name"> — {{ r.employee.name }}</span>
+                      </td>
+                      <td>{{ fmtDate(r.orderDate) }}</td>
+                      <td>{{ fmtDate(r.eatDate) }}</td>
+                      <td>
+                        {{ r.eatTimeStart || '—' }}
+                        <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
+                      </td>
 
-                  <td>
-                    <div class="cell-2l">
-                      <div class="en">{{ r.orderType }}</div>
-                      <div class="km">{{ orderTypeKM(r.orderType) }}</div>
-                    </div>
-                  </td>
+                      <td>
+                        <div class="cell-2l">
+                          <div class="en">{{ r.orderType }}</div>
+                          <div class="km">{{ orderTypeKM(r.orderType) }}</div>
+                        </div>
+                      </td>
 
-                  <td>
-                    <div class="cell-2l">
-                      <div class="en">{{ (r.meals || []).join(', ') }}</div>
-                      <div class="km">{{ mealListKM(r.meals) }}</div>
-                    </div>
-                  </td>
+                      <td>
+                        <div class="cell-2l">
+                          <div class="en">{{ (r.meals || []).join(', ') }}</div>
+                          <div class="km">{{ mealListKM(r.meals) }}</div>
+                        </div>
+                      </td>
 
-                  <td>{{ r.quantity }}</td>
-                  <td>
-                    {{ r?.location?.kind }}
-                    <span v-if="r?.location?.other"> — {{ r.location.other }}</span>
-                  </td>
-                </tr>
+                      <td>{{ r.quantity }}</td>
+                      <td>
+                        {{ r?.location?.kind }}
+                        <span v-if="r?.location?.other"> — {{ r.location.other }}</span>
+                      </td>
+                    </tr>
 
-                <!-- Details row -->
-                <tr v-if="isExpanded(r._id)" class="details-row">
-                  <td colspan="10">
-                    <v-expand-transition>
-                      <div class="px-3 py-2">
-                        <div class="tree">
-                          <div class="tree-node root">
-                            <div class="node-label two-lines">
-                              <div class="en">
-                                <strong>{{ tkm('Qty') }}</strong> {{ r.quantity }}
-                              </div>
-                              <div class="km">{{ tkm('Qty') }}</div>
-                            </div>
-                            <div class="children">
-                              <template
-                                v-for="[menuName, menuCnt] in menuMap(r)"
-                                :key="menuName"
-                              >
-                                <div class="tree-node">
-                                  <div class="node-label two-lines">
-                                    <div class="en">
-                                      <span class="arrow">→</span>
-                                      <strong>{{ menuName }}</strong> ×{{ menuCnt }}
-                                    </div>
-                                    <div class="km">{{ menuKM(menuName) }}</div>
+                    <!-- Details row -->
+                    <tr v-if="isExpanded(r._id)" class="details-row">
+                      <td colspan="10">
+                        <v-expand-transition>
+                          <div class="px-3 py-2">
+                            <div class="tree">
+                              <div class="tree-node root">
+                                <div class="node-label two-lines">
+                                  <div class="en">
+                                    <strong>{{ tkm('Qty') }}</strong> {{ r.quantity }}
                                   </div>
-                                  <div
-                                    class="children"
-                                    v-if="
-                                      Array.from(
-                                        (dietaryByMenu(r).get(menuName) || new Map()).entries()
-                                      ).length
-                                    "
+                                  <div class="km">{{ tkm('Qty') }}</div>
+                                </div>
+                                <div class="children">
+                                  <template
+                                    v-for="[menuName, menuCnt] in menuMap(r)"
+                                    :key="menuName"
                                   >
-                                    <div
-                                      class="tree-node leaf"
-                                      v-for="[allergen, aCnt] in Array.from(
-                                        (dietaryByMenu(r).get(menuName) || new Map()).entries()
-                                      )"
-                                      :key="menuName + '_' + allergen"
-                                    >
+                                    <div class="tree-node">
                                       <div class="node-label two-lines">
                                         <div class="en">
-                                          <span class="arrow small">↳</span>
-                                          {{ allergen }} ×{{ aCnt }}
+                                          <span class="arrow">→</span>
+                                          <strong>{{ menuName }}</strong> ×{{ menuCnt }}
                                         </div>
-                                        <div class="km">{{ allergenKM(allergen) }}</div>
+                                        <div class="km">{{ menuKM(menuName) }}</div>
+                                      </div>
+                                      <div
+                                        class="children"
+                                        v-if="
+                                          Array.from(
+                                            (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                          ).length
+                                        "
+                                      >
+                                        <div
+                                          class="tree-node leaf"
+                                          v-for="[allergen, aCnt] in Array.from(
+                                            (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                          )"
+                                          :key="menuName + '_' + allergen"
+                                        >
+                                          <div class="node-label two-lines">
+                                            <div class="en">
+                                              <span class="arrow small">↳</span>
+                                              {{ allergen }} ×{{ aCnt }}
+                                            </div>
+                                            <div class="km">{{ allergenKM(allergen) }}</div>
+                                          </div>
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
+                                  </template>
                                 </div>
-                              </template>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    </v-expand-transition>
-                  </td>
-                </tr>
-              </template>
+                        </v-expand-transition>
+                      </td>
+                    </tr>
+                  </template>
 
-              <tr v-if="!rows.length && !loading">
-                <td colspan="10" class="text-center py-6 text-medium-emphasis">
-                  No requests found.
-                </td>
-              </tr>
-            </tbody>
-          </v-table>
-        </div>
+                  <tr v-if="!rows.length && !loading">
+                    <td colspan="10" class="text-center py-6 text-medium-emphasis">
+                      No requests found.
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </div>
 
-        <!-- pagination -->
-        <div
-          class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3"
-        >
-          <v-select
-            v-model="itemsPerPage"
-            :items="itemsPerPageOptions"
-            density="compact"
-            :label="tkm('Rows per page')"
-            hide-details
-            variant="outlined"
-            style="max-width:140px"
-          />
-          <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
-        </div>
-      </v-card-text>
-    </v-card>
+            <!-- pagination -->
+            <div
+              class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3"
+            >
+              <v-select
+                v-model="itemsPerPage"
+                :items="itemsPerPageOptions"
+                density="compact"
+                :label="tkm('Rows per page')"
+                hide-details
+                variant="outlined"
+                style="max-width:140px"
+              />
+              <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
+            </div>
+          </v-card-text>
+        </v-card>
+      </div>
+    </v-sheet>
   </v-container>
 </template>
 
 <style scoped>
+.employee-reqhistory-page {}
+
+/* section shell */
+.section {
+  border: 1px solid rgba(100,116,139,.18);
+  background: linear-gradient(180deg, rgba(134,136,231,.06), rgba(16,185,129,.05));
+  border-radius: 12px;
+}
+
+/* header with gradient */
+.hero {
+  display:flex;
+  align-items:flex-start;
+  gap: 16px;
+  padding: 14px 18px;
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color:#000000;
+  border-bottom: 1px solid rgba(255,255,255,.25);
+}
+
+.hero-sub {
+  font-size:.9rem;
+  opacity:.95;
+}
+
+/* filters in header (desktop) */
+.hero-right {
+  display:flex;
+  align-items:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
+}
+.hf-field {
+  min-width: 140px;
+}
+.hf-search {
+  min-width: 220px;
+  max-width: 260px;
+}
+.hf-status {
+  max-width: 170px;
+}
+.hf-date {
+  max-width: 150px;
+}
+.hf-icon {
+  margin-left: 4px;
+}
+
+/* inner card */
+.soft-card {
+  border: 1px solid rgba(209,218,229,.14);
+  border-radius: 12px;
+  background: rgba(255,255,255,.97);
+}
+
 /* highlight when focused from calendar */
 .highlight-row {
   animation: rowFlash 5s ease-in-out;
@@ -806,11 +876,6 @@ function dietaryByMenu(r) {
   0%   { background-color: #fef9c3; }
   50%  { background-color: #fef08a; }
   100% { background-color: transparent; }
-}
-
-/* card border (same family as other slim pages) */
-.slim-card {
-  border: 1px solid rgba(100,116,139,.16);
 }
 
 /* wrapper */
@@ -823,6 +888,16 @@ function dietaryByMenu(r) {
 :deep(.v-field__input){
   min-height: 36px;
 }
+
+.hf-icon-btn {
+  background: rgba(255,255,255,0.18) !important;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.35);
+}
+.hf-icon-btn :deep(.v-icon) {
+  color: #050505 !important;
+}
+
 
 .min-width-table th,
 .min-width-table td{
@@ -943,8 +1018,31 @@ function dietaryByMenu(r) {
   text-align: left !important;
 }
 
+/* spacing helpers */
+.mr-1 { margin-right: .25rem; }
+.mr-2 { margin-right: .5rem; }
+.ml-1 { margin-left: .25rem; }
+
 /* phone tweaks */
+@media (max-width: 960px){
+  .hero {
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .hero-right{
+    width:100%;
+    justify-content:flex-start;
+  }
+}
 @media (max-width: 600px){
+  .section {
+    border-left:none;
+    border-right:none;
+    border-radius:0;
+  }
+  .hero {
+    padding: 10px 12px;
+  }
   .min-width-table th,
   .min-width-table td{
     min-width: 90px;
@@ -952,9 +1050,21 @@ function dietaryByMenu(r) {
   .table-wrap{
     -webkit-overflow-scrolling: touch;
   }
-  .v-toolbar{
-    padding-left: .5rem;
-    padding-right: .5rem;
-  }
 }
+
+.mobile-hero {
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  border-bottom: 1px solid rgba(255,255,255,.25);
+}
+
+/* optional: make controls readable on gradient */
+.mobile-hero :deep(.v-field__input),
+.mobile-hero :deep(.v-label),
+.mobile-hero :deep(.v-icon) {
+  color: #000000 !important;
+}
+.mobile-hero :deep(.v-field) {
+  --v-field-border-opacity: 0.5;
+}
+
 </style>

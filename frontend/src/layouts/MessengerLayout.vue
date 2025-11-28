@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer   = ref(true)
 const rail     = ref(false)
-const appTitle = 'Trax — Messenger'
+const appTitle = 'Messenger'
 
 /** Sections (one category for now) */
 const sections = [

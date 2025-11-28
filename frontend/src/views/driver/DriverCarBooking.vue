@@ -88,7 +88,6 @@ function useDevIdentity() {
   localStorage.setItem('loginId', devLoginId.value)
   localStorage.setItem('role', devRole.value)
   identity.value = { loginId: devLoginId.value, role: devRole.value }
-  // re-subscribe sockets for new role
   try { subscribeRoleIfNeeded({ role: devRole.value }) } catch {}
   loadList()
 }
@@ -173,7 +172,7 @@ const ackIcon = s =>
     DECLINED: 'mdi-thumb-down-outline',
   }[s] || 'mdi-help-circle-outline')
 
-/* destination text helper (English names from DB, but formatted clearly) */
+/* destination text helper */
 function destText(s = {}) {
   return s.destination === 'Other'
     ? s.destinationOther || 'Other'
@@ -288,7 +287,6 @@ const canRespond = it => {
 }
 
 const terminalStates = ['CANCELLED', 'COMPLETED']
-// driver cannot cancel; only move along the journey
 const ALLOWED_NEXT = {
   ACCEPTED: ['ON_ROAD', 'DELAYED'],
   ON_ROAD: ['ARRIVING', 'DELAYED'],
@@ -370,8 +368,6 @@ async function setDriverStatus(item, nextStatus) {
 }
 
 /* ─────────────── SOCKET HANDLERS ─────────────── */
-
-// new bookings created (admin side) – show if it's assigned to this driver/messenger
 function onCreated(doc) {
   if (!doc?._id) return
 
@@ -423,7 +419,6 @@ async function onAssigned(p) {
     }
     if (p.status) it.status = p.status
   } else if (isMine) {
-    // this driver/messenger just got a new booking -> reload list (and rooms)
     await loadList()
   }
 }
@@ -446,7 +441,6 @@ onMounted(() => {
     selectedDate.value = String(route.query.date)
   }
 
-  // focus row if navigated from calendar
   watch(rows, () => {
     const focusId = route.query?.focus
     if (focusId) {
@@ -494,70 +488,45 @@ function showDetails(item) {
     </div>
 
     <v-sheet class="driver-section pa-0" rounded="lg">
-      <div class="driver-header">
-        <div class="hdr-left">
-          <div class="hdr-title">
-            <v-icon icon="mdi-clipboard-list-outline" size="18" />
-            <span>បញ្ជីការកក់រថយន្ត</span>
-          </div>
-        </div>
-        <div class="hdr-actions">
-          <v-btn size="small" :loading="loading" @click="loadList">
-            <v-icon icon="mdi-sync" size="16" class="mr-1" /> ផ្ទុកឡើងវិញ
-          </v-btn>
-        </div>
+      <!-- HERO FILTER BAR -->
+      <div class="driver-hero">
+        <v-text-field
+          v-model="selectedDate"
+          type="date"
+          label="កាលបរិច្ឆេទ"
+          variant="outlined"
+          density="compact"
+          hide-details
+          clearable
+          class="fh-field fh-date"
+        />
+        <v-select
+          :items="statusOptions"
+          v-model="statusFilter"
+          item-title="label"
+          item-value="value"
+          label="ស្ថានភាព"
+          variant="outlined"
+          density="compact"
+          hide-details
+          class="fh-field fh-status"
+        />
+        <v-text-field
+          v-model="qSearch"
+          label="ស្វែងរកអ្នកស្នើសុំ / គោលបំណង / ទីតាំង"
+          variant="outlined"
+          density="compact"
+          hide-details
+          clearable
+          class="fh-field fh-search"
+        >
+          <template #prepend-inner>
+            <v-icon icon="mdi-magnify" size="16" />
+          </template>
+        </v-text-field>
       </div>
 
-      <div class="px-3 pb-3 pt-2">
-        <!-- Filters -->
-        <v-card flat class="soft-card mb-3">
-          <v-card-title class="subhdr">
-            <v-icon icon="mdi-filter-variant" size="18" /><span>តម្រង</span>
-            <v-spacer />
-          </v-card-title>
-          <v-card-text class="pt-0">
-            <v-row dense>
-              <v-col cols="12" md="3">
-                <v-text-field
-                  v-model="selectedDate"
-                  type="date"
-                  label="កាលបរិច្ឆេទ (ស្រេចចិត្ត)"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select
-                  :items="statusOptions"
-                  v-model="statusFilter"
-                  item-title="label"
-                  item-value="value"
-                  label="ស្ថានភាព"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" md="6">
-                <v-text-field
-                  v-model="qSearch"
-                  label="ស្វែងរកអ្នកស្នើសុំ / គោលបំណង / ទីតាំង"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                >
-                  <template #prepend-inner>
-                    <v-icon icon="mdi-magnify" size="16" />
-                  </template>
-                </v-text-field>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-
+      <div class="px-3 pb-3 pt-3">
         <v-card flat class="soft-card">
           <v-card-text>
             <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
@@ -631,7 +600,6 @@ function showDetails(item) {
               <!-- ACTIONS -->
               <template #item.actions="{ item }">
                 <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
-                  <!-- Step 1: driver/messenger ack (NO DECLINE) -->
                   <template v-if="canRespond(item)">
                     <v-btn
                       size="small"
@@ -644,7 +612,6 @@ function showDetails(item) {
                     </v-btn>
                   </template>
 
-                  <!-- Step 2: live status (after ack ACCEPTED) – no CANCELLED -->
                   <template v-if="canChangeStatus(item)">
                     <v-menu location="bottom end">
                       <template #activator="{ props }">
@@ -686,7 +653,6 @@ function showDetails(item) {
                 </v-sheet>
               </template>
 
-              <!-- Custom footer: only next/prev icons, no "items per page" select -->
               <template #bottom>
                 <div class="table-footer">
                   <div class="tf-left text-caption text-medium-emphasis">
@@ -811,7 +777,6 @@ function showDetails(item) {
         <v-divider />
         <v-card-actions class="justify-end" style="gap:8px;">
           <template v-if="detailItem && canRespond(detailItem)">
-            <!-- Driver can only accept here too -->
             <v-btn
               size="small"
               color="success"
@@ -879,24 +844,77 @@ function showDetails(item) {
   font-family: 'Kantumruy Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-.driver-section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
-.driver-header { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: var(--surface, #f5f7fb); border-bottom: 1px solid #e6e8ee; }
-.hdr-left { display:flex; flex-direction:column; gap:6px; }
-.hdr-title { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
-.hdr-sub { color:#64748b; font-size:.9rem; }
-.hdr-actions { display:flex; align-items:center; gap:8px; }
-.soft-card { border: 1px solid #e9ecf3; border-radius: 12px; background:#fff; }
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
-.elevated { border: 1px solid #e9ecf3; border-radius: 12px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-.truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.driver-section {
+  border: 1px solid #e6e8ee;
+  background:#fff;
+  border-radius: 12px;
+}
+
+/* HERO + FILTERS */
+.driver-hero {
+  display:flex;
+  align-items:flex-end;
+  justify-content:flex-start;
+  gap:12px;
+  padding: 14px 18px;
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color:#000000;
+  border-bottom: 1px solid rgba(255,255,255,.28);
+  flex-wrap:wrap;
+}
+
+.fh-field {
+  min-width: 200px;
+  flex: 1 1 140px;
+}
+.fh-date {
+  max-width: 160px;
+}
+.fh-status {
+  max-width: 180px;
+}
+.fh-search {
+  min-width: 220px;
+  max-width: 280px;
+}
+
+.fh-icon-btn {
+  background: rgba(255,255,255,0.20) !important;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.35);
+  flex: 0 0 auto;
+}
+.fh-icon-btn :deep(.v-icon) {
+  color: #050505 !important;
+}
+
+/* inner card */
+.soft-card {
+  border: 1px solid #e9ecf3;
+  border-radius: 12px;
+  background:#fff;
+}
+.elevated {
+  border: 1px solid #e9ecf3;
+  border-radius: 12px;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .lbl { font-size:.78rem; color:#64748b; }
 .val { font-weight:600; }
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 
 /* small spacing helpers */
-.mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
+.mr-1 { margin-right: .25rem; }
+.mr-2 { margin-right: .5rem; }
 .ml-2 { margin-left: .5rem; }
 
 /* custom footer */
@@ -911,11 +929,51 @@ function showDetails(item) {
 .tf-left { min-width: 120px; }
 .tf-right { display:flex; align-items:center; }
 
-/* tighter pagination buttons */
 :deep(.v-pagination .v-btn){ min-width: 32px; }
 :deep(.v-pagination .v-btn .v-icon){ line-height: 1; }
 
+/* tablet & down */
+@media (max-width: 960px){
+  .driver-hero {
+    padding: 12px 14px;
+  }
+}
+
+/* phone */
 @media (max-width: 600px){
-  .table-footer { flex-direction: column; align-items:flex-start; }
+  .driver-section {
+    border-left:none;
+    border-right:none;
+    border-radius:0;
+  }
+
+  .driver-hero {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .fh-field {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+  .fh-date,
+  .fh-status,
+  .fh-search {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .fh-icon-btn {
+    align-self: flex-start;
+    margin-top: 2px;
+  }
+
+  .table-footer {
+    flex-direction: column;
+    align-items:flex-start;
+  }
 }
 </style>

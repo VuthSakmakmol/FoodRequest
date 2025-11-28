@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer   = ref(true)
 const rail     = ref(false)
-const appTitle = 'Trax — Driver'
+const appTitle = 'Driver'
 
 /** Single section: Transportation */
 const sections = [

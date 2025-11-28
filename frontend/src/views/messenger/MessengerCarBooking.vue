@@ -96,7 +96,7 @@ function useDevIdentity() {
   loadList()
 }
 
-/* ─────────────── LABEL MAPS (KH) ─────────────── */
+/* ───────── LABEL MAPS (KH) ───────── */
 const STATUS_LABEL_KM = {
   PENDING : 'កំពុងរង់ចាំ',
   ASSIGNED: 'បានចាត់ចែង',
@@ -124,7 +124,7 @@ const statusLabel   = s => STATUS_LABEL_KM[String(s || '').toUpperCase()] || s
 const ackLabel      = s => ACK_LABEL_KM[String(s || '').toUpperCase()] || s
 const categoryLabel = c => CATEGORY_LABEL_KM[c] || c
 
-/* ─────────────── TABLE HEADERS ─────────────── */
+/* ───────── TABLE HEADERS ───────── */
 const roleLabel = computed(() => 'អ្នកបើកម៉ូតូ')
 
 const headers = computed(() => [
@@ -138,7 +138,7 @@ const headers = computed(() => [
   { title: '',                key: 'actions',    width: 330, align: 'end' },
 ])
 
-/* ─────────────── ICONS / COLORS (MDI) ─────────────── */
+/* ───────── ICONS / COLORS ───────── */
 const statusColor = s =>
   ({
     PENDING: 'grey',
@@ -195,7 +195,7 @@ function absUrl(u) {
   return `${base}${u.startsWith('/') ? '' : '/'}${u}`
 }
 
-/* ─────────────── LOAD BOOKINGS ─────────────── */
+/* ───────── LOAD BOOKINGS ───────── */
 let leavePreviousRooms = null
 async function loadList() {
   loading.value = true
@@ -207,7 +207,7 @@ async function loadList() {
     const params = {
       role,
       loginId,
-      messengerId: loginId // support old style if backend uses this
+      messengerId: loginId
     }
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
@@ -236,7 +236,7 @@ async function loadList() {
   }
 }
 
-/* ─────────────── FILTERED / SORTED ─────────────── */
+/* ───────── FILTERED / SORTED ───────── */
 const filtered = computed(() =>
   (rows.value || [])
     .filter(r => {
@@ -257,7 +257,7 @@ const filtered = computed(() =>
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 )
 
-/* ─────────────── SIMPLE PAGINATION ─────────────── */
+/* ───────── SIMPLE PAGINATION ───────── */
 const page = ref(1)
 const itemsPerPage = 10
 
@@ -277,7 +277,7 @@ watch(filtered, () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
 
-/* ─────────────── ACTION HELPERS ─────────────── */
+/* ───────── ACTION HELPERS ───────── */
 const isMine = it =>
   String(
     it?.assignment?.messengerId || it?.messengerId || ''
@@ -289,7 +289,6 @@ const canRespond = it => {
 }
 
 const terminalStates = ['CANCELLED', 'COMPLETED']
-// Messenger can NOT cancel; only move along journey statuses
 const ALLOWED_NEXT = {
   ACCEPTED: ['ON_ROAD', 'DELAYED'],
   ON_ROAD: ['ARRIVING', 'DELAYED'],
@@ -303,7 +302,7 @@ const canChangeStatus = it =>
   (it?.assignment?.messengerAck === 'ACCEPTED') &&
   !terminalStates.includes(String(it?.status || '').toUpperCase())
 
-/* ─────────────── ACTIONS ─────────────── */
+/* ───────── ACTIONS ───────── */
 const actLoading = ref('')
 const statusLoading = ref('')
 const snack = ref(false)
@@ -350,7 +349,7 @@ async function setMessengerStatus(item, nextStatus) {
   }
 }
 
-/* ─────────────── SOCKET HANDLERS ─────────────── */
+/* ───────── SOCKET HANDLERS ───────── */
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
@@ -366,17 +365,14 @@ function onAssigned(p) {
 
   const idx = rows.value.findIndex(x => String(x._id) === bookingId)
 
-  // If this booking is already in my list
   if (idx >= 0) {
     const it = rows.value[idx]
 
-    // 👉 Case 1: booking moved to another messenger/driver → remove from my list
     if (newAssignee && newAssignee !== myLoginId) {
       rows.value.splice(idx, 1)
       return
     }
 
-    // 👉 Case 2: still mine, just update info
     it.assignment = {
       ...it.assignment,
       driverId: p.driverId ?? it.assignment?.driverId ?? '',
@@ -391,8 +387,6 @@ function onAssigned(p) {
     return
   }
 
-  // If booking is NOT in my current list,
-  // but now assigned to me → reload my assignments
   if (newAssignee && newAssignee === myLoginId) {
     loadList()
   }
@@ -408,9 +402,10 @@ function onAck(p) {
     }
 }
 
-/* ─────────────── LIFECYCLE ─────────────── */
+/* ───────── LIFECYCLE ───────── */
 onMounted(() => {
   subscribeRoleIfNeeded(identity.value)
+
   if (route.query?.date) {
     selectedDate.value = String(route.query.date)
   }
@@ -430,7 +425,6 @@ onMounted(() => {
   loadList()
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
-  // 🔥 Messenger view should only react to messenger ack
   socket.on('carBooking:messengerAck', onAck)
 })
 
@@ -461,70 +455,45 @@ function showDetails(item) {
     </div>
 
     <v-sheet class="driver-section pa-0" rounded="lg">
-      <div class="driver-header">
-        <div class="hdr-left">
-          <div class="hdr-title">
-            <v-icon icon="mdi-motorbike" size="18" />
-            <span>បញ្ជីការកក់ម៉ូតូ / ម៉េសេនជឺរ</span>
-          </div>
-        </div>
-        <div class="hdr-actions">
-          <v-btn size="small" :loading="loading" @click="loadList">
-            <v-icon icon="mdi-sync" size="16" class="mr-1" /> ផ្ទុកឡើងវិញ
-          </v-btn>
-        </div>
+      <!-- Gradient HERO filter bar -->
+      <div class="driver-hero">
+        <v-text-field
+          v-model="selectedDate"
+          type="date"
+          label="កាលបរិច្ឆេទ"
+          variant="outlined"
+          density="compact"
+          hide-details
+          clearable
+          class="fh-field fh-date"
+        />
+        <v-select
+          :items="statusOptions"
+          v-model="statusFilter"
+          item-title="label"
+          item-value="value"
+          label="ស្ថានភាព"
+          variant="outlined"
+          density="compact"
+          hide-details
+          class="fh-field fh-status"
+        />
+        <v-text-field
+          v-model="qSearch"
+          label="ស្វែងរកអ្នកស្នើសុំ / គោលបំណង / ទីតាំង"
+          variant="outlined"
+          density="compact"
+          hide-details
+          clearable
+          class="fh-field fh-search"
+        >
+          <template #prepend-inner>
+            <v-icon icon="mdi-magnify" size="16" />
+          </template>
+        </v-text-field>
       </div>
 
-      <div class="px-3 pb-3 pt-2">
-        <!-- Filters -->
-        <v-card flat class="soft-card mb-3">
-          <v-card-title class="subhdr">
-            <v-icon icon="mdi-filter-variant" size="18" /><span>តម្រង</span>
-            <v-spacer />
-          </v-card-title>
-          <v-card-text class="pt-0">
-            <v-row dense>
-              <v-col cols="12" md="3">
-                <v-text-field
-                  v-model="selectedDate"
-                  type="date"
-                  label="កាលបរិច្ឆេទ (ស្រេចចិត្ត)"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select
-                  :items="statusOptions"
-                  v-model="statusFilter"
-                  item-title="label"
-                  item-value="value"
-                  label="ស្ថានភាព"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" md="6">
-                <v-text-field
-                  v-model="qSearch"
-                  label="ស្វែងរកអ្នកស្នើសុំ / គោលបំណង / ទីតាំង"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                >
-                  <template #prepend-inner>
-                    <v-icon icon="mdi-magnify" size="16" />
-                  </template>
-                </v-text-field>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-
+      <div class="px-3 pb-3 pt-3">
         <v-card flat class="soft-card">
           <v-card-text>
             <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
@@ -598,7 +567,6 @@ function showDetails(item) {
               <!-- ACTIONS -->
               <template #item.actions="{ item }">
                 <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
-                  <!-- Step 1: messenger ack (NO DECLINE) -->
                   <template v-if="canRespond(item)">
                     <v-btn
                       size="small"
@@ -611,7 +579,6 @@ function showDetails(item) {
                     </v-btn>
                   </template>
 
-                  <!-- Step 2: live status (after ack ACCEPTED) – no CANCELLED -->
                   <template v-if="canChangeStatus(item)">
                     <v-menu location="bottom end">
                       <template #activator="{ props }">
@@ -845,23 +812,74 @@ function showDetails(item) {
   font-family: 'Kantumruy Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-.driver-section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
-.driver-header { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: var(--surface, #f5f7fb); border-bottom: 1px solid #e6e8ee; }
-.hdr-left { display:flex; flex-direction:column; gap:6px; }
-.hdr-title { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
-.hdr-sub { color:#64748b; font-size:.9rem; }
-.hdr-actions { display:flex; align-items:center; gap:8px; }
-.soft-card { border: 1px solid #e9ecf3; border-radius: 12px; background:#fff; }
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
-.elevated { border: 1px solid #e9ecf3; border-radius: 12px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-.truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.driver-section {
+  border: 1px solid #e6e8ee;
+  background:#fff;
+  border-radius: 12px;
+}
+
+/* HERO + FILTERS (same style as driver list) */
+.driver-hero {
+  display:flex;
+  align-items:flex-start;
+  gap:16px;
+  padding: 14px 18px;
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color:#000000;
+  border-bottom: 1px solid rgba(255,255,255,.28);
+  flex-wrap:wrap;
+}
+
+.fh-field {
+  min-width: 200px;
+}
+.fh-date {
+  max-width: 150px;
+}
+.fh-status {
+  max-width: 170px;
+}
+.fh-search {
+  min-width: 220px;
+  max-width: 280px;
+}
+
+.fh-icon-btn {
+  background: rgba(255,255,255,0.20) !important;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(15,23,42,0.35);
+}
+.fh-icon-btn :deep(.v-icon) {
+  color: #050505 !important;
+}
+
+/* inner card */
+.soft-card {
+  border: 1px solid #e9ecf3;
+  border-radius: 12px;
+  background:#fff;
+}
+.elevated {
+  border: 1px solid #e9ecf3;
+  border-radius: 12px;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .lbl { font-size:.78rem; color:#64748b; }
 .val { font-weight:600; }
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 
-.mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
+/* small spacing helpers */
+.mr-1 { margin-right: .25rem; }
+.mr-2 { margin-right: .5rem; }
 .ml-2 { margin-left: .5rem; }
 
 /* custom footer */
@@ -880,7 +898,29 @@ function showDetails(item) {
 :deep(.v-pagination .v-btn){ min-width: 32px; }
 :deep(.v-pagination .v-btn .v-icon){ line-height: 1; }
 
+@media (max-width: 960px){
+  .driver-hero {
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .fh-search {
+    min-width: 100%;
+    max-width: 100%;
+  }
+}
+
 @media (max-width: 600px){
-  .table-footer { flex-direction: column; align-items:flex-start; }
+  .driver-section {
+    border-left:none;
+    border-right:none;
+    border-radius:0;
+  }
+  .driver-hero {
+    padding: 10px 12px;
+  }
+  .table-footer {
+    flex-direction: column;
+    align-items:flex-start;
+  }
 }
 </style>
