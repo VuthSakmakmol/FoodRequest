@@ -17,19 +17,23 @@ const sections = [
   {
     key: 'transport',
     header: 'Transportation',
-    icon: 'fa-solid fa-car-side',
+    icon: 'mdi-car-side',
     children: [
-      // { label: 'My Trips',         icon: 'fa-solid fa-route',          to: { name: 'driver-home' } },
-      { label: 'Car Bookings',     icon: 'fa-solid fa-clipboard-list', to: { name: 'driver-car-booking' } }, // views/driver/DriverCarBooking.vue
-      { label: 'Calendar',         icon: 'fa-solid fa-calendar-days',  to: { name: 'driver-carlendar' } },
+      { label: 'Car Bookings', icon: 'mdi-clipboard-text-outline', to: { name: 'driver-car-booking' } },
+      { label: 'Calendar',     icon: 'mdi-calendar-month-outline', to: { name: 'driver-carlendar' } },
     ],
   },
 ]
 
 /** Open state (default open if current route inside) */
-const open = reactive(Object.fromEntries(
-  sections.map(s => [s.key, s.children.some(c => c.to?.name === route.name) || true]) // default true
-))
+const open = reactive(
+  Object.fromEntries(
+    sections.map(s => [
+      s.key,
+      s.children.some(c => c.to?.name === route.name) || true, // default true
+    ])
+  )
+)
 
 /** Helpers */
 const initials = computed(() =>
@@ -38,11 +42,10 @@ const initials = computed(() =>
 function go(it){ if (it?.to) router.push(it.to) }
 function isActive(it){ return route.name === it?.to?.name }
 function logout() {
-  auth.logout()            // ✅ clear token, user, socket
-  localStorage.clear()     // ✅ optional: clear any leftover localStorage keys
-  router.push({ name: 'greeting' }) // ✅ go back to driver login page
+  auth.logout()
+  localStorage.clear()
+  router.push({ name: 'greeting' })
 }
-
 </script>
 
 <template>
@@ -51,9 +54,11 @@ function logout() {
       <!-- TOP BAR -->
       <v-app-bar density="comfortable" class="topbar" flat>
         <v-btn icon class="mr-2 text-on-brand" @click="drawer = !drawer">
-          <i class="fa-solid fa-bars" />
+          <v-icon icon="mdi-menu" size="22" />
         </v-btn>
+
         <v-spacer />
+
         <v-chip v-if="auth.user" class="mr-2 user-chip" label>
           <v-avatar size="24" class="chip-avatar mr-1">
             <span class="chip-initials">{{ initials }}</span>
@@ -61,8 +66,10 @@ function logout() {
           <span class="chip-text">{{ auth.user.name || auth.user.loginId }}</span>
           <span class="chip-role">(DRIVER)</span>
         </v-chip>
+
         <v-btn size="small" class="logout mr-4" variant="flat" @click="logout">
-          <i class="fa-solid fa-right-from-bracket mr-2"></i>Logout
+          <v-icon icon="mdi-logout" size="18" class="mr-2" />
+          Logout
         </v-btn>
       </v-app-bar>
 
@@ -78,10 +85,11 @@ function logout() {
       >
         <div class="drawer-head">
           <div class="brand">
-            <i class="fa-solid fa-steering-wheel mr-2"></i> Driver
+            <v-icon icon="mdi-steering" size="22" class="mr-2" />
+            Driver
           </div>
           <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
-            <v-icon>{{ rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left' }}</v-icon>
+            <v-icon :icon="rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left'" />
           </v-btn>
         </div>
 
@@ -92,10 +100,14 @@ function logout() {
             <!-- Section header toggles open/close -->
             <div class="section-header" @click="open[s.key] = !open[s.key]">
               <div class="left">
-                <i :class="s.icon" class="fa-fw mr-2" />
+                <v-icon :icon="s.icon" size="20" class="nav-icon mr-2" />
                 <span>{{ s.header }}</span>
               </div>
-              <i class="fa-solid" :class="open[s.key] ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+              <v-icon
+                size="18"
+                class="caret"
+                :icon="open[s.key] ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+              />
             </div>
 
             <v-expand-transition>
@@ -108,9 +120,15 @@ function logout() {
                   class="nav-item"
                   @click="go(it)"
                 >
-                  <template #prepend><i :class="it.icon" class="fa-fw" /></template>
+                  <template #prepend>
+                    <v-icon :icon="it.icon" size="20" class="nav-icon" />
+                  </template>
+
                   <v-list-item-title>{{ it.label }}</v-list-item-title>
-                  <template #append><i class="fa-solid fa-chevron-right caret"></i></template>
+
+                  <template #append>
+                    <v-icon icon="mdi-chevron-right" size="18" class="caret" />
+                  </template>
                 </v-list-item>
               </div>
             </v-expand-transition>
@@ -131,13 +149,12 @@ function logout() {
 </template>
 
 <style scoped>
-/* Professional 2–3 color palette (same family as Admin/Employee) */
 .driver-theme {
-  --brand:   #1f2a44; /* deep navy */
-  --accent:  #2ea3a5; /* teal accent */
-  --surface: #f5f7fb; /* light surface */
-  --text:    #0f172a; /* slate-900 */
-  --muted:   #64748b; /* slate-600 */
+  --brand:   #1f2a44;
+  --accent:  #2ea3a5;
+  --surface: #f5f7fb;
+  --text:    #0f172a;
+  --muted:   #64748b;
   --on-brand:#ffffff;
 }
 
@@ -148,7 +165,6 @@ function logout() {
   border-bottom: 1px solid rgba(255,255,255,.08);
 }
 .text-on-brand { color: var(--on-brand) !important; }
-.title { font-weight: 800; }
 
 /* User chip */
 .user-chip {
@@ -159,7 +175,9 @@ function logout() {
 .chip-avatar {
   background: var(--on-brand);
   color: var(--brand);
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .chip-initials { font-weight: 800; }
 .chip-text { color: var(--on-brand); }
@@ -180,10 +198,17 @@ function logout() {
   border-right: 1px solid #e6e8ee;
 }
 .drawer-head {
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   padding: 12px 10px;
 }
-.brand { font-weight: 900; color: var(--brand); display:flex; align-items:center; }
+.brand {
+  font-weight: 900;
+  color: var(--brand);
+  display:flex;
+  align-items:center;
+}
 .rail-toggle { color: var(--brand) !important; }
 
 .divider { border-color: #e6e8ee !important; }
@@ -191,7 +216,9 @@ function logout() {
 
 /* Section header (toggle) */
 .section-header {
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   padding: 8px 12px;
   margin: 6px 8px 2px;
   color: var(--brand);
@@ -214,7 +241,7 @@ function logout() {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(46,163,165,.12) inset;
 }
-.fa-fw { width: 1.25em; text-align: center; }
+.nav-icon { width: 1.4em; }
 .caret { color: var(--muted); }
 
 /* Main */
@@ -222,4 +249,5 @@ function logout() {
 .content { padding: 16px 12px; }
 
 .mr-2 { margin-right: .5rem; }
+.mr-4 { margin-right: 1rem; }
 </style>

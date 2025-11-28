@@ -159,64 +159,68 @@ onMounted(fetchMonth)
   <div class="calendar-wrapper">
     <!-- Toolbar -->
     <div class="calendar-toolbar">
-      <button class="btn-nav" @click="prevMonth">
-        <i class="fa-solid fa-chevron-left"></i>
-      </button>
-      <div class="month-label">{{ monthLabel }}</div>
-      <button class="btn-nav" @click="nextMonth">
-        <i class="fa-solid fa-chevron-right"></i>
-      </button>
+      <div class="toolbar-left">
+        <button class="btn-nav" @click="prevMonth">
+          <v-icon size="18">mdi-chevron-left</v-icon>
+        </button>
+        <div class="month-label">{{ monthLabel }}</div>
+        <button class="btn-nav" @click="nextMonth">
+          <v-icon size="18">mdi-chevron-right</v-icon>
+        </button>
+      </div>
 
       <div class="toolbar-right">
         <button class="btn-flat" @click="fetchMonth">
-          <i class="fa-solid fa-rotate-right"></i>
-          <span class="ml-1">REFRESH</span>
+          <v-icon size="16" class="mr-1">mdi-rotate-right</v-icon>
+          <span>Refresh</span>
         </button>
         <button class="btn-flat today" @click="goToday">
-          <i class="fa-solid fa-circle-dot"></i>
-          <span class="ml-1">TODAY</span>
+          <v-icon size="16" class="mr-1">mdi-calendar-today</v-icon>
+          <span>Today</span>
         </button>
       </div>
     </div>
 
-    <!-- Week header -->
-    <div class="week-header">
-      <div
-        v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
-        :key="w"
-        class="week-cell"
-      >
-        {{ w }}
-      </div>
-    </div>
-
-    <!-- Calendar grid -->
-    <div class="calendar-grid">
-      <div
-        v-for="d in days"
-        :key="d.format('YYYY-MM-DD')"
-        class="day-cell"
-        :class="{
-          today: d.isSame(dayjs(), 'day'),
-          otherMonth: !d.isSame(currentMonth.value, 'month')
-        }"
-        @click="showDayDetails(d)"
-      >
-        <div class="day-number" :class="{ sunday: d.day() === 0 }">
-          {{ d.date() }}
+    <!-- Scrollable body (vertical + horizontal) -->
+    <div class="calendar-body">
+      <div class="calendar-inner">
+        <!-- Week header -->
+        <div class="week-header">
+          <div
+            v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
+            :key="w"
+            class="week-cell"
+          >
+            {{ w }}
+          </div>
         </div>
 
-        <div
-          v-if="byDate[d.format('YYYY-MM-DD')]"
-          class="bookings"
-        >
+        <!-- Calendar grid -->
+        <div class="calendar-grid">
           <div
-            v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
-            :key="i"
-            class="booking-chip"
-            :style="{ backgroundColor: statusColor(b.status) }"
+            v-for="d in days"
+            :key="d.format('YYYY-MM-DD')"
+            class="day-cell"
+            :class="{
+              today: d.isSame(dayjs(), 'day'),
+              otherMonth: !d.isSame(currentMonth, 'month')
+            }"
+            @click="showDayDetails(d)"
           >
-            {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+            <div class="day-number" :class="{ sunday: d.day() === 0 }">
+              {{ d.date() }}
+            </div>
+
+            <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
+              <div
+                v-for="(b, i) in byDate[d.format('YYYY-MM-DD')]"
+                :key="i"
+                class="booking-chip"
+                :style="{ backgroundColor: statusColor(b.status) }"
+              >
+                {{ b.employee?.name || b.employeeId }} ({{ b.status }})
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -249,46 +253,51 @@ onMounted(fetchMonth)
   background: #fff;
   overflow: hidden;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Header same style as other transport calendars */
+/* Header – blue/purple like other transport calendars */
 .calendar-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 8px 14px;
   background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
   border-bottom: 1px solid rgba(15,23,42,.12);
   font-weight: 600;
   color: #fff;
 }
-.month-label {
-  font-size: 13px;
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .toolbar-right {
   display: flex;
-  gap: 8px;
+  gap: 6px;
+}
+.month-label {
+  font-size: 0.95rem;
+  line-height: 1.2;
+  color: #fff;
 }
 
-/* Nav buttons with visible icons */
+/* Nav buttons (mdi icons inside) */
 .btn-nav {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   border: none;
-  background: rgba(255,255,255,.2);
+  background: rgba(255,255,255,.22);
   cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
 }
 .btn-nav:hover {
   background: rgba(255,255,255,.32);
-}
-.btn-nav i {
-  color: #ffffff;
-  font-size: 16px;
-  line-height: 1;
 }
 
 /* Flat buttons */
@@ -298,8 +307,8 @@ onMounted(fetchMonth)
   border-radius: 999px;
   border: 1px solid rgba(255,255,255,.7);
   background: transparent;
-  padding: 2px 5px;
-  font-size: .85rem;
+  padding: 2px 8px;
+  font-size: 0.78rem;
   cursor: pointer;
   color: #ffffff;
 }
@@ -307,12 +316,19 @@ onMounted(fetchMonth)
   background: #4f46e5;
   border-color: #4f46e5;
 }
-.btn-flat i {
-  line-height: 1;
-}
-.ml-1 { margin-left: .25rem; }
+.mr-1 { margin-right: .25rem; }
 
-/* Calendar body */
+/* Scrollable body – both directions */
+.calendar-body {
+  max-height: 460px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+.calendar-inner {
+  min-width: 860px;
+}
+
+/* Week header */
 .week-header {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -322,18 +338,20 @@ onMounted(fetchMonth)
 .week-cell {
   text-align: center;
   font-weight: 700;
-  padding: 8px 0;
+  padding: 6px 0;
   color: #334155;
+  font-size: 0.8rem;
 }
 
+/* Grid */
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
 }
 .day-cell {
-  min-height: 110px;
+  min-height: 100px;
   border: 1px solid #e2e8f0;
-  padding: 6px 8px;
+  padding: 5px 6px;
   background: #fff;
   position: relative;
   transition: background .2s;
@@ -348,7 +366,7 @@ onMounted(fetchMonth)
 }
 .day-number {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   color: #0f172a;
 }
 .day-number.sunday {
@@ -363,8 +381,8 @@ onMounted(fetchMonth)
 }
 .booking-chip {
   border-radius: 6px;
-  padding: 2px 4px;
-  font-size: 0.8rem;
+  padding: 1px 4px;
+  font-size: 0.75rem;
   color: #fff;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -377,9 +395,9 @@ onMounted(fetchMonth)
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 10px;
-  margin: 10px 0 14px;
-  font-size: 0.85rem;
+  gap: 8px;
+  margin: 8px 0 10px;
+  font-size: 0.78rem;
   color: #334155;
 }
 .legend-item {
@@ -388,8 +406,8 @@ onMounted(fetchMonth)
   gap: 6px;
 }
 .legend-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   border: 1px solid rgba(0,0,0,0.2);
 }
@@ -397,8 +415,69 @@ onMounted(fetchMonth)
 /* Loader */
 .loader {
   text-align: center;
-  padding: 10px;
+  padding: 8px;
   color: #475569;
   font-weight: 600;
+  font-size: 0.8rem;
+}
+
+/* 📱 Mobile tweaks */
+@media (max-width: 600px) {
+  .calendar-wrapper {
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .calendar-toolbar {
+    padding: 6px 10px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .toolbar-left {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .toolbar-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .month-label {
+    font-size: 0.9rem;
+  }
+
+  .btn-nav {
+    width: 30px;
+    height: 30px;
+  }
+
+  .btn-flat {
+    padding: 2px 6px;
+    font-size: 0.72rem;
+  }
+
+  .calendar-body {
+    max-height: 380px;
+  }
+
+  .day-cell {
+    min-height: 80px;
+    padding: 4px 4px;
+  }
+
+  .booking-chip {
+    font-size: 0.7rem;
+  }
+
+  .status-legend {
+    justify-content: flex-start;
+    padding: 0 8px 8px;
+    margin-top: 4px;
+    font-size: 0.74rem;
+    overflow-x: auto;
+  }
 }
 </style>

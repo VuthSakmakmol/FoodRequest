@@ -17,28 +17,28 @@ const sections = [
   {
     key: 'food',
     header: 'Food Request',
-    icon: 'fa-solid fa-utensils',
+    icon: 'mdi-silverware-fork-knife',
     children: [
-      { label: 'Requests', icon: 'fa-solid fa-list-check', to: { name: 'admin-requests' } },
-      { label: 'Calendar', icon: 'fa-solid fa-calendar-days', to: { name: 'admin-food-calendar' } },
+      { label: 'Requests', icon: 'mdi-format-list-checkbox',      to: { name: 'admin-requests' } },
+      { label: 'Calendar', icon: 'mdi-calendar-month-outline',    to: { name: 'admin-food-calendar' } },
     ],
   },
   {
     key: 'transport',
     header: 'Transportation',
-    icon: 'fa-solid fa-car-side',
+    icon: 'mdi-car-side',
     children: [
-      { label: 'Car Booking', icon: 'fa-solid fa-calendar-check', to: { name: 'admin-car-booking' } },
-      { label: 'Calendar',    icon: 'fa-solid fa-calendar-days',  to: { name: 'admin-car-calendar' } },
+      { label: 'Car Booking', icon: 'mdi-calendar-check-outline', to: { name: 'admin-car-booking' } },
+      { label: 'Calendar',    icon: 'mdi-calendar-clock-outline', to: { name: 'admin-car-calendar' } },
     ],
   },
   // If you bring dashboard back:
   // {
   //   key: 'overview',
   //   header: 'Overview',
-  //   icon: 'fa-solid fa-chart-line',
+  //   icon: 'mdi-chart-line',
   //   children: [
-  //     { label: 'Dashboard', icon: 'fa-solid fa-gauge-high', to: { name: 'admin-dashboard' } },
+  //     { label: 'Dashboard', icon: 'mdi-gauge-high', to: { name: 'admin-dashboard' } },
   //   ],
   // },
 ]
@@ -67,9 +67,11 @@ function logout() {
       <!-- TOP BAR -->
       <v-app-bar density="comfortable" class="topbar" flat>
         <v-btn icon class="mr-2 text-on-brand" @click="drawer = !drawer">
-          <i class="fa-solid fa-bars" />
+          <v-icon icon="mdi-menu" size="22" />
         </v-btn>
-        <v-app-bar-title class="text-on-brand title">{{ appTitle }}</v-app-bar-title>
+        <v-app-bar-title class="text-on-brand title">
+          {{ appTitle }}
+        </v-app-bar-title>
         <v-spacer />
         <v-chip v-if="auth.user" class="mr-2 user-chip" label>
           <v-avatar size="24" class="chip-avatar mr-1">
@@ -79,7 +81,8 @@ function logout() {
           <span class="chip-role">({{ auth.user.role }})</span>
         </v-chip>
         <v-btn size="small" class="logout" variant="flat" @click="logout">
-          <i class="fa-solid fa-right-from-bracket mr-2"></i>Logout
+          <v-icon icon="mdi-logout" size="18" class="mr-2" />
+          Logout
         </v-btn>
       </v-app-bar>
 
@@ -95,10 +98,11 @@ function logout() {
       >
         <div class="drawer-head">
           <div class="brand">
-            <i class="fa-solid fa-shield-halved mr-2"></i> Admin
+            <v-icon icon="mdi-shield-account-outline" size="22" class="mr-2" />
+            Admin
           </div>
           <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
-            <v-icon>{{ rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left' }}</v-icon>
+            <v-icon :icon="rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left'" />
           </v-btn>
         </div>
 
@@ -109,10 +113,14 @@ function logout() {
             <!-- Section header toggles open/close -->
             <div class="section-header" @click="open[s.key] = !open[s.key]">
               <div class="left">
-                <i :class="s.icon" class="fa-fw mr-2" />
+                <v-icon :icon="s.icon" size="20" class="nav-icon mr-2" />
                 <span>{{ s.header }}</span>
               </div>
-              <i class="fa-solid" :class="open[s.key] ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+              <v-icon
+                size="18"
+                class="caret"
+                :icon="open[s.key] ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+              />
             </div>
 
             <v-expand-transition>
@@ -125,8 +133,12 @@ function logout() {
                   class="nav-item"
                   @click="go(it)"
                 >
-                  <template #prepend><i :class="it.icon" class="fa-fw" /></template>
-                  <v-list-item-title>{{ it.label }}</v-list-item-title>
+                  <template #prepend>
+                    <v-icon :icon="it.icon" size="20" class="nav-icon" />
+                  </template>
+                  <v-list-item-title class="ml-2">
+                    {{ it.label }}
+                  </v-list-item-title>
                 </v-list-item>
               </div>
             </v-expand-transition>
@@ -176,7 +188,9 @@ function logout() {
 .chip-avatar {
   background: var(--on-brand);
   color: var(--brand);
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .chip-initials { font-weight: 800; }
 .chip-text { color: var(--on-brand); }
@@ -197,10 +211,17 @@ function logout() {
   border-right: 1px solid #e6e8ee;
 }
 .drawer-head {
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   padding: 12px 10px;
 }
-.brand { font-weight: 900; color: var(--brand); display:flex; align-items:center; }
+.brand {
+  font-weight: 900;
+  color: var(--brand);
+  display:flex;
+  align-items:center;
+}
 .rail-toggle { color: var(--brand) !important; }
 
 .divider { border-color: #e6e8ee !important; }
@@ -208,7 +229,9 @@ function logout() {
 
 /* Section header (toggle) */
 .section-header {
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   padding: 8px 12px;
   margin: 6px 8px 2px;
   color: var(--brand);
@@ -231,7 +254,7 @@ function logout() {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(46,163,165,.12) inset;
 }
-.fa-fw { width: 1.25em; text-align: center; }
+.nav-icon { width: 1.4em; }
 .caret { color: var(--muted); }
 
 /* Main */

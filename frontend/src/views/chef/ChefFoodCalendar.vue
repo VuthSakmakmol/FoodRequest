@@ -252,11 +252,11 @@ watch(currentMonth, () => loadMonth())
     <div class="calendar-hero">
       <div class="hero-controls">
         <button class="circle-btn" @click="prevMonth">
-          <i class="fa-solid fa-chevron-left"></i>
+          <v-icon size="18">mdi-chevron-left</v-icon>
         </button>
         <div class="month-label">{{ monthLabel }}</div>
         <button class="circle-btn" @click="nextMonth">
-          <i class="fa-solid fa-chevron-right"></i>
+          <v-icon size="18">mdi-chevron-right</v-icon>
         </button>
 
         <div class="hero-right">

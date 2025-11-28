@@ -464,25 +464,40 @@ async function exportExcel() {
                 @click="load"
                 aria-label="Refresh"
                 title="Refresh">
-                <i class="fa-solid fa-rotate-right"></i>
+                <v-icon icon="mdi-refresh" size="20" />
               </v-btn>
             </template>
           </v-tooltip>
 
           <v-tooltip text="Filters" location="bottom">
             <template #activator="{ props }">
-              <v-btn v-bind="props" icon variant="flat" class="mr-1"
-                     @click="showFilterDialog = true" aria-label="Filters" title="Filters">
-                <i class="fa-solid fa-filter"></i>
+              <v-btn
+                v-bind="props"
+                icon
+                variant="flat"
+                class="mr-1"
+                @click="showFilterDialog = true"
+                aria-label="Filters"
+                title="Filters"
+              >
+                <v-icon icon="mdi-filter-variant" size="20" />
               </v-btn>
             </template>
           </v-tooltip>
 
           <v-tooltip text="Export Excel" location="bottom">
             <template #activator="{ props }">
-              <v-btn v-bind="props" :loading="exporting" icon color="success" variant="flat"
-                     @click="exportExcel" aria-label="Export Excel" title="Export Excel">
-                <i class="fa-regular fa-file-excel"></i>
+              <v-btn
+                v-bind="props"
+                :loading="exporting"
+                icon
+                color="success"
+                variant="flat"
+                @click="exportExcel"
+                aria-label="Export Excel"
+                title="Export Excel"
+              >
+                <v-icon icon="mdi-file-excel-outline" size="20" />
               </v-btn>
             </template>
           </v-tooltip>
@@ -498,15 +513,30 @@ async function exportExcel() {
             />
             <v-tooltip text="Refresh" location="bottom">
               <template #activator="{ props }">
-                <v-btn v-bind="props" :loading="loading" icon size="small" variant="tonal" @click="load"  style="margin: 5px;">
-                  <i class="fa-solid fa-rotate-right"></i>
+                <v-btn
+                  v-bind="props"
+                  :loading="loading"
+                  icon
+                  size="small"
+                  variant="tonal"
+                  @click="load"
+                  style="margin: 5px;"
+                >
+                  <v-icon icon="mdi-refresh" size="20" />
                 </v-btn>
               </template>
             </v-tooltip>
             <v-tooltip text="Filters" location="bottom">
               <template #activator="{ props }">
-                <v-btn v-bind="props" icon color="primary" variant="flat" size="small" @click="showFilterDialog = true">
-                  <i class="fa-solid fa-filter"></i>
+                <v-btn
+                  v-bind="props"
+                  icon
+                  color="primary"
+                  variant="flat"
+                  size="small"
+                  @click="showFilterDialog = true"
+                >
+                  <v-icon icon="mdi-filter-variant" size="20" />
                 </v-btn>
               </template>
             </v-tooltip>
@@ -806,13 +836,6 @@ async function exportExcel() {
 .km{
   font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
-}
-
-/* Font Awesome icons inside Vuetify icon buttons */
-:deep(.v-btn--icon i.fa-solid),
-:deep(.v-btn--icon i.fa-regular){
-  font-size: 1.05rem;
-  line-height: 1;
 }
 
 /* ---------- NEW: Left alignment + comfy spacing + hover ---------- */

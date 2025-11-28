@@ -244,7 +244,7 @@ watch([selectedDate, statusFilter], loadList)
 <template>
   <!-- edge on phone, light padding desktop -->
   <v-container fluid class="messenger-page">
-
+    <!-- Dev identity helper (for testing without SSO) -->
     <div
       v-if="!identity?.loginId"
       class="d-flex align-center mb-2"
@@ -262,13 +262,20 @@ watch([selectedDate, statusFilter], loadList)
     </div>
 
     <v-sheet class="messenger-section pa-0" rounded="lg">
+      <!-- Hero / header -->
       <div class="messenger-header">
         <div class="hdr-title">
-          <i class="fa-solid fa-motorcycle"></i>
-          <span>Messenger Tasks</span>
         </div>
-        <v-btn size="small" :loading="loading" @click="loadList">
-          <i class="fa-solid fa-rotate-right mr-1"></i> Refresh
+        <v-btn
+          size="small"
+          :loading="loading"
+          color="deep-orange-darken-2"
+          variant="elevated"
+          class="hdr-refresh"
+          @click="loadList"
+        >
+          <i class="fa-solid fa-rotate-right mr-1"></i>
+          Refresh
         </v-btn>
       </div>
 
@@ -279,7 +286,7 @@ watch([selectedDate, statusFilter], loadList)
             <i class="fa-solid fa-filter"></i>
             <span>Filters</span>
           </v-card-title>
-          <v-card-text class="pt-0">
+          <v-card-text class="pt-1">
             <v-row dense>
               <v-col cols="12" md="3">
                 <v-text-field
@@ -333,164 +340,167 @@ watch([selectedDate, statusFilter], loadList)
               {{ error }}
             </v-alert>
 
-            <v-data-table
-              :headers="headers"
-              :items="filtered"
-              :loading="loading"
-              density="compact"
-              item-key="_id"
-              class="elevated"
-              v-model:page="page"
-              :items-per-page="itemsPerPage"
-            >
-              <template #loading>
-                <v-skeleton-loader type="table-row@6" />
-              </template>
+            <!-- horizontal scroll wrapper -->
+            <div class="table-wrapper">
+              <v-data-table
+                :headers="headers"
+                :items="filtered"
+                :loading="loading"
+                density="compact"
+                item-key="_id"
+                class="elevated"
+                v-model:page="page"
+                :items-per-page="itemsPerPage"
+              >
+                <template #loading>
+                  <v-skeleton-loader type="table-row@6" />
+                </template>
 
-              <template #item.time="{ item }">
-                <div class="mono">
-                  {{ item.timeStart }} – {{ item.timeEnd }}
-                </div>
-                <div class="text-caption text-medium-emphasis">
-                  {{ item.tripDate }}
-                </div>
-              </template>
+                <template #item.time="{ item }">
+                  <div class="mono">
+                    {{ item.timeStart }} – {{ item.timeEnd }}
+                  </div>
+                  <div class="text-caption text-medium-emphasis">
+                    {{ item.tripDate }}
+                  </div>
+                </template>
 
-              <template #item.category>
-                <v-chip color="deep-orange" size="small" label>
-                  <i class="fa-solid fa-motorcycle mr-1"></i> Messenger
-                </v-chip>
-              </template>
+                <template #item.category>
+                  <v-chip color="deep-orange" size="small" label>
+                    <i class="fa-solid fa-motorcycle mr-1"></i> Messenger
+                  </v-chip>
+                </template>
 
-              <template #item.requester="{ item }">
-                <div class="font-weight-600">
-                  {{ item.employee?.name || '—' }}
-                </div>
-                <div class="text-caption text-medium-emphasis">
-                  {{ item.employee?.department || '—' }}
-                </div>
-              </template>
+                <template #item.requester="{ item }">
+                  <div class="font-weight-600">
+                    {{ item.employee?.name || '—' }}
+                  </div>
+                  <div class="text-caption text-medium-emphasis">
+                    {{ item.employee?.department || '—' }}
+                  </div>
+                </template>
 
-              <template #item.itinerary="{ item }">
-                <div class="truncate-2">
-                  {{ prettyStops(item.stops) }}
-                </div>
-              </template>
+                <template #item.itinerary="{ item }">
+                  <div class="truncate-2">
+                    {{ prettyStops(item.stops) }}
+                  </div>
+                </template>
 
-              <template #item.passengers="{ item }">
-                <div class="text-center">
-                  {{ item.passengers ?? 1 }}
-                </div>
-              </template>
+                <template #item.passengers="{ item }">
+                  <div class="text-center">
+                    {{ item.passengers ?? 1 }}
+                  </div>
+                </template>
 
-              <template #item.status="{ item }">
-                <v-chip :color="statusColor(item.status)" size="small" label>
-                  <i :class="statusFa(item.status)" class="mr-1"></i>
-                  {{ item.status }}
-                </v-chip>
-              </template>
+                <template #item.status="{ item }">
+                  <v-chip :color="statusColor(item.status)" size="small" label>
+                    <i :class="statusFa(item.status)" class="mr-1"></i>
+                    {{ item.status }}
+                  </v-chip>
+                </template>
 
-              <template #item.messengerAck="{ item }">
-                <v-chip
-                  :color="ackColor(item.assignment?.messengerAck || 'PENDING')"
-                  size="small"
-                  label
-                >
-                  <i
-                    :class="ackFa(item.assignment?.messengerAck || 'PENDING')"
-                    class="mr-1"
-                  ></i>
-                  {{ item.assignment?.messengerAck || 'PENDING' }}
-                </v-chip>
-              </template>
-
-              <template #item.actions="{ item }">
-                <div
-                  :data-row-id="item._id"
-                  class="d-flex justify-end flex-wrap"
-                  style="gap:6px;"
-                >
-                  <!-- ACK buttons (messenger can only ACCEPT) -->
-                  <template
-                    v-if="(item.assignment?.messengerAck || 'PENDING') === 'PENDING'"
+                <template #item.messengerAck="{ item }">
+                  <v-chip
+                    :color="ackColor(item.assignment?.messengerAck || 'PENDING')"
+                    size="small"
+                    label
                   >
-                    <v-btn
-                      size="small"
-                      color="success"
-                      variant="flat"
-                      :loading="actLoading === String(item._id)"
-                      @click.stop="sendAck(item, 'ACCEPTED')"
+                    <i
+                      :class="ackFa(item.assignment?.messengerAck || 'PENDING')"
+                      class="mr-1"
+                    ></i>
+                    {{ item.assignment?.messengerAck || 'PENDING' }}
+                  </v-chip>
+                </template>
+
+                <template #item.actions="{ item }">
+                  <div
+                    :data-row-id="item._id"
+                    class="d-flex justify-end flex-wrap"
+                    style="gap:6px;"
+                  >
+                    <!-- ACK buttons (messenger can only ACCEPT) -->
+                    <template
+                      v-if="(item.assignment?.messengerAck || 'PENDING') === 'PENDING'"
                     >
-                      <i class="fa-solid fa-check mr-1"></i> Accept
-                    </v-btn>
-                  </template>
+                      <v-btn
+                        size="small"
+                        color="success"
+                        variant="flat"
+                        :loading="actLoading === String(item._id)"
+                        @click.stop="sendAck(item, 'ACCEPTED')"
+                      >
+                        <i class="fa-solid fa-check mr-1"></i> Accept
+                      </v-btn>
+                    </template>
 
-                  <!-- Status updates (only after ack) – no CANCELLED option here -->
-                  <template v-else>
-                    <v-menu>
-                      <template #activator="{ props }">
-                        <v-btn
-                          v-bind="props"
-                          color="primary"
-                          size="small"
-                          variant="flat"
-                        >
-                          <i class="fa-solid fa-route mr-1"></i> Update Status
-                        </v-btn>
-                      </template>
-                      <v-list density="compact">
-                        <v-list-item
-                          v-for="s in ['ON_ROAD','ARRIVING','COMPLETED','DELAYED']"
-                          :key="s"
-                          @click="updateStatus(item, s)"
-                        >
-                          <v-list-item-title>{{ s }}</v-list-item-title>
-                        </v-list-item>
-                      </v-list>
-                    </v-menu>
-                  </template>
-                </div>
-              </template>
+                    <!-- Status updates (only after ack) – no CANCELLED option here -->
+                    <template v-else>
+                      <v-menu>
+                        <template #activator="{ props }">
+                          <v-btn
+                            v-bind="props"
+                            color="primary"
+                            size="small"
+                            variant="flat"
+                          >
+                            <i class="fa-solid fa-route mr-1"></i> Update Status
+                          </v-btn>
+                        </template>
+                        <v-list density="compact">
+                          <v-list-item
+                            v-for="s in ['ON_ROAD','ARRIVING','COMPLETED','DELAYED']"
+                            :key="s"
+                            @click="updateStatus(item, s)"
+                          >
+                            <v-list-item-title>{{ s }}</v-list-item-title>
+                          </v-list-item>
+                        </v-list>
+                      </v-menu>
+                    </template>
+                  </div>
+                </template>
 
-              <template #no-data>
-                <v-sheet
-                  class="pa-6 text-center"
-                  color="grey-lighten-4"
-                  rounded="lg"
-                >
-                  No messenger bookings<span v-if="selectedDate">
-                    on {{ selectedDate }}</span
-                  >.
-                </v-sheet>
-              </template>
+                <template #no-data>
+                  <v-sheet
+                    class="pa-6 text-center"
+                    color="grey-lighten-4"
+                    rounded="lg"
+                  >
+                    No messenger bookings<span v-if="selectedDate">
+                      on {{ selectedDate }}</span
+                    >.
+                  </v-sheet>
+                </template>
 
-              <!-- compact footer: no row-size select, just page + prev/next -->
-              <template #bottom>
-                <div class="table-footer">
-                  <div class="tf-left">
-                    <div class="text-caption text-medium-emphasis">
-                      Page {{ page }} of {{ pageCount }}
+                <!-- compact footer: no row-size select, just page + prev/next -->
+                <template #bottom>
+                  <div class="table-footer">
+                    <div class="tf-left">
+                      <div class="text-caption text-medium-emphasis">
+                        Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                      </div>
+                    </div>
+
+                    <div class="tf-right">
+                      <v-pagination
+                        v-model="page"
+                        :length="pageCount"
+                        :total-visible="isMobile ? 3 : 5"
+                        density="comfortable"
+                      >
+                        <template #prev>
+                          <i class="fa-solid fa-angle-left"></i>
+                        </template>
+                        <template #next>
+                          <i class="fa-solid fa-angle-right"></i>
+                        </template>
+                      </v-pagination>
                     </div>
                   </div>
-
-                  <div class="tf-right">
-                    <v-pagination
-                      v-model="page"
-                      :length="pageCount"
-                      :total-visible="isMobile ? 3 : 5"
-                      density="comfortable"
-                    >
-                      <template #prev>
-                        <i class="fa-solid fa-angle-left"></i>
-                      </template>
-                      <template #next>
-                        <i class="fa-solid fa-angle-right"></i>
-                      </template>
-                    </v-pagination>
-                  </div>
-                </div>
-              </template>
-            </v-data-table>
+                </template>
+              </v-data-table>
+            </div>
           </v-card-text>
         </v-card>
       </div>
@@ -539,22 +549,40 @@ watch([selectedDate, statusFilter], loadList)
   }
 }
 
+/* Hero header */
 .messenger-header {
   display:flex;
   align-items:center;
   justify-content:space-between;
   padding: 10px 16px;
-  background:#fff7f3;
-  border-bottom: 1px solid #e6e8ee;
+  color:#000000;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
 }
 .hdr-title {
   display:flex;
   align-items:center;
   gap:10px;
+}
+.hdr-text {
+  display:flex;
+  flex-direction:column;
+  line-height:1.1;
+}
+.hdr-main {
   font-weight:800;
-  color:#3b1e10;
+  font-size:0.98rem;
+}
+.hdr-sub {
+  font-size:0.78rem;
+  opacity:.9;
+}
+.hdr-refresh {
+  font-size:0.78rem;
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 
+/* cards */
 .soft-card {
   border: 1px solid #e9ecf3;
   border-radius: 12px;
@@ -565,12 +593,20 @@ watch([selectedDate, statusFilter], loadList)
   align-items:center;
   gap:10px;
   font-weight:800;
+  font-size:0.9rem;
   color:#3b1e10;
 }
 
+/* table styling */
 .elevated {
   border: 1px solid #e9ecf3;
   border-radius: 12px;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mono {
@@ -583,6 +619,7 @@ watch([selectedDate, statusFilter], loadList)
   overflow: hidden;
 }
 
+/* highlight from calendar */
 .highlight-row {
   animation: flash 0.8s ease-in-out 3;
   outline: 3px solid #4f46e5;
@@ -606,13 +643,26 @@ watch([selectedDate, statusFilter], loadList)
   padding: 8px 10px;
   flex-wrap: wrap;
 }
-.tf-left { min-width: 120px; }
+.tf-left { min-width: 140px; font-size: 0.78rem; }
 .tf-right { display:flex; align-items:center; }
 
 :deep(.v-pagination .v-btn){ min-width: 36px; }
-:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
+:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; font-size: 0.8rem; }
 
 @media (max-width: 600px){
+  .messenger-header {
+    padding: 8px 10px;
+  }
+  .hdr-main {
+    font-size: 0.9rem;
+  }
+  .hdr-sub {
+    font-size: 0.72rem;
+  }
+  .hdr-refresh {
+    font-size: 0.72rem;
+  }
+
   .table-footer {
     padding: 6px 8px;
     gap:8px;

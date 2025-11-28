@@ -1,9 +1,9 @@
+<!-- src/employee/carbooking/EmployeeCarBooking.vue (or similar) -->
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
-import socket from '@/utils/socket'
 import { useRouter, useRoute } from 'vue-router'   // ✅ useRoute added
 
 /* ───────── Router ───────── */
@@ -56,14 +56,13 @@ const LOCATIONS = [
   'PTT 271',
   'Dyeing Company',
   'S E C Mega factory  CO., LTD',
-  
 ]
 const PURPOSES = [
   'Bring & Pick up',
-  'Bring Customer', 
-  'Pick up Customer', 
-  'Meeting', 
-  'Check quality in subcon', 
+  'Bring Customer',
+  'Pick up Customer',
+  'Meeting',
+  'Check quality in subcon',
   'Release Document',
   'Submit payment',
   'Collect doc back',
@@ -172,7 +171,12 @@ const busyCar = computed(() => {
   return demoBookings.value.filter(b =>
     b.date === form.value.tripDate &&
     b.category === 'Car' &&
-    overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
+    overlaps(
+      selectedStart.value,
+      selectedEnd.value,
+      toMinutes(...b.start.split(':')),
+      toMinutes(...b.end.split(':'))
+    )
   ).length
 })
 
@@ -181,7 +185,12 @@ const busyMsgr = computed(() => {
   return demoBookings.value.filter(b =>
     b.date === form.value.tripDate &&
     b.category === 'Messenger' &&
-    overlaps(selectedStart.value, selectedEnd.value, toMinutes(...b.start.split(':')), toMinutes(...b.end.split(':')))
+    overlaps(
+      selectedStart.value,
+      selectedEnd.value,
+      toMinutes(...b.start.split(':')),
+      toMinutes(...b.end.split(':'))
+    )
   ).length
 })
 
@@ -336,7 +345,6 @@ async function submit() {
   }
 }
 
-
 /* ───────── Reset ───────── */
 function resetForm({ keepEmployee = false } = {}) {
   const cur = {
@@ -417,11 +425,19 @@ watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeI
       </v-card-text>
 
       <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
+        <v-spacer />
         <v-btn :loading="loading" size="small" class="px-4 ml-1" color="primary" @click="submit">
           <v-icon start>mdi-send</v-icon> Submit
         </v-btn>
 
-        <v-btn variant="text" size="small" class="ml-1" color="error" :disabled="loading" @click="resetForm()">
+        <v-btn
+          variant="text"
+          size="small"
+          class="ml-1"
+          color="error"
+          :disabled="loading"
+          @click="resetForm()"
+        >
           <v-icon start>mdi-refresh</v-icon> Reset
         </v-btn>
       </v-toolbar>
@@ -450,7 +466,7 @@ watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeI
 /* 📱 Mobile: remove borders, full-width to phone edge, tighter paddings */
 @media (max-width: 600px) {
   .book-container {
-    padding: 0 !important;          /* kill v-container padding */
+    padding: 0 !important;
   }
 
   .slim-card {

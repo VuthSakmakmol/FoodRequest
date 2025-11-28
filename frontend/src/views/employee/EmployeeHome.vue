@@ -163,7 +163,7 @@ function validateForm() {
   return errs
 }
 
-/* Builders (unchanged) */
+/* Builders */
 function buildMenuCountsArray(menuCountsObj) {
   const entries = Object.entries(menuCountsObj || {})
     .map(([choice, cnt]) => ({ choice, count: Number(cnt || 0) }))
@@ -307,15 +307,29 @@ onMounted(() => {
   socket.on('foodRequest:created', (doc) => {
     const empId = doc?.employee?.employeeId || doc?.employeeId
     if (empId && empId === (form.value.employeeId || localStorage.getItem('employeeId'))) {
-      if (!success.value) Swal.fire({ toast:true, icon:'success', title:'Request received', timer:1500, position:'top', showConfirmButton:false })
+      if (!success.value) {
+        Swal.fire({
+          toast:true,
+          icon:'success',
+          title:'Request received',
+          timer:1500,
+          position:'top',
+          showConfirmButton:false
+        })
+      }
     }
   })
   window.addEventListener('keydown', onHotkey)
 })
-onBeforeUnmount(() => { socket.off('foodRequest:created'); window.removeEventListener('keydown', onHotkey) })
-function onHotkey(e) { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit() }
+onBeforeUnmount(() => {
+  socket.off('foodRequest:created')
+  window.removeEventListener('keydown', onHotkey)
+})
+function onHotkey(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit()
+}
 
-/* Holidays + recurring preview (unchanged from your version) */
+/* Holidays + recurring preview */
 const customHolidaySet = ref(new Set())
 const holidaysLoading  = ref(false)
 
@@ -402,10 +416,24 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
 <template>
   <v-container fluid class="pa-2">
     <v-card class="rounded-lg slim-card" elevation="1">
-      <v-alert v-if="error" type="error" class="mx-2 mt-2" density="compact" variant="tonal" border="start">
+      <v-alert
+        v-if="error"
+        type="error"
+        class="mx-2 mt-2"
+        density="compact"
+        variant="tonal"
+        border="start"
+      >
         {{ error }}
       </v-alert>
-      <v-alert v-if="success" type="success" class="mx-2 mt-2" density="compact" variant="tonal" border="start">
+      <v-alert
+        v-if="success"
+        type="success"
+        class="mx-2 mt-2"
+        density="compact"
+        variant="tonal"
+        border="start"
+      >
         {{ success }}
       </v-alert>
       <v-divider class="my-1" />
@@ -446,7 +474,7 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
               <RecurringBookingSection :form="form" :holidays="[...customHolidaySet]" />
             </v-col>
 
-            <!-- recurring preview table (unchanged) -->
+            <!-- recurring preview table -->
             <v-col cols="12" v-if="form.recurring">
               <v-card class="rounded-lg mt-2" elevation="0" variant="outlined">
                 <v-toolbar flat density="compact">
@@ -454,7 +482,10 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
                     Recurring schedule preview
                     <v-progress-circular
                       v-if="holidaysLoading"
-                      indeterminate size="16" width="2" class="ml-2"
+                      indeterminate
+                      size="16"
+                      width="2"
+                      class="ml-2"
                     />
                   </v-toolbar-title>
                   <v-spacer />
@@ -500,7 +531,10 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
                         <td>{{ d.location }}</td>
                         <td>
                           <v-chip :color="d.included ? 'green' : 'grey'" size="small" label>
-                            {{ d.status }} <template v-if="!d.included && d.reason"> ({{ d.reason }})</template>
+                            {{ d.status }}
+                            <template v-if="!d.included && d.reason">
+                              ({{ d.reason }})
+                            </template>
                           </v-chip>
                         </td>
                       </tr>
@@ -521,23 +555,73 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
 
       <v-toolbar flat density="compact" class="px-3 py-1 slim-toolbar">
         <v-spacer />
-        <v-btn :loading="loading" size="small" class="px-4" @click="submit" color="primary" style="background-color:aqua;">Submit</v-btn>
-        <v-btn variant="text" size="small" class="ml-1" :disabled="loading" @click="resetForm()" style="background-color:red;">Reset</v-btn>
+        <v-btn
+          :loading="loading"
+          size="small"
+          class="px-4"
+          color="primary"
+          @click="submit"
+        >
+          Submit
+        </v-btn>
+        <v-btn
+          variant="text"
+          size="small"
+          class="ml-1"
+          color="error"
+          :disabled="loading"
+          @click="resetForm()"
+        >
+          Reset
+        </v-btn>
       </v-toolbar>
     </v-card>
   </v-container>
 </template>
 
 <style scoped>
-.slim-card { border: 1px solid rgba(100,116,139,.16); }
-.slim-toolbar { background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05)); }
-.section { background: #fafafb; border: 1px dashed rgba(100,116,139,.25); }
-.hdr { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
-.hdr .t { font-weight: 600; font-size: .95rem; }
-.n { width:18px; height:18px; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; background:#6b7280; color:#fff; font-size:11px; font-weight:700; }
-:deep(.v-input){ margin-bottom:6px !important; }
-:deep(.v-field__input){ padding-top:6px; padding-bottom:6px; }
-.sticky-col { align-self:flex-start; }
+.slim-card {
+  border: 1px solid rgba(100,116,139,.16);
+}
+.slim-toolbar {
+  background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
+}
+.section {
+  background: #fafafb;
+  border: 1px dashed rgba(100,116,139,.25);
+}
+.hdr {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-bottom:6px;
+}
+.hdr .t {
+  font-weight: 600;
+  font-size: .95rem;
+}
+.n {
+  width:18px;
+  height:18px;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:#6b7280;
+  color:#fff;
+  font-size:11px;
+  font-weight:700;
+}
+:deep(.v-input){
+  margin-bottom:6px !important;
+}
+:deep(.v-field__input){
+  padding-top:6px;
+  padding-bottom:6px;
+}
+.sticky-col {
+  align-self:flex-start;
+}
 
 /* Recurring preview table */
 :deep(.v-table thead th){

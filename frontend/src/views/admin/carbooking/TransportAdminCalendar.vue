@@ -155,11 +155,11 @@ onMounted(fetchMonth)
 
       <div class="hero-controls">
         <button class="circle-btn" @click="prevMonth">
-          <i class="fa-solid fa-chevron-left"></i>
+          <v-icon icon="mdi-chevron-left" size="20" />
         </button>
         <div class="month-label">{{ monthLabel }}</div>
         <button class="circle-btn" @click="nextMonth">
-          <i class="fa-solid fa-chevron-right"></i>
+          <v-icon icon="mdi-chevron-right" size="20" />
         </button>
 
         <div class="hero-right">
@@ -293,7 +293,7 @@ onMounted(fetchMonth)
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.18);
 }
-.circle-btn i {
+.circle-btn .v-icon {
   color: #0f172a;
 }
 

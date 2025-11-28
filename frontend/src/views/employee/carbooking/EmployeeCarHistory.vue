@@ -52,9 +52,8 @@ function scrollToBooking(id) {
       el.classList.add('highlight-row')
       setTimeout(() => el.classList.remove('highlight-row'), 2500)
     }
-  }, 400) // small delay to wait table render
+  }, 400)
 }
-
 
 /* ——— Data table headers ——— */
 const headers = [
@@ -103,12 +102,11 @@ const statusIconFA = s => ({
   ACCEPTED:  'fa-solid fa-circle-check',
   ON_ROAD:   'fa-solid fa-truck-fast',
   ARRIVING:  'fa-solid fa-flag-checkered',
-  COMPLETED: 'fa-solid fa-badge-check', // fallback below if not available
+  COMPLETED: 'fa-solid fa-badge-check',
   DELAYED:   'fa-solid fa-triangle-exclamation',
   CANCELLED: 'fa-solid fa-ban'
 }[s] || 'fa-solid fa-hourglass-half')
 
-// Many FA builds don’t have fa-badge-check in Free. Fallback:
 function fixFA(icon) {
   return icon === 'fa-solid fa-badge-check'
     ? 'fa-solid fa-circle-check'
@@ -136,11 +134,8 @@ const filtered = computed(() => {
 /* ——— Cancel rules ——— */
 function canCancel(item) {
   const st = String(item.status || '').toUpperCase()
-
-  // Cannot cancel once the trip is basically in progress or done
   if (['ON_ROAD','ARRIVING','COMPLETED','CANCELLED'].includes(st)) return false
 
-  // Allow cancel for today or future
   if (!item.tripDate) return true
   const tripDay = dayjs(item.tripDate).startOf('day')
   const today   = dayjs().startOf('day')
@@ -163,9 +158,7 @@ async function cancelBooking(item) {
 
   cancelLoading.value = String(item._id)
   try {
-    // adjust endpoint if your backend uses another route
     await api.post(`/employee/car-bookings/${item._id}/cancel`)
-    // optimistic update
     item.status = 'CANCELLED'
 
     await Swal.fire({
@@ -341,7 +334,7 @@ watch([filtered, itemsPerPage], () => {
                 :loading="loading"
                 item-key="_id"
                 :density="isMobile ? 'compact' : 'comfortable'"
-                class="elevated car-history-table"
+                class="elevated car-history-table align-left comfy-cells row-hover"
                 v-model:page="page"
                 :items-per-page="itemsPerPage"
                 @click:row="onRowClick"
@@ -430,7 +423,6 @@ watch([filtered, itemsPerPage], () => {
 
                 <template #item.actions="{ item }">
                   <div :data-row-id="item._id" class="d-flex justify-end" style="gap:6px;">
-                    <!-- Cancel (only my bookings) -->
                     <v-btn
                       v-if="item.isMine"
                       size="small"
@@ -446,7 +438,6 @@ watch([filtered, itemsPerPage], () => {
                       Cancel
                     </v-btn>
 
-                    <!-- Details -->
                     <v-btn
                       size="small"
                       variant="tonal"
@@ -474,7 +465,6 @@ watch([filtered, itemsPerPage], () => {
                     </div>
 
                     <div class="tf-middle">
-                      <!-- Hide rows-per-page on phones to save space -->
                       <v-select
                         v-if="!isMobile"
                         v-model="itemsPerPage"
@@ -719,6 +709,25 @@ watch([filtered, itemsPerPage], () => {
 .stops { display:flex; flex-direction:column; gap:6px; }
 .stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 
+/* ---------- Match other tables: left align + comfy + row hover ---------- */
+.align-left :deep(table thead th),
+.align-left :deep(table tbody td){
+  text-align: left !important;
+}
+.comfy-cells :deep(table tbody td){
+  vertical-align: top;
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+.comfy-cells :deep(table thead th){
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+}
+.row-hover :deep(table tbody tr:hover){
+  background: rgba(59,130,246,0.08);
+  transition: background 120ms ease;
+}
+
 /* ——— Responsive table footer ——— */
 .table-footer{
   display:flex;
@@ -726,7 +735,7 @@ watch([filtered, itemsPerPage], () => {
   justify-content:space-between;
   gap:12px;
   padding: 12px 16px;
-  flex-wrap: wrap; /* allow wrap on small screens */
+  flex-wrap: wrap;
 }
 .tf-left { min-width: 120px; }
 .tf-middle { display:flex; align-items:center; }
@@ -739,7 +748,7 @@ watch([filtered, itemsPerPage], () => {
 /* On very narrow screens, stretch footer sections to full width */
 @media (max-width: 600px){
   .history-container {
-    padding: 0 !important;      /* full-width content */
+    padding: 0 !important;
   }
 
   .section {
@@ -786,7 +795,7 @@ watch([filtered, itemsPerPage], () => {
   animation: rowFlash 2.2s ease-in-out;
 }
 @keyframes rowFlash {
-  0%   { background-color: #fef9c3; }  /* light yellow */
+  0%   { background-color: #fef9c3; }
   50%  { background-color: #fef08a; }
   100% { background-color: transparent; }
 }

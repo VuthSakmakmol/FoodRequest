@@ -90,21 +90,23 @@ const statusColor = s => ({
   PENDING:'grey', ACCEPTED:'primary', ON_ROAD:'info', ARRIVING:'teal',
   COMPLETED:'success', DELAYED:'warning', CANCELLED:'error'
 }[s] || 'grey')
-const statusFa = s => ({
-  PENDING:'fa-solid fa-hourglass-half',
-  ACCEPTED:'fa-solid fa-circle-check',
-  ON_ROAD:'fa-solid fa-truck-fast',
-  ARRIVING:'fa-solid fa-flag-checkered',
-  COMPLETED:'fa-solid fa-check-double',
-  DELAYED:'fa-solid fa-triangle-exclamation',
-  CANCELLED:'fa-solid fa-ban'
-}[s] || 'fa-solid fa-hourglass-half')
+
+const statusIcon = s => ({
+  PENDING:'mdi-timer-sand',
+  ACCEPTED:'mdi-check-circle-outline',
+  ON_ROAD:'mdi-truck-fast',
+  ARRIVING:'mdi-flag-checkered',
+  COMPLETED:'mdi-check-all',
+  DELAYED:'mdi-alert',
+  CANCELLED:'mdi-cancel'
+}[s] || 'mdi-timer-sand')
+
 const ackColor = s => ({ PENDING:'grey', ACCEPTED:'success', DECLINED:'error' }[s] || 'grey')
-const ackFa  = s => ({
-  PENDING:'fa-solid fa-circle-question',
-  ACCEPTED:'fa-solid fa-thumbs-up',
-  DECLINED:'fa-solid fa-thumbs-down'
-}[s] || 'fa-solid fa-circle-question')
+const ackIcon  = s => ({
+  PENDING:'mdi-help-circle-outline',
+  ACCEPTED:'mdi-thumb-up-outline',
+  DECLINED:'mdi-thumb-down-outline'
+}[s] || 'mdi-help-circle-outline')
 
 /* Assigned chip helpers */
 const assigneeName = (it) => {
@@ -115,7 +117,7 @@ const assigneeName = (it) => {
   return it.assignment.driverName || it.assignment.driverId || ''
 }
 const assigneeColor = (it) => (it?.category === 'Messenger' ? 'deep-orange' : 'indigo')
-const assigneeIconFA = (it) => (it?.category === 'Messenger' ? 'fa-motorcycle' : 'fa-car')
+const assigneeIcon = (it) => (it?.category === 'Messenger' ? 'mdi-motorbike' : 'mdi-car')
 
 /* Same logic as backend: has assignee or not */
 const hasAssignee = (it) => {
@@ -355,7 +357,7 @@ async function updateStatus(item, nextStatus){
       <div class="hero">
         <div class="hero-left">
           <div class="hero-title">
-            <i class="fa-solid fa-steering-wheel" />
+            <v-icon icon="mdi-steering" size="22" />
             <span>Admin — Day Schedule (All Requests)</span>
           </div>
         </div>
@@ -364,10 +366,12 @@ async function updateStatus(item, nextStatus){
       <div class="px-3 pb-3 pt-2">
         <v-card flat class="soft-card mb-3">
           <v-card-title class="subhdr">
-            <i class="fa-solid fa-filter" /><span>Filters</span>
+            <v-icon icon="mdi-filter-variant" size="20" />
+            <span>Filters</span>
             <v-spacer />
             <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading">
-              <i class="fa-solid fa-rotate-right mr-1" /> Refresh
+              <v-icon icon="mdi-refresh" size="18" class="mr-1" /> 
+              Refresh
             </v-btn>
           </v-card-title>
           <v-card-text class="pt-0 pb-2 px-2">
@@ -413,7 +417,7 @@ async function updateStatus(item, nextStatus){
                   clearable
                 >
                   <template #prepend-inner>
-                    <i class="fa-solid fa-magnifying-glass" />
+                    <v-icon icon="mdi-magnify" size="18" />
                   </template>
                 </v-text-field>
               </v-col>
@@ -455,9 +459,9 @@ async function updateStatus(item, nextStatus){
 
                 <template #item.category="{ item }">
                   <v-chip :color="item.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
-                    <i
-                      class="fa-solid"
-                      :class="item.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"
+                    <v-icon
+                      :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'"
+                      size="16"
                     />
                     <span class="ml-2">{{ item.category }}</span>
                   </v-chip>
@@ -485,7 +489,8 @@ async function updateStatus(item, nextStatus){
                       class="ml-2"
                       @click.stop="openTicket(item.ticketUrl)"
                     >
-                      <i class="fa-solid fa-paperclip mr-1" /> Ticket
+                      <v-icon icon="mdi-paperclip" size="16" class="mr-1" /> 
+                      Ticket
                     </v-btn>
                   </div>
                 </template>
@@ -496,7 +501,7 @@ async function updateStatus(item, nextStatus){
 
                 <template #item.purpose="{ item }">
                   <div class="purpose-pill">
-                    <i class="fa-regular fa-lightbulb mr-2" />
+                    <v-icon icon="mdi-lightbulb-on-outline" size="16" class="mr-2" />
                     <span class="purpose-text">{{ item.purpose || '—' }}</span>
                   </div>
                 </template>
@@ -505,13 +510,14 @@ async function updateStatus(item, nextStatus){
                   <div class="d-flex align-center" style="gap:6px;">
                     <template v-if="assigneeName(item)">
                       <v-chip :color="assigneeColor(item)" size="small" class="assignee-chip" label>
-                        <i class="fa-solid mr-2" :class="assigneeIconFA(item)" />
+                        <v-icon :icon="assigneeIcon(item)" size="16" class="mr-2" />
                         {{ assigneeName(item) }}
                       </v-chip>
                     </template>
                     <template v-else>
                       <v-chip color="grey" size="small" variant="tonal" class="assignee-chip" label>
-                        <i class="fa-solid fa-user-slash mr-2" /> Unassigned
+                        <v-icon icon="mdi-account-off-outline" size="16" class="mr-2" />
+                        Unassigned
                       </v-chip>
                     </template>
                   </div>
@@ -519,14 +525,14 @@ async function updateStatus(item, nextStatus){
 
                 <template #item.driverAck="{ item }">
                   <v-chip :color="ackColor(item.assignment?.driverAck || 'PENDING')" size="small" label>
-                    <i :class="ackFa(item.assignment?.driverAck || 'PENDING')" class="mr-1" />
+                    <v-icon :icon="ackIcon(item.assignment?.driverAck || 'PENDING')" size="16" class="mr-1" />
                     {{ (item.assignment?.driverAck || 'PENDING') }}
                   </v-chip>
                 </template>
 
                 <template #item.status="{ item }">
                   <v-chip :color="statusColor(item.status)" size="small" label>
-                    <i :class="statusFa(item.status)" class="mr-1" />
+                    <v-icon :icon="statusIcon(item.status)" size="16" class="mr-1" />
                     {{ item.status }}
                   </v-chip>
                 </template>
@@ -542,7 +548,8 @@ async function updateStatus(item, nextStatus){
                         :loading="!!updating[item._id]"
                         :disabled="!hasAssignee(item)"
                       >
-                        <i class="fa-solid fa-arrows-rotate mr-2" /> Update
+                        <v-icon icon="mdi-sync" size="18" class="mr-2" /> 
+                        Update
                       </v-btn>
                     </template>
                     <v-list density="compact" min-width="260">
@@ -553,12 +560,16 @@ async function updateStatus(item, nextStatus){
                           :key="s"
                           @click.stop="updateStatus(item, s)"
                         >
-                          <template #prepend><i :class="statusFa(s)" /></template>
+                          <template #prepend>
+                            <v-icon :icon="statusIcon(s)" size="18" />
+                          </template>
                           <v-list-item-title>{{ s }}</v-list-item-title>
                         </v-list-item>
                       </template>
                       <v-list-item v-else disabled>
-                        <template #prepend><i class="fa-solid fa-lock" /></template>
+                        <template #prepend>
+                          <v-icon icon="mdi-lock-outline" size="18" />
+                        </template>
                         <v-list-item-title>No further changes</v-list-item-title>
                       </v-list-item>
                     </v-list>
@@ -571,7 +582,8 @@ async function updateStatus(item, nextStatus){
                     class="ml-1"
                     @click.stop="openAssignDialog(item)"
                   >
-                    <i class="fa-solid fa-id-badge mr-2" /> Assign
+                    <v-icon icon="mdi-badge-account-horizontal-outline" size="18" class="mr-2" />
+                    Assign
                   </v-btn>
 
                   <v-btn
@@ -581,7 +593,8 @@ async function updateStatus(item, nextStatus){
                     class="ml-1"
                     @click.stop="showDetails(item)"
                   >
-                    <i class="fa-solid fa-circle-info mr-2" /> Details
+                    <v-icon icon="mdi-information-outline" size="18" class="mr-2" />
+                    Details
                   </v-btn>
                 </template>
 
@@ -623,16 +636,16 @@ async function updateStatus(item, nextStatus){
                         density="comfortable"
                       >
                         <template #first>
-                          <i class="fa-solid fa-angles-left" />
+                          <v-icon icon="mdi-page-first" size="18" />
                         </template>
                         <template #prev>
-                          <i class="fa-solid fa-angle-left" style="margin-top: 10px;" />
+                          <v-icon icon="mdi-chevron-left" size="18" />
                         </template>
                         <template #next>
-                          <i class="fa-solid fa-angle-right" style="margin-top: 10px;" />
+                          <v-icon icon="mdi-chevron-right" size="18" />
                         </template>
                         <template #last>
-                          <i class="fa-solid fa-angles-right" />
+                          <v-icon icon="mdi-page-last" size="18" />
                         </template>
                       </v-pagination>
                     </div>
@@ -651,16 +664,16 @@ async function updateStatus(item, nextStatus){
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
             <v-chip :color="detailItem?.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
-              <i
-                class="fa-solid"
-                :class="detailItem?.category === 'Car' ? 'fa-car' : 'fa-motorcycle'"
+              <v-icon
+                :icon="detailItem?.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'"
+                size="16"
               />
               <span class="ml-2">{{ detailItem?.category || '—' }}</span>
             </v-chip>
             <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
           </div>
           <v-btn icon variant="text" @click="detailOpen = false">
-            <i class="fa-solid fa-xmark" />
+            <v-icon icon="mdi-close" />
           </v-btn>
         </v-card-title>
 
@@ -692,8 +705,9 @@ async function updateStatus(item, nextStatus){
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
                   <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
-                    <i
-                      :class="s.destination === 'Airport' ? 'fa-solid fa-plane' : 'fa-solid fa-location-dot'"
+                    <v-icon
+                      :icon="s.destination === 'Airport' ? 'mdi-airplane-takeoff' : 'mdi-map-marker'"
+                      size="16"
                       class="mr-1"
                     />
                     <strong>#{{ i+1 }}:</strong>
@@ -706,7 +720,8 @@ async function updateStatus(item, nextStatus){
                       class="ml-2 text-decoration-none"
                     >
                       <v-btn size="x-small" variant="text" color="primary">
-                        <i class="fa-solid fa-link link-icon mr-1" /> Map
+                        <v-icon icon="mdi-link-variant" size="16" class="mr-1 link-icon" /> 
+                        Map
                       </v-btn>
                     </a>
                   </div>
@@ -719,7 +734,7 @@ async function updateStatus(item, nextStatus){
               <div class="lbl">Driver Response</div>
               <div class="val">
                 <v-chip :color="ackColor(detailItem?.assignment?.driverAck || 'PENDING')" size="small" label>
-                  <i :class="ackFa(detailItem?.assignment?.driverAck || 'PENDING')" class="mr-1" />
+                  <v-icon :icon="ackIcon(detailItem?.assignment?.driverAck || 'PENDING')" size="16" class="mr-1" />
                   {{ detailItem?.assignment?.driverAck || 'PENDING' }}
                 </v-chip>
               </div>
@@ -735,7 +750,8 @@ async function updateStatus(item, nextStatus){
                   class="text-decoration-none"
                 >
                   <v-btn size="small" color="indigo" variant="tonal">
-                    <i class="fa-solid fa-paperclip mr-2" /> VIEW TICKET
+                    <v-icon icon="mdi-paperclip" size="16" class="mr-2" /> 
+                    VIEW TICKET
                   </v-btn>
                 </a>
               </div>
@@ -762,16 +778,16 @@ async function updateStatus(item, nextStatus){
       </v-card>
     </v-dialog>
 
-    <!-- Assign dialog (unchanged) -->
+    <!-- Assign dialog -->
     <v-dialog v-model="assignOpen" max-width="920">
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <i class="fa-solid fa-id-badge" />
+            <v-icon icon="mdi-badge-account-horizontal-outline" size="20" />
             <span class="ml-2">Assign to Driver or Messenger</span>
           </div>
           <v-btn icon variant="text" @click="assignOpen = false">
-            <i class="fa-solid fa-xmark" />
+            <v-icon icon="mdi-close" />
           </v-btn>
         </v-card-title>
 
@@ -790,13 +806,15 @@ async function updateStatus(item, nextStatus){
                 value="DRIVER"
                 :disabled="assignLockedRole === 'MESSENGER'"
               >
-                <i class="fa-solid fa-car mr-2" />Car Driver
+                <v-icon icon="mdi-car" size="18" class="mr-2" />
+                Car Driver
               </v-btn>
               <v-btn
                 value="MESSENGER"
                 :disabled="assignLockedRole === 'DRIVER'"
               >
-                <i class="fa-solid fa-motorcycle mr-2" />Messenger
+                <v-icon icon="mdi-motorbike" size="18" class="mr-2" />
+                Messenger
               </v-btn>
             </v-btn-toggle>
           </div>
@@ -835,14 +853,17 @@ async function updateStatus(item, nextStatus){
                 >
                   <v-card-text class="py-4">
                     <div class="d-flex align-center" style="gap:10px;">
-                      <v-avatar size="44"><i class="fa-solid fa-user" /></v-avatar>
+                      <v-avatar size="44">
+                        <v-icon icon="mdi-account" />
+                      </v-avatar>
                       <div>
                         <div class="font-weight-700">{{ p.name }}</div>
                         <div class="text-caption text-medium-emphasis mono">
                           ID: {{ p.loginId }}
                         </div>
                         <div v-if="isBusy(p.loginId)" class="text-caption text-error mt-1">
-                          <i class="fa-solid fa-circle-exclamation mr-1" /> Busy in this window
+                          <v-icon icon="mdi-alert-circle-outline" size="14" class="mr-1" />
+                          Busy in this window
                         </div>
                       </div>
                     </div>
@@ -862,7 +883,8 @@ async function updateStatus(item, nextStatus){
             :loading="assignLoading"
             @click="submitAssign"
           >
-            <i class="fa-solid fa-check mr-2" /> Assign & Accept
+            <v-icon icon="mdi-check" size="18" class="mr-2" />
+            Assign & Accept
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -988,7 +1010,6 @@ async function updateStatus(item, nextStatus){
   cursor:not-allowed;
 }
 
-i.fa-solid, i.fa-regular { line-height: 1; }
 .mr-1 { margin-right: .25rem; }
 .mr-2 { margin-right: .5rem; }
 .ml-2 { margin-left: .5rem; }
@@ -1007,8 +1028,7 @@ i.fa-solid, i.fa-regular { line-height: 1; }
 .tf-middle { display:flex; align-items:center; }
 .tf-right { display:flex; align-items:center; }
 
-:deep(.v-pagination .v-btn){ min-width: 36px; }
-:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
+:deep(.v-pagination .v-btn .v-icon){ line-height: 1; }
 
 @media (max-width: 600px){
   .admin-car-page {

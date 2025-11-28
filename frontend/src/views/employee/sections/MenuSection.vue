@@ -131,14 +131,16 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
           <v-row dense class="mt-1">
             <v-col cols="6" v-for="mc in MENU_CHOICES" :key="mc">
               <v-btn
-                block variant="tonal" class="choice-btn two-line"
+                block
+                variant="tonal"
+                class="choice-btn two-line"
                 :class="{ active: props.form.menuChoices.includes(mc) }"
                 @click="
                   props.form.menuChoices = toggleArrayValue(props.form.menuChoices, mc);
                   if (mc !== 'Standard') ensureMenuCountKey(mc);
                 "
               >
-                <div class="label mt-2">
+                <div class="label">
                   <div class="en">
                     {{ mc }}
                     <span v-if="mc === 'Standard'" class="std-count">({{ standardCount }})</span>
@@ -175,14 +177,16 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
           <v-row dense class="mt-1">
             <v-col cols="12" v-for="item in ALLERGENS" :key="item">
               <v-btn
-                block variant="tonal" class="choice-btn two-line"
+                block
+                variant="tonal"
+                class="choice-btn two-line"
                 :class="{ active: props.form.dietary.includes(item) }"
                 @click="
                   props.form.dietary = toggleArrayValue(props.form.dietary, item);
                   ensureDietaryKey(item);
                 "
               >
-                <div class="label mt-2">
+                <div class="label">
                   <div class="en">{{ item }}</div>
                   <div class="km">{{ ALLERGEN_KM[item] }}</div>
                 </div>
@@ -267,7 +271,7 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
 
         <v-divider class="my-2" />
 
-        <!-- Validation summary -->
+        <!-- Validation summary (optional message area) -->
         <v-card-text class="pt-0">
           <div
             class="mt-2 text-caption"
@@ -276,7 +280,7 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
               'text-success': assignedMenus <= props.form.quantity
             }"
           >
-            <!-- intentionally left blank; you can inject a message if needed -->
+            <!-- You can put a message here if you want -->
           </div>
         </v-card-text>
       </v-card>
@@ -297,15 +301,15 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
   color:#fff; 
 }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
-.hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
+.hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.02rem; }
 .hero-sub { opacity:.92; font-size:.9rem; }
 
 .soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
 .glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
 
-.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size:medium; }
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:700; font-size:0.96rem; }
 
-/* ——— Existing component styles (kept) ——— */
+/* Khmer font helper */
 .km{
   font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
@@ -313,22 +317,43 @@ watch(() => props.form.menuChoices.slice(), (choices) => {
 
 /* Two-line pattern */
 .two-line{ display:flex; flex-direction:column; line-height:1.1; }
-.two-line .km{ font-size:.86rem; opacity:.9; margin-top:2px; }
+.two-line .km{ font-size:.8rem; opacity:.9; margin-top:2px; }
 
-/* Choice buttons */
+/* Choice buttons – smaller text + centered vertically */
 .choice-btn{
+  display:flex;
+  align-items:center;           /* center vertically */
+  justify-content:flex-start;
   font-weight:600;
-  min-height:56px;
+  min-height:52px;              /* slightly shorter to save space */
   text-transform:none;
   background-color:aliceblue;
-  justify-content:flex-start;
   text-align:left;
+  padding:6px 10px;             /* vertical padding */
+  font-size:0.88rem;
 }
-.choice-btn.two-line .label{ display:flex; flex-direction:column; line-height:1.1; }
-.label .en{ font-size:0.98rem; }
-.label .km{ font-size:0.86rem; opacity:0.9; margin-top:2px; }
-.std-count{ font-weight:500; margin-left:.25rem; opacity:.85; }
-.choice-btn.active{ background-color:#16a34a !important; color:#fff !important; }
+.choice-btn.two-line .label{
+  display:flex;
+  flex-direction:column;
+  line-height:1.15;
+}
+.label .en{
+  font-size:0.9rem;
+}
+.label .km{
+  font-size:0.78rem;
+  opacity:0.9;
+  margin-top:1px;
+}
+.std-count{
+  font-weight:500;
+  margin-left:.25rem;
+  opacity:.85;
+}
+.choice-btn.active{
+  background-color:#16a34a !important;
+  color:#fff !important;
+}
 
 .text-error{ color:#dc2626 !important; }
 .text-success{ color:#16a34a !important; }

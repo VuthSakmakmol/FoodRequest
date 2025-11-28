@@ -1,6 +1,6 @@
 <!-- src/views/employee/carBooking/calendars/TransportScheduleCalendar.vue -->
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Swal from 'sweetalert2'
 import dayjs from 'dayjs'
@@ -22,6 +22,17 @@ const currentMonth = ref(dayjs(props.modelValue))
 const selectedDate = ref(props.modelValue)
 const loading = ref(false)
 const bookings = ref([])
+
+/* keep in sync if parent changes v-model */
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (!val) return
+    selectedDate.value = val
+    currentMonth.value = dayjs(val)
+    fetchMonth()
+  }
+)
 
 /* ───────── Computed ───────── */
 const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
@@ -91,7 +102,11 @@ function prevMonth() {
   fetchMonth()
 }
 function goToday() {
-  currentMonth.value = dayjs()
+  const today = dayjs()
+  currentMonth.value = today
+  const iso = today.format('YYYY-MM-DD')
+  selectedDate.value = iso
+  emit('update:modelValue', iso)
   fetchMonth()
 }
 
@@ -151,13 +166,16 @@ function selectDay(d) {
             })
           })
         })
-        document.getElementById('createNewBtn').addEventListener('click', () => {
-          Swal.close()
-          router.push({
-            name: 'employee-car-booking',
-            query: { tripDate: dateStr }
+        const btn = document.getElementById('createNewBtn')
+        if (btn) {
+          btn.addEventListener('click', () => {
+            Swal.close()
+            router.push({
+              name: 'employee-car-booking',
+              query: { tripDate: dateStr }
+            })
           })
-        })
+        }
       }
     })
   } else {
@@ -221,7 +239,7 @@ onMounted(fetchMonth)
             class="day-cell"
             :class="{
               today: d.isSame(dayjs(), 'day'),
-              otherMonth: !d.isSame(currentMonth.value, 'month'),
+              otherMonth: !d.isSame(currentMonth, 'month'),
               selected: selectedDate === d.format('YYYY-MM-DD')
             }"
             @click="selectDay(d)"
@@ -275,14 +293,14 @@ onMounted(fetchMonth)
   flex-direction: column;
 }
 
-/* Toolbar — match other car booking headers */
+/* Toolbar — match other transport headers */
 .calendar-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
   font-weight: 600;
-  background: linear-gradient(90deg, #5d7884 0%, #9293d4 60%, #786e95 100%);
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
   color: #fff;
 }
 .toolbar-left {
@@ -332,6 +350,7 @@ onMounted(fetchMonth)
   max-height: 460px;         /* vertical scroll */
   overflow-y: auto;
   overflow-x: auto;          /* horizontal scroll */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Inner container is wider than phone */
@@ -477,7 +496,7 @@ onMounted(fetchMonth)
   }
 
   .calendar-body {
-    max-height: 380px;   /* still scrollable, just shorter on phone */
+    max-height: 380px;
   }
 
   .day-cell {

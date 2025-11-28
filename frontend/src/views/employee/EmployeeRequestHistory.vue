@@ -74,7 +74,7 @@ const ALLERGEN_KM_MAP = {
 const menuKM = (en) => MENU_KM_MAP[en] || en
 const allergenKM = (en) => ALLERGEN_KM_MAP[en] || en
 
-/* NEW: OrderType & Meals bilingual maps for table cells */
+/* OrderType & Meals bilingual maps for table cells */
 const ORDER_TYPE_KM_MAP = {
   'Daily meal': 'អាហារប្រចាំថ្ងៃ',
   'Meeting catering': 'អាហារប្រជុំ',
@@ -157,7 +157,6 @@ async function focusOnRowIfNeeded() {
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
       el.classList.add('highlight-row')
-      // keep highlight for 5s
       setTimeout(() => el.classList.remove('highlight-row'), 5000)
     }
   }, 300)
@@ -353,11 +352,14 @@ function dietaryByMenu(r) {
 
 <template>
   <v-container fluid class="pa-2">
-    <v-card class="rounded-lg" elevation="1">
+    <v-card class="rounded-lg slim-card" elevation="1">
       <!-- Desktop / Tablet toolbar -->
       <v-toolbar v-if="mdAndUp" flat density="comfortable" class="py-2">
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">
-          {{ 'My Requests' }}
+          <div class="title-2l">
+            <span class="en">My Requests</span>
+            <span class="km">{{ tkm('My Requests') }}</span>
+          </div>
         </v-toolbar-title>
         <v-spacer />
         <v-text-field
@@ -479,7 +481,13 @@ function dietaryByMenu(r) {
               </v-btn>
             </template>
           </v-tooltip>
-          <v-btn @click="showFilterDialog = true">{{ tkm('Filters') }}</v-btn>
+          <v-btn
+            variant="tonal"
+            color="primary"
+            @click="showFilterDialog = true"
+          >
+            {{ tkm('Filters') }}
+          </v-btn>
         </div>
       </v-sheet>
 
@@ -487,7 +495,9 @@ function dietaryByMenu(r) {
       <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
         <v-card>
           <v-toolbar density="comfortable" color="primary" class="text-white">
-            <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false"><v-icon>mdi-close</v-icon></v-btn>
+            <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
             <v-toolbar-title>{{ tkm('Filters') }}</v-toolbar-title>
             <v-spacer />
             <v-btn variant="text" class="text-white" @click="resetFilters">
@@ -498,7 +508,14 @@ function dietaryByMenu(r) {
           <v-card-text>
             <v-row dense>
               <v-col cols="12">
-                <v-select v-model="status" :items="statuses" :label="tkm('Status')" variant="outlined" density="comfortable" hide-details>
+                <v-select
+                  v-model="status"
+                  :items="statuses"
+                  :label="tkm('Status')"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                >
                   <template #selection="{ item }">
                     <span>{{ item.title || item.value || item }}</span>
                     <span class="km ml-1">({{ tkm(item.title || item.value || item) }})</span>
@@ -514,13 +531,34 @@ function dietaryByMenu(r) {
                 </v-select>
               </v-col>
               <v-col cols="12" sm="6">
-                <v-text-field v-model="dateStart" type="date" :label="tkm('From')" variant="outlined" density="comfortable" hide-details />
+                <v-text-field
+                  v-model="dateStart"
+                  type="date"
+                  :label="tkm('From')"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-text-field v-model="dateEnd" type="date" :label="tkm('To')" variant="outlined" density="comfortable" hide-details />
+                <v-text-field
+                  v-model="dateEnd"
+                  type="date"
+                  :label="tkm('To')"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                />
               </v-col>
               <v-col cols="12" sm="6">
-                <v-select v-model="itemsPerPage" :items="itemsPerPageOptions" :label="tkm('Rows per page')" variant="outlined" density="comfortable" hide-details />
+                <v-select
+                  v-model="itemsPerPage"
+                  :items="itemsPerPageOptions"
+                  :label="tkm('Rows per page')"
+                  variant="outlined"
+                  density="comfortable"
+                  hide-details
+                />
               </v-col>
             </v-row>
           </v-card-text>
@@ -535,28 +573,89 @@ function dietaryByMenu(r) {
 
       <v-card-text class="pa-0">
         <div class="table-wrap">
-          <!-- MATCH ADMIN: align-left + comfy-cells + row-hover -->
+          <!-- align-left + comfy-cells + row-hover -->
           <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
             <thead>
               <tr>
-                <th><div class="hdr-2l"><div class="en">Status</div><div class="km">{{ tkm('Status') }}</div></div></th>
-                <th style="width: 120px;"><div class="hdr-2l"><div class="en">Details</div><div class="km">{{ tkm('Details') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Requester (ID & Name)</div><div class="km">{{ tkm('Requester (ID & Name)') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Order Date</div><div class="km">{{ tkm('Order Date') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Eat Date</div><div class="km">{{ tkm('Eat Date') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Time</div><div class="km">{{ tkm('Time') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Order Type</div><div class="km">{{ tkm('Order Type') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Meal(s)</div><div class="km">{{ tkm('Meal(s)') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Qty</div><div class="km">{{ tkm('Qty') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Location</div><div class="km">{{ tkm('Location') }}</div></div></th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Status</div>
+                    <div class="km">{{ tkm('Status') }}</div>
+                  </div>
+                </th>
+                <th style="width: 120px;">
+                  <div class="hdr-2l">
+                    <div class="en">Details</div>
+                    <div class="km">{{ tkm('Details') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Requester (ID & Name)</div>
+                    <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Order Date</div>
+                    <div class="km">{{ tkm('Order Date') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Eat Date</div>
+                    <div class="km">{{ tkm('Eat Date') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Time</div>
+                    <div class="km">{{ tkm('Time') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Order Type</div>
+                    <div class="km">{{ tkm('Order Type') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Meal(s)</div>
+                    <div class="km">{{ tkm('Meal(s)') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Qty</div>
+                    <div class="km">{{ tkm('Qty') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Location</div>
+                    <div class="km">{{ tkm('Location') }}</div>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
               <template v-for="r in pagedRows" :key="r._id">
-                <!-- add data-row-id so calendar can focus -->
+                <!-- data-row-id so calendar can focus -->
                 <tr :data-row-id="r._id">
                   <td>
-                    <v-chip :color="{ NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }[r.status]" size="small" label>
+                    <v-chip
+                      :color="{
+                        NEW:'grey',
+                        ACCEPTED:'primary',
+                        COOKING:'orange',
+                        READY:'teal',
+                        DELIVERED:'green',
+                        CANCELED:'red'
+                      }[r.status]"
+                      size="small"
+                      label
+                    >
                       <div class="chip-2l">
                         <div class="en">{{ r.status }}</div>
                         <div class="km">{{ tkm(r.status) }}</div>
@@ -564,15 +663,28 @@ function dietaryByMenu(r) {
                     </v-chip>
                   </td>
                   <td>
-                    <v-btn size="small" variant="text" color="secondary" @click="toggleExpanded(r._id)">
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      color="secondary"
+                      @click="toggleExpanded(r._id)"
+                    >
                       {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
-                      <span class="km ml-1">({{ isExpanded(r._id) ? 'លាក់' : tkm('Details') }})</span>
+                      <span class="km ml-1">
+                        ({{ isExpanded(r._id) ? 'លាក់' : tkm('Details') }})
+                      </span>
                     </v-btn>
                   </td>
-                  <td>{{ r?.employee?.employeeId || '—' }}<span v-if="r?.employee?.name"> — {{ r.employee.name }}</span></td>
+                  <td>
+                    {{ r?.employee?.employeeId || '—' }}
+                    <span v-if="r?.employee?.name"> — {{ r.employee.name }}</span>
+                  </td>
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
-                  <td>{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></td>
+                  <td>
+                    {{ r.eatTimeStart || '—' }}
+                    <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
+                  </td>
 
                   <td>
                     <div class="cell-2l">
@@ -589,7 +701,10 @@ function dietaryByMenu(r) {
                   </td>
 
                   <td>{{ r.quantity }}</td>
-                  <td>{{ r?.location?.kind }}<span v-if="r?.location?.other"> — {{ r.location.other }}</span></td>
+                  <td>
+                    {{ r?.location?.kind }}
+                    <span v-if="r?.location?.other"> — {{ r.location.other }}</span>
+                  </td>
                 </tr>
 
                 <!-- Details row -->
@@ -600,24 +715,44 @@ function dietaryByMenu(r) {
                         <div class="tree">
                           <div class="tree-node root">
                             <div class="node-label two-lines">
-                              <div class="en"><strong>{{ tkm('Qty') }}</strong> {{ r.quantity }}</div>
+                              <div class="en">
+                                <strong>{{ tkm('Qty') }}</strong> {{ r.quantity }}
+                              </div>
                               <div class="km">{{ tkm('Qty') }}</div>
                             </div>
                             <div class="children">
-                              <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
+                              <template
+                                v-for="[menuName, menuCnt] in menuMap(r)"
+                                :key="menuName"
+                              >
                                 <div class="tree-node">
                                   <div class="node-label two-lines">
-                                    <div class="en"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                    <div class="en">
+                                      <span class="arrow">→</span>
+                                      <strong>{{ menuName }}</strong> ×{{ menuCnt }}
+                                    </div>
                                     <div class="km">{{ menuKM(menuName) }}</div>
                                   </div>
-                                  <div class="children" v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length">
+                                  <div
+                                    class="children"
+                                    v-if="
+                                      Array.from(
+                                        (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                      ).length
+                                    "
+                                  >
                                     <div
                                       class="tree-node leaf"
-                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                      v-for="[allergen, aCnt] in Array.from(
+                                        (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                      )"
                                       :key="menuName + '_' + allergen"
                                     >
                                       <div class="node-label two-lines">
-                                        <div class="en"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
+                                        <div class="en">
+                                          <span class="arrow small">↳</span>
+                                          {{ allergen }} ×{{ aCnt }}
+                                        </div>
                                         <div class="km">{{ allergenKM(allergen) }}</div>
                                       </div>
                                     </div>
@@ -634,20 +769,26 @@ function dietaryByMenu(r) {
               </template>
 
               <tr v-if="!rows.length && !loading">
-                <td colspan="10" class="text-center py-6 text-medium-emphasis">No requests found.</td>
+                <td colspan="10" class="text-center py-6 text-medium-emphasis">
+                  No requests found.
+                </td>
               </tr>
             </tbody>
           </v-table>
         </div>
 
         <!-- pagination -->
-        <div class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3">
+        <div
+          class="d-flex flex-wrap gap-2 justify-space-between align-center pa-3"
+        >
           <v-select
             v-model="itemsPerPage"
             :items="itemsPerPageOptions"
             density="compact"
             :label="tkm('Rows per page')"
-            hide-details variant="outlined" style="max-width:140px"
+            hide-details
+            variant="outlined"
+            style="max-width:140px"
           />
           <v-pagination v-model="page" :length="pageCount" :total-visible="7" />
         </div>
@@ -667,34 +808,106 @@ function dietaryByMenu(r) {
   100% { background-color: transparent; }
 }
 
-.table-wrap{ overflow-x:auto; display:block; }
+/* card border (same family as other slim pages) */
+.slim-card {
+  border: 1px solid rgba(100,116,139,.16);
+}
+
+/* wrapper */
+.table-wrap{
+  overflow-x:auto;
+  display:block;
+}
 
 /* Inputs a bit tighter */
-:deep(.v-field__input){ min-height: 36px; }
+:deep(.v-field__input){
+  min-height: 36px;
+}
 
-.min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
+.min-width-table th,
+.min-width-table td{
+  min-width:120px;
+  white-space:nowrap;
+}
 
 /* bilingual headers */
-.hdr-2l .en{ font-weight:600; }
-.hdr-2l .km{ font-size:.82rem; opacity:.85; }
+.hdr-2l .en{
+  font-weight:600;
+}
+.hdr-2l .km{
+  font-size:.82rem;
+  opacity:.85;
+}
+
+/* bilingual page title */
+.title-2l{
+  display:flex;
+  flex-direction:column;
+  line-height:1.1;
+}
+.title-2l .km{
+  font-size:.86rem;
+  opacity:.9;
+}
 
 /* two-line table cells */
-.cell-2l{ display:flex; flex-direction:column; line-height:1.1; }
-.cell-2l .km{ font-size:.86rem; opacity:.9; }
+.cell-2l{
+  display:flex;
+  flex-direction:column;
+  line-height:1.1;
+}
+.cell-2l .km{
+  font-size:.86rem;
+  opacity:.9;
+}
 
 /* status chip two-line */
-.chip-2l{ display:flex; flex-direction:column; line-height:1; }
-.chip-2l .km{ font-size:.78em; opacity:.9; }
+.chip-2l{
+  display:flex;
+  flex-direction:column;
+  line-height:1;
+}
+.chip-2l .km{
+  font-size:.78em;
+  opacity:.9;
+}
 
 /* details */
-.details-row{ background: rgba(0,0,0,0.02); }
-.tree{ font-size:.96rem; line-height:1.4; }
-.tree .node-label{ display:inline-flex; align-items:center; gap:.4rem; padding:.2rem .5rem; border-radius:.5rem; }
-.tree .root>.node-label{ background: rgba(16,185,129,.12); }
-.tree .tree-node .node-label{ background: rgba(59,130,246,.10); }
-.tree .leaf .node-label{ background: rgba(234,179,8,.12); }
-.arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
-.children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
+.details-row{
+  background: rgba(0,0,0,0.02);
+}
+.tree{
+  font-size:.96rem;
+  line-height:1.4;
+}
+.tree .node-label{
+  display:inline-flex;
+  align-items:center;
+  gap:.4rem;
+  padding:.2rem .5rem;
+  border-radius:.5rem;
+}
+.tree .root > .node-label{
+  background: rgba(16,185,129,.12);
+}
+.tree .tree-node .node-label{
+  background: rgba(59,130,246,.10);
+}
+.tree .leaf .node-label{
+  background: rgba(234,179,8,.12);
+}
+.arrow{
+  font-weight:700;
+}
+.arrow.small{
+  opacity:.9;
+}
+.children{
+  margin-left:1.2rem;
+  padding-left:.6rem;
+  border-left:2px dashed rgba(0,0,0,.15);
+  margin-top:.35rem;
+}
 
 /* Khmer font helper */
 .km{
@@ -702,28 +915,23 @@ function dietaryByMenu(r) {
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
 }
 
-/* ---------- MATCH ADMIN: Left alignment + comfy spacing + hover ---------- */
-
-/* Force left alignment for headers/cells */
+/* Left alignment + comfy spacing + hover */
 .align-left :deep(table thead th),
 .align-left :deep(table tbody td){
   text-align: left !important;
 }
 
-/* Top/bottom breathing room for each td */
 .comfy-cells :deep(table tbody td){
   vertical-align: top;
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-/* Also pad headers for balance */
 .comfy-cells :deep(table thead th){
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
 
-/* Hover color for normal rows (exclude expanded details row) */
 .row-hover :deep(table tbody tr:not(.details-row):hover){
   background: rgba(59,130,246,0.08);
   transition: background 120ms ease;
@@ -737,8 +945,16 @@ function dietaryByMenu(r) {
 
 /* phone tweaks */
 @media (max-width: 600px){
-  .min-width-table th,.min-width-table td{ min-width: 90px; }
-  .table-wrap{ -webkit-overflow-scrolling: touch; }
-  .v-toolbar{ padding-left: .5rem; padding-right: .5rem; }
+  .min-width-table th,
+  .min-width-table td{
+    min-width: 90px;
+  }
+  .table-wrap{
+    -webkit-overflow-scrolling: touch;
+  }
+  .v-toolbar{
+    padding-left: .5rem;
+    padding-right: .5rem;
+  }
 }
 </style>

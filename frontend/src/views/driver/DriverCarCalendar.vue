@@ -177,9 +177,13 @@ onMounted(fetchMonth)
     <div class="calendar-wrapper">
       <!-- Toolbar -->
       <div class="calendar-toolbar">
-        <button class="btn-nav" @click="prevMonth">‹</button>
+        <button class="btn-nav" @click="prevMonth">
+          <v-icon icon="mdi-chevron-left" size="20" />
+        </button>
         <div class="month-label">{{ monthLabel }}</div>
-        <button class="btn-nav" @click="nextMonth">›</button>
+        <button class="btn-nav" @click="nextMonth">
+          <v-icon icon="mdi-chevron-right" size="20" />
+        </button>
         <div class="toolbar-right">
           <button class="btn-flat" @click="fetchMonth">ផ្ទុកឡើងវិញ</button>
           <button class="btn-flat today" @click="goToday">ថ្ងៃនេះ</button>
@@ -293,10 +297,12 @@ onMounted(fetchMonth)
   background: #fff;
   border: 1px solid #cbd5e1;
   border-radius: 999px;
-  font-size: 18px;
   width: 34px;
   height: 34px;
   cursor: pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
 .btn-nav:hover {
   background: #f1f5f9;

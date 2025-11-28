@@ -43,28 +43,43 @@ const scrollToServices = () => {
           <span class="km">សេវាកម្មទាំងអស់ ក្នុងប្រព័ន្ធតែមួយ</span>
         </p>
 
-        <!-- CTA: Login + (optional) scroll to services -->
+        <!-- CTA: Login -->
         <div class="hero-cta">
           <v-btn
             class="cta-btn mr-2"
             color="white"
             variant="elevated"
+            prepend-icon="mdi-login"
             @click="goLogin"
           >
-            <i class="fa-solid fa-right-to-bracket mr-2" />
             Login
           </v-btn>
         </div>
 
         <div class="quick-badges">
-          <v-chip size="small" variant="elevated" color="cyan">
-            <i class="fa-solid fa-bolt mr-2" /> Real-time
+          <v-chip
+            size="small"
+            variant="elevated"
+            color="cyan"
+            prepend-icon="mdi-flash"
+          >
+            Real-time
           </v-chip>
-          <v-chip size="small" variant="elevated" color="pink">
-            <i class="fa-solid fa-language mr-2" /> English / ខ្មែរ
+          <v-chip
+            size="small"
+            variant="elevated"
+            color="pink"
+            prepend-icon="mdi-translate"
+          >
+            English / ខ្មែរ
           </v-chip>
-          <v-chip size="small" variant="elevated" color="lime">
-            <i class="fa-solid fa-shield-halved mr-2" /> Secure
+          <v-chip
+            size="small"
+            variant="elevated"
+            color="lime"
+            prepend-icon="mdi-shield-check"
+          >
+            Secure
           </v-chip>
         </div>
       </div>
@@ -92,13 +107,14 @@ const scrollToServices = () => {
               >
                 <div class="service-card-inner">
                   <div class="icon-pill food">
-                    <i class="fa-solid fa-bowl-rice" />
+                    <v-icon size="26">mdi-rice</v-icon>
                   </div>
                   <div class="service-text">
                     <div class="service-label-row">
                       <span class="service-label">Food Booking</span>
                       <span class="service-chip">
-                        <i class="fa-solid fa-utensils mr-1" /> Canteen
+                        <v-icon size="16" class="mr-1">mdi-silverware-fork-knife</v-icon>
+                        Canteen
                       </span>
                     </div>
                     <div class="service-subtitle">
@@ -108,12 +124,18 @@ const scrollToServices = () => {
                       </span>
                     </div>
                     <div class="service-meta">
-                      <span><i class="fa-solid fa-clock mr-1" /> Less than 1 min</span>
-                      <span><i class="fa-solid fa-bell mr-1" /> Telegram alert</span>
+                      <span>
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-clock-outline</v-icon>
+                        Less than 1 min
+                      </span>
+                      <span>
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-telegram</v-icon>
+                        Telegram alert
+                      </span>
                     </div>
                   </div>
                   <div class="service-arrow">
-                    <i class="fa-solid fa-arrow-right-long" />
+                    <v-icon size="22">mdi-arrow-right</v-icon>
                   </div>
                 </div>
               </v-card>
@@ -129,13 +151,14 @@ const scrollToServices = () => {
               >
                 <div class="service-card-inner">
                   <div class="icon-pill transport">
-                    <i class="fa-solid fa-car" />
+                    <v-icon size="26">mdi-car</v-icon>
                   </div>
                   <div class="service-text">
                     <div class="service-label-row">
                       <span class="service-label">Car Booking</span>
                       <span class="service-chip">
-                        <i class="fa-solid fa-road mr-1" /> Transportation
+                        <v-icon size="16" class="mr-1">mdi-road-variant</v-icon>
+                        Transportation
                       </span>
                     </div>
                     <div class="service-subtitle">
@@ -145,11 +168,14 @@ const scrollToServices = () => {
                       </span>
                     </div>
                     <div class="service-meta">
-                      <span><i class="fa-solid fa-users mr-1" /> Driver &amp; Messenger app</span>
+                      <span>
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-account-tie</v-icon>
+                        Driver &amp; Messenger app
+                      </span>
                     </div>
                   </div>
                   <div class="service-arrow">
-                    <i class="fa-solid fa-arrow-right-long" />
+                    <v-icon size="22">mdi-arrow-right</v-icon>
                   </div>
                 </div>
               </v-card>
@@ -164,13 +190,14 @@ const scrollToServices = () => {
               >
                 <div class="service-card-inner">
                   <div class="icon-pill meeting">
-                    <i class="fa-solid fa-people-roof" />
+                    <v-icon size="26">mdi-account-group</v-icon>
                   </div>
                   <div class="service-text">
                     <div class="service-label-row">
                       <span class="service-label">Meeting Room Booking</span>
                       <span class="service-chip dev-chip">
-                        <i class="fa-solid fa-wrench mr-1" /> In development
+                        <v-icon size="16" class="mr-1">mdi-wrench</v-icon>
+                        In development
                       </span>
                     </div>
                     <div class="service-subtitle">
@@ -180,11 +207,14 @@ const scrollToServices = () => {
                       </span>
                     </div>
                     <div class="service-meta">
-                      <span><i class="fa-solid fa-hourglass-half mr-1" /> Coming soon</span>
+                      <span>
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-timer-sand</v-icon>
+                        Coming soon
+                      </span>
                     </div>
                   </div>
                   <div class="service-arrow">
-                    <i class="fa-solid fa-lock" />
+                    <v-icon size="20">mdi-lock</v-icon>
                   </div>
                 </div>
               </v-card>
@@ -199,13 +229,14 @@ const scrollToServices = () => {
               >
                 <div class="service-card-inner">
                   <div class="icon-pill leave">
-                    <i class="fa-solid fa-home" />
+                    <v-icon size="26">mdi-home</v-icon>
                   </div>
                   <div class="service-text">
                     <div class="service-label-row">
                       <span class="service-label">Leave Request (Expat)</span>
                       <span class="service-chip dev-chip">
-                        <i class="fa-solid fa-wrench mr-1" /> In development
+                        <v-icon size="16" class="mr-1">mdi-wrench</v-icon>
+                        In development
                       </span>
                     </div>
                     <div class="service-subtitle">
@@ -215,11 +246,14 @@ const scrollToServices = () => {
                       </span>
                     </div>
                     <div class="service-meta">
-                      <span><i class="fa-solid fa-hourglass-half mr-1" /> Coming soon</span>
+                      <span>
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-timer-sand</v-icon>
+                        Coming soon
+                      </span>
                     </div>
                   </div>
                   <div class="service-arrow">
-                    <i class="fa-solid fa-lock" />
+                    <v-icon size="20">mdi-lock</v-icon>
                   </div>
                 </div>
               </v-card>
@@ -228,15 +262,17 @@ const scrollToServices = () => {
         </v-container>
       </section>
 
-      <!-- Feature strip (keep) -->
+      <!-- Feature strip -->
       <v-container class="py-6">
         <v-sheet class="feature-strip" rounded="lg" elevation="1">
           <div class="stripe">
             <div class="chip">
-              <i class="fa-brands fa-telegram" /> Telegram Alerts
+              <v-icon size="18" class="mr-1">mdi-telegram</v-icon>
+              Telegram Alerts
             </div>
             <div class="chip">
-              <i class="fa-solid fa-database" /> Secure Database
+              <v-icon size="18" class="mr-1">mdi-database</v-icon>
+              Secure Database
             </div>
           </div>
         </v-sheet>
@@ -249,7 +285,8 @@ const scrollToServices = () => {
         <span>© {{ new Date().getFullYear() }} Trax Apparel Cambodia</span>
         <span class="sep">•</span>
         <a href="mailto:it@traxapparel.com" class="foot-link">
-          <i class="fa-solid fa-envelope" /> IT Support
+          <v-icon size="16" class="mr-1">mdi-email</v-icon>
+          IT Support
         </a>
       </div>
     </footer>
@@ -310,9 +347,6 @@ const scrollToServices = () => {
   font-weight: 700;
   color: #0f172a !important;
   box-shadow: 0 6px 22px rgba(0,0,0,.2);
-}
-.cta-btn.secondary {
-  box-shadow: none;
 }
 
 /* badges */
@@ -407,7 +441,6 @@ const scrollToServices = () => {
   align-items:center;
   justify-content:center;
   color:#fff;
-  font-size: 24px;
 }
 .icon-pill.food {
   background: linear-gradient(135deg,#f97316,#ef4444);
@@ -471,7 +504,7 @@ const scrollToServices = () => {
   font-size:0.8rem;
   color:#6b7280;
 }
-.service-meta i {
+.meta-icon {
   color:#2563eb;
 }
 

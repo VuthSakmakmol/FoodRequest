@@ -476,7 +476,7 @@ async function exportExcel() {
                 @click="load"
                 aria-label="Refresh"
                 title="Refresh">
-                <i class="fa-solid fa-rotate-right"></i>
+                <v-icon size="20">mdi-refresh</v-icon>
               </v-btn>
             </template>
           </v-tooltip>
@@ -485,7 +485,7 @@ async function exportExcel() {
             <template #activator="{ props }">
               <v-btn v-bind="props" icon variant="flat" class="mr-1"
                      @click="showFilterDialog = true" aria-label="Filters" title="Filters">
-                <i class="fa-solid fa-filter"></i>
+                <v-icon>mdi-filter-variant</v-icon>
               </v-btn>
             </template>
           </v-tooltip>
@@ -494,7 +494,7 @@ async function exportExcel() {
             <template #activator="{ props }">
               <v-btn v-bind="props" :loading="exporting" icon color="success" variant="flat"
                      @click="exportExcel" aria-label="Export Excel" title="Export Excel">
-                <i class="fa-regular fa-file-excel"></i>
+                <v-icon>mdi-file-excel</v-icon>
               </v-btn>
             </template>
           </v-tooltip>
@@ -511,14 +511,14 @@ async function exportExcel() {
             <v-tooltip text="Refresh" location="bottom">
               <template #activator="{ props }">
                 <v-btn v-bind="props" :loading="loading" icon variant="tonal" @click="load">
-                  <i class="fa-solid fa-rotate-right"></i>
+                  <v-icon>mdi-refresh</v-icon>
                 </v-btn>
               </template>
             </v-tooltip>
             <v-tooltip text="Filters" location="bottom">
               <template #activator="{ props }">
                 <v-btn v-bind="props" icon color="primary" variant="flat" @click="showFilterDialog = true">
-                  <i class="fa-solid fa-filter"></i>
+                  <v-icon>mdi-filter-variant</v-icon>
                 </v-btn>
               </template>
             </v-tooltip>
@@ -779,13 +779,6 @@ async function exportExcel() {
 .km{
   font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
-}
-
-/* Font Awesome icons inside Vuetify icon buttons */
-:deep(.v-btn--icon i.fa-solid),
-:deep(.v-btn--icon i.fa-regular){
-  font-size: 1.05rem;
-  line-height: 1;
 }
 
 /* ---------- NEW: focus row from calendar ---------- */

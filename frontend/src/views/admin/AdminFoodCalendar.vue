@@ -208,23 +208,19 @@ function showDayDetails (d) {
     showCloseButton: true,
     width: 520,
     didOpen: () => {
-      // name must match your router: adjust if different
+      const role = auth.user?.role || localStorage.getItem('authRole') || ''
+      const targetRoute =
+        role === 'CHEF'
+          ? 'chef-requests'
+          : 'admin-requests'
+
       window.__selectFood = (id) => {
         Swal.close()
-
-        // if this component is reused in Chef layout, send Chef to chef-requests
-        const role = auth.user?.role || localStorage.getItem('authRole') || ''
-        const targetRoute =
-          role === 'CHEF'
-            ? 'chef-requests'
-            : 'admin-requests'   // 👈 this matches your router
-
         router.push({
           name: targetRoute,
           query: { focus: id, date: dateStr }
         })
       }
-
     },
     willClose: () => {
       delete window.__selectFood
@@ -257,15 +253,15 @@ watch(currentMonth, () => loadMonth())
 
 <template>
   <div class="calendar-wrapper">
-    <!-- Header / toolbar (same family as Transportation) -->
+    <!-- Header / toolbar -->
     <div class="calendar-hero">
       <div class="hero-controls">
         <button class="circle-btn" @click="prevMonth">
-          <i class="fa-solid fa-chevron-left"></i>
+          <v-icon icon="mdi-chevron-left" size="20" />
         </button>
         <div class="month-label">{{ monthLabel }}</div>
         <button class="circle-btn" @click="nextMonth">
-          <i class="fa-solid fa-chevron-right"></i>
+          <v-icon icon="mdi-chevron-right" size="20" />
         </button>
 
         <div class="hero-right">
@@ -349,7 +345,7 @@ watch(currentMonth, () => loadMonth())
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 
-/* ── Gradient header (same family as transportation) ── */
+/* ── Gradient header ── */
 .calendar-hero {
   padding: 12px 18px;
   background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);

@@ -139,7 +139,7 @@ function goToday() {
   loadMonth()
 }
 
-/* ───────── Click handler (same pattern as TransportScheduleCalendar) ───────── */
+/* ───────── Click handler ───────── */
 function selectDay(d) {
   const dateStr = d.format('YYYY-MM-DD')
   const list = listForDate(dateStr)
@@ -165,8 +165,6 @@ function selectDay(d) {
                 cursor:pointer;
                 transition:background .2s;
               "
-              onmouseover="this.style.background='#e0f2fe'"
-              onmouseout="this.style.background='#f8fafc'"
             >
               <div><b>${esc(r.employee?.name || '')}</b> (${esc(r.orderType)})</div>
               <div>🍱 Meals: ${esc(fmtMeals(r))}</div>
@@ -240,6 +238,8 @@ function upsert(doc) {
   if (idx === -1) requests.value.push(d)
   else requests.value[idx] = d
 }
+const onDeleted = ({ _id }) => removeById(String(_id || ''))
+
 function removeById(id) {
   const idx = requests.value.findIndex(x => x._id === id)
   if (idx !== -1) requests.value.splice(idx, 1)
@@ -253,20 +253,20 @@ onMounted(async () => {
   socket.on('foodRequest:created', upsert)
   socket.on('foodRequest:updated', upsert)
   socket.on('foodRequest:statusChanged', upsert)
-  socket.on('foodRequest:deleted', ({ _id }) => removeById(String(_id || '')))
+  socket.on('foodRequest:deleted', onDeleted)
 })
 
 onBeforeUnmount(() => {
   socket.off('foodRequest:created', upsert)
   socket.off('foodRequest:updated', upsert)
   socket.off('foodRequest:statusChanged', upsert)
-  socket.off('foodRequest:deleted')
+  socket.off('foodRequest:deleted', onDeleted)
 })
 </script>
 
 <template>
   <v-container fluid class="pa-2">
-    <v-card class="rounded-lg" elevation="1">
+    <v-card class="rounded-lg slim-card" elevation="1">
       <div class="calendar-wrapper">
         <!-- Toolbar -->
         <div class="calendar-toolbar">
@@ -347,14 +347,19 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.slim-card {
+  border: 1px solid rgba(100,116,139,.16);
+}
+
 .calendar-wrapper {
   border-radius: 12px;
   background: #fff;
   display: flex;
   flex-direction: column;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
 }
 
-/* Toolbar – visually similar to car schedule */
+/* Toolbar – same family as transport calendars */
 .calendar-toolbar {
   display: flex;
   align-items: center;
@@ -375,7 +380,7 @@ onBeforeUnmount(() => {
 }
 
 .btn-nav {
-  background: rgba(255,255,255,.9);
+  background: rgba(255,255,255,.96);
   border: none;
   border-radius: 999px;
   font-size: 18px;
@@ -407,14 +412,14 @@ onBeforeUnmount(() => {
   border-color: #c7d2fe;
 }
 
-/* Scrollable body */
+/* Scrollable body (horizontal + vertical) */
 .calendar-body {
   max-height: 460px;
   overflow-y: auto;
   overflow-x: auto;
 }
 .calendar-inner {
-  min-width: 860px;
+  min-width: 860px; /* ensures horizontal scroll on narrow screens */
 }
 
 /* Week row */
@@ -454,6 +459,9 @@ onBeforeUnmount(() => {
 }
 .day-cell.selected {
   box-shadow: inset 0 0 0 2px #4f46e5;
+}
+.day-cell:hover {
+  background: #f8fafc;
 }
 .day-number {
   font-weight: 700;
@@ -511,14 +519,16 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-/* SweetAlert hover helper */
+/* SweetAlert hover helper (just in case) */
 :deep(.swal-food:hover) {
   background-color: #e0f2fe !important;
 }
 
 /* Mobile tweaks */
 @media (max-width: 600px) {
-  .calendar-wrapper {
+  .slim-card {
+    border-left: none;
+    border-right: none;
     border-radius: 0;
   }
 

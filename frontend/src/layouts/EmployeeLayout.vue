@@ -17,30 +17,29 @@ const groups = [
   {
     key: 'home',
     header: 'Home',
-    icon: 'fa-solid fa-house',
+    icon: 'mdi-home-outline',
     children: [
-      // ✅ use route name 'greeting'
-      { label: 'Greeting', icon: 'fa-solid fa-handshake', to: { name: 'greeting' } },
+      { label: 'Greeting', icon: 'mdi-handshake-outline', to: { name: 'greeting' } },
     ]
   },
   {
     key: 'food',
     header: 'Food Request',
-    icon: 'fa-solid fa-utensils',
+    icon: 'mdi-silverware-fork-knife',
     children: [
-      { label: 'Request Meal', icon: 'fa-solid fa-bowl-food', to: { name: 'employee-request' } },
-      { label: 'My Requests',  icon: 'fa-solid fa-clock-rotate-left', to: { name: 'employee-request-history' } },
-      { label: 'Calendar',     icon: 'fa-solid fa-clock', to: { name: 'employee-food-calendar'} }
+      { label: 'Request Meal', icon: 'mdi-bowl-mix-outline', to: { name: 'employee-request' } },
+      { label: 'My Requests',  icon: 'mdi-history',          to: { name: 'employee-request-history' } },
+      { label: 'Calendar',     icon: 'mdi-calendar-month-outline', to: { name: 'employee-food-calendar'} }
     ]
   },
   {
     key: 'transport',
     header: 'Transportation',
-    icon: 'fa-solid fa-car-side',
+    icon: 'mdi-car-side',
     children: [
-      { label: 'Book a Car',      icon: 'fa-solid fa-taxi', to: { name: 'employee-car-booking' } },
-      { label: 'My Car Bookings', icon: 'fa-solid fa-list', to: { name: 'employee-car-history' } },
-      { label: 'Schedule',        icon: 'fa-solid fa-clock', to: { name: 'employee-car-schedule'} },
+      { label: 'Book a Car',      icon: 'mdi-car-arrow-right',       to: { name: 'employee-car-booking' } },
+      { label: 'My Car Bookings', icon: 'mdi-format-list-bulleted',  to: { name: 'employee-car-history' } },
+      { label: 'Schedule',        icon: 'mdi-clock-outline',         to: { name: 'employee-car-schedule'} },
     ]
   }
 ]
@@ -87,7 +86,7 @@ function toggleAuth() {
       <!-- TOP BAR -->
       <v-app-bar density="comfortable" class="topbar" flat>
         <v-btn icon class="mr-2 text-on-brand" @click="drawer = !drawer">
-          <i class="fa-solid fa-bars" />
+          <v-icon icon="mdi-menu" size="22" />
         </v-btn>
         <p class="text-on-brand title">Employee</p>
         <v-spacer />
@@ -99,7 +98,8 @@ function toggleAuth() {
           <span class="chip-role">({{ auth.user.role }})</span>
         </v-chip>
         <v-btn size="small" class="logout mr-4" variant="flat" @click="toggleAuth">
-          <i class="fa-solid fa-right-from-bracket mr-2"></i>{{ auth.user ? 'Logout' : 'Go' }}
+          <v-icon icon="mdi-logout" size="18" class="mr-2" />
+          {{ auth.user ? 'Logout' : 'Go' }}
         </v-btn>
       </v-app-bar>
 
@@ -115,10 +115,11 @@ function toggleAuth() {
       >
         <div class="drawer-head">
           <div class="brand">
-            <i class="fa-solid fa-rocket mr-2"></i> Menu
+            <v-icon icon="mdi-rocket-launch-outline" size="22" class="mr-2" />
+            Menu
           </div>
           <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
-            <v-icon>{{ rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left' }}</v-icon>
+            <v-icon :icon="rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left'" />
           </v-btn>
         </div>
 
@@ -129,10 +130,14 @@ function toggleAuth() {
             <!-- Section header acts as toggle (accordion) -->
             <div class="section-header" @click="handleSectionClick(g.key)">
               <div class="left">
-                <i :class="g.icon" class="fa-fw mr-2" />
+                <v-icon :icon="g.icon" size="20" class="nav-icon mr-2" />
                 <span>{{ g.header }}</span>
               </div>
-              <i class="fa-solid" :class="open[g.key] ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+              <v-icon
+                size="18"
+                class="caret"
+                :icon="open[g.key] ? 'mdi-chevron-up' : 'mdi-chevron-down'"
+              />
             </div>
 
             <v-expand-transition>
@@ -146,7 +151,7 @@ function toggleAuth() {
                   @click="handleNavClick(it)"
                 >
                   <template #prepend>
-                    <i :class="it.icon" class="fa-fw" />
+                    <v-icon :icon="it.icon" size="20" class="nav-icon" />
                   </template>
                   <v-list-item-title class="ml-2">{{ it.label }}</v-list-item-title>
                 </v-list-item>
@@ -197,7 +202,9 @@ function toggleAuth() {
 .chip-avatar {
   background: var(--on-brand);
   color: var(--brand);
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .chip-initials { font-weight: 800; }
 .chip-text { color: var(--on-brand); }
@@ -218,10 +225,17 @@ function toggleAuth() {
   border-right: 1px solid #e6e8ee;
 }
 .drawer-head {
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   padding: 12px 10px;
 }
-.brand { font-weight: 900; color: var(--brand); display:flex; align-items:center; }
+.brand {
+  font-weight: 900;
+  color: var(--brand);
+  display:flex;
+  align-items:center;
+}
 .rail-toggle { color: var(--brand) !important; }
 
 .divider { border-color: #e6e8ee !important; }
@@ -229,7 +243,9 @@ function toggleAuth() {
 
 /* Section header that toggles open/close */
 .section-header {
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
   padding: 8px 12px;
   margin: 6px 8px 2px;
   color: var(--brand);
@@ -254,7 +270,7 @@ function toggleAuth() {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(46,163,165,.12) inset;
 }
-.fa-fw { width: 1.05em; text-align: center; }
+.nav-icon { width: 1.4em; }
 .caret { color: var(--muted); }
 
 /* Main area */
@@ -262,4 +278,5 @@ function toggleAuth() {
 .content { padding: 16px 12px; }
 
 .mr-2 { margin-right: .5rem; }
+.mr-4 { margin-right: 1rem; }
 </style>

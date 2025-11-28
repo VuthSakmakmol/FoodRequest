@@ -61,14 +61,22 @@ async function submit() {
     <v-card class="pa-10 login-card" max-width="440" elevation="6" rounded="xl">
       <div class="text-center mb-6">
         <v-avatar size="68" class="mb-3" color="primary" variant="tonal">
-          <i class="fa-solid fa-user-shield fa-lg text-primary-dark"></i>
+          <v-icon icon="mdi-shield-account-outline" size="32" class="text-primary-dark" />
         </v-avatar>
         <div class="text-h5 font-weight-bold">Sign in</div>
         <div class="text-subtitle-2 text-grey mt-1">Admin • Chef • Driver • Messenger</div>
       </div>
 
-      <v-text-field v-model="loginId" label="Login ID" variant="outlined" density="comfortable" class="mb-3">
-        <template #prepend-inner><i class="fa-solid fa-user text-muted"></i></template>
+      <v-text-field
+        v-model="loginId"
+        label="Login ID"
+        variant="outlined"
+        density="comfortable"
+        class="mb-3"
+      >
+        <template #prepend-inner>
+          <v-icon icon="mdi-account-outline" size="20" class="text-muted" />
+        </template>
       </v-text-field>
 
       <v-text-field
@@ -83,16 +91,34 @@ async function submit() {
         :hint="capsOn ? 'Caps Lock is ON' : ''"
         persistent-hint
       >
-        <template #prepend-inner><i class="fa-solid fa-lock text-muted"></i></template>
+        <template #prepend-inner>
+          <v-icon icon="mdi-lock-outline" size="20" class="text-muted" />
+        </template>
         <template #append-inner>
-          <v-btn variant="text" icon @click="showPwd = !showPwd" :aria-label="showPwd ? 'Hide password' : 'Show password'">
-            <i :class="showPwd ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye'"></i>
+          <v-btn
+            variant="text"
+            icon
+            @click="showPwd = !showPwd"
+            :aria-label="showPwd ? 'Hide password' : 'Show password'"
+          >
+            <v-icon
+              :icon="showPwd ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+              size="20"
+            />
           </v-btn>
         </template>
       </v-text-field>
 
-      <v-btn :loading="loading" color="primary" block rounded="lg" size="large" class="mt-4" @click="submit">
-        <i class="fa-solid fa-right-to-bracket me-2"></i>
+      <v-btn
+        :loading="loading"
+        color="primary"
+        block
+        rounded="lg"
+        size="large"
+        class="mt-4"
+        @click="submit"
+      >
+        <v-icon icon="mdi-login" size="20" class="me-2" />
         Login
       </v-btn>
 
