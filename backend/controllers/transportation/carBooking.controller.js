@@ -1,4 +1,4 @@
-// backend/controllers/carBooking.controller.js
+// backend/controllers/transportation/carBooking.controller.js
 const createError = require('http-errors');
 const CarBooking = require('../../models/transportation/CarBooking');
 
@@ -10,12 +10,11 @@ try { Employee = require('../models/Employee'); } catch {
   try { Employee = require('../../models/EmployeeDirectory'); } catch { Employee = null; }
 }
 
-const { ROOMS, emitToRoom } = require('../../utils/realtime');
+const { broadcastCarBooking } = require('../../utils/realtime');
 const { toMinutes, overlaps, isValidDate } = require('../../utils/time');
 const { notify } = require('../../services/transport.telegram.notify');
-const AIRPORT_DESTINATION = 'Techo International Airport'
 
-const { io } = require('../../utils/realtime')
+const AIRPORT_DESTINATION = 'Techo International Airport';
 
 const MAX_CAR  = 3;
 const MAX_MSGR = 1;
@@ -33,21 +32,23 @@ const FORWARD = {
 /* ───────── assignment helpers ───────── */
 function hasAssignee(doc) {
   // Car uses driverId; Messenger uses messengerId
-  if (!doc?.assignment) return false
-  if (doc.category === 'Messenger') return !!doc.assignment.messengerId
-  return !!doc.assignment.driverId
+  if (!doc?.assignment) return false;
+  if (doc.category === 'Messenger') return !!doc.assignment.messengerId;
+  return !!doc.assignment.driverId;
 }
+
 function assigneeIdOf(doc) {
   return doc?.category === 'Messenger'
     ? (doc?.assignment?.messengerId || '')
-    : (doc?.assignment?.driverId || '')
+    : (doc?.assignment?.driverId || '');
 }
 
 /* ───────── helpers ───────── */
 function parsePayload(req) {
   if (req.file) {
     if (!req.body?.data) throw createError(400, 'Missing "data" field in multipart form.');
-    try { return JSON.parse(req.body.data); } catch { throw createError(400, 'Invalid JSON in "data".'); }
+    try { return JSON.parse(req.body.data); }
+    catch { throw createError(400, 'Invalid JSON in "data".'); }
   }
   return req.body || {};
 }
@@ -60,7 +61,8 @@ function pickIdentityFrom(req) {
     req.query.loginId ||
     req.session?.user?.loginId ||
     req.cookies?.loginId ||
-    ''
+    '';
+
   const role =
     (
       req.headers['x-role'] ||
@@ -71,9 +73,9 @@ function pickIdentityFrom(req) {
       ''
     )
       .toString()
-      .toUpperCase()
+      .toUpperCase();
 
-  return { loginId: String(loginId || ''), role }
+  return { loginId: String(loginId || ''), role };
 }
 
 /** Minimal delta payloads */
@@ -117,6 +119,11 @@ const shape = {
     response: doc.assignment?.driverAck || 'PENDING',
     at: doc.assignment?.driverAckAt || null,
   }),
+  messengerAck: (doc) => ({
+    bookingId: String(doc._id),
+    response: doc.assignment?.messengerAck || 'PENDING',
+    at: doc.assignment?.messengerAckAt || null,
+  }),
   updated: (doc) => ({
     bookingId: String(doc._id),
     patch: {
@@ -136,19 +143,6 @@ const shape = {
     bookingId: String(doc._id),
   }),
 };
-
-/* ───────────── Helper: real-time broadcast ───────────── */
-function broadcast(io, doc, event, payload) {
-  if (!io || !doc) return
-  const empId = String(doc.employeeId || doc.employee?.employeeId || '')
-  const rooms = new Set([
-    ROOMS.ADMINS,
-    empId && ROOMS.EMPLOYEE(empId),
-    ROOMS.BOOKING(String(doc._id))
-  ])
-  for (const r of rooms) if (r) emitToRoom(io, r, event, payload)
-}
-
 
 /* ───────── public ───────── */
 async function checkAvailability(req, res, next) {
@@ -222,7 +216,6 @@ async function createBooking(req, res, next) {
       ticketUrl = `/uploads/${req.file.filename}`;
     }
 
-
     const active = await CarBooking.find({ tripDate, category, status: { $nin: ['CANCELLED'] } }).lean();
     const overlapping = active.filter(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))).length;
     const max = category === 'Car' ? MAX_CAR : MAX_MSGR;
@@ -249,7 +242,7 @@ async function createBooking(req, res, next) {
     });
 
     // SOCKET (scoped)
-    broadcast(io, doc, 'carBooking:created', shape.created(doc));
+    broadcastCarBooking(io, doc, 'carBooking:created', shape.created(doc));
 
     // TELEGRAM
     try {
@@ -274,67 +267,67 @@ async function listMyBookings(req, res, next) {
 
 async function updateStatus(req, res, next) {
   try {
-    const io = req.io
-    const { id } = req.params
+    const io = req.io;
+    const { id } = req.params;
 
     // 👇 now we also accept `forceReopen` from the body
-    const { status, forceReopen } = req.body || {}
-    const allowed = ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']
-    if (!allowed.includes(status)) throw createError(400, 'Invalid status.')
+    const { status, forceReopen } = req.body || {};
+    const allowed = ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED'];
+    if (!allowed.includes(status)) throw createError(400, 'Invalid status.');
 
-    const doc = await CarBooking.findById(id)
-    if (!doc) throw createError(404, 'Booking not found.')
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found.');
 
-    const from = doc.status || 'PENDING'
+    const from = doc.status || 'PENDING';
 
     // ───────── special case: reopen to PENDING after admin edits schedule ─────────
     const isReopen =
       !!forceReopen &&
       status === 'PENDING' &&
       from !== 'PENDING' &&
-      !['COMPLETED', 'CANCELLED'].includes(from) // don’t reopen finished/cancelled trips
+      !['COMPLETED', 'CANCELLED'].includes(from); // don’t reopen finished/cancelled trips
 
     if (isReopen) {
       // allow ACCEPTED/ON_ROAD/… → PENDING even though FORWARD doesn’t allow it
-      doc.status = 'PENDING'
+      doc.status = 'PENDING';
 
       // reset acks so driver/messenger can react again
       if (doc.assignment) {
-        doc.assignment.driverAck = 'PENDING'
-        doc.assignment.messengerAck = 'PENDING'
+        doc.assignment.driverAck = 'PENDING';
+        doc.assignment.messengerAck = 'PENDING';
       }
     } else {
       // ───────── normal workflow enforcement ─────────
       if (!FORWARD[from] || !FORWARD[from].has(status)) {
-        throw createError(400, `Cannot change from ${from} to ${status}`)
+        throw createError(400, `Cannot change from ${from} to ${status}`);
       }
 
       // must have assignee for any active (non-cancelled) status
       if (status !== 'CANCELLED' && !hasAssignee(doc)) {
-        throw createError(400, 'You must assign a Driver/Messenger before changing status.')
+        throw createError(400, 'You must assign a Driver/Messenger before changing status.');
       }
 
-      doc.status = status
+      doc.status = status;
     }
 
-    await doc.save()
+    await doc.save();
 
     // SOCKET (delta to all relevant rooms)
-    broadcast(io, doc, 'carBooking:status', shape.status(doc))
+    broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
-    console.log('[status] updated', { bookingId: String(doc._id), newStatus: doc.status })
+    console.log('[status] updated', { bookingId: String(doc._id), newStatus: doc.status });
 
     // TELEGRAM
     try {
-      console.log('[notify] STATUS_CHANGED', { bookingId: String(doc._id), newStatus: doc.status })
-      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name })
+      console.log('[notify] STATUS_CHANGED', { bookingId: String(doc._id), newStatus: doc.status });
+      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name });
     } catch (e) {
-      console.error('[notify error] STATUS_CHANGED', e?.message || e)
+      console.error('[notify error] STATUS_CHANGED', e?.message || e);
     }
 
-    res.json(doc)
+    res.json(doc);
   } catch (err) {
-    next(err)
+    next(err);
   }
 }
 
@@ -394,7 +387,6 @@ async function assignBooking(req, res, next) {
     }
 
     // ───────── Apply assignment ─────────
-    // Always keep both fields in shape but only one is active depending on role
     const baseAssign = {
       vehicleId: vehicleId || '',
       vehicleName: vehicleName || '',
@@ -442,8 +434,8 @@ async function assignBooking(req, res, next) {
     await doc.save();
 
     // Realtime
-    broadcast(io, doc, 'carBooking:assigned', shape.assigned(doc));
-    broadcast(io, doc, 'carBooking:status', shape.status(doc));
+    broadcastCarBooking(io, doc, 'carBooking:assigned', shape.assigned(doc));
+    broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
     // Telegram
     try {
@@ -478,70 +470,65 @@ async function listAdmin(req, res, next) {
 /* ───────────── LIST FOR ASSIGNEE ───────────── */
 async function listForAssignee(req, res, next) {
   try {
-    const { loginId, role } = pickIdentityFrom(req)
-    const driverId = req.query.driverId || loginId
-    if (!driverId) return res.json([])
+    const { loginId, role } = pickIdentityFrom(req);
+    const driverId = req.query.driverId || loginId;
+    if (!driverId) return res.json([]);
 
-    const { date, status } = req.query
-    const filter = {}
+    const { date, status } = req.query;
+    const filter = {};
 
     if (role === 'DRIVER') {
-      filter.category = 'Car'
-      filter['assignment.driverId'] = driverId
+      filter.category = 'Car';
+      filter['assignment.driverId'] = driverId;
     } else if (role === 'MESSENGER') {
       filter.$or = [
         { category: 'Messenger', 'assignment.messengerId': driverId },
         { category: 'Car', 'assignment.messengerId': driverId }
-      ]
+      ];
     } else {
-      filter.employeeId = driverId
+      filter.employeeId = driverId;
     }
 
-    if (date) filter.tripDate = date
-    if (status && status !== 'ALL') filter.status = status
+    if (date) filter.tripDate = date;
+    if (status && status !== 'ALL') filter.status = status;
 
-    // 🧠 Add debug log
-    console.log('[ListForAssignee]', JSON.stringify({ role, loginId, driverId, filter }, null, 2))
+    console.log('[ListForAssignee]', JSON.stringify({ role, loginId, driverId, filter }, null, 2));
 
     const list = await CarBooking.find(filter)
       .sort({ tripDate: -1, timeStart: 1 })
-      .lean()
+      .lean();
 
-    res.json(list)
+    res.json(list);
   } catch (err) {
-    console.error('[ListForAssignee error]', err)
-    next(err)
+    console.error('[ListForAssignee error]', err);
+    next(err);
   }
 }
-
-
 
 
 /* ───────────── DRIVER ACKNOWLEDGE ───────────── */
 async function driverAcknowledge(req, res, next) {
   try {
-    const io = req.io
-    const { id } = req.params
-    const { response } = req.body || {}
-    const { loginId } = pickIdentityFrom(req)
-    const normalized = (response || '').toUpperCase()
+    const io = req.io;
+    const { id } = req.params;
+    const { response } = req.body || {};
+    const { loginId } = pickIdentityFrom(req);
+    const normalized = (response || '').toUpperCase();
 
-    const doc = await CarBooking.findById(id)
-    if (!doc) throw createError(404, 'Booking not found')
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found');
     if (String(doc.assignment?.driverId) !== String(loginId))
-      throw createError(403, 'Not allowed: not your booking')
+      throw createError(403, 'Not allowed: not your booking');
 
-    doc.assignment.driverAck = normalized
-    doc.assignment.driverAckAt = new Date()
-    await doc.save()
+    doc.assignment.driverAck = normalized;
+    doc.assignment.driverAckAt = new Date();
+    await doc.save();
 
-    broadcast(io, doc, 'carBooking:driverAck', {
-      bookingId: String(doc._id),
-      response: normalized
-    })
-    res.json(doc)
+    broadcastCarBooking(io, doc, 'carBooking:driverAck', shape.driverAck(doc));
+
+    res.json(doc);
   } catch (err) {
-    next(err)
+    next(err);
   }
 }
 
@@ -549,52 +536,51 @@ async function driverAcknowledge(req, res, next) {
 /* ───────────── DRIVER STATUS UPDATE ───────────── */
 async function driverUpdateStatus(req, res, next) {
   try {
-    const io = req.io
-    const { id } = req.params
-    const { status } = req.body || {}
-    const { loginId } = pickIdentityFrom(req)
+    const io = req.io;
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const { loginId } = pickIdentityFrom(req);
 
-    if (!status) throw createError(400, 'Status is required.')
+    if (!status) throw createError(400, 'Status is required.');
 
-    const doc = await CarBooking.findById(id)
-    if (!doc) throw createError(404, 'Booking not found.')
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found.');
 
     // Must be the assigned driver
     if (String(doc.assignment?.driverId) !== String(loginId)) {
-      throw createError(403, 'Not allowed: not your assigned booking.')
+      throw createError(403, 'Not allowed: not your assigned booking.');
     }
 
     // Enforce workflow
-    const from = doc.status || 'PENDING'
-    const next = (status || '').toUpperCase()
-    if (!FORWARD[from] || !FORWARD[from].has(next)) {
-      throw createError(400, `Cannot change from ${from} to ${next}`)
+    const from = doc.status || 'PENDING';
+    const nextStatus = (status || '').toUpperCase();
+    if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
+      throw createError(400, `Cannot change from ${from} to ${nextStatus}`);
     }
 
     // Defensive: ensure booking is assigned
-    if (!hasAssignee(doc)) throw createError(400, 'Booking is not assigned.')
+    if (!hasAssignee(doc)) throw createError(400, 'Booking is not assigned.');
 
-    doc.status = next
-    doc.updatedAt = new Date()
-    await doc.save()
+    doc.status = nextStatus;
+    doc.updatedAt = new Date();
+    await doc.save();
 
     // Real-time broadcast
-    if (io) io.to(`booking:${id}`).emit('carBooking:status', { bookingId: id, status: next })
-    broadcast(io, doc, 'carBooking:status', { bookingId: id, status: next })
+    broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
-    console.log(`[driverUpdateStatus] ${loginId} → ${next} for ${id}`)
+    console.log(`[driverUpdateStatus] ${loginId} → ${nextStatus} for ${id}`);
 
     // Telegram notify
     try {
-      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: next, byName: loginId })
+      await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: nextStatus, byName: loginId });
     } catch (err) {
-      console.error('[notify error] STATUS_CHANGED', err?.message || err)
+      console.error('[notify error] STATUS_CHANGED', err?.message || err);
     }
 
-    res.json({ ok: true, message: 'Status updated', status: next })
+    res.json({ ok: true, message: 'Status updated', status: nextStatus });
   } catch (err) {
-    console.error('Update status error', err)
-    next(err)
+    console.error('Update status error', err);
+    next(err);
   }
 }
 
@@ -707,7 +693,7 @@ async function updateBooking(req, res, next) {
     await doc.save();
 
     // Realtime
-    broadcast(io, doc, 'carBooking:updated', shape.updated(doc));
+    broadcastCarBooking(io, doc, 'carBooking:updated', shape.updated(doc));
 
     // Optional telegram (keep light)
     try {
@@ -719,8 +705,6 @@ async function updateBooking(req, res, next) {
     next(err);
   }
 }
-
-
 
 
 /* ───────── NEW: delete (CRUD → D) ─────────
@@ -735,7 +719,7 @@ async function deleteBooking(req, res, next) {
     await CarBooking.deleteOne({ _id: id });
 
     // Realtime
-    broadcast(io, doc, 'carBooking:deleted', shape.deleted(doc));
+    broadcastCarBooking(io, doc, 'carBooking:deleted', shape.deleted(doc));
 
     // Optional telegram (comment out if noisy)
     try {
@@ -749,28 +733,26 @@ async function deleteBooking(req, res, next) {
 /* ───────────── MESSENGER ACKNOWLEDGE ───────────── */
 async function messengerAcknowledge(req, res, next) {
   try {
-    const io = req.io
-    const { id } = req.params
-    const { response } = req.body || {}
-    const { loginId } = pickIdentityFrom(req)
-    const normalized = (response || '').toUpperCase()
+    const io = req.io;
+    const { id } = req.params;
+    const { response } = req.body || {};
+    const { loginId } = pickIdentityFrom(req);
+    const normalized = (response || '').toUpperCase();
 
-    const doc = await CarBooking.findById(id)
-    if (!doc) throw createError(404, 'Booking not found')
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found');
     if (String(doc.assignment?.messengerId) !== String(loginId))
-      throw createError(403, 'Not allowed: not your booking')
+      throw createError(403, 'Not allowed: not your booking');
 
-    doc.assignment.messengerAck = normalized
-    doc.assignment.messengerAckAt = new Date()
-    await doc.save()
+    doc.assignment.messengerAck = normalized;
+    doc.assignment.messengerAckAt = new Date();
+    await doc.save();
 
-    broadcast(io, doc, 'carBooking:messengerAck', {
-      bookingId: String(doc._id),
-      response: normalized
-    })
-    res.json(doc)
+    broadcastCarBooking(io, doc, 'carBooking:messengerAck', shape.messengerAck(doc));
+
+    res.json(doc);
   } catch (err) {
-    next(err)
+    next(err);
   }
 }
 
@@ -778,26 +760,27 @@ async function messengerAcknowledge(req, res, next) {
 /* ───────────── MESSENGER STATUS UPDATE ───────────── */
 async function messengerUpdateStatus(req, res, next) {
   try {
-    const io = req.io
-    const { id } = req.params
-    const { status } = req.body || {}
-    const { loginId } = pickIdentityFrom(req)
-    const nextStatus = (status || '').toUpperCase()
+    const io = req.io;
+    const { id } = req.params;
+    const { status } = req.body || {};
+    const { loginId } = pickIdentityFrom(req);
+    const nextStatus = (status || '').toUpperCase();
 
-    const doc = await CarBooking.findById(id)
-    if (!doc) throw createError(404, 'Booking not found')
+    const doc = await CarBooking.findById(id);
+    if (!doc) throw createError(404, 'Booking not found');
     if (String(doc.assignment?.messengerId) !== String(loginId))
-      throw createError(403, 'Not allowed')
+      throw createError(403, 'Not allowed');
 
-    const from = doc.status || 'PENDING'
+    const from = doc.status || 'PENDING';
     if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
-      throw createError(400, `Cannot change from ${from} to ${nextStatus}`)
+      throw createError(400, `Cannot change from ${from} to ${nextStatus}`);
     }
-    if (!hasAssignee(doc)) throw createError(400, 'Booking is not assigned.')
+    if (!hasAssignee(doc)) throw createError(400, 'Booking is not assigned.');
 
-    doc.status = nextStatus
-    await doc.save()
-    broadcast(io, doc, 'carBooking:status', { bookingId: String(doc._id), status: nextStatus })
+    doc.status = nextStatus;
+    await doc.save();
+
+    broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
     // Telegram notify
     try {
@@ -805,14 +788,14 @@ async function messengerUpdateStatus(req, res, next) {
         bookingId: doc._id,
         newStatus: nextStatus,
         byName: loginId
-      })
+      });
     } catch (e) {
-      console.error('[notify error] STATUS_CHANGED', e?.message || e)
+      console.error('[notify error] STATUS_CHANGED', e?.message || e);
     }
 
-    res.json(doc)
+    res.json(doc);
   } catch (err) {
-    next(err)
+    next(err);
   }
 }
 
@@ -822,28 +805,28 @@ async function messengerUpdateStatus(req, res, next) {
 // ─────────────────────────────
 async function listMessengerTasks(req, res) {
   try {
-    const messengerId = req.query.messengerId || req.headers['x-login-id']
-    if (!messengerId) return res.status(400).json({ message: 'messengerId missing' })
+    const messengerId = req.query.messengerId || req.headers['x-login-id'];
+    if (!messengerId) return res.status(400).json({ message: 'messengerId missing' });
 
     const filter = {
       $or: [
         { category: 'Messenger', 'assignment.messengerId': messengerId },
         { category: 'Car', 'assignment.messengerId': messengerId }
       ]
-    }
+    };
 
-    if (req.query.date) filter.tripDate = req.query.date
-    if (req.query.status && req.query.status !== 'ALL') filter.status = req.query.status
+    if (req.query.date) filter.tripDate = req.query.date;
+    if (req.query.status && req.query.status !== 'ALL') filter.status = req.query.status;
 
     const rows = await CarBooking.find(filter)
       .sort({ tripDate: -1, timeStart: 1 })
-      .lean()
+      .lean();
 
-    if (!rows.length) return res.status(404).json({ message: 'Not found' })
-    res.json(rows)
+    if (!rows.length) return res.status(404).json({ message: 'Not found' });
+    res.json(rows);
   } catch (err) {
-    console.error('listMessengerTasks error', err)
-    res.status(500).json({ message: err.message || 'Internal error' })
+    console.error('listMessengerTasks error', err);
+    res.status(500).json({ message: err.message || 'Internal error' });
   }
 }
 
@@ -863,5 +846,5 @@ module.exports = {
   updateBooking,
   deleteBooking,
   listSchedulePublic,
-  listMessengerTasks
-}
+  listMessengerTasks,
+};

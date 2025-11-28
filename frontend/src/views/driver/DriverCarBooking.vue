@@ -88,6 +88,8 @@ function useDevIdentity() {
   localStorage.setItem('loginId', devLoginId.value)
   localStorage.setItem('role', devRole.value)
   identity.value = { loginId: devLoginId.value, role: devRole.value }
+  // re-subscribe sockets for new role
+  try { subscribeRoleIfNeeded({ role: devRole.value }) } catch {}
   loadList()
 }
 
@@ -368,22 +370,64 @@ async function setDriverStatus(item, nextStatus) {
 }
 
 /* ─────────────── SOCKET HANDLERS ─────────────── */
-function onStatus(p) {
-  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) it.status = p.status
-}
-function onAssigned(p) {
-  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) {
-    it.assignment = {
-      ...it.assignment,
-      driverId: p.driverId,
-      driverName: p.driverName,
-      messengerId: p.messengerId,
-      messengerName: p.messengerName,
-    }
+
+// new bookings created (admin side) – show if it's assigned to this driver/messenger
+function onCreated(doc) {
+  if (!doc?._id) return
+
+  const myLogin = (identity.value?.loginId || '').toLowerCase()
+  const driverId    = String(doc?.assignment?.driverId || doc?.driverId || '').toLowerCase()
+  const messengerId = String(doc?.assignment?.messengerId || doc?.messengerId || '').toLowerCase()
+  const isMine = myLogin && (driverId === myLogin || messengerId === myLogin)
+  if (!isMine) return
+
+  const tripDate = doc.tripDate || doc.date
+  if (selectedDate.value && tripDate !== selectedDate.value) return
+
+  const status = String(doc.status || '').toUpperCase()
+  if (statusFilter.value !== 'ALL' && status !== statusFilter.value) return
+
+  const exists = rows.value.some(x => String(x._id) === String(doc._id))
+  if (!exists) {
+    rows.value.push({
+      ...doc,
+      stops: doc.stops || [],
+      assignment: doc.assignment || {},
+    })
   }
 }
+
+function onStatus(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (it && p?.status) it.status = p.status
+}
+
+async function onAssigned(p) {
+  const bookingId = String(p?.bookingId || '')
+  if (!bookingId) return
+
+  const it = rows.value.find(x => String(x._id) === bookingId)
+
+  const myLogin = (identity.value?.loginId || '').toLowerCase()
+  const isMine =
+    String(p?.driverId || '').toLowerCase() === myLogin ||
+    String(p?.messengerId || '').toLowerCase() === myLogin
+
+  if (it) {
+    it.assignment = {
+      ...(it.assignment || {}),
+      driverId: p.driverId ?? it.assignment?.driverId ?? '',
+      driverName: p.driverName ?? it.assignment?.driverName ?? '',
+      messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
+      messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
+    }
+    if (p.status) it.status = p.status
+  } else if (isMine) {
+    // this driver/messenger just got a new booking -> reload list (and rooms)
+    await loadList()
+  }
+}
+
 function onAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (!it) return
@@ -402,6 +446,7 @@ onMounted(() => {
     selectedDate.value = String(route.query.date)
   }
 
+  // focus row if navigated from calendar
   watch(rows, () => {
     const focusId = route.query?.focus
     if (focusId) {
@@ -415,12 +460,14 @@ onMounted(() => {
   })
 
   loadList()
+  socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
   socket.on('carBooking:driverAck', onAck)
   socket.on('carBooking:messengerAck', onAck)
 })
 onBeforeUnmount(() => {
+  socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
   socket.off('carBooking:driverAck', onAck)

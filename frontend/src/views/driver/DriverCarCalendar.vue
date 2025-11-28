@@ -33,7 +33,7 @@ function detectIdentity() {
       u?.user?.role ||
       localStorage.getItem('role') ||
       'DRIVER'
-    return { loginId, role: String(role).toUpperCase() }
+    return { loginId: String(loginId || ''), role: String(role || 'DRIVER').toUpperCase() }
   } catch {
     return { loginId: '', role: 'DRIVER' }
   }
@@ -65,10 +65,14 @@ async function fetchMonth() {
   loading.value = true
   bookings.value = []
   try {
-    const { data } = await api.get('/driver/car-bookings', {
+    const isMessenger = role === 'MESSENGER'
+    const basePath = isMessenger ? '/messenger/car-bookings' : '/driver/car-bookings'
+
+    const { data } = await api.get(basePath, {
       params:  { loginId, role },
       headers: { 'x-login-id': loginId, 'x-role': role }
     })
+
     bookings.value = Array.isArray(data) ? data : []
   } catch (err) {
     console.error('[DriverCalendar] Error', err)
@@ -81,9 +85,13 @@ async function fetchMonth() {
 const byDate = computed(() => {
   const map = {}
   for (const b of bookings.value) {
-    const d = dayjs(b.tripDate).format('YYYY-MM-DD')
-    if (!map[d]) map[d] = []
-    map[d].push(b)
+    const raw = b.tripDate || b.date
+    if (!raw) continue
+    const d = dayjs(raw)
+    if (!d.isValid()) continue
+    const key = d.format('YYYY-MM-DD')
+    if (!map[key]) map[key] = []
+    map[key].push(b)
   }
   return map
 })
@@ -91,25 +99,29 @@ const byDate = computed(() => {
 /* ───────── STATUS COLORS / LABELS (KH) ───────── */
 const STATUS_COLORS = {
   PENDING  : '#94a3b8',
+  ASSIGNED : '#64748b',
   ACCEPTED : '#3b82f6',
   ON_ROAD  : '#06b6d4',
   ARRIVING : '#10b981',
   COMPLETED: '#16a34a',
   DELAYED  : '#facc15',
-  CANCELLED: '#ef4444'
+  CANCELLED: '#ef4444',
+  DECLINED : '#b91c1c'
 }
 
 const STATUS_LABEL_KM = {
   PENDING  : 'កំពុងរង់ចាំ',
+  ASSIGNED : 'បានចាត់ចែង',
   ACCEPTED : 'បានព្រមទទួល',
   ON_ROAD  : 'កំពុងធ្វើដំណើរ',
   ARRIVING : 'ជិតដល់គោលដៅ',
   COMPLETED: 'បានបញ្ចប់',
   DELAYED  : 'យឺតយ៉ាវ',
-  CANCELLED: 'បានបោះបង់'
+  CANCELLED: 'បានបោះបង់',
+  DECLINED : 'បដិសេធ'
 }
 
-const statusColor = s => STATUS_COLORS[s] || '#94a3b8'
+const statusColor = s => STATUS_COLORS[String(s || '').toUpperCase()] || '#94a3b8'
 const statusLabel = s => STATUS_LABEL_KM[String(s || '').toUpperCase()] || s
 
 /* ───────── WEEKDAY LABELS (KH) ───────── */
@@ -124,15 +136,25 @@ const WEEKDAYS = [
 ]
 
 /* ───────── NAVIGATION ───────── */
-function nextMonth()  { currentMonth.value = currentMonth.value.add(1, 'month'); fetchMonth() }
-function prevMonth()  { currentMonth.value = currentMonth.value.subtract(1, 'month'); fetchMonth() }
-function goToday()    { currentMonth.value = dayjs(); fetchMonth() }
+function nextMonth()  {
+  currentMonth.value = currentMonth.value.add(1, 'month')
+  fetchMonth()
+}
+function prevMonth()  {
+  currentMonth.value = currentMonth.value.subtract(1, 'month')
+  fetchMonth()
+}
+function goToday()    {
+  currentMonth.value = dayjs()
+  fetchMonth()
+}
 
 /* ───────── DETAILS ───────── */
 function showDayDetails(d) {
   const dateStr = d.format('YYYY-MM-DD')
   const list = byDate.value[dateStr]
   if (!list?.length) {
+    // No bookings → jump directly to list view with that date
     router.push({ name: 'driver-car-booking', query: { date: dateStr } })
     return
   }
@@ -148,7 +170,7 @@ function showDayDetails(d) {
             onclick="window.__selectDriverBooking('${b._id}', '${dateStr}')"
           >
             <div><b>${b.employee?.name || b.employeeId}</b></div>
-            <div>🕓 ${b.timeStart} - ${b.timeEnd}</div>
+            <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
             <div>📍 ${(b.stops && b.stops[0]?.destination) || 'មិនមាន'}</div>
             <div>🚗 ${(b.assignment?.driverName || 'មិនទាន់ចាត់ចែង')} • <b>${statusLabel(b.status)}</b></div>
           </div>

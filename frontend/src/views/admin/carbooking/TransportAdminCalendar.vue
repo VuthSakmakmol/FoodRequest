@@ -13,7 +13,7 @@ const currentMonth = ref(dayjs())
 const loading = ref(false)
 const bookings = ref([])
 
-/* ───────── Computed ───────── */
+/* ───────── Computed (month, grid) ───────── */
 const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
 const startOfMonth = computed(() => currentMonth.value.startOf('month'))
 const endOfMonth   = computed(() => currentMonth.value.endOf('month'))
@@ -23,7 +23,7 @@ const endOfGrid    = computed(() => endOfMonth.value.endOf('week'))
 const days = computed(() => {
   const arr = []
   let d = startOfGrid.value
-  while (d.isBefore(endOfGrid.value) || d.isSame(endOfGrid.value, 'day')) {
+  while (d.isBefore(endOfGrid.value, 'day') || d.isSame(endOfGrid.value, 'day')) {
     arr.push(d)
     d = d.add(1, 'day')
   }
@@ -37,7 +37,7 @@ async function fetchMonth () {
   try {
     const { data } = await api.get('/admin/car-bookings', {
       headers: { 'x-role': 'ADMIN' },
-      // you can also pass month if your backend supports it:
+      // If your backend supports month filtering, enable this:
       // params: { month: currentMonth.value.format('YYYY-MM') }
     })
     bookings.value = Array.isArray(data) ? data : []
@@ -52,24 +52,36 @@ async function fetchMonth () {
 const byDate = computed(() => {
   const map = {}
   for (const b of bookings.value) {
-    const d = dayjs(b.tripDate || b.date).format('YYYY-MM-DD')
-    if (!map[d]) map[d] = []
-    map[d].push(b)
+    const raw = b.tripDate || b.date
+    if (!raw) continue   // guard against invalid date
+    const d = dayjs(raw)
+    if (!d.isValid()) continue
+    const key = d.format('YYYY-MM-DD')
+    if (!map[key]) map[key] = []
+    map[key].push(b)
   }
   return map
 })
 
-/* ───────── Status Colors ───────── */
+// small helper for template
+const listForDate = (d) => {
+  const k = d.format('YYYY-MM-DD')
+  return byDate.value[k] || []
+}
+
+/* ───────── Status Colors (aligned with system) ───────── */
 const statusColor = (s) =>
   ({
     PENDING:   '#94a3b8',
-    ASSIGNED:  '#64748b',
     ACCEPTED:  '#3b82f6',
     ON_ROAD:   '#06b6d4',
     ARRIVING:  '#10b981',
     COMPLETED: '#16a34a',
     DELAYED:   '#facc15',
     CANCELLED: '#ef4444',
+
+    // keep these in case some old data still uses them
+    ASSIGNED:  '#64748b',
     DECLINED:  '#b91c1c'
   }[s] || '#94a3b8')
 
@@ -87,12 +99,12 @@ function goToday () {
   fetchMonth()
 }
 
-/* ───────── Click Handler ───────── */
+/* ───────── Click Handler (route → AdminCarBooking) ───────── */
 function showDayDetails (d) {
   const dateStr = d.format('YYYY-MM-DD')
-  const list = byDate.value[dateStr]
+  const list = listForDate(d)
 
-  if (!list?.length) {
+  if (!list.length) {
     Swal.fire({
       icon: 'info',
       title: `No bookings on ${dateStr}`,
@@ -118,7 +130,7 @@ function showDayDetails (d) {
                 cursor:pointer
               "
                onclick="window.__selectBooking('${b._id}')">
-            <div><b>${b.employee?.name || b.employeeId}</b> (${b.category})</div>
+            <div><b>${b.employee?.name || b.employeeId || 'Unknown'}</b> (${b.category || 'Car'})</div>
             <div>🕓 ${b.timeStart || '--:--'} - ${b.timeEnd || '--:--'}</div>
             <div>📍 ${(b.stops && b.stops[0]?.destination) || 'N/A'}</div>
             <div>🚗 ${(b.assignment?.driverName || 'Unassigned')}</div>
@@ -152,12 +164,13 @@ onMounted(fetchMonth)
   <div class="calendar-wrapper">
     <!-- Header / toolbar -->
     <div class="calendar-hero">
-
       <div class="hero-controls">
         <button class="circle-btn" @click="prevMonth">
           <v-icon icon="mdi-chevron-left" size="20" />
         </button>
+
         <div class="month-label">{{ monthLabel }}</div>
+
         <button class="circle-btn" @click="nextMonth">
           <v-icon icon="mdi-chevron-right" size="20" />
         </button>
@@ -191,7 +204,7 @@ onMounted(fetchMonth)
             class="day-cell"
             :class="{
               today: d.isSame(dayjs(), 'day'),
-              otherMonth: !d.isSame(currentMonth.value, 'month')
+              otherMonth: !d.isSame(currentMonth, 'month')
             }"
             @click="showDayDetails(d)"
           >
@@ -199,9 +212,9 @@ onMounted(fetchMonth)
               {{ d.date() }}
             </div>
 
-            <div v-if="byDate[d.format('YYYY-MM-DD')]" class="bookings">
+            <div v-if="listForDate(d).length" class="bookings">
               <div
-                v-for="(b,i) in byDate[d.format('YYYY-MM-DD')]"
+                v-for="(b,i) in listForDate(d)"
                 :key="i"
                 class="booking-chip"
                 :style="{ backgroundColor: statusColor(b.status) }"
@@ -218,9 +231,15 @@ onMounted(fetchMonth)
     <div class="status-legend">
       <div
         v-for="(color, status) in {
-          PENDING:'#94a3b8', ASSIGNED:'#64748b', ACCEPTED:'#3b82f6',
-          ON_ROAD:'#06b6d4', ARRIVING:'#10b981', COMPLETED:'#16a34a',
-          DELAYED:'#facc15', CANCELLED:'#ef4444', DECLINED:'#b91c1c'
+          PENDING:'#94a3b8',
+          ACCEPTED:'#3b82f6',
+          ON_ROAD:'#06b6d4',
+          ARRIVING:'#10b981',
+          COMPLETED:'#16a34a',
+          DELAYED:'#facc15',
+          CANCELLED:'#ef4444',
+          ASSIGNED:'#64748b',
+          DECLINED:'#b91c1c'
         }"
         :key="status"
         class="legend-item"
@@ -250,22 +269,6 @@ onMounted(fetchMonth)
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-.hero-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.hero-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 700;
-  font-size: 1rem;
-}
-.hero-sub {
-  font-size: 0.85rem;
-  opacity: 0.95;
 }
 .hero-controls {
   display: flex;

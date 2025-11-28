@@ -162,38 +162,67 @@ watch([filtered, itemsPerPage], () => {
 })
 
 /* ───────── Realtime ───────── */
+// new booking created
 function onCreated(doc) {
-  if (!doc?.tripDate) return
-  if (selectedDate.value && doc.tripDate !== selectedDate.value) return
-  const exists = rows.value.some(x => String(x._id) === String(doc._id))
-  if (!exists) rows.value.push({ ...doc, stops: doc.stops || [], assignment: doc.assignment || {} })
+  // if this booking is for another date, ignore
+  if (doc?.tripDate && selectedDate.value && doc.tripDate !== selectedDate.value) return
+  // instead of pushing half data (no populated employee), just reload
+  loadSchedule()
 }
+
+// status change
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
 }
+
+// assign/change driver or messenger
 function onAssigned(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) {
-    it.assignment = {
-      ...(it.assignment || {}),
-      driverId: p.driverId ?? it.assignment?.driverId ?? '',
-      driverName: p.driverName ?? it.assignment?.driverName ?? '',
-      messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
-      messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
-      driverAck: 'PENDING',
-    }
-    if (p.status) it.status = p.status
-    if (p.category) it.category = p.category
-    // no auto ACCEPTED here – backend decides status
+  if (!it) return
+  it.assignment = {
+    ...(it.assignment || {}),
+    driverId: p.driverId ?? it.assignment?.driverId ?? '',
+    driverName: p.driverName ?? it.assignment?.driverName ?? '',
+    messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
+    messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
+    vehicleId: p.vehicleId ?? it.assignment?.vehicleId ?? '',
+    vehicleName: p.vehicleName ?? it.assignment?.vehicleName ?? '',
+    driverAck: 'PENDING',
+    messengerAck: it.assignment?.messengerAck || 'PENDING'
   }
+  if (p.status) it.status = p.status
+  if (p.category) it.category = p.category
 }
 
+// driver acknowledges
 function onDriverAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
 }
 
+// messenger acknowledges (future use in UI)
+function onMessengerAck(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (it) it.assignment = { ...(it.assignment || {}), messengerAck: p.response, messengerAckAt: p.at }
+}
+
+// booking fields updated (tripDate/time/category/notes/…)
+function onUpdated(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (!it) return
+  const patch = p?.patch || {}
+  Object.assign(it, patch)
+}
+
+// booking deleted
+function onDeleted(p) {
+  const id = String(p?.bookingId || '')
+  if (!id) return
+  rows.value = rows.value.filter(x => String(x._id) !== id)
+}
+
+/* lifecycle: subscribe + initial load */
 onMounted(() => {
   try { subscribeRoleIfNeeded({ role: 'ADMIN' }) } catch {}
   if (route.query.date) selectedDate.value = route.query.date
@@ -202,12 +231,19 @@ onMounted(() => {
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
   socket.on('carBooking:driverAck', onDriverAck)
+  socket.on('carBooking:messengerAck', onMessengerAck)
+  socket.on('carBooking:updated', onUpdated)
+  socket.on('carBooking:deleted', onDeleted)
 })
+
 onBeforeUnmount(() => {
   socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
   socket.off('carBooking:driverAck', onDriverAck)
+  socket.off('carBooking:messengerAck', onMessengerAck)
+  socket.off('carBooking:updated', onUpdated)
+  socket.off('carBooking:deleted', onDeleted)
 })
 
 watch([selectedDate, statusFilter, categoryFilter], loadSchedule)
@@ -478,7 +514,6 @@ async function saveEdit() {
     editLoading.value = false
   }
 }
-
 </script>
 
 <template>

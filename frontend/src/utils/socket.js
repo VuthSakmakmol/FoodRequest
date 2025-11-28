@@ -3,32 +3,51 @@ import { io } from 'socket.io-client'
 
 let socket = null
 let isConnected = false
+let authToken = ''
 
-export function getSocket(token) {
-  if (socket) return socket
+// ---- internal: create socket instance ----
+function createSocket() {
   const wsOrigin =
     import.meta.env.VITE_WS_ORIGIN ||
     import.meta.env.VITE_API_BASE ||
     `${location.protocol}//${location.hostname}:4333`
 
-  socket = io(wsOrigin, {
+  // initial token from localStorage (for page refresh)
+  authToken = authToken || localStorage.getItem('token') || ''
+
+  const s = io(wsOrigin, {
     transports: ['websocket'],
-    auth: token ? { token } : undefined,
+    auth: authToken ? { token: authToken } : undefined,
     reconnectionAttempts: Infinity,
-    reconnectionDelayMax: 8000,
+    reconnectionDelayMax: 8000
   })
 
-  socket.on('connect', () => { isConnected = true })
-  socket.on('disconnect', () => { isConnected = false })
+  s.on('connect', () => {
+    isConnected = true
+    // console.debug('[ws] connected', s.id)
+  })
 
-  // socket.onAny((ev, ...args) => console.debug('[ws<=]', ev, args))
+  s.on('disconnect', () => {
+    isConnected = false
+    // console.debug('[ws] disconnected')
+  })
 
-  setInterval(() => { try { socket.emit('ping:client', Date.now()) } catch {} }, 15000)
+  // light heartbeat
+  setInterval(() => {
+    try {
+      s.emit('ping:client', Date.now())
+    } catch {}
+  }, 15000)
 
-  return socket
+  return s
 }
 
-const s = getSocket()
+// ensure singleton
+if (!socket) {
+  socket = createSocket()
+}
+
+const s = socket
 export default s
 
 /* ---------- connect-aware joins ---------- */
@@ -39,12 +58,37 @@ const joinedCompanies = new Set()
 
 function waitConnected() {
   return new Promise((resolve) => {
-    if (isConnected) return resolve()
-    const onConnect = () => { s.off('connect', onConnect); resolve() }
+    if (isConnected && s.connected) return resolve()
+    const onConnect = () => {
+      s.off('connect', onConnect)
+      resolve()
+    }
     s.on('connect', onConnect)
   })
 }
 
+/**
+ * Update socket auth token and reconnect with the new JWT.
+ * Call this from auth store after login/restore, and on logout with ''.
+ */
+export function setSocketAuthToken(token) {
+  authToken = token || ''
+  if (!socket) {
+    socket = createSocket()
+    return
+  }
+
+  // attach token to next handshake
+  socket.auth = authToken ? { ...(socket.auth || {}), token: authToken } : {}
+
+  // force a reconnect so server sees new JWT
+  if (socket.connected) {
+    socket.disconnect()
+  }
+  socket.connect()
+}
+
+/* ---------- ROLE rooms (ADMIN, CHEF, DRIVER, MESSENGER) ---------- */
 export async function subscribeRole(role) {
   role = String(role || '').toUpperCase()
   if (!role || subscribedRoles.has(role)) return
@@ -61,6 +105,7 @@ export async function unsubscribeRole(role) {
   subscribedRoles.delete(role)
 }
 
+/* ---------- BOOKING rooms (for driver/messenger live status) ---------- */
 export async function subscribeBookingRooms(ids = []) {
   await waitConnected()
   const uniq = Array.from(new Set(ids.map(String).filter(Boolean)))
@@ -69,6 +114,7 @@ export async function subscribeBookingRooms(ids = []) {
     s.emit('subscribe', { bookingId: id }, () => {})
     joinedBookings.add(id)
   })
+  // return cleanup function
   return async () => {
     await waitConnected()
     uniq.forEach((id) => {
@@ -79,6 +125,7 @@ export async function subscribeBookingRooms(ids = []) {
   }
 }
 
+/* ---------- EMPLOYEE + COMPANY rooms (for employee/my-booking & dashboards) ---------- */
 export async function subscribeEmployeeIfNeeded(employeeId) {
   const id = String(employeeId || '')
   if (!id || joinedEmployees.has(id)) return
@@ -95,6 +142,7 @@ export async function subscribeCompanyIfNeeded(companyId) {
   joinedCompanies.add(id)
 }
 
+/* ---------- small helpers ---------- */
 export function onSocket(event, handler) {
   s.on(event, handler)
   return () => s.off(event, handler)

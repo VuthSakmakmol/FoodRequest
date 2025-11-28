@@ -134,7 +134,7 @@ const headers = computed(() => [
   { title: 'ផ្លូវដំណើរ',     key: 'itinerary' },
   { title: 'អ្នកដំណើរ',      key: 'passengers', width: 70,  align: 'center' },
   { title: 'ស្ថានភាព',      key: 'status',     width: 150, align: 'end' },
-  { title: roleLabel.value,   key: 'driverAck',  width: 150, align: 'end' },
+  { title: roleLabel.value,   key: 'driverAck',  width: 150, align: 'end' }, // slot name stays driverAck
   { title: '',                key: 'actions',    width: 330, align: 'end' },
 ])
 
@@ -355,6 +355,7 @@ function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
 }
+
 function onAssigned(p) {
   const bookingId = String(p?.bookingId || '')
   if (!bookingId) return
@@ -397,7 +398,6 @@ function onAssigned(p) {
   }
 }
 
-
 function onAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (!it) return
@@ -430,16 +430,17 @@ onMounted(() => {
   loadList()
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
-  socket.on('carBooking:driverAck', onAck)
+  // 🔥 Messenger view should only react to messenger ack
   socket.on('carBooking:messengerAck', onAck)
 })
+
 onBeforeUnmount(() => {
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
-  socket.off('carBooking:driverAck', onAck)
   socket.off('carBooking:messengerAck', onAck)
   if (typeof leavePreviousRooms === 'function') leavePreviousRooms()
 })
+
 watch([selectedDate, statusFilter], loadList)
 
 const detailOpen = ref(false)

@@ -1,3 +1,4 @@
+// backend/controllers/transportation/transportRecurring.controller.js
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const tz = require('dayjs/plugin/timezone');
@@ -9,6 +10,7 @@ const CarBooking = require('../../models/transportation/CarBooking');
 const { enumerateLocalDates, padTimeHHMM } = require('../../utils/datetime');
 const { getHolidaySet, isSunday } = require('../../utils/holidays');
 const { notify } = require('../../services/transport.telegram.notify');
+const { broadcastCarBooking, ROOMS, emitToRoom } = require('../../utils/realtime');
 
 const ZONE = 'Asia/Phnom_Penh';
 const MAX_DAYS = Number(process.env.MAX_RECURRING_DAYS || 30);
@@ -26,6 +28,7 @@ function addMinutes(hhmm, minutes = 60) {
 /* CREATE SERIES (and materialize CarBooking docs, skipping holidays/Sundays) */
 async function createSeries(req, res) {
   try {
+    const io = req.io;
     const body = { ...(req.body || {}) };
 
     // defaults / normalization
@@ -114,6 +117,20 @@ async function createSeries(req, res) {
         status: 'PENDING'
       });
       createdIds.push(doc._id);
+
+      // 🔄 Realtime: mimic shape.created in carBooking.controller
+      if (io) {
+        const payload = {
+          _id: String(doc._id),
+          employeeId: doc.employeeId,
+          category: doc.category,
+          tripDate: doc.tripDate,
+          timeStart: doc.timeStart,
+          timeEnd: doc.timeEnd,
+          status: doc.status,
+        };
+        broadcastCarBooking(io, doc, 'carBooking:created', payload);
+      }
     }
 
     // notify (best effort)
@@ -172,6 +189,7 @@ async function preview(req, res) {
 /* CANCEL remaining future bookings in a recurring series */
 async function cancelRemaining(req, res) {
   try {
+    const io = req.io;
     const { id } = req.params;
     const series = await Series.findById(id);
     if (!series) return res.status(404).json({ ok: false, error: 'Series not found' });
@@ -185,13 +203,29 @@ async function cancelRemaining(req, res) {
       { $set: { status: 'CANCELLED', notes: 'Cancelled by recurring series' } }
     );
 
-    try { 
-      await notify('SERIES_CANCELLED', { seriesId: id, affected: upd.modifiedCount || 0 }); 
+    const affected = upd.modifiedCount || 0;
+
+    // 🔄 Realtime summary for admins + original requester
+    if (io) {
+      const payload = { seriesId: id, affected };
+
+      // All admins can refresh their calendars
+      emitToRoom(io, ROOMS.ADMINS, 'recurring:seriesCancelled', payload);
+
+      // Original employee (creator of the series)
+      const empId = series.createdByEmp?.employeeId || '';
+      if (empId) {
+        emitToRoom(io, ROOMS.EMPLOYEE(empId), 'recurring:seriesCancelled', payload);
+      }
+    }
+
+    try {
+      await notify('SERIES_CANCELLED', { seriesId: id, affected });
     } catch (err) {
       console.warn('[notify SERIES_CANCELLED failed]', err.message);
     }
 
-    return res.json({ ok: true, affected: upd.modifiedCount || 0 });
+    return res.json({ ok: true, affected });
   } catch (e) {
     return res.status(400).json({ ok: false, error: e.message });
   }

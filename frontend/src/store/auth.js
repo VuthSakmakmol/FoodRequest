@@ -1,7 +1,7 @@
 // src/store/auth.js
 import { defineStore } from 'pinia'
 import api from '@/utils/api'
-import socket, { subscribeRole, unsubscribeRole } from '@/utils/socket'
+import socket, { subscribeRole, unsubscribeRole, setSocketAuthToken } from '@/utils/socket'
 
 export const useAuth = defineStore('auth', {
   state: () => ({
@@ -29,10 +29,13 @@ export const useAuth = defineStore('auth', {
       localStorage.setItem('token', this.token)
       localStorage.setItem('user', JSON.stringify(this.user))
 
-      // attach token for subsequent requests
+      // attach token for HTTP
       this._applyTokenHeader(this.token)
 
-      // join a role room for realtime updates (ADMIN, CHEF, DRIVER, MESSENGER)
+      // 🔥 also attach token for WebSocket
+      setSocketAuthToken(this.token)
+
+      // join a role room for realtime updates
       if (this.user?.role) {
         subscribeRole(this.user.role)
       }
@@ -48,10 +51,10 @@ export const useAuth = defineStore('auth', {
       }
       try {
         this._applyTokenHeader(this.token)
+        setSocketAuthToken(this.token) // in case of refresh
+
         const { data } = await api.get('/auth/me')
         this.user = data
-
-        // persist updated user
         localStorage.setItem('user', JSON.stringify(this.user))
 
         if (this.user?.role) subscribeRole(this.user.role)
@@ -71,6 +74,7 @@ export const useAuth = defineStore('auth', {
       if (storedToken) {
         this.token = storedToken
         this._applyTokenHeader(this.token)
+        setSocketAuthToken(this.token)  // 👈 make sure WS has token too
       }
 
       if (storedUser) {
@@ -92,14 +96,7 @@ export const useAuth = defineStore('auth', {
       localStorage.removeItem('user')
 
       this._applyTokenHeader('')
-
-      // Optional: if you kept manual emits, make them exhaustive, or remove entirely
-      // try {
-      //   socket.emit('unsubscribe', { role: 'ADMIN' })
-      //   socket.emit('unsubscribe', { role: 'CHEF' })
-      //   socket.emit('unsubscribe', { role: 'DRIVER' })
-      //   socket.emit('unsubscribe', { role: 'MESSENGER' })
-      // } catch {}
+      setSocketAuthToken('')  // 👈 drop JWT from socket
     }
   }
 })
