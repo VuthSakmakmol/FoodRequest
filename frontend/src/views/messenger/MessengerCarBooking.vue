@@ -4,139 +4,252 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
 import { useRoute } from 'vue-router'
-import { useDisplay } from 'vuetify'
 
-/* ───────── Responsive helper (for footer) ───────── */
-const { smAndDown } = useDisplay()
-const isMobile = computed(() => smAndDown.value)
-
-/* ───────── State ───────── */
+/* ─────────────── STATE ─────────────── */
 const loading = ref(false)
 const error   = ref('')
 const rows    = ref([])
 
-const route        = useRoute()
-const focusId      = ref(route.query.focus || '')
-const focusDate    = ref(route.query.date || '')
+const route = useRoute()
+
 const selectedDate = ref('')
 const statusFilter = ref('ALL')
 const qSearch      = ref('')
 
-/* ───────── Identity (Messenger) ───────── */
-function readCookie (name) {
+/* Khmer status options for filter (values still English for backend) */
+const statusOptions = [
+  { label: 'ទាំងអស់', value: 'ALL' },
+  { label: 'កំពុងរង់ចាំ', value: 'PENDING' },
+  { label: 'បានចាត់ចែង', value: 'ASSIGNED' },
+  { label: 'បានព្រមទទួល', value: 'ACCEPTED' },
+  { label: 'កំពុងធ្វើដំណើរ', value: 'ON_ROAD' },
+  { label: 'ជិតដល់គោលដៅ', value: 'ARRIVING' },
+  { label: 'បានបញ្ចប់', value: 'COMPLETED' },
+  { label: 'យឺតយ៉ាវ', value: 'DELAYED' },
+  { label: 'បានបោះបង់', value: 'CANCELLED' },
+  { label: 'បដិសេធ', value: 'DECLINED' },
+]
+
+/* ─────────────── IDENTITY DETECTION (MESSENGER) ─────────────── */
+function readCookie(name) {
   const m = document.cookie.match(
     new RegExp('(?:^|; )' + name.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)')
   )
   return m ? decodeURIComponent(m[1]) : ''
 }
-function detectIdentity () {
-  const sources = [
-    localStorage.getItem('loginId'),
-    sessionStorage.getItem('loginId'),
-    readCookie('loginId')
-  ].filter(Boolean)
-  const loginId = sources[0] || ''
-  const role = (
-    localStorage.getItem('role') ||
-    sessionStorage.getItem('role') ||
-    readCookie('role') ||
-    'MESSENGER'
-  ).toUpperCase()
-  return { loginId, role }
-}
-const identity = ref(detectIdentity())
 
+function detectIdentity() {
+  const found = []
+  const tryParse = src => {
+    try {
+      const u = JSON.parse(localStorage.getItem(src) || sessionStorage.getItem(src) || '{}')
+      if (u?.loginId || u?.user?.loginId)
+        found.push({
+          loginId: String(u.loginId || u?.user?.loginId),
+          role: String(u.role || u?.user?.role || '').toUpperCase(),
+        })
+    } catch {}
+  }
+
+  tryParse('auth:user')
+
+  const lsLogin = localStorage.getItem('loginId')
+  const lsRole = (localStorage.getItem('role') || '').toUpperCase()
+  if (lsLogin || lsRole) found.push({ loginId: String(lsLogin || ''), role: lsRole })
+
+  const ssLogin = sessionStorage.getItem('loginId')
+  const ssRole = (sessionStorage.getItem('role') || '').toUpperCase()
+  if (ssLogin || ssRole) found.push({ loginId: String(ssLogin || ''), role: ssRole })
+
+  const ckLogin = readCookie('loginId')
+  const ckRole = (readCookie('role') || '').toUpperCase()
+  if (ckLogin || ckRole) found.push({ loginId: String(ckLogin || ''), role: ckRole })
+
+  for (let i = 0; i < localStorage.length; i++) {
+    try {
+      const v = JSON.parse(localStorage.getItem(localStorage.key(i)) || 'null')
+      const candLogin = v?.loginId || v?.user?.loginId || v?.me?.loginId
+      const candRole = (v?.role || v?.user?.role || v?.me?.role || '').toUpperCase()
+      if (candLogin && candRole) {
+        found.push({ loginId: String(candLogin), role: candRole })
+        break
+      }
+    } catch {}
+  }
+  return found.find(x => x.loginId) || { loginId: '', role: '' }
+}
+
+/* Force role to MESSENGER for this view (but keep detected loginId) */
+const identity = ref({
+  ...detectIdentity(),
+  role: 'MESSENGER'
+})
+
+/* Dev override bar */
 const devLoginId = ref('')
-function useDevIdentity () {
+const devRole = ref('MESSENGER')
+function useDevIdentity() {
   if (!devLoginId.value) return
   localStorage.setItem('loginId', devLoginId.value)
-  localStorage.setItem('role', 'MESSENGER')
-  identity.value = { loginId: devLoginId.value, role: 'MESSENGER' }
+  localStorage.setItem('role', devRole.value)
+  identity.value = { loginId: devLoginId.value, role: devRole.value }
   loadList()
 }
 
-/* ───────── Columns ───────── */
-const headers = [
-  { title: 'Time',          key: 'time',          width: 150, sortable: true },
-  { title: 'Category',      key: 'category',      width: 120 },
-  { title: 'Requester',     key: 'requester',     width: 220, sortable: true },
-  { title: 'Itinerary',     key: 'itinerary' },
-  { title: 'Pax',           key: 'passengers',    width: 70,  align: 'center' },
-  { title: 'Status',        key: 'status',        width: 150, align: 'end' },
-  { title: 'Messenger Ack', key: 'messengerAck',  width: 180, align: 'end' },
-  { title: '',              key: 'actions',       width: 260, align: 'end', sortable: false }
-]
-
-/* ───────── Icon + Color Maps ───────── */
-const statusColor = s => ({
-  PENDING:'grey', ASSIGNED:'blue-grey', ACCEPTED:'primary', ON_ROAD:'info',
-  ARRIVING:'teal', COMPLETED:'success', DELAYED:'warning', CANCELLED:'error', DECLINED:'error'
-}[s] || 'grey')
-
-const statusFa = s => ({
-  PENDING:'fa-solid fa-hourglass-half',
-  ASSIGNED:'fa-solid fa-user-check',
-  ACCEPTED:'fa-solid fa-circle-check',
-  ON_ROAD:'fa-solid fa-truck-fast',
-  ARRIVING:'fa-solid fa-flag-checkered',
-  COMPLETED:'fa-solid fa-check-double',
-  DELAYED:'fa-solid fa-triangle-exclamation',
-  CANCELLED:'fa-solid fa-ban',
-  DECLINED:'fa-solid fa-circle-xmark'
-}[s] || 'fa-solid fa-hourglass-half')
-
-const ackColor = s => ({ PENDING:'grey', ACCEPTED:'success', DECLINED:'error' }[s] || 'grey')
-const ackFa = s => ({
-  PENDING:'fa-solid fa-circle-question',
-  ACCEPTED:'fa-solid fa-thumbs-up',
-  DECLINED:'fa-solid fa-thumbs-down'
-}[s] || 'fa-solid fa-circle-question')
-
-function prettyStops (stops = []) {
-  if (!stops.length) return '—'
-  return stops
-    .map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination)
-    .join(' → ')
+/* ─────────────── LABEL MAPS (KH) ─────────────── */
+const STATUS_LABEL_KM = {
+  PENDING : 'កំពុងរង់ចាំ',
+  ASSIGNED: 'បានចាត់ចែង',
+  ACCEPTED: 'បានព្រមទទួល',
+  ON_ROAD : 'កំពុងធ្វើដំណើរ',
+  ARRIVING: 'ជិតដល់គោលដៅ',
+  COMPLETED: 'បានបញ្ចប់',
+  DELAYED : 'យឺតយ៉ាវ',
+  CANCELLED: 'បានបោះបង់',
+  DECLINED: 'បដិសេធ',
 }
 
-/* ───────── Load List ───────── */
+const ACK_LABEL_KM = {
+  PENDING : 'មិនទាន់ឆ្លើយ',
+  ACCEPTED: 'ព្រមទទួល',
+  DECLINED: 'បដិសេធ',
+}
+
+const CATEGORY_LABEL_KM = {
+  Car  : 'ឡាន',
+  Motor: 'ម៉ូតូ',
+}
+
+const statusLabel   = s => STATUS_LABEL_KM[String(s || '').toUpperCase()] || s
+const ackLabel      = s => ACK_LABEL_KM[String(s || '').toUpperCase()] || s
+const categoryLabel = c => CATEGORY_LABEL_KM[c] || c
+
+/* ─────────────── TABLE HEADERS ─────────────── */
+const roleLabel = computed(() => 'អ្នកបើកម៉ូតូ')
+
+const headers = computed(() => [
+  { title: 'ម៉ោង',           key: 'time',       width: 160 },
+  { title: 'ប្រភេទ',         key: 'category',   width: 120 },
+  { title: 'អ្នកស្នើសុំ',    key: 'requester',  width: 230 },
+  { title: 'ផ្លូវដំណើរ',     key: 'itinerary' },
+  { title: 'អ្នកដំណើរ',      key: 'passengers', width: 70,  align: 'center' },
+  { title: 'ស្ថានភាព',      key: 'status',     width: 150, align: 'end' },
+  { title: roleLabel.value,   key: 'driverAck',  width: 150, align: 'end' },
+  { title: '',                key: 'actions',    width: 330, align: 'end' },
+])
+
+/* ─────────────── ICONS / COLORS (MDI) ─────────────── */
+const statusColor = s =>
+  ({
+    PENDING: 'grey',
+    ACCEPTED: 'primary',
+    ON_ROAD: 'info',
+    ARRIVING: 'teal',
+    COMPLETED: 'success',
+    DELAYED: 'warning',
+    CANCELLED: 'error',
+    DECLINED: 'error',
+    ASSIGNED: 'primary',
+  }[s] || 'grey')
+
+const statusIcon = s =>
+  ({
+    PENDING:   'mdi-timer-sand',
+    ACCEPTED:  'mdi-check-circle-outline',
+    ON_ROAD:   'mdi-truck-fast',
+    ARRIVING:  'mdi-flag-checkered',
+    COMPLETED: 'mdi-check-all',
+    DELAYED:   'mdi-alert-outline',
+    CANCELLED: 'mdi-cancel',
+    DECLINED:  'mdi-close-circle-outline',
+    ASSIGNED:  'mdi-account-badge',
+  }[s] || 'mdi-timer-sand')
+
+const ackColor = s => ({ PENDING: 'grey', ACCEPTED: 'success', DECLINED: 'error' }[s] || 'grey')
+const ackIcon = s =>
+  ({
+    PENDING:  'mdi-help-circle-outline',
+    ACCEPTED: 'mdi-thumb-up-outline',
+    DECLINED: 'mdi-thumb-down-outline',
+  }[s] || 'mdi-help-circle-outline')
+
+/* destination text helper */
+function destText(s = {}) {
+  return s.destination === 'Other'
+    ? s.destinationOther || 'Other'
+    : s.destination
+}
+
+/* Khmer-friendly multi-stop display */
+function prettyStops(stops = []) {
+  if (!stops.length) return '—'
+  return stops
+    .map((s, i) => `#${i + 1}: ${destText(s)}`)
+    .join(' • ')
+}
+
+function absUrl(u) {
+  const base = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
+  if (!u) return ''
+  if (/^https?:\/\//i.test(u)) return u
+  return `${base}${u.startsWith('/') ? '' : '/'}${u}`
+}
+
+/* ─────────────── LOAD BOOKINGS ─────────────── */
 let leavePreviousRooms = null
-async function loadList () {
+async function loadList() {
   loading.value = true
   error.value = ''
   try {
     const { loginId, role } = identity.value || { loginId: '', role: '' }
-    const params = { messengerId: loginId, role }
+    const isMessenger = role === 'MESSENGER'
+    const basePath = isMessenger ? '/messenger/car-bookings' : '/driver/car-bookings'
+    const params = {
+      role,
+      loginId,
+      messengerId: loginId // support old style if backend uses this
+    }
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
 
-    const { data } = await api.get('/messenger/car-bookings', {
+    const { data } = await api.get(basePath, {
       params,
-      headers: { 'x-login-id': loginId, 'x-role': 'MESSENGER' }
+      headers: { 'x-login-id': loginId || '', 'x-role': role || '' },
     })
 
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],
-      assignment: x.assignment || {}
+      assignment: x.assignment || {},
     }))
 
-    if (typeof leavePreviousRooms === 'function') await leavePreviousRooms()
-    leavePreviousRooms = await subscribeBookingRooms(rows.value.map(r => r._id))
+    const ids = rows.value.map(r => String(r._id)).filter(Boolean)
+    if (typeof leavePreviousRooms === 'function') {
+      await leavePreviousRooms()
+      leavePreviousRooms = null
+    }
+    leavePreviousRooms = await subscribeBookingRooms(ids)
   } catch (e) {
-    error.value = e?.response?.data?.message || e?.message || 'Failed to load bookings'
+    error.value = e?.response?.data?.message || e?.message || 'មិនអាចផ្ទុកទិន្នន័យបាន'
   } finally {
     loading.value = false
   }
 }
 
-/* ───────── Filtered list ───────── */
+/* ─────────────── FILTERED / SORTED ─────────────── */
 const filtered = computed(() =>
   (rows.value || [])
     .filter(r => {
       const term = qSearch.value.trim().toLowerCase()
       if (!term) return true
-      const hay = [r.employee?.name, r.employeeId, prettyStops(r.stops)]
+      const hay = [
+        r.employee?.name,
+        r.employee?.department,
+        r.employeeId,
+        r.purpose,
+        r.notes,
+        prettyStops(r.stops),
+      ]
         .join(' ')
         .toLowerCase()
       return hay.includes(term)
@@ -144,166 +257,250 @@ const filtered = computed(() =>
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 )
 
-/* ───────── Pagination (fixed page size, no selector) ───────── */
-const page         = ref(1)
-const itemsPerPage = ref(10)
-const pageCount    = computed(() => {
-  const n = Math.ceil((filtered.value?.length || 0) / (itemsPerPage.value || 10))
+/* ─────────────── SIMPLE PAGINATION ─────────────── */
+const page = ref(1)
+const itemsPerPage = 10
+
+const pageCount = computed(() => {
+  const n = Math.ceil((filtered.value?.length || 0) / itemsPerPage)
   return Math.max(1, n || 1)
 })
 const totalItems = computed(() => filtered.value?.length || 0)
 const rangeStart = computed(() =>
-  totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0
+  totalItems.value ? (page.value - 1) * itemsPerPage + 1 : 0
 )
 const rangeEnd = computed(() =>
-  Math.min(page.value * itemsPerPage.value, totalItems.value)
+  Math.min(page.value * itemsPerPage, totalItems.value)
 )
 
-watch([filtered, itemsPerPage], () => {
+watch(filtered, () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
 
-/* ───────── Actions ───────── */
+/* ─────────────── ACTION HELPERS ─────────────── */
+const isMine = it =>
+  String(
+    it?.assignment?.messengerId || it?.messengerId || ''
+  ).toLowerCase() === String(identity.value?.loginId || '').toLowerCase()
+
+const canRespond = it => {
+  const ack = String(it?.assignment?.messengerAck || '').toUpperCase()
+  return isMine(it) && !['ACCEPTED', 'DECLINED'].includes(ack)
+}
+
+const terminalStates = ['CANCELLED', 'COMPLETED']
+// Messenger can NOT cancel; only move along journey statuses
+const ALLOWED_NEXT = {
+  ACCEPTED: ['ON_ROAD', 'DELAYED'],
+  ON_ROAD: ['ARRIVING', 'DELAYED'],
+  ARRIVING: ['COMPLETED', 'DELAYED'],
+  DELAYED: ['ON_ROAD', 'ARRIVING'],
+}
+const nextStatusesFor = from => ALLOWED_NEXT[String(from || '').toUpperCase()] || []
+
+const canChangeStatus = it =>
+  isMine(it) &&
+  (it?.assignment?.messengerAck === 'ACCEPTED') &&
+  !terminalStates.includes(String(it?.status || '').toUpperCase())
+
+/* ─────────────── ACTIONS ─────────────── */
 const actLoading = ref('')
-const snack      = ref(false)
-const snackText  = ref('')
+const statusLoading = ref('')
+const snack = ref(false)
+const snackText = ref('')
 
-async function updateStatus (item, newStatus) {
+async function sendAck(item, response) {
   if (!item?._id || actLoading.value) return
   actLoading.value = String(item._id)
   try {
     const { loginId, role } = identity.value || { loginId: '', role: '' }
-    await api.patch(
-      `/messenger/car-bookings/${item._id}/status`,
-      { status: newStatus },
-      { headers: { 'x-login-id': loginId, 'x-role': role } }
-    )
-    item.status = newStatus
-    snackText.value = `Status updated → ${newStatus}`
+    const path = `/messenger/car-bookings/${item._id}/ack`
+
+    await api.post(path, { response }, { headers: { 'x-login-id': loginId, 'x-role': role } })
+    item.assignment = { ...item.assignment, messengerAck: response, messengerAckAt: new Date() }
+
+    snackText.value = response === 'ACCEPTED'
+      ? 'អ្នកបានព្រមទទួលភារកិច្ចនេះ។'
+      : 'បានកត់ត្រាការឆ្លើយតបរួចរាល់។'
     snack.value = true
   } catch (e) {
-    snackText.value = e?.response?.data?.message || e?.message || 'Update failed'
+    snackText.value = e?.response?.data?.message || e?.message || 'សកម្មភាពបរាជ័យ'
     snack.value = true
   } finally {
     actLoading.value = ''
   }
 }
 
-async function sendAck (item, response) {
-  if (!item?._id || actLoading.value) return
-  actLoading.value = String(item._id)
+async function setMessengerStatus(item, nextStatus) {
+  if (!item?._id || statusLoading.value) return
+  statusLoading.value = String(item._id)
   try {
     const { loginId, role } = identity.value || { loginId: '', role: '' }
-    await api.post(
-      `/messenger/car-bookings/${item._id}/ack`,
-      { response },
-      { headers: { 'x-login-id': loginId, 'x-role': role } }
-    )
-    item.assignment = {
-      ...(item.assignment || {}),
-      messengerAck: response,
-      messengerAckAt: new Date().toISOString()
-    }
-    snackText.value = response === 'ACCEPTED' ? 'Acknowledged.' : 'Response recorded.'
+    const path = `/messenger/car-bookings/${item._id}/status`
+    await api.patch(path, { status: nextStatus }, { headers: { 'x-login-id': loginId, 'x-role': role } })
+    item.status = nextStatus
+    snackText.value = `បានធ្វើបច្ចុប្បន្នភាពស្ថានភាពទៅ ${statusLabel(nextStatus)}។`
     snack.value = true
   } catch (e) {
-    snackText.value = e?.response?.data?.message || e?.message || 'Action failed'
+    await loadList()
+    snackText.value = e?.response?.data?.message || e?.message || 'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន'
     snack.value = true
   } finally {
-    actLoading.value = ''
+    statusLoading.value = ''
   }
 }
 
-/* ───────── Highlight row from calendar ───────── */
-function scrollToBooking (id) {
-  setTimeout(() => {
-    const el = document.querySelector(`[data-row-id="${id}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.classList.add('highlight-row')
-      setTimeout(() => el.classList.remove('highlight-row'), 2000)
+/* ─────────────── SOCKET HANDLERS ─────────────── */
+function onStatus(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (it) it.status = p.status
+}
+function onAssigned(p) {
+  const bookingId = String(p?.bookingId || '')
+  if (!bookingId) return
+
+  const myLoginId = String(identity.value?.loginId || '').toLowerCase()
+  const newAssignee =
+    String(p?.messengerId || p?.driverId || '').toLowerCase()
+
+  const idx = rows.value.findIndex(x => String(x._id) === bookingId)
+
+  // If this booking is already in my list
+  if (idx >= 0) {
+    const it = rows.value[idx]
+
+    // 👉 Case 1: booking moved to another messenger/driver → remove from my list
+    if (newAssignee && newAssignee !== myLoginId) {
+      rows.value.splice(idx, 1)
+      return
     }
-  }, 300)
+
+    // 👉 Case 2: still mine, just update info
+    it.assignment = {
+      ...it.assignment,
+      driverId: p.driverId ?? it.assignment?.driverId ?? '',
+      driverName: p.driverName ?? it.assignment?.driverName ?? '',
+      messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
+      messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
+    }
+    if (p.status) it.status = p.status
+    if (p.tripDate) it.tripDate = p.tripDate
+    if (p.timeStart) it.timeStart = p.timeStart
+    if (p.timeEnd) it.timeEnd = p.timeEnd
+    return
+  }
+
+  // If booking is NOT in my current list,
+  // but now assigned to me → reload my assignments
+  if (newAssignee && newAssignee === myLoginId) {
+    loadList()
+  }
 }
 
-/* ───────── Lifecycle ───────── */
+
+function onAck(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (!it) return
+  if (p.response)
+    it.assignment = {
+      ...it.assignment,
+      messengerAck: p.response,
+    }
+}
+
+/* ─────────────── LIFECYCLE ─────────────── */
 onMounted(() => {
-  subscribeRoleIfNeeded({ role: 'MESSENGER' })
-  if (focusDate.value) selectedDate.value = focusDate.value
-  loadList().then(() => {
-    if (focusId.value) scrollToBooking(focusId.value)
+  subscribeRoleIfNeeded(identity.value)
+  if (route.query?.date) {
+    selectedDate.value = String(route.query.date)
+  }
+
+  watch(rows, () => {
+    const focusId = route.query?.focus
+    if (focusId) {
+      const el = document.querySelector(`[data-id="${focusId}"]`)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add('highlighted')
+        setTimeout(() => el.classList.remove('highlighted'), 2500)
+      }
+    }
   })
+
+  loadList()
+  socket.on('carBooking:status', onStatus)
+  socket.on('carBooking:assigned', onAssigned)
+  socket.on('carBooking:driverAck', onAck)
+  socket.on('carBooking:messengerAck', onAck)
 })
 onBeforeUnmount(() => {
+  socket.off('carBooking:status', onStatus)
+  socket.off('carBooking:assigned', onAssigned)
+  socket.off('carBooking:driverAck', onAck)
+  socket.off('carBooking:messengerAck', onAck)
   if (typeof leavePreviousRooms === 'function') leavePreviousRooms()
 })
-
 watch([selectedDate, statusFilter], loadList)
+
+const detailOpen = ref(false)
+const detailItem = ref(null)
+function showDetails(item) {
+  detailItem.value = item
+  detailOpen.value = true
+}
 </script>
 
 <template>
-  <!-- edge on phone, light padding desktop -->
-  <v-container fluid class="messenger-page">
-    <!-- Dev identity helper (for testing without SSO) -->
-    <div
-      v-if="!identity?.loginId"
-      class="d-flex align-center mb-2"
-      style="gap:8px;"
-    >
-      <v-text-field
-        v-model="devLoginId"
-        label="loginId"
-        density="compact"
-        variant="outlined"
-        hide-details
-        style="max-width:220px"
-      />
+  <v-container fluid class="pa-2">
+    <!-- identity bar (dev only) -->
+    <div v-if="!identity?.loginId" class="d-flex align-center mb-2" style="gap:8px;">
+      <v-text-field v-model="devLoginId" label="loginId" density="compact" variant="outlined" style="max-width:220px;" hide-details />
+      <v-select :items="['MESSENGER']" v-model="devRole" density="compact" variant="outlined" hide-details style="max-width:160px;" />
       <v-btn color="primary" size="small" @click="useDevIdentity">USE</v-btn>
     </div>
 
-    <v-sheet class="messenger-section pa-0" rounded="lg">
-      <!-- Hero / header -->
-      <div class="messenger-header">
-        <div class="hdr-title">
+    <v-sheet class="driver-section pa-0" rounded="lg">
+      <div class="driver-header">
+        <div class="hdr-left">
+          <div class="hdr-title">
+            <v-icon icon="mdi-motorbike" size="18" />
+            <span>បញ្ជីការកក់ម៉ូតូ / ម៉េសេនជឺរ</span>
+          </div>
         </div>
-        <v-btn
-          size="small"
-          :loading="loading"
-          color="deep-orange-darken-2"
-          variant="elevated"
-          class="hdr-refresh"
-          @click="loadList"
-        >
-          <i class="fa-solid fa-rotate-right mr-1"></i>
-          Refresh
-        </v-btn>
+        <div class="hdr-actions">
+          <v-btn size="small" :loading="loading" @click="loadList">
+            <v-icon icon="mdi-sync" size="16" class="mr-1" /> ផ្ទុកឡើងវិញ
+          </v-btn>
+        </div>
       </div>
 
-      <div class="inner-pad pb-3 pt-2">
+      <div class="px-3 pb-3 pt-2">
         <!-- Filters -->
         <v-card flat class="soft-card mb-3">
           <v-card-title class="subhdr">
-            <i class="fa-solid fa-filter"></i>
-            <span>Filters</span>
+            <v-icon icon="mdi-filter-variant" size="18" /><span>តម្រង</span>
+            <v-spacer />
           </v-card-title>
-          <v-card-text class="pt-1">
+          <v-card-text class="pt-0">
             <v-row dense>
               <v-col cols="12" md="3">
                 <v-text-field
                   v-model="selectedDate"
                   type="date"
-                  label="Date (optional)"
+                  label="កាលបរិច្ឆេទ (ស្រេចចិត្ត)"
                   variant="outlined"
                   density="compact"
-                  clearable
                   hide-details
+                  clearable
                 />
               </v-col>
               <v-col cols="6" md="3">
                 <v-select
-                  :items="['ALL','PENDING','ASSIGNED','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED','DECLINED']"
+                  :items="statusOptions"
                   v-model="statusFilter"
-                  label="Status"
+                  item-title="label"
+                  item-value="value"
+                  label="ស្ថានភាព"
                   variant="outlined"
                   density="compact"
                   hide-details
@@ -312,14 +509,14 @@ watch([selectedDate, statusFilter], loadList)
               <v-col cols="12" md="6">
                 <v-text-field
                   v-model="qSearch"
-                  label="Search requester / destination"
+                  label="ស្វែងរកអ្នកស្នើសុំ / គោលបំណង / ទីតាំង"
                   variant="outlined"
                   density="compact"
-                  clearable
                   hide-details
+                  clearable
                 >
                   <template #prepend-inner>
-                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <v-icon icon="mdi-magnify" size="16" />
                   </template>
                 </v-text-field>
               </v-col>
@@ -327,352 +524,362 @@ watch([selectedDate, statusFilter], loadList)
           </v-card-text>
         </v-card>
 
-        <!-- Table -->
         <v-card flat class="soft-card">
           <v-card-text>
-            <v-alert
-              v-if="error"
-              type="error"
-              variant="tonal"
-              border="start"
-              class="mb-3"
+            <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
+
+            <v-data-table
+              :headers="headers"
+              :items="filtered"
+              :loading="loading"
+              item-key="_id"
+              density="comfortable"
+              class="elevated"
+              v-model:page="page"
+              :items-per-page="itemsPerPage"
+              :hide-default-footer="true"
             >
-              {{ error }}
-            </v-alert>
+              <template #loading><v-skeleton-loader type="table-row@6" /></template>
 
-            <!-- horizontal scroll wrapper -->
-            <div class="table-wrapper">
-              <v-data-table
-                :headers="headers"
-                :items="filtered"
-                :loading="loading"
-                density="compact"
-                item-key="_id"
-                class="elevated"
-                v-model:page="page"
-                :items-per-page="itemsPerPage"
-              >
-                <template #loading>
-                  <v-skeleton-loader type="table-row@6" />
-                </template>
+              <template #item.time="{ item }">
+                <div :data-id="item._id">
+                  <div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
+                  <div class="text-caption text-medium-emphasis">{{ item.tripDate }}</div>
+                </div>
+              </template>
 
-                <template #item.time="{ item }">
-                  <div class="mono">
-                    {{ item.timeStart }} – {{ item.timeEnd }}
-                  </div>
-                  <div class="text-caption text-medium-emphasis">
-                    {{ item.tripDate }}
-                  </div>
-                </template>
+              <template #item.category="{ item }">
+                <v-chip :color="item.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
+                  <v-icon :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" size="16" />
+                  <span class="ml-2">{{ categoryLabel(item.category) }}</span>
+                </v-chip>
+              </template>
 
-                <template #item.category>
-                  <v-chip color="deep-orange" size="small" label>
-                    <i class="fa-solid fa-motorcycle mr-1"></i> Messenger
-                  </v-chip>
-                </template>
+              <template #item.requester="{ item }">
+                <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
+                <div class="text-caption text-medium-emphasis">
+                  {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                </div>
+              </template>
 
-                <template #item.requester="{ item }">
-                  <div class="font-weight-600">
-                    {{ item.employee?.name || '—' }}
-                  </div>
-                  <div class="text-caption text-medium-emphasis">
-                    {{ item.employee?.department || '—' }}
-                  </div>
-                </template>
+              <template #item.itinerary="{ item }">
+                <div class="truncate-2">
+                  <span class="text-medium-emphasis">គោលដៅ៖ </span>
+                  {{ prettyStops(item.stops) }}
+                </div>
+                <div class="mt-1" v-if="item.ticketUrl">
+                  <a :href="absUrl(item.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
+                    <v-btn size="x-small" color="indigo" variant="tonal">
+                      <v-icon icon="mdi-paperclip" size="14" class="mr-1" /> សំបុត្រ
+                    </v-btn>
+                  </a>
+                </div>
+              </template>
 
-                <template #item.itinerary="{ item }">
-                  <div class="truncate-2">
-                    {{ prettyStops(item.stops) }}
-                  </div>
-                </template>
+              <template #item.passengers="{ item }">
+                <div class="text-center">{{ item.passengers ?? 1 }}</div>
+              </template>
 
-                <template #item.passengers="{ item }">
-                  <div class="text-center">
-                    {{ item.passengers ?? 1 }}
-                  </div>
-                </template>
+              <template #item.status="{ item }">
+                <v-chip :color="statusColor(item.status)" size="small" label>
+                  <v-icon :icon="statusIcon(item.status)" size="16" class="mr-1" />
+                  {{ statusLabel(item.status) }}
+                </v-chip>
+              </template>
 
-                <template #item.status="{ item }">
-                  <v-chip :color="statusColor(item.status)" size="small" label>
-                    <i :class="statusFa(item.status)" class="mr-1"></i>
-                    {{ item.status }}
-                  </v-chip>
-                </template>
+              <template #item.driverAck="{ item }">
+                <v-chip :color="ackColor(item.assignment?.messengerAck || 'PENDING')" size="small" label>
+                  <v-icon :icon="ackIcon(item.assignment?.messengerAck || 'PENDING')" size="16" class="mr-1" />
+                  {{ ackLabel(item.assignment?.messengerAck || 'PENDING') }}
+                </v-chip>
+              </template>
 
-                <template #item.messengerAck="{ item }">
-                  <v-chip
-                    :color="ackColor(item.assignment?.messengerAck || 'PENDING')"
-                    size="small"
-                    label
-                  >
-                    <i
-                      :class="ackFa(item.assignment?.messengerAck || 'PENDING')"
-                      class="mr-1"
-                    ></i>
-                    {{ item.assignment?.messengerAck || 'PENDING' }}
-                  </v-chip>
-                </template>
-
-                <template #item.actions="{ item }">
-                  <div
-                    :data-row-id="item._id"
-                    class="d-flex justify-end flex-wrap"
-                    style="gap:6px;"
-                  >
-                    <!-- ACK buttons (messenger can only ACCEPT) -->
-                    <template
-                      v-if="(item.assignment?.messengerAck || 'PENDING') === 'PENDING'"
+              <!-- ACTIONS -->
+              <template #item.actions="{ item }">
+                <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
+                  <!-- Step 1: messenger ack (NO DECLINE) -->
+                  <template v-if="canRespond(item)">
+                    <v-btn
+                      size="small"
+                      color="success"
+                      variant="flat"
+                      :loading="actLoading === String(item._id)"
+                      @click.stop="sendAck(item,'ACCEPTED')"
                     >
-                      <v-btn
-                        size="small"
-                        color="success"
-                        variant="flat"
-                        :loading="actLoading === String(item._id)"
-                        @click.stop="sendAck(item, 'ACCEPTED')"
-                      >
-                        <i class="fa-solid fa-check mr-1"></i> Accept
-                      </v-btn>
-                    </template>
+                      <v-icon icon="mdi-check" size="16" class="mr-1" /> យល់ព្រម
+                    </v-btn>
+                  </template>
 
-                    <!-- Status updates (only after ack) – no CANCELLED option here -->
-                    <template v-else>
-                      <v-menu>
-                        <template #activator="{ props }">
-                          <v-btn
-                            v-bind="props"
-                            color="primary"
-                            size="small"
-                            variant="flat"
-                          >
-                            <i class="fa-solid fa-route mr-1"></i> Update Status
-                          </v-btn>
-                        </template>
-                        <v-list density="compact">
-                          <v-list-item
-                            v-for="s in ['ON_ROAD','ARRIVING','COMPLETED','DELAYED']"
-                            :key="s"
-                            @click="updateStatus(item, s)"
-                          >
-                            <v-list-item-title>{{ s }}</v-list-item-title>
-                          </v-list-item>
-                        </v-list>
-                      </v-menu>
-                    </template>
+                  <!-- Step 2: live status (after ack ACCEPTED) – no CANCELLED -->
+                  <template v-if="canChangeStatus(item)">
+                    <v-menu location="bottom end">
+                      <template #activator="{ props }">
+                        <v-btn
+                          v-bind="props"
+                          size="small"
+                          variant="tonal"
+                          color="primary"
+                          :loading="statusLoading === String(item._id)"
+                        >
+                          <v-icon icon="mdi-sync" size="16" class="mr-2" /> បន្ទាន់សម័យស្ថានភាព
+                        </v-btn>
+                      </template>
+                      <v-list density="compact" min-width="220">
+                        <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
+                        <v-list-item
+                          v-for="s in nextStatusesFor(item.status)"
+                          :key="s"
+                          @click.stop="setMessengerStatus(item, s)"
+                        >
+                          <template #prepend>
+                            <v-icon :icon="statusIcon(s)" size="18" />
+                          </template>
+                          <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
+                        </v-list-item>
+                      </v-list>
+                    </v-menu>
+                  </template>
+
+                  <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
+                    <v-icon icon="mdi-information" size="16" class="mr-1" /> ព័ត៌មានលម្អិត
+                  </v-btn>
+                </div>
+              </template>
+
+              <template #no-data>
+                <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">
+                  មិនមានការកក់ម៉ូតូទេ<span v-if="selectedDate"> នៅថ្ងៃទី {{ selectedDate }}</span>។
+                </v-sheet>
+              </template>
+
+              <!-- Custom footer -->
+              <template #bottom>
+                <div class="table-footer">
+                  <div class="tf-left text-caption text-medium-emphasis">
+                    {{ rangeStart }}–{{ rangeEnd }} នៃ {{ totalItems }}
                   </div>
-                </template>
-
-                <template #no-data>
-                  <v-sheet
-                    class="pa-6 text-center"
-                    color="grey-lighten-4"
-                    rounded="lg"
-                  >
-                    No messenger bookings<span v-if="selectedDate">
-                      on {{ selectedDate }}</span
-                    >.
-                  </v-sheet>
-                </template>
-
-                <!-- compact footer: no row-size select, just page + prev/next -->
-                <template #bottom>
-                  <div class="table-footer">
-                    <div class="tf-left">
-                      <div class="text-caption text-medium-emphasis">
-                        Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
-                      </div>
-                    </div>
-
-                    <div class="tf-right">
-                      <v-pagination
-                        v-model="page"
-                        :length="pageCount"
-                        :total-visible="isMobile ? 3 : 5"
-                        density="comfortable"
-                      >
-                        <template #prev>
-                          <i class="fa-solid fa-angle-left"></i>
-                        </template>
-                        <template #next>
-                          <i class="fa-solid fa-angle-right"></i>
-                        </template>
-                      </v-pagination>
-                    </div>
+                  <div class="tf-right">
+                    <v-pagination
+                      v-model="page"
+                      :length="pageCount"
+                      :total-visible="5"
+                      density="comfortable"
+                    >
+                      <template #first>
+                        <v-icon icon="mdi-chevron-double-left" />
+                      </template>
+                      <template #prev>
+                        <v-icon icon="mdi-chevron-left" class="mt-2" />
+                      </template>
+                      <template #next>
+                        <v-icon icon="mdi-chevron-right" class="mt-2" />
+                      </template>
+                      <template #last>
+                        <v-icon icon="mdi-chevron-double-right" />
+                      </template>
+                    </v-pagination>
                   </div>
-                </template>
-              </v-data-table>
-            </div>
+                </div>
+              </template>
+            </v-data-table>
           </v-card-text>
         </v-card>
       </div>
     </v-sheet>
 
-    <v-snackbar v-model="snack" timeout="2000" location="bottom right">
+    <!-- Details dialog -->
+    <v-dialog v-model="detailOpen" max-width="820">
+      <v-card class="soft-card" rounded="lg">
+        <v-card-title class="d-flex align-center justify-space-between">
+          <div class="d-flex align-center" style="gap:10px;">
+            <v-chip :color="detailItem?.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
+              <v-icon :icon="detailItem?.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" size="16" />
+              <span class="ml-2">{{ categoryLabel(detailItem?.category || '') || '—' }}</span>
+            </v-chip>
+            <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
+          </div>
+          <v-btn icon variant="text" @click="detailOpen = false">
+            <v-icon icon="mdi-close" />
+          </v-btn>
+        </v-card-title>
+
+        <v-divider />
+        <v-card-text>
+          <v-row dense>
+            <v-col cols="12" md="6">
+              <div class="lbl">កាលបរិច្ឆេទ</div>
+              <div class="val">{{ detailItem?.tripDate || '—' }}</div>
+            </v-col>
+            <v-col cols="12" md="6">
+              <div class="lbl">អ្នកដំណើរ</div>
+              <div class="val">{{ detailItem?.passengers ?? 1 }}</div>
+            </v-col>
+            <v-col cols="12" md="6">
+              <div class="lbl">អ្នកស្នើសុំ</div>
+              <div class="val">
+                {{ detailItem?.employee?.name || '—' }}
+                <div class="text-caption text-medium-emphasis">
+                  {{ detailItem?.employee?.department || '—' }} • ID {{ detailItem?.employeeId }}
+                </div>
+              </div>
+            </v-col>
+            <v-col cols="12">
+              <div class="lbl">ផ្លូវដំណើរ / គោលដៅ</div>
+              <div class="val">
+                <div v-if="(detailItem?.stops || []).length" class="stops">
+                  <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
+                    <v-icon
+                      :icon="s.destination === 'Airport' ? 'mdi-airplane' : 'mdi-map-marker'"
+                      size="16"
+                      class="mr-1"
+                    />
+                    <strong>#{{ i+1 }}:</strong>
+                    <span>{{ destText(s) }}</span>
+                    <a
+                      v-if="s.mapLink"
+                      :href="absUrl(s.mapLink)"
+                      target="_blank"
+                      rel="noopener"
+                      class="ml-2 text-decoration-none"
+                    >
+                      <v-btn size="x-small" variant="text" color="primary">
+                        <v-icon icon="mdi-link-variant" size="14" class="mr-1" /> ផែនទី
+                      </v-btn>
+                    </a>
+                  </div>
+                </div>
+                <div v-else>—</div>
+              </div>
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <div class="lbl">ស្ថានភាព</div>
+              <div class="val">
+                <v-chip :color="statusColor(detailItem?.status)" size="small" label>
+                  <v-icon :icon="statusIcon(detailItem?.status)" size="16" class="mr-1" />
+                  {{ statusLabel(detailItem?.status || '—') }}
+                </v-chip>
+              </div>
+            </v-col>
+
+            <v-col cols="12" md="6">
+              <div class="lbl">ការឆ្លើយតបអ្នកបើកម៉ូតូ</div>
+              <div class="val">
+                <v-chip :color="ackColor(detailItem?.assignment?.messengerAck || 'PENDING')" size="small" label>
+                  <v-icon :icon="ackIcon(detailItem?.assignment?.messengerAck || 'PENDING')" size="16" class="mr-1" />
+                  {{ ackLabel(detailItem?.assignment?.messengerAck || 'PENDING') }}
+                </v-chip>
+              </div>
+            </v-col>
+          </v-row>
+        </v-card-text>
+
+        <v-divider />
+        <v-card-actions class="justify-end" style="gap:8px;">
+          <template v-if="detailItem && canRespond(detailItem)">
+            <v-btn
+              size="small"
+              color="success"
+              variant="flat"
+              :loading="actLoading === String(detailItem?._id)"
+              @click="sendAck(detailItem,'ACCEPTED')"
+            >
+              <v-icon icon="mdi-check" size="16" class="mr-1" /> យល់ព្រម
+            </v-btn>
+          </template>
+          <template v-if="detailItem && canChangeStatus(detailItem)">
+            <v-menu location="bottom end">
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  size="small"
+                  variant="tonal"
+                  color="primary"
+                  :loading="statusLoading === String(detailItem?._id)"
+                >
+                  <v-icon icon="mdi-sync" size="16" class="mr-2" /> បន្ទាន់សម័យស្ថានភាព
+                </v-btn>
+              </template>
+              <v-list density="compact" min-width="220">
+                <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
+                <v-list-item
+                  v-for="s in nextStatusesFor(detailItem.status)"
+                  :key="s"
+                  @click.stop="setMessengerStatus(detailItem, s)"
+                >
+                  <template #prepend>
+                    <v-icon :icon="statusIcon(s)" size="18" />
+                  </template>
+                  <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </v-menu>
+          </template>
+          <v-btn variant="text" @click="detailOpen = false">បិទ</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-snackbar v-model="snack" timeout="2200" location="bottom right">
       {{ snackText }}
     </v-snackbar>
   </v-container>
 </template>
 
 <style scoped>
-/* container: edge on phone */
-.messenger-page {
-  padding: 6px 8px 10px;
+@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap');
+
+.highlighted {
+  animation: flashHighlight 2s ease-in-out;
+  background: #e0f2fe !important;
 }
-@media (max-width: 600px) {
-  .messenger-page {
-    padding: 0 !important; /* flush to screen edge */
-  }
+@keyframes flashHighlight {
+  0% { background: #e0f2fe; }
+  100% { background: transparent; }
 }
 
-/* inner padding: slightly reduced on phone */
-.inner-pad {
-  padding-left: 16px;
-  padding-right: 16px;
-}
-@media (max-width: 600px) {
-  .inner-pad {
-    padding-left: 8px;
-    padding-right: 8px;
-  }
+/* Apply Kantumruy Pro to this section */
+.driver-section,
+.driver-section * {
+  font-family: 'Kantumruy Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-/* sheet: full-width edge on phone */
-.messenger-section {
-  border: 1px solid #e6e8ee;
-  background:#fff;
-  border-radius: 12px;
-}
-@media (max-width: 600px) {
-  .messenger-section {
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-  }
-}
+.driver-section { border: 1px solid #e6e8ee; background:#fff; border-radius: 12px; }
+.driver-header { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background: var(--surface, #f5f7fb); border-bottom: 1px solid #e6e8ee; }
+.hdr-left { display:flex; flex-direction:column; gap:6px; }
+.hdr-title { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
+.hdr-sub { color:#64748b; font-size:.9rem; }
+.hdr-actions { display:flex; align-items:center; gap:8px; }
+.soft-card { border: 1px solid #e9ecf3; border-radius: 12px; background:#fff; }
+.subhdr { display:flex; align-items:center; gap:10px; font-weight:800; color: var(--brand, #1f2a44); }
+.elevated { border: 1px solid #e9ecf3; border-radius: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+.truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lbl { font-size:.78rem; color:#64748b; }
+.val { font-weight:600; }
+.stops { display:flex; flex-direction:column; gap:6px; }
+.stop { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
 
-/* Hero header */
-.messenger-header {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  padding: 10px 16px;
-  color:#000000;
-  border-bottom: 1px solid rgba(0,0,0,0.08);
-}
-.hdr-title {
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-.hdr-text {
-  display:flex;
-  flex-direction:column;
-  line-height:1.1;
-}
-.hdr-main {
-  font-weight:800;
-  font-size:0.98rem;
-}
-.hdr-sub {
-  font-size:0.78rem;
-  opacity:.9;
-}
-.hdr-refresh {
-  font-size:0.78rem;
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
-/* cards */
-.soft-card {
-  border: 1px solid #e9ecf3;
-  border-radius: 12px;
-  background:#fff;
-}
-.subhdr {
-  display:flex;
-  align-items:center;
-  gap:10px;
-  font-weight:800;
-  font-size:0.9rem;
-  color:#3b1e10;
-}
-
-/* table styling */
-.elevated {
-  border: 1px solid #e9ecf3;
-  border-radius: 12px;
-}
-
-.table-wrapper {
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.mono {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-}
-.truncate-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* highlight from calendar */
-.highlight-row {
-  animation: flash 0.8s ease-in-out 3;
-  outline: 3px solid #4f46e5;
-  background-color: #eef2ff !important;
-}
-@keyframes flash {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.4; }
-}
-
-.mr-1 { margin-right: .25rem; }
-.mr-2 { margin-right: .5rem; }
+.mr-1 { margin-right: .25rem; } .mr-2 { margin-right: .5rem; }
 .ml-2 { margin-left: .5rem; }
 
-/* compact footer */
-.table-footer {
+/* custom footer */
+.table-footer{
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:12px;
-  padding: 8px 10px;
-  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-top: 1px solid #e5e7eb;
 }
-.tf-left { min-width: 140px; font-size: 0.78rem; }
+.tf-left { min-width: 120px; }
 .tf-right { display:flex; align-items:center; }
 
-:deep(.v-pagination .v-btn){ min-width: 36px; }
-:deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; font-size: 0.8rem; }
+/* tighter pagination buttons */
+:deep(.v-pagination .v-btn){ min-width: 32px; }
+:deep(.v-pagination .v-btn .v-icon){ line-height: 1; }
 
 @media (max-width: 600px){
-  .messenger-header {
-    padding: 8px 10px;
-  }
-  .hdr-main {
-    font-size: 0.9rem;
-  }
-  .hdr-sub {
-    font-size: 0.72rem;
-  }
-  .hdr-refresh {
-    font-size: 0.72rem;
-  }
-
-  .table-footer {
-    padding: 6px 8px;
-    gap:8px;
-  }
-  .tf-left,
-  .tf-right {
-    width:100%;
-  }
-  .tf-right {
-    justify-content:flex-end;
-  }
+  .table-footer { flex-direction: column; align-items:flex-start; }
 }
 </style>

@@ -37,6 +37,10 @@ const ALLOWED_NEXT = {
 }
 const nextStatuses = (from) => ALLOWED_NEXT[from] || []
 
+/* Time helpers for edit dialog */
+const HOURS   = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+const MINUTES = ['00', '30']
+
 /* Helpers */
 const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
 const absUrl = (u) => !u ? '' : (/^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u.startsWith('/')?'':'/'}${u}`)
@@ -53,7 +57,7 @@ const headers = [
   { title: 'Assigned',    key: 'assigned',   sortable: false, width: 160 },
   { title: 'Driver Resp.',key: 'driverAck',  sortable: false, width: 150, align: 'end' },
   { title: 'Status',      key: 'status',     sortable: true,  width: 150, align: 'end' },
-  { title: '',            key: 'actions',    sortable: false, width: 140, align: 'end' }
+  { title: '',            key: 'actions',    sortable: false, width: 180, align: 'end' }
 ]
 
 async function loadSchedule() {
@@ -157,7 +161,7 @@ watch([filtered, itemsPerPage], () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
 
-/* Realtime */
+/* ───────── Realtime ───────── */
 function onCreated(doc) {
   if (!doc?.tripDate) return
   if (selectedDate.value && doc.tripDate !== selectedDate.value) return
@@ -173,17 +177,18 @@ function onAssigned(p) {
   if (it) {
     it.assignment = {
       ...(it.assignment || {}),
-      driverId: p.driverId || '',
-      driverName: p.driverName || '',
-      messengerId: p.messengerId || it.assignment?.messengerId || '',
-      messengerName: p.messengerName || it.assignment?.messengerName || '',
+      driverId: p.driverId ?? it.assignment?.driverId ?? '',
+      driverName: p.driverName ?? it.assignment?.driverName ?? '',
+      messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
+      messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
       driverAck: 'PENDING',
     }
     if (p.status) it.status = p.status
     if (p.category) it.category = p.category
-    if (it.status === 'PENDING') it.status = 'ACCEPTED'
+    // no auto ACCEPTED here – backend decides status
   }
 }
+
 function onDriverAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
@@ -212,7 +217,7 @@ const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item){ detailItem.value = item; detailOpen.value = true }
 
-/* ───────── Assign flow ───────── */
+/* ───────── Assign flow (swap driver/messenger) ───────── */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
 const assignLoading = ref(false)
@@ -243,7 +248,12 @@ async function fetchFirstOk(requests) {
 async function loadPeopleAndAvailability(item) {
   people.value = []
   busyMap.value = new Map()
-  selectedLoginId.value = item?.assignment?.driverId || ''
+
+  // preselect current assignee (driver or messenger) based on booking type
+  const currentLoginId = assignRole.value === 'MESSENGER'
+    ? item?.assignment?.messengerId
+    : item?.assignment?.driverId
+  selectedLoginId.value = currentLoginId || ''
 
   const role = assignRole.value
 
@@ -302,26 +312,44 @@ watch(assignRole, () => {
 async function submitAssign() {
   if (!assignTarget.value?._id) return
   if (!selectedLoginId.value) {
-    assignError.value = 'Please select exactly one card'
+    assignError.value = 'Please select one person.'
     return
   }
   if (isBusy(selectedLoginId.value)) {
     assignError.value = 'This person is busy in this window.'
     return
   }
+
   assignLoading.value = true
   assignError.value = ''
   try {
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
-      driverId: selectedLoginId.value,
+      driverId: selectedLoginId.value,   // backend uses role to decide driver vs messenger
       role: assignRole.value,
-      status: 'ACCEPTED'
+      status: 'PENDING'                  // new assignment must start as PENDING
     })
+
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
     if (it) {
-      it.assignment = { ...(it.assignment || {}), driverId: selectedLoginId.value, driverAck: 'PENDING' }
-      if (it.status === 'PENDING') it.status = 'ACCEPTED'
+      if (assignRole.value === 'MESSENGER') {
+        it.assignment = {
+          ...(it.assignment || {}),
+          messengerId: selectedLoginId.value,
+          driverAck: 'PENDING'
+        }
+      } else {
+        it.assignment = {
+          ...(it.assignment || {}),
+          driverId: selectedLoginId.value,
+          driverAck: 'PENDING'
+        }
+      }
+
+      // always reset status to PENDING when swapping person (frontend view);
+      // backend will also broadcast via socket.
+      it.status = 'PENDING'
     }
+
     assignOpen.value = false
   } catch (e) {
     assignError.value = e?.response?.data?.message || e?.message || 'Failed to assign'
@@ -330,7 +358,7 @@ async function submitAssign() {
   }
 }
 
-/* Status update */
+/* ───────── Status update ───────── */
 async function updateStatus(item, nextStatus){
   if (!item?._id || !nextStatus) return
   const allowed = nextStatuses(item.status)
@@ -349,6 +377,108 @@ async function updateStatus(item, nextStatus){
     updating.value[item._id] = false
   }
 }
+
+/* ───────── Edit schedule (date / time / category) ───────── */
+const editOpen   = ref(false)
+const editTarget = ref(null)
+const editForm   = ref({
+  tripDate: '',
+  timeStartHour: '',
+  timeStartMinute: '',
+  timeEndHour: '',
+  timeEndMinute: '',
+  category: 'Car'
+})
+const editLoading = ref(false)
+const editError   = ref('')
+
+function openEditDialog(item) {
+  editTarget.value = item
+  editError.value = ''
+
+  const [sh, sm] = (item.timeStart || '08:00').split(':')
+  const [eh, em] = (item.timeEnd || '09:00').split(':')
+
+  editForm.value = {
+    tripDate: item.tripDate || selectedDate.value,
+    timeStartHour: sh,
+    timeStartMinute: sm,
+    timeEndHour: eh,
+    timeEndMinute: em,
+    category: item.category || 'Car'
+  }
+
+  editOpen.value = true
+}
+
+async function saveEdit() {
+  if (!editTarget.value?._id) return
+
+  editError.value = ''
+
+  const timeStart = `${editForm.value.timeStartHour}:${editForm.value.timeStartMinute}`
+  const timeEnd   = `${editForm.value.timeEndHour}:${editForm.value.timeEndMinute}`
+
+  // simple validation: end must be after start
+  if (timeEnd <= timeStart) {
+    editError.value = 'End time must be after start time.'
+    return
+  }
+
+  const old = editTarget.value
+
+  const payload = {
+    tripDate: editForm.value.tripDate,
+    timeStart,
+    timeEnd,
+    category: editForm.value.category
+  }
+
+  // 👉 detect any schedule change
+  const scheduleChanged =
+    old.tripDate  !== payload.tripDate ||
+    old.timeStart !== payload.timeStart ||
+    old.timeEnd   !== payload.timeEnd ||
+    old.category  !== payload.category
+
+  editLoading.value = true
+  try {
+    // 1) update date / time / category
+    await api.patch(`/admin/car-bookings/${old._id}`, payload)
+
+    // local UI update
+    const it = rows.value.find(x => String(x._id) === String(old._id))
+    if (it) {
+      it.tripDate  = payload.tripDate
+      it.timeStart = payload.timeStart
+      it.timeEnd   = payload.timeEnd
+      it.category  = payload.category
+    }
+
+    // 2) if schedule changed -> tell backend to reopen to PENDING (admin only)
+    if (scheduleChanged) {
+      await api.patch(`/admin/car-bookings/${old._id}/status`, {
+        status: 'PENDING',
+        forceReopen: true          // 🔥 special flag for backend
+      })
+
+      if (it) {
+        it.status = 'PENDING'
+        if (!it.assignment) it.assignment = {}
+        it.assignment.driverAck = 'PENDING'
+        it.assignment.messengerAck = 'PENDING'
+      }
+    }
+
+    editOpen.value = false
+    await loadSchedule()
+  } catch (e) {
+    editError.value = e?.response?.data?.message || e?.message || 'Failed to update schedule'
+  } finally {
+    editLoading.value = false
+  }
+}
+
 </script>
 
 <template>
@@ -538,6 +668,18 @@ async function updateStatus(item, nextStatus){
                 </template>
 
                 <template #item.actions="{ item }">
+                  <!-- Edit schedule (date/time/category) -->
+                  <v-btn
+                    size="small"
+                    variant="text"
+                    color="primary"
+                    class="mr-1"
+                    @click.stop="openEditDialog(item)"
+                  >
+                    <v-icon icon="mdi-calendar-clock" size="18" class="mr-2" />
+                    Edit
+                  </v-btn>
+
                   <v-menu location="bottom end">
                     <template #activator="{ props }">
                       <v-btn
@@ -778,6 +920,114 @@ async function updateStatus(item, nextStatus){
       </v-card>
     </v-dialog>
 
+    <!-- Edit schedule dialog -->
+    <v-dialog v-model="editOpen" max-width="520">
+      <v-card class="soft-card" rounded="lg">
+        <v-card-title class="d-flex align-center justify-space-between">
+          <div class="d-flex align-center" style="gap:10px;">
+            <v-icon icon="mdi-calendar-clock" size="20" />
+            <span>Edit schedule</span>
+          </div>
+          <v-btn icon variant="text" @click="editOpen = false">
+            <v-icon icon="mdi-close" />
+          </v-btn>
+        </v-card-title>
+
+        <v-divider />
+
+        <v-card-text>
+          <v-alert
+            v-if="editError"
+            type="error"
+            variant="tonal"
+            border="start"
+            class="mb-3"
+          >
+            {{ editError }}
+          </v-alert>
+
+          <v-row dense>
+            <v-col cols="12">
+              <v-text-field
+                v-model="editForm.tripDate"
+                type="date"
+                label="Trip date"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+
+            <v-col cols="6">
+              <v-select
+                v-model="editForm.timeStartHour"
+                :items="HOURS"
+                label="Start hour"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-select
+                v-model="editForm.timeStartMinute"
+                :items="MINUTES"
+                label="Start minute"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+
+            <v-col cols="6">
+              <v-select
+                v-model="editForm.timeEndHour"
+                :items="HOURS"
+                label="End hour"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6">
+              <v-select
+                v-model="editForm.timeEndMinute"
+                :items="MINUTES"
+                label="End minute"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+
+            <v-col cols="12">
+              <v-select
+                v-model="editForm.category"
+                :items="['Car','Messenger']"
+                label="Category"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+          </v-row>
+        </v-card-text>
+
+        <v-divider />
+        <v-card-actions class="justify-end">
+          <v-btn variant="text" @click="editOpen = false">Cancel</v-btn>
+          <v-btn
+            color="primary"
+            :loading="editLoading"
+            @click="saveEdit"
+          >
+            <v-icon icon="mdi-content-save" size="18" class="mr-2" />
+            Save
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Assign dialog -->
     <v-dialog v-model="assignOpen" max-width="920">
       <v-card class="soft-card" rounded="lg">
@@ -884,7 +1134,7 @@ async function updateStatus(item, nextStatus){
             @click="submitAssign"
           >
             <v-icon icon="mdi-check" size="18" class="mr-2" />
-            Assign & Accept
+            Assign
           </v-btn>
         </v-card-actions>
       </v-card>

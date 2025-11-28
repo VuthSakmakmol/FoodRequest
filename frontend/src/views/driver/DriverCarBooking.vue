@@ -286,7 +286,7 @@ const canRespond = it => {
 }
 
 const terminalStates = ['CANCELLED', 'COMPLETED']
-// 🚫 remove CANCELLED from allowed next statuses (driver cannot cancel)
+// driver cannot cancel; only move along the journey
 const ALLOWED_NEXT = {
   ACCEPTED: ['ON_ROAD', 'DELAYED'],
   ON_ROAD: ['ARRIVING', 'DELAYED'],
@@ -336,19 +336,31 @@ async function sendAck(item, response) {
 async function setDriverStatus(item, nextStatus) {
   if (!item?._id || statusLoading.value) return
   statusLoading.value = String(item._id)
+
   try {
     const { loginId, role } = identity.value || { loginId: '', role: '' }
+
     const path =
       role === 'MESSENGER'
         ? `/messenger/car-bookings/${item._id}/status`
         : `/driver/car-bookings/${item._id}/status`
-    await api.patch(path, { status: nextStatus }, { headers: { 'x-login-id': loginId, 'x-role': role } })
+
+    await api.patch(
+      path,
+      { status: nextStatus },
+      { headers: { 'x-login-id': loginId, 'x-role': role } }
+    )
+
     item.status = nextStatus
+
     snackText.value = `បានធ្វើបច្ចុប្បន្នភាពស្ថានភាពទៅ ${statusLabel(nextStatus)}។`
     snack.value = true
   } catch (e) {
     await loadList()
-    snackText.value = e?.response?.data?.message || e?.message || 'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន'
+    snackText.value =
+      e?.response?.data?.message ||
+      e?.message ||
+      'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន'
     snack.value = true
   } finally {
     statusLoading.value = ''
