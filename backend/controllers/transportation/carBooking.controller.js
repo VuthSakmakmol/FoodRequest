@@ -78,16 +78,27 @@ function pickIdentityFrom(req) {
   return { loginId: String(loginId || ''), role };
 }
 
-/** Minimal delta payloads */
+/** Minimal (but slightly richer) delta payloads */
 const shape = {
   created: (doc) => ({
+    bookingId: String(doc._id),
     _id: String(doc._id),
     employeeId: doc.employeeId,
+    employee: doc.employee || null,
     category: doc.category,
     tripDate: doc.tripDate,
     timeStart: doc.timeStart,
     timeEnd: doc.timeEnd,
+    passengers: doc.passengers,
+    customerContact: doc.customerContact,
+    stops: doc.stops || [],
+    purpose: doc.purpose || '',
+    notes: doc.notes || '',
+    ticketUrl: doc.ticketUrl || '',
     status: doc.status,
+    assignment: doc.assignment || {},
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
   }),
   status: (doc) => ({
     bookingId: String(doc._id),
@@ -241,7 +252,7 @@ async function createBooking(req, res, next) {
       ticketUrl
     });
 
-    // SOCKET (scoped)
+    // SOCKET (scoped): new booking created → ADMIN / dashboards / employee room
     broadcastCarBooking(io, doc, 'carBooking:created', shape.created(doc));
 
     // TELEGRAM
@@ -346,7 +357,7 @@ async function assignBooking(req, res, next) {
       assignedById = '',
       assignedByName = '',
       autoAccept = true,
-      role = 'DRIVER' // <── NEW: explicit role from frontend tab
+      role = 'DRIVER' // explicit role from frontend tab
     } = req.body || {};
 
     if (!driverId) throw createError(400, 'driverId (loginId) is required.');
@@ -433,7 +444,7 @@ async function assignBooking(req, res, next) {
 
     await doc.save();
 
-    // Realtime
+    // Realtime: assignment delta + status delta
     broadcastCarBooking(io, doc, 'carBooking:assigned', shape.assigned(doc));
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
@@ -585,9 +596,8 @@ async function driverUpdateStatus(req, res, next) {
 }
 
 
-/* ───────── NEW: update (CRUD → U) ─────────
-   Allows editing core fields; keeps your validations light and simple.
-   NOW: also checks fleet capacity + driver/messenger availability. */
+/* ───────── UPDATE BOOKING (CRUD → U) ─────────
+   Allows editing core fields + capacity & assignee conflict checks. */
 async function updateBooking(req, res, next) {
   try {
     const io = req.io;
@@ -602,7 +612,7 @@ async function updateBooking(req, res, next) {
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
-    // Editable fields (keep simple)
+    // Editable fields
     const editable = [
       'category','tripDate','timeStart','timeEnd','passengers',
       'customerContact','stops','purpose','notes','ticketUrl'
@@ -695,7 +705,7 @@ async function updateBooking(req, res, next) {
     // Realtime
     broadcastCarBooking(io, doc, 'carBooking:updated', shape.updated(doc));
 
-    // Optional telegram (keep light)
+    // Optional telegram
     try {
       await notify('REQUEST_UPDATED', { bookingId: doc._id });
     } catch {}
@@ -707,7 +717,7 @@ async function updateBooking(req, res, next) {
 }
 
 
-/* ───────── NEW: delete (CRUD → D) ─────────
+/* ───────── DELETE BOOKING (CRUD → D) ─────────
    Hard delete. If you prefer soft delete, replace with doc.status='CANCELLED' + save. */
 async function deleteBooking(req, res, next) {
   try {
@@ -721,7 +731,7 @@ async function deleteBooking(req, res, next) {
     // Realtime
     broadcastCarBooking(io, doc, 'carBooking:deleted', shape.deleted(doc));
 
-    // Optional telegram (comment out if noisy)
+    // Optional telegram
     try {
       await notify('REQUEST_DELETED', { bookingId: doc._id });
     } catch {}
