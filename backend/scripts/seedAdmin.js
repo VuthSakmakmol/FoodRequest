@@ -87,7 +87,7 @@ const User = require('../models/User')
 
     // Example chefs
     const chefs = [
-      { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '' },
+      { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '7163451169' },
       { loginId: '002', name: 'Chef Two', password: defaultPwd },
     ]
 

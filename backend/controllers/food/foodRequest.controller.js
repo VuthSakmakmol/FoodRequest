@@ -5,7 +5,6 @@ const FoodRequest = require('../../models/food/FoodRequest');
 const RecurringTemplate = require('../../models/food/RecurringTemplate');
 const EmployeeDirectory = require('../../models/EmployeeDirectory');
 const User = require('../../models/User');
-const { emitCounterpart } = require('../../utils/realtime');
 
 // 🔔 Telegram notify
 const { sendToAll } = require('../../services/telegram.service');
@@ -57,6 +56,16 @@ const HOLIDAY_SET = new Set(
 // Khmer rule: Sunday = holiday; Saturday is NOT
 const isSunday = (dateStr) => dayjs(dateStr).day() === 0;
 const isHoliday = (dateStr) => isSunday(dateStr) || HOLIDAY_SET.has(dateStr);
+
+// ───────── realtime helper ─────────
+function broadcastFood(io, event, payload) {
+  if (!io || !event) return;
+  try {
+    io.emit(event, payload);
+  } catch (e) {
+    console.error('[food realtime] broadcast error:', e?.message || e);
+  }
+}
 
 // ───────── helpers ─────────
 function coerceMenuCounts(input, qty) {
@@ -336,7 +345,8 @@ exports.createRequest = async (req, res, next) => {
         } catch (e) {
           console.warn('[Telegram] notify failed:', e?.message);
         }
-        emitCounterpart(req.io, 'foodRequest:created', existing);
+
+        broadcastFood(req.io, 'foodRequest:created', existing);
         return res.status(200).json(existing);
       }
 
@@ -366,7 +376,7 @@ exports.createRequest = async (req, res, next) => {
         console.warn('[Telegram] new request notify failed:', e?.message);
       }
 
-      emitCounterpart(req.io, 'foodRequest:created', doc);
+      broadcastFood(req.io, 'foodRequest:created', doc);
       return res.status(201).json(doc);
     }
 
@@ -388,7 +398,7 @@ exports.createRequest = async (req, res, next) => {
       console.warn('[Telegram] new request notify failed:', e?.message);
     }
 
-    emitCounterpart(req.io, 'foodRequest:created', doc);
+    broadcastFood(req.io, 'foodRequest:created', doc);
     return res.status(201).json(doc);
 
   } catch (err) {
@@ -496,7 +506,9 @@ exports.updateStatus = async (req, res, next) => {
       console.warn('[Telegram] notify failed:', e?.message);
     }
 
-    emitCounterpart(req.io, 'foodRequest:statusChanged', doc);
+    // 🔴 realtime status change to everyone
+    broadcastFood(req.io, 'foodRequest:statusChanged', doc);
+
     res.json(doc);
   } catch (err) { next(err); }
 };
@@ -572,7 +584,9 @@ exports.updateRequest = async (req, res, next) => {
     const doc = await FoodRequest.findByIdAndUpdate(id, { $set }, { new: true, runValidators: true });
     if (!doc) return res.status(404).json({ message: 'Not found' });
 
-    emitCounterpart(req.io, 'foodRequest:updated', doc);
+    // 🔴 realtime general update
+    broadcastFood(req.io, 'foodRequest:updated', doc);
+
     res.json(doc);
   } catch (err) { next(err); }
 };
@@ -586,7 +600,9 @@ exports.deleteRequest = async (req, res, next) => {
     const doc = await FoodRequest.findByIdAndDelete(id);
     if (!doc) return res.status(404).json({ message: 'Not found' });
 
-    emitCounterpart(req.io, 'foodRequest:deleted', { _id: id, employee: doc.employee });
+    // 🔴 realtime delete (send minimal payload)
+    broadcastFood(req.io, 'foodRequest:deleted', { _id: id, employee: doc.employee });
+
     res.json({ ok: true });
   } catch (err) { next(err); }
 };

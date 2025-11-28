@@ -200,7 +200,8 @@ onMounted(async () => {
   localStorage.setItem('authRole', auth.user?.role || '')
   subscribeRoleIfNeeded()
 
-  // 🔗 If navigated from AdminFoodCalendar, apply initial date + focus
+  // 🔗 If navigated from AdminFoodCalendar, use that date,
+  // otherwise default to TODAY only
   const qDate = route.query.date
   if (qDate) {
     const dStr = dayjs(qDate).isValid()
@@ -208,7 +209,12 @@ onMounted(async () => {
       : String(qDate)
     fromDate.value = dStr
     toDate.value   = dStr
+  } else {
+    const today = dayjs().format('YYYY-MM-DD')
+    fromDate.value = today
+    toDate.value   = today
   }
+
   const focus = route.query.focus
   if (focus) {
     const s = new Set(expanded.value)
@@ -319,8 +325,9 @@ async function updateStatus(row, target) {
 function resetFilters() {
   q.value = ''
   status.value = 'ALL'
-  fromDate.value = ''
-  toDate.value = ''
+  const today = dayjs().format('YYYY-MM-DD')
+  fromDate.value = today
+  toDate.value   = today
   page.value = 1
   load()
 }
@@ -433,8 +440,8 @@ async function exportExcel() {
 <template>
   <v-container fluid class="pa-2">
     <v-card elevation="1" class="rounded-lg">
-      <!-- Toolbar -->
-      <v-toolbar flat density="comfortable" class="px-2">
+      <!-- Toolbar with gradient header like calendar -->
+      <v-toolbar flat density="comfortable" class="px-2 ka-toolbar">
         <v-spacer />
         <!-- Desktop/tablet inline filters (EN-only labels) -->
         <template v-if="mdAndUp">
@@ -795,6 +802,12 @@ async function exportExcel() {
 
 <style scoped>
 .table-wrap{ overflow-x:auto; display:block; }
+
+/* Toolbar gradient, same feel as calendar header */
+.ka-toolbar{
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color: #000000;
+}
 
 /* Tighter inputs */
 :deep(.v-field__input){ min-height: 36px; }

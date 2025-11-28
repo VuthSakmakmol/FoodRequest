@@ -81,7 +81,9 @@ async function loadSchedule() {
 
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
-  return stops.map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination).join(' → ')
+  return stops
+    .map(s => s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination)
+    .join(' → ')
 }
 
 function rowClass(item){
@@ -138,8 +140,13 @@ const filtered = computed(() => {
     .filter(r => {
       if (!term) return true
       const hay = [
-        r.employee?.name, r.employee?.department, r.employeeId,
-        r.purpose, prettyStops(r.stops), assigneeName(r), r.assignment?.driverAck
+        r.employee?.name,
+        r.employee?.department,
+        r.employeeId,
+        r.purpose,
+        prettyStops(r.stops),
+        assigneeName(r),
+        r.assignment?.driverAck
       ].join(' ').toLowerCase()
       return hay.includes(term)
     })
@@ -519,77 +526,60 @@ async function saveEdit() {
 <template>
   <v-container fluid class="pa-2 admin-car-page">
     <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
-      <div class="hero">
-        <div class="hero-left">
-          <div class="hero-title">
-            <v-icon icon="mdi-steering" size="22" />
-            <span>Admin — Day Schedule (All Requests)</span>
-          </div>
+      <!-- Gradient header = filters -->
+      <div class="hero hero-filters">
+        <div class="hero-inner">
+          <v-row dense>
+            <v-col cols="12" md="3">
+              <v-text-field
+                v-model="selectedDate"
+                type="date"
+                label="Date"
+                variant="outlined"
+                density="compact"
+                hide-details
+                clearable
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-select
+                :items="['ALL','PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']"
+                v-model="statusFilter"
+                label="Status"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="6" md="3">
+              <v-select
+                :items="['ALL','Car','Messenger']"
+                v-model="categoryFilter"
+                label="Category"
+                variant="outlined"
+                density="compact"
+                hide-details
+              />
+            </v-col>
+            <v-col cols="12" md="3">
+              <v-text-field
+                v-model="qSearch"
+                label="Search requester / purpose / destination / assignee / driverResp"
+                variant="outlined"
+                density="compact"
+                hide-details
+                clearable
+              >
+                <template #prepend-inner>
+                  <v-icon icon="mdi-magnify" size="18" />
+                </template>
+              </v-text-field>
+            </v-col>
+          </v-row>
         </div>
       </div>
 
-      <div class="px-3 pb-3 pt-2">
-        <v-card flat class="soft-card mb-3">
-          <v-card-title class="subhdr">
-            <v-icon icon="mdi-filter-variant" size="20" />
-            <span>Filters</span>
-            <v-spacer />
-            <v-btn size="small" variant="text" @click="loadSchedule" :loading="loading">
-              <v-icon icon="mdi-refresh" size="18" class="mr-1" /> 
-              Refresh
-            </v-btn>
-          </v-card-title>
-          <v-card-text class="pt-0 pb-2 px-2">
-            <v-row dense>
-              <v-col cols="12" md="3">
-                <v-text-field
-                  v-model="selectedDate"
-                  type="date"
-                  label="Date (optional)"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select
-                  :items="['ALL','PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED']"
-                  v-model="statusFilter"
-                  label="Status"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="6" md="3">
-                <v-select
-                  :items="['ALL','Car','Messenger']"
-                  v-model="categoryFilter"
-                  label="Category"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                />
-              </v-col>
-              <v-col cols="12" md="3">
-                <v-text-field
-                  v-model="qSearch"
-                  label="Search requester / purpose / destination / assignee / driverResp"
-                  variant="outlined"
-                  density="compact"
-                  hide-details
-                  clearable
-                >
-                  <template #prepend-inner>
-                    <v-icon icon="mdi-magnify" size="18" />
-                  </template>
-                </v-text-field>
-              </v-col>
-            </v-row>
-          </v-card-text>
-        </v-card>
-
+      <div class="px-3 pb-3 pt-3">
         <v-card flat class="soft-card">
           <v-card-text class="pt-2 pb-1 px-2">
             <v-alert
@@ -654,7 +644,7 @@ async function saveEdit() {
                       class="ml-2"
                       @click.stop="openTicket(item.ticketUrl)"
                     >
-                      <v-icon icon="mdi-paperclip" size="16" class="mr-1" /> 
+                      <v-icon icon="mdi-paperclip" size="16" class="mr-1" />
                       Ticket
                     </v-btn>
                   </div>
@@ -725,7 +715,7 @@ async function saveEdit() {
                         :loading="!!updating[item._id]"
                         :disabled="!hasAssignee(item)"
                       >
-                        <v-icon icon="mdi-sync" size="18" class="mr-2" /> 
+                        <v-icon icon="mdi-sync" size="18" class="mr-2" />
                         Update
                       </v-btn>
                     </template>
@@ -897,7 +887,7 @@ async function saveEdit() {
                       class="ml-2 text-decoration-none"
                     >
                       <v-btn size="x-small" variant="text" color="primary">
-                        <v-icon icon="mdi-link-variant" size="16" class="mr-1 link-icon" /> 
+                        <v-icon icon="mdi-link-variant" size="16" class="mr-1 link-icon" />
                         Map
                       </v-btn>
                     </a>
@@ -927,7 +917,7 @@ async function saveEdit() {
                   class="text-decoration-none"
                 >
                   <v-btn size="small" color="indigo" variant="tonal">
-                    <v-icon icon="mdi-paperclip" size="16" class="mr-2" /> 
+                    <v-icon icon="mdi-paperclip" size="16" class="mr-2" />
                     VIEW TICKET
                   </v-btn>
                 </a>
@@ -1200,8 +1190,14 @@ async function saveEdit() {
   justify-content:space-between;
   padding: 14px 18px;
   background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
-  color:#fff;
+  color:#000000;
   border-bottom: 1px solid rgba(255,255,255,.25);
+}
+.hero-filters {
+  align-items: flex-start;
+}
+.hero-inner {
+  width: 100%;
 }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
 .hero-title {
