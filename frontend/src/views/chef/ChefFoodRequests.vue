@@ -8,9 +8,10 @@ import api from '@/utils/api'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useDisplay } from 'vuetify'
-import * as XLSX from 'xlsx'
 
 const { mdAndUp } = useDisplay()
+const isMobile = computed(() => !mdAndUp.value)
+
 const auth = useAuth()
 const route = useRoute()
 
@@ -93,19 +94,16 @@ const rows = ref([])
 const q = ref('')
 const status = ref('ALL')
 
-/* 🔹 DEFAULT: show only TODAY */
+/* 🔹 DEFAULT: show only TODAY (or one date from calendar) */
 const todayStr = dayjs().format('YYYY-MM-DD')
-const fromDate = ref(todayStr)
-const toDate = ref(todayStr)
-
-const showFilterDialog = ref(false)
+const filterDate = ref(todayStr)
 
 const page = ref(1)
 const perPage = ref(10)
-const perPageOptions = [10,20, 50, 100, 'All']
+const perPageOptions = [10, 20, 50, 100, 'All']
 
-const statuses = ['ACTIVE','ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED','CANCELED']
-const COLOR = { NEW:'grey', ACCEPTED:'primary', COOKING:'orange', READY:'teal', DELIVERED:'green', CANCELED:'red' }
+const statuses = ['ACTIVE', 'ALL', 'NEW', 'ACCEPTED', 'COOKING', 'READY', 'DELIVERED', 'CANCELED']
+const COLOR = { NEW: 'grey', ACCEPTED: 'primary', COOKING: 'orange', READY: 'teal', DELIVERED: 'green', CANCELED: 'red' }
 
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
 const normalize = o => ({
@@ -169,7 +167,7 @@ const BASE = '/chef/food-requests' // chef namespace (mirrors admin endpoints)
 function upsertRow(doc) {
   const d = normalize(doc)
   const i = rows.value.findIndex(r => r._id === d._id)
-  if (status.value === 'ACTIVE' && ['DELIVERED','CANCELED'].includes(d.status)) {
+  if (status.value === 'ACTIVE' && ['DELIVERED', 'CANCELED'].includes(d.status)) {
     if (i !== -1) rows.value.splice(i, 1)
     expanded.value.delete(d._id)
     return
@@ -190,7 +188,6 @@ async function applyInitialFocus() {
   const idx = rows.value.findIndex(r => r._id === focusId.value)
   if (idx === -1) return
 
-  // move to page that contains this row
   if (perPage.value !== 'All') {
     const size = typeof perPage.value === 'number' ? perPage.value : 20
     page.value = Math.floor(idx / size) + 1
@@ -208,9 +205,7 @@ async function applyInitialFocus() {
 
   didInitialFocus.value = true
 
-  // 🔹 Auto-clear focus highlight after 5s
   setTimeout(() => {
-    // only clear if still focusing same id (user didn't change focus)
     if (focusedRowId.value === focusId.value) {
       focusedRowId.value = ''
     }
@@ -223,12 +218,15 @@ async function load() {
     const params = new URLSearchParams()
     if (q.value.trim()) params.set('q', q.value.trim())
     if (status.value && status.value !== 'ALL' && status.value !== 'ACTIVE') params.set('status', status.value)
-    if (fromDate.value) params.set('from', fromDate.value)
-    if (toDate.value) params.set('to', toDate.value)
+    if (filterDate.value) {
+      // use same date as from & to so backend still works
+      params.set('from', filterDate.value)
+      params.set('to', filterDate.value)
+    }
 
     const { data } = await api.get(`${BASE}?${params.toString()}`)
     let list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
-    if (status.value === 'ACTIVE') list = list.filter(r => !['DELIVERED','CANCELED'].includes(r.status))
+    if (status.value === 'ACTIVE') list = list.filter(r => !['DELIVERED', 'CANCELED'].includes(r.status))
     rows.value = list.map(normalize)
     page.value = 1
 
@@ -242,21 +240,19 @@ onMounted(async () => {
   localStorage.setItem('authRole', auth.user?.role || '')
   subscribeRoleIfNeeded()
 
-  // read query from calendar
   const qFocus = route.query.focus
   const qDate  = route.query.date
   if (qFocus) focusId.value = String(qFocus)
   if (qDate) {
-    // 🔹 If calendar passes a date, override “today” filter
-    fromDate.value = String(qDate)
-    toDate.value   = String(qDate)
+    // calendar → force that single date
+    filterDate.value = String(qDate)
   }
 
   await load()
   socket.on('foodRequest:created', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:updated', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:statusChanged', (doc) => doc && upsertRow(doc))
-  socket.on('foodRequest:deleted', ({ _id }) => removeRowById(String(_id||'')))
+  socket.on('foodRequest:deleted', ({ _id }) => removeRowById(String(_id || '')))
 })
 onBeforeUnmount(() => {
   socket.off('foodRequest:created')
@@ -264,11 +260,13 @@ onBeforeUnmount(() => {
   socket.off('foodRequest:statusChanged')
   socket.off('foodRequest:deleted')
 })
-watch([q, status, fromDate, toDate], () => { page.value = 1; load() })
+watch([q, status, filterDate], () => { page.value = 1; load() })
 
 /* ───────── paging ───────── */
 const totalItems = computed(() => rows.value.length)
-const totalPages = computed(() => perPage.value === 'All' ? 1 : Math.max(1, Math.ceil(totalItems.value / perPage.value)))
+const totalPages = computed(() =>
+  perPage.value === 'All' ? 1 : Math.max(1, Math.ceil(totalItems.value / perPage.value))
+)
 const pagedRows = computed(() => {
   if (perPage.value === 'All') return rows.value
   const start = (page.value - 1) * perPage.value
@@ -276,18 +274,29 @@ const pagedRows = computed(() => {
 })
 
 /* ───────── workflow ───────── */
+/* ───────── workflow ───────── */
 const nextSteps = (s) => {
   switch (s) {
-    case 'NEW': return ['ACCEPTED','CANCELED']
-    case 'ACCEPTED': return ['COOKING','CANCELED']
-    case 'COOKING': return ['READY','CANCELED']
-    case 'READY': return ['DELIVERED','CANCELED']
-    default: return []
+    case 'NEW':
+      // Chef can only move NEW → ACCEPTED
+      return ['ACCEPTED']
+    case 'ACCEPTED':
+      // ACCEPTED → COOKING
+      return ['COOKING']
+    case 'COOKING':
+      // COOKING → READY
+      return ['READY']
+    case 'READY':
+      // READY → DELIVERED
+      return ['DELIVERED']
+    default:
+      return []
   }
 }
+
 async function updateStatus(row, target) {
   if (!row?._id) {
-    await Swal.fire({ icon:'error', title:'Missing _id', text:'This row has no Mongo _id. Cannot update.' })
+    await Swal.fire({ icon: 'error', title: 'Missing _id', text: 'This row has no Mongo _id. Cannot update.' })
     return
   }
   let reason = ''
@@ -318,274 +327,289 @@ async function updateStatus(row, target) {
     const url = `${BASE}/${encodeURIComponent(row._id)}/status`
     const { data: updated } = await api.patch(url, { status: target, reason })
     upsertRow(updated)
-    await Swal.fire({ icon:'success', title:'Updated', timer:900, showConfirmButton:false })
+    await Swal.fire({ icon: 'success', title: 'Updated', timer: 900, showConfirmButton: false })
   } catch (e) {
     upsertRow(before)
-    await Swal.fire({ icon:'error', title:'Failed', text: e?.response?.data?.message || e.message || 'Request failed' })
+    await Swal.fire({ icon: 'error', title: 'Failed', text: e?.response?.data?.message || e.message || 'Request failed' })
   }
 }
 
-/* ───────── mobile helpers / export ───────── */
+/* ───────── helpers ───────── */
 function resetFilters() {
   q.value = ''
   status.value = 'ALL'
-  const today = dayjs().format('YYYY-MM-DD')
-  fromDate.value = today
-  toDate.value = today
+  filterDate.value = dayjs().format('YYYY-MM-DD')
   page.value = 1
   load()
 }
-
-const exporting = ref(false)
-
-function toMainRow(r) {
-  return {
-    _id: r._id,
-    RequestID: r.requestId || '',
-    Status: r.status || '',
-    OrderType: r.orderType || '',
-    Quantity: r.quantity || 0,
-    EmployeeID: r.employee?.employeeId || '',
-    Name: r.employee?.name || '',
-    Department: r.employee?.department || '',
-    OrderDate: fmtDate(r.orderDate),
-    EatDate: fmtDate(r.eatDate),
-    Time: [r.eatTimeStart, r.eatTimeEnd].filter(Boolean).join(' – '),
-    MenuChoices: Array.isArray(r.menuChoices) ? r.menuChoices.join(', ') : '',
-    DietarySelected: Array.isArray(r.dietary) ? r.dietary.join(', ') : '',
-    DietaryOther: r.dietaryOther || '',
-    SpecialInstructions: r.specialInstructions || '',
-    Recurring: r?.recurring?.enabled
-      ? `${r.recurring.frequency}${r.recurring.endDate ? ' until ' + fmtDate(r.recurring.endDate) : ''}${r.recurring.skipHolidays ? ' (skip holidays)' : ''}`
-      : ''
-  }
-}
-function buildMenuRows(list) {
-  const out = []
-  for (const r of list) {
-    const m = menuMap(r)
-    for (const [menuName, count] of m.entries()) {
-      out.push({
-        RequestID: r.requestId || '',
-        Status: r.status || '',
-        EatDate: fmtDate(r.eatDate),
-        Menu: menuName,
-        Count: count
-      })
-    }
-  }
-  return out
-}
-function buildDietaryRows(list) {
-  const out = []
-  for (const r of list) {
-    const g = dietaryByMenu(r)
-    for (const [menuName, inner] of g.entries()) {
-      for (const [allergen, count] of inner.entries()) {
-        out.push({
-          RequestID: r.requestId || '',
-          Status: r.status || '',
-          EatDate: fmtDate(r.eatDate),
-          Menu: menuName,
-          Allergen: allergen,
-          Count: count
-        })
-      }
-    }
-  }
-  return out
-}
-
-async function exportExcel() {
-  try {
-    exporting.value = true
-    const list = rows.value
-    const wb = XLSX.utils.book_new()
-
-    const main = list.map(toMainRow)
-    const wsMain = XLSX.utils.json_to_sheet(main)
-    XLSX.utils.book_append_sheet(wb, wsMain, 'Requests')
-
-    const menuRows = buildMenuRows(list)
-    const wsMenus = XLSX.utils.json_to_sheet(menuRows)
-    XLSX.utils.book_append_sheet(wb, wsMenus, 'Menus')
-
-    const dietRows = buildDietaryRows(list)
-    const wsDiet = XLSX.utils.json_to_sheet(dietRows)
-    XLSX.utils.book_append_sheet(wb, wsDiet, 'Dietary')
-
-    for (const ws of [wsMain, wsMenus, wsDiet]) {
-      const data = XLSX.utils.sheet_to_json(ws, { header: 1 })
-      const colWidths = data[0]?.map((_, c) =>
-        ({ wch: Math.min(50, Math.max(...data.map(row => String(row?.[c] ?? '').length), 8)) })
-      ) || []
-      ws['!cols'] = colWidths
-    }
-
-    const rangeText = [
-      fromDate.value ? `from_${fromDate.value}` : '',
-      toDate.value ? `to_${toDate.value}` : '',
-      status.value && status.value !== 'ALL' ? `status_${status.value}` : ''
-    ].filter(Boolean).join('_')
-    const stamp = dayjs().format('YYYYMMDD_HHmmss')
-    const fname = `FoodRequests_${rangeText || 'all'}_${stamp}.xlsx`
-
-    XLSX.writeFile(wb, fname)
-  } catch (err) {
-    console.error(err)
-    await Swal.fire({ icon: 'error', title: 'Export failed', text: err?.message || 'Unknown error' })
-  } finally {
-    exporting.value = false
-  }
-}
 </script>
-
 
 <template>
   <v-container fluid class="pa-2">
-    <v-card elevation="1" class="rounded-lg">
-      <!-- Toolbar -->
-      <v-toolbar flat density="comfortable" class="px-2">
-        <v-spacer />
+    <v-card elevation="1" class="rounded-lg chef-shell">
+      <!-- Gradient HERO filter bar -->
+      <div class="chef-hero">
+        <v-text-field
+          v-model="q"
+          density="compact"
+          variant="outlined"
+          hide-details
+          clearable
+          placeholder="Search name / ID / dept"
+          class="fh-field fh-search"
+          @keyup.enter="load"
+        />
+        <v-select
+          v-model="status"
+          :items="statuses"
+          density="compact"
+          variant="outlined"
+          hide-details
+          label="Status"
+          class="fh-field fh-status"
+        />
+        <v-text-field
+          v-model="filterDate"
+          type="date"
+          density="compact"
+          variant="outlined"
+          hide-details
+          label="Eat date"
+          class="fh-field fh-date"
+        />
 
-        <!-- Desktop/tablet inline filters -->
-        <template v-if="mdAndUp">
-          <v-text-field v-model="q" density="compact" placeholder="Search"
-                        hide-details variant="outlined" class="mr-2"
-                        @keyup.enter="load" style="max-width: 220px" />
-
-          <v-select v-model="status" :items="statuses" density="compact" label="Status"
-                    hide-details variant="outlined" class="mr-2" style="max-width: 160px" />
-
-          <v-text-field v-model="fromDate" type="date" density="compact" label="From"
-                        hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
-          <v-text-field v-model="toDate" type="date" density="compact" label="To"
-                        hide-details variant="outlined" class="mr-2" style="max-width: 150px" />
-
-          <v-select v-model="perPage" :items="perPageOptions" density="compact" label="Rows"
-                    hide-details variant="outlined" style="max-width: 110px" class="mr-2" />
-
-          <v-tooltip text="Refresh" location="bottom">
-            <template #activator="{ props }">
-              <v-btn 
-                v-bind="props"
-                :loading="loading"
-                icon
-                color="primary"
-                class="mr-2"
-                @click="load"
-                aria-label="Refresh"
-                title="Refresh">
-                <v-icon size="20">mdi-refresh</v-icon>
-              </v-btn>
-            </template>
-          </v-tooltip>
-
-          <v-tooltip text="Filters" location="bottom">
-            <template #activator="{ props }">
-              <v-btn v-bind="props" icon variant="flat" class="mr-1"
-                     @click="showFilterDialog = true" aria-label="Filters" title="Filters">
-                <v-icon>mdi-filter-variant</v-icon>
-              </v-btn>
-            </template>
-          </v-tooltip>
-
-          <v-tooltip text="Export Excel" location="bottom">
-            <template #activator="{ props }">
-              <v-btn v-bind="props" :loading="exporting" icon color="success" variant="flat"
-                     @click="exportExcel" aria-label="Export Excel" title="Export Excel">
-                <v-icon>mdi-file-excel</v-icon>
-              </v-btn>
-            </template>
-          </v-tooltip>
-        </template>
-
-        <!-- Mobile search + Refresh + Filters -->
-        <v-sheet v-if="!mdAndUp" class="px-3 pt-3 pb-1 bg-transparent">
-          <div class="d-flex align-center gap-2">
-            <v-text-field
-              v-model="q" density="compact" placeholder="Search"
-              clearable hide-details variant="outlined" class="flex-grow-1" 
-              @keyup.enter="load"
-            />
-            <v-tooltip text="Refresh" location="bottom">
-              <template #activator="{ props }">
-                <v-btn v-bind="props" :loading="loading" icon variant="tonal" @click="load">
-                  <v-icon>mdi-refresh</v-icon>
-                </v-btn>
-              </template>
-            </v-tooltip>
-            <v-tooltip text="Filters" location="bottom">
-              <template #activator="{ props }">
-                <v-btn v-bind="props" icon color="primary" variant="flat" @click="showFilterDialog = true">
-                  <v-icon>mdi-filter-variant</v-icon>
-                </v-btn>
-              </template>
-            </v-tooltip>
-          </div>
-        </v-sheet>
-      </v-toolbar>
-
-      <!-- Mobile Filters dialog -->
-      <v-dialog v-model="showFilterDialog" fullscreen transition="dialog-bottom-transition">
-        <v-card>
-          <v-toolbar density="comfortable" color="primary" class="text-white">
-            <v-btn icon variant="text" class="text-white" @click="showFilterDialog=false">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
-            <v-toolbar-title>Filters</v-toolbar-title>
-            <v-spacer />
-            <v-btn variant="text" class="text-white" @click="resetFilters">
-              <v-icon start>mdi-restore</v-icon> Reset
-            </v-btn>
-          </v-toolbar>
-
-          <v-card-text>
-            <v-row dense>
-              <v-col cols="12">
-                <v-select v-model="status" :items="statuses" label="Status"
-                          variant="outlined" density="comfortable" hide-details />
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field v-model="fromDate" type="date" label="From"
-                              variant="outlined" density="comfortable" hide-details />
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-text-field v-model="toDate" type="date" label="To"
-                              variant="outlined" density="comfortable" hide-details />
-              </v-col>
-              <v-col cols="12" sm="6">
-                <v-select v-model="perPage" :items="perPageOptions" label="Rows per page"
-                          variant="outlined" density="comfortable" hide-details />
-              </v-col>
-            </v-row>
-          </v-card-text>
-
-          <v-card-actions class="px-4 pb-4">
-            <v-btn color="grey" variant="tonal" @click="showFilterDialog=false">Close</v-btn>
-            <v-spacer />
-            <v-btn color="primary" @click="showFilterDialog=false; load()">Apply</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-
-      <v-divider />
+        <div class="hero-actions">
+          <v-btn
+            size="small"
+            variant="tonal"
+            color="grey"
+            @click="resetFilters"
+          >
+            <v-icon size="18" class="mr-1">mdi-calendar-today</v-icon>
+            Today
+          </v-btn>
+        </div>
+      </div>
 
       <v-card-text class="pa-0">
-        <div class="table-wrap">
+        <!-- MOBILE: CARD LIST -->
+        <div v-if="isMobile" class="chef-mobile-wrap">
+          <v-skeleton-loader
+            v-if="loading"
+            type="card@3"
+            class="mb-2"
+          />
+          <template v-else>
+            <div v-if="!pagedRows.length" class="text-center py-6 text-medium-emphasis">
+              {{ tkm('No requests found.') }}
+            </div>
+
+            <div v-else class="chef-card-list">
+              <v-card
+                v-for="r in pagedRows"
+                :key="r._id"
+                class="chef-card"
+                rounded="xl"
+                elevation="2"
+                :class="{ 'focused-row': r._id === focusedRowId }"
+              >
+                <v-card-text class="py-3 px-3">
+                  <!-- top: status + time/eat date -->
+                  <div class="card-top">
+                    <div>
+                      <v-chip :color="COLOR[r.status]" size="small" label>
+                        <div class="chip-2l">
+                          <div class="en">{{ r.status }}</div>
+                          <div class="km">{{ tkm(r.status) }}</div>
+                        </div>
+                      </v-chip>
+                      <div class="text-caption text-medium-emphasis mt-1">
+                        {{ fmtDate(r.orderDate) }} →
+                        {{ fmtDate(r.eatDate) }}
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <div class="card-time">
+                        {{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
+                      </div>
+                      <div class="text-caption text-medium-emphasis">
+                        {{ orderTypeKM(r.orderType) }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <v-divider class="my-2" />
+
+                  <!-- requester -->
+                  <div class="card-row">
+                    <div class="lbl">អ្នកស្នើ</div>
+                    <div class="val">
+                      {{ r.employee?.name || '—' }}
+                      <div class="text-caption text-medium-emphasis">
+                        ID {{ r.employee?.employeeId || '—' }} • {{ r.employee?.department || '—' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- meals / qty -->
+                  <div class="card-row">
+                    <div class="lbl">អាហារ</div>
+                    <div class="val">
+                      {{ mealListKM(r.meals) || '—' }}
+                      <div class="text-caption text-medium-emphasis">
+                        {{ tkm('Qty') }}: {{ r.quantity }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- special instructions -->
+                  <div class="card-row" v-if="r.specialInstructions">
+                    <div class="lbl">{{ tkm('Special instruction') }}</div>
+                    <div class="val notes-val">
+                      {{ r.specialInstructions }}
+                    </div>
+                  </div>
+
+                  <!-- actions -->
+                  <div class="card-actions-row">
+                    <div class="mb-1">
+                      <v-btn
+                        v-for="s in nextSteps(r.status)"
+                        :key="s"
+                        size="small"
+                        class="mr-1 mb-1"
+                        :color="s==='CANCELED' ? 'red' : (s==='DELIVERED' ? 'green' : 'primary')"
+                        variant="tonal"
+                        :disabled="!r._id"
+                        @click="updateStatus(r, s)"
+                      >
+                        <span class="en">{{ s }}</span>
+                        <span class="km ml-1">{{ tkm(s) }}</span>
+                      </v-btn>
+                    </div>
+
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      color="primary"
+                      @click="toggleExpanded(r._id)"
+                    >
+                      <span class="en">{{ isExpanded(r._id) ? 'Hide details' : 'Details' }}</span>
+                      <span class="km ml-1">
+                        ({{ isExpanded(r._id) ? tkm('Hide details') : tkm('Details') }})
+                      </span>
+                    </v-btn>
+                  </div>
+
+                  <!-- details tree inside card -->
+                  <v-expand-transition>
+                    <div v-if="isExpanded(r._id)" class="mt-2 card-details-tree">
+                      <div class="tree">
+                        <div class="tree-node root">
+                          <div class="node-label two-lines">
+                            <div class="en"><strong>{{ tkm('Quantity') }}</strong> {{ r.quantity }}</div>
+                            <div class="km">{{ tkm('Quantity') }}</div>
+                          </div>
+                          <div class="children">
+                            <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
+                              <div class="tree-node">
+                                <div class="node-label two-lines">
+                                  <div class="en"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
+                                  <div class="km">{{ menuKM(menuName) }}</div>
+                                </div>
+                                <div
+                                  class="children"
+                                  v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length"
+                                >
+                                  <div
+                                    class="tree-node leaf"
+                                    v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                    :key="menuName + '_' + allergen"
+                                  >
+                                    <div class="node-label two-lines">
+                                      <div class="en"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
+                                      <div class="km">{{ allergenKM(allergen) }}</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </v-expand-transition>
+                </v-card-text>
+              </v-card>
+            </div>
+          </template>
+        </div>
+
+        <!-- DESKTOP/TABLET: TABLE -->
+        <div v-else class="table-wrap">
           <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
             <thead>
               <tr>
-                <th><div class="hdr-2l"><div class="en">{{ tkm('Status') }}</div><div class="km">{{ tkm('Status') }}</div></div></th>
-                <th style="width:320px;"><div class="hdr-2l"><div class="en">Actions</div><div class="km">{{ tkm('Actions') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Requester (ID & Name)</div><div class="km">{{ tkm('Requester (ID & Name)') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Order Date</div><div class="km">{{ tkm('Order Date') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Eat Date</div><div class="km">{{ tkm('Eat Date') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Time</div><div class="km">{{ tkm('Time') }}</div></div></th>
-                <th class="d-none d-sm-table-cell"><div class="hdr-2l"><div class="en">Dept</div><div class="km">{{ tkm('Dept') }}</div></div></th>
-                <th class="d-none d-md-table-cell"><div class="hdr-2l"><div class="en">Order Type</div><div class="km">{{ tkm('Type') }}</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Meals</div><div class="km">អាហារ</div></div></th>
-                <th><div class="hdr-2l"><div class="en">Qty</div><div class="km">{{ tkm('Qty') }}</div></div></th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">{{ tkm('Status') }}</div>
+                    <div class="km">{{ tkm('Status') }}</div>
+                  </div>
+                </th>
+                <th style="width:320px;">
+                  <div class="hdr-2l">
+                    <div class="en">Actions</div>
+                    <div class="km">{{ tkm('Actions') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Requester (ID & Name)</div>
+                    <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Order Date</div>
+                    <div class="km">{{ tkm('Order Date') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Eat Date</div>
+                    <div class="km">{{ tkm('Eat Date') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Time</div>
+                    <div class="km">{{ tkm('Time') }}</div>
+                  </div>
+                </th>
+                <th class="d-none d-sm-table-cell">
+                  <div class="hdr-2l">
+                    <div class="en">Dept</div>
+                    <div class="km">{{ tkm('Dept') }}</div>
+                  </div>
+                </th>
+                <th class="d-none d-md-table-cell">
+                  <div class="hdr-2l">
+                    <div class="en">Order Type</div>
+                    <div class="km">{{ tkm('Type') }}</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Meals</div>
+                    <div class="km">អាហារ</div>
+                  </div>
+                </th>
+                <th>
+                  <div class="hdr-2l">
+                    <div class="en">Qty</div>
+                    <div class="km">{{ tkm('Qty') }}</div>
+                  </div>
+                </th>
               </tr>
             </thead>
 
@@ -637,7 +661,10 @@ async function exportExcel() {
 
                   <td>
                     <div class="cell-2l">
-                      <div class="en">{{ r.eatTimeStart || '—' }}<span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span></div>
+                      <div class="en">
+                        {{ r.eatTimeStart || '—' }}
+                        <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
+                      </div>
                     </div>
                   </td>
 
@@ -710,43 +737,39 @@ async function exportExcel() {
 
       <v-divider />
       <div class="d-flex flex-wrap align-center justify-space-between px-4 py-3 gap-2">
-        <div class="text-caption text-medium-emphasis">
-          Showing
-          <b>{{ perPage === 'All' ? 1 : Math.min((page - 1) * perPage + 1, totalItems) }}</b>
-          -
-          <b>{{ perPage === 'All' ? totalItems : Math.min(page * perPage, totalItems) }}</b>
-          of <b>{{ totalItems }}</b>
-        </div>
-        <v-select v-if="!mdAndUp" v-model="perPage" :items="perPageOptions" density="compact"
-                  label="Rows" hide-details variant="outlined" style="max-width: 140px" />
-        <v-pagination v-if="perPage !== 'All'" v-model="page" :length="totalPages" :total-visible="7" density="comfortable" />
+        <!-- <v-select
+          v-if="isMobile"
+          v-model="perPage"
+          :items="perPageOptions"
+          density="compact"
+          label="Rows"
+          hide-details
+          variant="outlined"
+          style="max-width: 140px"
+        /> -->
+        <v-pagination
+          v-if="perPage !== 'All'"
+          v-model="page"
+          :length="totalPages"
+          :total-visible="7"
+          density="comfortable"
+        />
       </div>
     </v-card>
   </v-container>
 </template>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap');
 .table-wrap{ overflow-x:auto; display:block; }
 
 /* Tighter inputs */
 :deep(.v-field__input){ min-height: 36px; }
 
-/* Title clamp so controls stay visible */
-.title-clamp {
-  max-width: 38vw;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-@media (max-width: 420px){
-  .title-clamp { max-width: 48vw; }
-}
-
 /* Table min widths; shrink on phones */
 .min-width-table th,.min-width-table td{ min-width:120px; white-space:nowrap; }
 @media (max-width: 600px){
   .min-width-table th,.min-width-table td{ min-width: 90px; }
-  .v-toolbar{ padding-left: .5rem; padding-right: .5rem; }
 }
 
 /* bilingual headers */
@@ -768,9 +791,8 @@ async function exportExcel() {
 .tree .leaf .node-label{ background: rgba(234,179,8,.12); }
 .arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
-.ok{ color:#16a34a; } .warn{ color:#dc2626; }
 
-/* Display utility for small screens */
+/* Display utility */
 .d-none{ display:none !important; }
 @media (min-width: 600px){ .d-sm-table-cell{ display: table-cell !important; } }
 @media (min-width: 960px){ .d-md-table-cell{ display: table-cell !important; } }
@@ -781,7 +803,7 @@ async function exportExcel() {
                'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
 }
 
-/* ---------- NEW: focus row from calendar ---------- */
+/* ---------- Focus row from calendar ---------- */
 .focused-row{
   background: rgba(56,189,248,0.18) !important;
 }
@@ -798,16 +820,122 @@ async function exportExcel() {
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
-
 .comfy-cells :deep(table thead th){
   padding-top: 10px !important;
   padding-bottom: 10px !important;
 }
-
 .row-hover :deep(table tbody tr:not(.details-row):hover){
   background: rgba(59,130,246,0.08);
   transition: background 120ms ease;
 }
-
 .min-width-table :deep(td > *){ justify-content: flex-start !important; text-align: left !important; }
+
+/* ---------- HERO (gradient filters like Driver/Messenger) ---------- */
+.chef-shell{
+  overflow: hidden;
+  font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
+               'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
+}
+.chef-hero{
+  display:flex;
+  align-items:flex-end;
+  justify-content:flex-start;
+  flex-wrap:wrap;
+  gap:12px;
+  padding:14px 18px;
+  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  color:#0f172a;
+  border-bottom:1px solid rgba(0, 0, 0, 0.28);
+}
+.fh-field{
+  min-width: 200px;
+  flex: 1 1 150px;
+}
+.fh-search{
+  min-width: 220px;
+  max-width: 260px;
+}
+.fh-status{
+  max-width: 180px;
+}
+.fh-date{
+  max-width: 160px;
+}
+.hero-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:6px;
+  flex: 0 0 auto;
+}
+@media (max-width: 960px){
+  .chef-hero{
+    flex-direction:column;
+    align-items:stretch;
+  }
+  .fh-field{
+    min-width:0;
+    width:100%;
+    max-width:100%;
+    flex:1 1 100%;
+  }
+  .hero-actions{
+    justify-content:flex-start;
+    flex-wrap:wrap;
+  }
+}
+
+/* ---------- MOBILE CARD LAYOUT ---------- */
+.chef-mobile-wrap{
+  padding: 8px 8px 4px;
+}
+.chef-card-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.chef-card{
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: radial-gradient(circle at top left, #eff6ff 0, #ffffff 38%, #f8fafc 100%);
+  box-shadow: 0 10px 24px rgba(15,23,42,0.14);
+}
+.card-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:8px;
+}
+.card-time{
+  font-size:.9rem;
+  font-weight:600;
+}
+.card-row{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin-top:6px;
+}
+.card-row .lbl{
+  min-width:82px;
+  font-size:.78rem;
+  color:#64748b;
+  padding-top:2px;
+}
+.card-row .val{
+  font-weight:500;
+  font-size:.9rem;
+}
+.notes-val{
+  white-space: pre-wrap;
+}
+.card-actions-row{
+  margin-top:10px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+.card-details-tree{
+  margin-top:4px;
+}
 </style>
