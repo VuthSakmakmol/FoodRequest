@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer   = ref(true)
 const rail     = ref(false)
-const appTitle = 'Admin'
+const appTitle = ''
 
 /** Sections (collapsible, no duplicate rows) */
 const sections = [
@@ -96,7 +96,7 @@ function logout() {
         :permanent="$vuetify.display.mdAndUp"
         expand-on-hover
       >
-        <div class="drawer-head">
+        <!-- <div class="drawer-head">
           <div class="brand">
             <v-icon icon="mdi-shield-account-outline" size="22" class="mr-2" />
             Admin
@@ -104,7 +104,7 @@ function logout() {
           <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
             <v-icon :icon="rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left'" />
           </v-btn>
-        </div>
+        </div> -->
 
         <v-divider class="divider" />
 

@@ -4,6 +4,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded, subscribeBookingRooms } from '@/utils/socket'
 import { useRoute } from 'vue-router'
+import { useDisplay } from 'vuetify'
+import dayjs from 'dayjs'
 
 /* ─────────────── STATE ─────────────── */
 const loading = ref(false)
@@ -12,9 +14,13 @@ const rows    = ref([])
 
 const route = useRoute()
 
-const selectedDate = ref('')
+const selectedDate = ref(dayjs().format('YYYY-MM-DD'))
 const statusFilter = ref('ALL')
 const qSearch      = ref('')
+
+/* responsive: use Vuetify breakpoint like DriverCarBooking */
+const { smAndDown } = useDisplay()
+const isMobile = computed(() => smAndDown.value)
 
 /* Khmer status options for filter (values still English for backend) */
 const statusOptions = [
@@ -82,7 +88,7 @@ function detectIdentity() {
 /* Force role to MESSENGER for this view (but keep detected loginId) */
 const identity = ref({
   ...detectIdentity(),
-  role: 'MESSENGER'
+  role: 'MESSENGER',
 })
 
 /* Dev override bar */
@@ -207,7 +213,7 @@ async function loadList() {
     const params = {
       role,
       loginId,
-      messengerId: loginId
+      messengerId: loginId,
     }
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
@@ -257,7 +263,7 @@ const filtered = computed(() =>
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 )
 
-/* ───────── SIMPLE PAGINATION ───────── */
+/* ───────── SIMPLE PAGINATION (shared for table + cards) ───────── */
 const page = ref(1)
 const itemsPerPage = 10
 
@@ -272,6 +278,11 @@ const rangeStart = computed(() =>
 const rangeEnd = computed(() =>
   Math.min(page.value * itemsPerPage, totalItems.value)
 )
+
+const paged = computed(() => {
+  const start = (page.value - 1) * itemsPerPage
+  return filtered.value.slice(start, start + itemsPerPage)
+})
 
 watch(filtered, () => {
   if (page.value > pageCount.value) page.value = pageCount.value
@@ -368,6 +379,7 @@ function onAssigned(p) {
   if (idx >= 0) {
     const it = rows.value[idx]
 
+    // ❗ if re-assigned to someone else, remove from my list
     if (newAssignee && newAssignee !== myLoginId) {
       rows.value.splice(idx, 1)
       return
@@ -380,13 +392,14 @@ function onAssigned(p) {
       messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
       messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
     }
-    if (p.status) it.status = p.status
+    if (p.status)   it.status   = p.status
     if (p.tripDate) it.tripDate = p.tripDate
     if (p.timeStart) it.timeStart = p.timeStart
-    if (p.timeEnd) it.timeEnd = p.timeEnd
+    if (p.timeEnd)   it.timeEnd   = p.timeEnd
     return
   }
 
+  // not in list yet, but now assigned to me → reload
   if (newAssignee && newAssignee === myLoginId) {
     loadList()
   }
@@ -437,6 +450,7 @@ onBeforeUnmount(() => {
 
 watch([selectedDate, statusFilter], loadList)
 
+/* details dialog */
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item) {
@@ -449,14 +463,28 @@ function showDetails(item) {
   <v-container fluid class="pa-2">
     <!-- identity bar (dev only) -->
     <div v-if="!identity?.loginId" class="d-flex align-center mb-2" style="gap:8px;">
-      <v-text-field v-model="devLoginId" label="loginId" density="compact" variant="outlined" style="max-width:220px;" hide-details />
-      <v-select :items="['MESSENGER']" v-model="devRole" density="compact" variant="outlined" hide-details style="max-width:160px;" />
+      <v-text-field
+        v-model="devLoginId"
+        label="loginId"
+        density="compact"
+        variant="outlined"
+        style="max-width:220px;"
+        hide-details
+      />
+      <v-select
+        :items="['MESSENGER']"
+        v-model="devRole"
+        density="compact"
+        variant="outlined"
+        hide-details
+        style="max-width:160px;"
+      />
       <v-btn color="primary" size="small" @click="useDevIdentity">USE</v-btn>
     </div>
 
-    <v-sheet class="driver-section pa-0" rounded="lg">
+    <v-sheet class="messenger-section pa-0" rounded="lg">
       <!-- Gradient HERO filter bar -->
-      <div class="driver-hero">
+      <div class="messenger-hero">
         <v-text-field
           v-model="selectedDate"
           type="date"
@@ -496,133 +524,206 @@ function showDetails(item) {
       <div class="px-3 pb-3 pt-3">
         <v-card flat class="soft-card">
           <v-card-text>
-            <v-alert v-if="error" type="error" variant="tonal" border="start" class="mb-3">{{ error }}</v-alert>
-
-            <v-data-table
-              :headers="headers"
-              :items="filtered"
-              :loading="loading"
-              item-key="_id"
-              density="comfortable"
-              class="elevated"
-              v-model:page="page"
-              :items-per-page="itemsPerPage"
-              :hide-default-footer="true"
+            <v-alert
+              v-if="error"
+              type="error"
+              variant="tonal"
+              border="start"
+              class="mb-3"
             >
-              <template #loading><v-skeleton-loader type="table-row@6" /></template>
+              {{ error }}
+            </v-alert>
 
-              <template #item.time="{ item }">
-                <div :data-id="item._id">
-                  <div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
-                  <div class="text-caption text-medium-emphasis">{{ item.tripDate }}</div>
+            <!-- MOBILE: CARD LIST (same feeling as Driver) -->
+            <div v-if="isMobile" class="messenger-card-wrap">
+              <v-skeleton-loader
+                v-if="loading"
+                type="card@3"
+                class="mb-2"
+              />
+              <template v-else>
+                <div
+                  v-if="!filtered.length"
+                  class="no-data-mobile text-center py-6 text-medium-emphasis"
+                >
+                  មិនមានការកក់ម៉ូតូទេ
+                  <span v-if="selectedDate"> នៅថ្ងៃទី {{ selectedDate }}</span>។
                 </div>
-              </template>
 
-              <template #item.category="{ item }">
-                <v-chip :color="item.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
-                  <v-icon :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" size="16" />
-                  <span class="ml-2">{{ categoryLabel(item.category) }}</span>
-                </v-chip>
-              </template>
+                <div v-else class="messenger-card-list">
+                  <v-card
+                    v-for="item in paged"
+                    :key="item._id"
+                    class="messenger-card"
+                    rounded="xl"
+                    elevation="2"
+                    :data-id="item._id"
+                  >
+                    <v-card-text class="py-3 px-3">
+                      <!-- top row: category + time + status -->
+                      <div class="card-top">
+                        <div class="card-top-left">
+                          <v-chip
+                            :color="item.category === 'Car' ? 'indigo' : 'deep-orange'"
+                            size="small"
+                            label
+                            class="mb-1"
+                          >
+                            <v-icon
+                              :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'"
+                              size="16"
+                            />
+                            <span class="ml-2">{{ categoryLabel(item.category) }}</span>
+                          </v-chip>
+                          <div class="card-time mono">
+                            {{ item.timeStart }} – {{ item.timeEnd }}
+                          </div>
+                          <div class="card-date text-caption text-medium-emphasis">
+                            {{ item.tripDate }}
+                          </div>
+                        </div>
+                        <div class="card-top-right">
+                          <v-chip :color="statusColor(item.status)" size="small" label>
+                            <v-icon :icon="statusIcon(item.status)" size="16" class="mr-1" />
+                            {{ statusLabel(item.status) }}
+                          </v-chip>
+                        </div>
+                      </div>
 
-              <template #item.requester="{ item }">
-                <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
-                <div class="text-caption text-medium-emphasis">
-                  {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
-                </div>
-              </template>
+                      <v-divider class="my-2" />
 
-              <template #item.itinerary="{ item }">
-                <div class="truncate-2">
-                  <span class="text-medium-emphasis">គោលដៅ៖ </span>
-                  {{ prettyStops(item.stops) }}
-                </div>
-                <div class="mt-1" v-if="item.ticketUrl">
-                  <a :href="absUrl(item.ticketUrl)" target="_blank" rel="noopener" class="text-decoration-none">
-                    <v-btn size="x-small" color="indigo" variant="tonal">
-                      <v-icon icon="mdi-paperclip" size="14" class="mr-1" /> សំបុត្រ
-                    </v-btn>
-                  </a>
-                </div>
-              </template>
+                      <!-- requester -->
+                      <div class="card-row">
+                        <div class="lbl">អ្នកស្នើសុំ</div>
+                        <div class="val">
+                          {{ item.employee?.name || '—' }}
+                          <div class="text-caption text-medium-emphasis">
+                            {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                          </div>
+                        </div>
+                      </div>
 
-              <template #item.passengers="{ item }">
-                <div class="text-center">{{ item.passengers ?? 1 }}</div>
-              </template>
+                      <!-- destination -->
+                      <div class="card-row">
+                        <div class="lbl">គោលដៅ</div>
+                        <div class="val">
+                          <div class="truncate-2">
+                            {{ prettyStops(item.stops) }}
+                          </div>
+                          <div class="mt-1" v-if="item.ticketUrl">
+                            <a
+                              :href="absUrl(item.ticketUrl)"
+                              target="_blank"
+                              rel="noopener"
+                              class="text-decoration-none"
+                            >
+                              <v-btn size="x-small" color="indigo" variant="tonal">
+                                <v-icon icon="mdi-paperclip" size="14" class="mr-1" /> សំបុត្រ
+                              </v-btn>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
 
-              <template #item.status="{ item }">
-                <v-chip :color="statusColor(item.status)" size="small" label>
-                  <v-icon :icon="statusIcon(item.status)" size="16" class="mr-1" />
-                  {{ statusLabel(item.status) }}
-                </v-chip>
-              </template>
+                      <!-- passengers + ack -->
+                      <div class="card-row small">
+                        <div class="lbl">អ្នកដំណើរ</div>
+                        <div class="val">{{ item.passengers ?? 1 }}</div>
+                      </div>
 
-              <template #item.driverAck="{ item }">
-                <v-chip :color="ackColor(item.assignment?.messengerAck || 'PENDING')" size="small" label>
-                  <v-icon :icon="ackIcon(item.assignment?.messengerAck || 'PENDING')" size="16" class="mr-1" />
-                  {{ ackLabel(item.assignment?.messengerAck || 'PENDING') }}
-                </v-chip>
-              </template>
+                      <div class="card-row small">
+                        <div class="lbl">{{ roleLabel }}</div>
+                        <div class="val">
+                          <v-chip
+                            :color="ackColor(item.assignment?.messengerAck || 'PENDING')"
+                            size="small"
+                            label
+                          >
+                            <v-icon
+                              :icon="ackIcon(item.assignment?.messengerAck || 'PENDING')"
+                              size="16"
+                              class="mr-1"
+                            />
+                            {{ ackLabel(item.assignment?.messengerAck || 'PENDING') }}
+                          </v-chip>
+                        </div>
+                      </div>
 
-              <!-- ACTIONS -->
-              <template #item.actions="{ item }">
-                <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
-                  <template v-if="canRespond(item)">
-                    <v-btn
-                      size="small"
-                      color="success"
-                      variant="flat"
-                      :loading="actLoading === String(item._id)"
-                      @click.stop="sendAck(item,'ACCEPTED')"
-                    >
-                      <v-icon icon="mdi-check" size="16" class="mr-1" /> យល់ព្រម
-                    </v-btn>
-                  </template>
+                      <!-- purpose / notes -->
+                      <div class="card-row" v-if="item.purpose">
+                        <div class="lbl">គោលបំណង</div>
+                        <div class="val">{{ item.purpose }}</div>
+                      </div>
+                      <div class="card-row" v-if="item.notes">
+                        <div class="lbl">ចំណាំ</div>
+                        <div class="val notes-val">{{ item.notes }}</div>
+                      </div>
 
-                  <template v-if="canChangeStatus(item)">
-                    <v-menu location="bottom end">
-                      <template #activator="{ props }">
+                      <!-- actions -->
+                      <div class="card-actions-row">
                         <v-btn
-                          v-bind="props"
+                          v-if="canRespond(item)"
+                          block
                           size="small"
-                          variant="tonal"
-                          color="primary"
-                          :loading="statusLoading === String(item._id)"
+                          color="success"
+                          variant="flat"
+                          :loading="actLoading === String(item._id)"
+                          class="mb-1"
+                          @click.stop="sendAck(item,'ACCEPTED')"
                         >
-                          <v-icon icon="mdi-sync" size="16" class="mr-2" /> បន្ទាន់សម័យស្ថានភាព
+                          <v-icon icon="mdi-check" size="16" class="mr-1" /> យល់ព្រម
                         </v-btn>
-                      </template>
-                      <v-list density="compact" min-width="220">
-                        <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
-                        <v-list-item
-                          v-for="s in nextStatusesFor(item.status)"
-                          :key="s"
-                          @click.stop="setMessengerStatus(item, s)"
+
+                        <v-menu
+                          v-if="canChangeStatus(item)"
+                          location="bottom end"
                         >
-                          <template #prepend>
-                            <v-icon :icon="statusIcon(s)" size="18" />
+                          <template #activator="{ props }">
+                            <v-btn
+                              v-bind="props"
+                              block
+                              size="small"
+                              variant="tonal"
+                              color="primary"
+                              class="mb-1"
+                              :loading="statusLoading === String(item._id)"
+                            >
+                              <v-icon icon="mdi-sync" size="16" class="mr-2" />
+                              បន្ទាន់សម័យស្ថានភាព
+                            </v-btn>
                           </template>
-                          <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
-                        </v-list-item>
-                      </v-list>
-                    </v-menu>
-                  </template>
+                          <v-list density="compact" min-width="220">
+                            <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
+                            <v-list-item
+                              v-for="s in nextStatusesFor(item.status)"
+                              :key="s"
+                              @click.stop="setMessengerStatus(item, s)"
+                            >
+                              <template #prepend>
+                                <v-icon :icon="statusIcon(s)" size="18" />
+                              </template>
+                              <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
+                            </v-list-item>
+                          </v-list>
+                        </v-menu>
 
-                  <v-btn size="small" variant="tonal" color="primary" @click.stop="showDetails(item)">
-                    <v-icon icon="mdi-information" size="16" class="mr-1" /> ព័ត៌មានលម្អិត
-                  </v-btn>
+                        <v-btn
+                          block
+                          size="small"
+                          variant="text"
+                          color="primary"
+                          @click.stop="showDetails(item)"
+                        >
+                          <v-icon icon="mdi-information" size="16" class="mr-1" />
+                          ព័ត៌មានលម្អិត
+                        </v-btn>
+                      </div>
+                    </v-card-text>
+                  </v-card>
                 </div>
-              </template>
 
-              <template #no-data>
-                <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">
-                  មិនមានការកក់ម៉ូតូទេ<span v-if="selectedDate"> នៅថ្ងៃទី {{ selectedDate }}</span>។
-                </v-sheet>
-              </template>
-
-              <!-- Custom footer -->
-              <template #bottom>
-                <div class="table-footer">
+                <!-- same footer info as driver -->
+                <div class="table-footer mobile-footer">
                   <div class="tf-left text-caption text-medium-emphasis">
                     {{ rangeStart }}–{{ rangeEnd }} នៃ {{ totalItems }}
                   </div>
@@ -649,7 +750,191 @@ function showDetails(item) {
                   </div>
                 </div>
               </template>
-            </v-data-table>
+            </div>
+
+            <!-- DESKTOP/TABLET: TABLE -->
+            <div v-else>
+              <v-data-table
+                :headers="headers"
+                :items="filtered"
+                :loading="loading"
+                item-key="_id"
+                density="comfortable"
+                class="elevated"
+                v-model:page="page"
+                :items-per-page="itemsPerPage"
+                :hide-default-footer="true"
+              >
+                <template #loading>
+                  <v-skeleton-loader type="table-row@6" />
+                </template>
+
+                <template #item.time="{ item }">
+                  <div :data-id="item._id">
+                    <div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ item.tripDate }}</div>
+                  </div>
+                </template>
+
+                <template #item.category="{ item }">
+                  <v-chip
+                    :color="item.category === 'Car' ? 'indigo' : 'deep-orange'"
+                    size="small"
+                    label
+                  >
+                    <v-icon
+                      :icon="item.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'"
+                      size="16"
+                    />
+                    <span class="ml-2">{{ categoryLabel(item.category) }}</span>
+                  </v-chip>
+                </template>
+
+                <template #item.requester="{ item }">
+                  <div class="font-weight-600">{{ item.employee?.name || '—' }}</div>
+                  <div class="text-caption text-medium-emphasis">
+                    {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                  </div>
+                </template>
+
+                <template #item.itinerary="{ item }">
+                  <div class="truncate-2">
+                    <span class="text-medium-emphasis">គោលដៅ៖ </span>
+                    {{ prettyStops(item.stops) }}
+                  </div>
+                  <div class="mt-1" v-if="item.ticketUrl">
+                    <a
+                      :href="absUrl(item.ticketUrl)"
+                      target="_blank"
+                      rel="noopener"
+                      class="text-decoration-none"
+                    >
+                      <v-btn size="x-small" color="indigo" variant="tonal">
+                        <v-icon icon="mdi-paperclip" size="14" class="mr-1" /> សំបុត្រ
+                      </v-btn>
+                    </a>
+                  </div>
+                </template>
+
+                <template #item.passengers="{ item }">
+                  <div class="text-center">{{ item.passengers ?? 1 }}</div>
+                </template>
+
+                <template #item.status="{ item }">
+                  <v-chip :color="statusColor(item.status)" size="small" label>
+                    <v-icon :icon="statusIcon(item.status)" size="16" class="mr-1" />
+                    {{ statusLabel(item.status) }}
+                  </v-chip>
+                </template>
+
+                <template #item.driverAck="{ item }">
+                  <v-chip
+                    :color="ackColor(item.assignment?.messengerAck || 'PENDING')"
+                    size="small"
+                    label
+                  >
+                    <v-icon
+                      :icon="ackIcon(item.assignment?.messengerAck || 'PENDING')"
+                      size="16"
+                      class="mr-1"
+                    />
+                    {{ ackLabel(item.assignment?.messengerAck || 'PENDING') }}
+                  </v-chip>
+                </template>
+
+                <!-- ACTIONS -->
+                <template #item.actions="{ item }">
+                  <div class="d-flex justify-end" style="gap:6px; flex-wrap: wrap;">
+                    <template v-if="canRespond(item)">
+                      <v-btn
+                        size="small"
+                        color="success"
+                        variant="flat"
+                        :loading="actLoading === String(item._id)"
+                        @click.stop="sendAck(item,'ACCEPTED')"
+                      >
+                        <v-icon icon="mdi-check" size="16" class="mr-1" /> យល់ព្រម
+                      </v-btn>
+                    </template>
+
+                    <template v-if="canChangeStatus(item)">
+                      <v-menu location="bottom end">
+                        <template #activator="{ props }">
+                          <v-btn
+                            v-bind="props"
+                            size="small"
+                            variant="tonal"
+                            color="primary"
+                            :loading="statusLoading === String(item._id)"
+                          >
+                            <v-icon icon="mdi-sync" size="16" class="mr-2" />
+                            បន្ទាន់សម័យស្ថានភាព
+                          </v-btn>
+                        </template>
+                        <v-list density="compact" min-width="220">
+                          <v-list-subheader>ស្ថានភាពបន្ទាប់</v-list-subheader>
+                          <v-list-item
+                            v-for="s in nextStatusesFor(item.status)"
+                            :key="s"
+                            @click.stop="setMessengerStatus(item, s)"
+                          >
+                            <template #prepend>
+                              <v-icon :icon="statusIcon(s)" size="18" />
+                            </template>
+                            <v-list-item-title>{{ statusLabel(s) }}</v-list-item-title>
+                          </v-list-item>
+                        </v-list>
+                      </v-menu>
+                    </template>
+
+                    <v-btn
+                      size="small"
+                      variant="tonal"
+                      color="primary"
+                      @click.stop="showDetails(item)"
+                    >
+                      <v-icon icon="mdi-information" size="16" class="mr-1" /> ព័ត៌មានលម្អិត
+                    </v-btn>
+                  </div>
+                </template>
+
+                <template #no-data>
+                  <v-sheet class="pa-6 text-center" color="grey-lighten-4" rounded="lg">
+                    មិនមានការកក់ម៉ូតូទេ<span v-if="selectedDate"> នៅថ្ងៃទី {{ selectedDate }}</span>។
+                  </v-sheet>
+                </template>
+
+                <!-- Custom footer -->
+                <template #bottom>
+                  <div class="table-footer">
+                    <div class="tf-left text-caption text-medium-emphasis">
+                      {{ rangeStart }}–{{ rangeEnd }} នៃ {{ totalItems }}
+                    </div>
+                    <div class="tf-right">
+                      <v-pagination
+                        v-model="page"
+                        :length="pageCount"
+                        :total-visible="5"
+                        density="comfortable"
+                      >
+                        <template #first>
+                          <v-icon icon="mdi-chevron-double-left" />
+                        </template>
+                        <template #prev>
+                          <v-icon icon="mdi-chevron-left" class="mt-2" />
+                        </template>
+                        <template #next>
+                          <v-icon icon="mdi-chevron-right" class="mt-2" />
+                        </template>
+                        <template #last>
+                          <v-icon icon="mdi-chevron-double-right" />
+                        </template>
+                      </v-pagination>
+                    </div>
+                  </div>
+                </template>
+              </v-data-table>
+            </div>
           </v-card-text>
         </v-card>
       </div>
@@ -660,11 +945,22 @@ function showDetails(item) {
       <v-card class="soft-card" rounded="lg">
         <v-card-title class="d-flex align-center justify-space-between">
           <div class="d-flex align-center" style="gap:10px;">
-            <v-chip :color="detailItem?.category === 'Car' ? 'indigo' : 'deep-orange'" size="small" label>
-              <v-icon :icon="detailItem?.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'" size="16" />
-              <span class="ml-2">{{ categoryLabel(detailItem?.category || '') || '—' }}</span>
+            <v-chip
+              :color="detailItem?.category === 'Car' ? 'indigo' : 'deep-orange'"
+              size="small"
+              label
+            >
+              <v-icon
+                :icon="detailItem?.category === 'Car' ? 'mdi-car' : 'mdi-motorbike'"
+                size="16"
+              />
+              <span class="ml-2">
+                {{ categoryLabel(detailItem?.category || '') || '—' }}
+              </span>
             </v-chip>
-            <span class="mono">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
+            <span class="mono">
+              {{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}
+            </span>
           </div>
           <v-btn icon variant="text" @click="detailOpen = false">
             <v-icon icon="mdi-close" />
@@ -733,8 +1029,16 @@ function showDetails(item) {
             <v-col cols="12" md="6">
               <div class="lbl">ការឆ្លើយតបអ្នកបើកម៉ូតូ</div>
               <div class="val">
-                <v-chip :color="ackColor(detailItem?.assignment?.messengerAck || 'PENDING')" size="small" label>
-                  <v-icon :icon="ackIcon(detailItem?.assignment?.messengerAck || 'PENDING')" size="16" class="mr-1" />
+                <v-chip
+                  :color="ackColor(detailItem?.assignment?.messengerAck || 'PENDING')"
+                  size="small"
+                  label
+                >
+                  <v-icon
+                    :icon="ackIcon(detailItem?.assignment?.messengerAck || 'PENDING')"
+                    size="16"
+                    class="mr-1"
+                  />
                   {{ ackLabel(detailItem?.assignment?.messengerAck || 'PENDING') }}
                 </v-chip>
               </div>
@@ -806,23 +1110,24 @@ function showDetails(item) {
   100% { background: transparent; }
 }
 
-/* Apply Kantumruy Pro to this section */
-.driver-section,
-.driver-section * {
+/* Apply Kantumruy Pro only to messenger page */
+.messenger-section,
+.messenger-section * {
   font-family: 'Kantumruy Pro', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
-.driver-section {
+.messenger-section {
   border: 1px solid #e6e8ee;
   background:#fff;
   border-radius: 12px;
 }
 
-/* HERO + FILTERS (same style as driver list) */
-.driver-hero {
+/* HERO + FILTERS (same sizing as Driver, different gradient) */
+.messenger-hero {
   display:flex;
-  align-items:flex-start;
-  gap:16px;
+  align-items:flex-end;
+  justify-content:flex-start;
+  gap:12px;
   padding: 14px 18px;
   background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
   color:#000000;
@@ -832,28 +1137,20 @@ function showDetails(item) {
 
 .fh-field {
   min-width: 200px;
+  flex: 1 1 140px;
 }
 .fh-date {
-  max-width: 150px;
+  max-width: 160px;
 }
 .fh-status {
-  max-width: 170px;
+  max-width: 180px;
 }
 .fh-search {
   min-width: 220px;
   max-width: 280px;
 }
 
-.fh-icon-btn {
-  background: rgba(255,255,255,0.20) !important;
-  border-radius: 999px;
-  box-shadow: 0 1px 4px rgba(15,23,42,0.35);
-}
-.fh-icon-btn :deep(.v-icon) {
-  color: #050505 !important;
-}
-
-/* inner card */
+/* inner card + table */
 .soft-card {
   border: 1px solid #e9ecf3;
   border-radius: 12px;
@@ -898,29 +1195,107 @@ function showDetails(item) {
 :deep(.v-pagination .v-btn){ min-width: 32px; }
 :deep(.v-pagination .v-btn .v-icon){ line-height: 1; }
 
+/* MOBILE CARD LIST (same idea as driver) */
+.messenger-card-wrap {
+  margin-top: 2px;
+}
+.messenger-card-list {
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.messenger-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: radial-gradient(circle at top left, #eff6ff 0, #ffffff 38%, #f8fafc 100%);
+  box-shadow: 0 10px 24px rgba(15,23,42,0.14);
+}
+
+.card-top {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:8px;
+}
+.card-top-left {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.card-time {
+  font-size:.9rem;
+}
+.card-date {
+  font-size:.78rem;
+}
+
+.card-row {
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin-top:6px;
+}
+.card-row.small {
+  margin-top:4px;
+}
+.card-row .lbl {
+  min-width: 82px;
+  font-size:.78rem;
+  color:#64748b;
+  padding-top:2px;
+}
+.card-row .val {
+  font-weight:500;
+  font-size:.9rem;
+}
+.notes-val {
+  white-space: pre-wrap;
+}
+
+.card-actions-row {
+  margin-top:10px;
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+/* tablet & down */
 @media (max-width: 960px){
-  .driver-hero {
-    flex-direction:column;
-    align-items:flex-start;
+  .messenger-hero {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px 14px;
   }
-  .fh-search {
-    min-width: 100%;
+
+  .fh-field {
+    min-width: 0;
+    width: 100%;
     max-width: 100%;
+    flex: 1 1 100%;
+  }
+  .fh-date,
+  .fh-status,
+  .fh-search {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .table-footer {
+    flex-direction: column;
+    align-items:flex-start;
   }
 }
 
+/* phone */
 @media (max-width: 600px){
-  .driver-section {
+  .messenger-section {
     border-left:none;
     border-right:none;
     border-radius:0;
   }
-  .driver-hero {
-    padding: 10px 12px;
-  }
+
   .table-footer {
-    flex-direction: column;
-    align-items:flex-start;
+    padding-inline: 4px;
   }
 }
 </style>

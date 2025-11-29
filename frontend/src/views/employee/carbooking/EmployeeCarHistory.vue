@@ -233,6 +233,14 @@ const rangeEnd   = computed(() =>
   Math.min(page.value * itemsPerPage.value, totalItems.value)
 )
 
+/* Items for mobile card view (manual slice) */
+const mobilePaged = computed(() => {
+  const items = filtered.value || []
+  const per = itemsPerPage.value || items.length || 1
+  const start = (page.value - 1) * per
+  return items.slice(start, start + per)
+})
+
 watch([filtered, itemsPerPage], () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
@@ -326,8 +334,8 @@ watch([filtered, itemsPerPage], () => {
               {{ error }}
             </v-alert>
 
-            <!-- table wrapper for horizontal scroll on small screens -->
-            <div class="table-wrapper">
+            <!-- ========== DESKTOP TABLE ========== -->
+            <div v-if="!isMobile" class="table-wrapper">
               <v-data-table
                 :headers="headers"
                 :items="filtered"
@@ -452,7 +460,7 @@ watch([filtered, itemsPerPage], () => {
                   </div>
                 </template>
 
-                <!-- ✅ Responsive bottom footer with Font Awesome -->
+                <!-- ✅ Desktop bottom footer -->
                 <template #bottom>
                   <div class="table-footer">
                     <div class="tf-left">
@@ -501,6 +509,188 @@ watch([filtered, itemsPerPage], () => {
                   </div>
                 </template>
               </v-data-table>
+            </div>
+
+            <!-- ========== MOBILE CARD LIST ========== -->
+            <div v-else class="mobile-list">
+              <div v-if="loading" class="py-4">
+                <v-skeleton-loader type="list-item-three-line@4" />
+              </div>
+
+              <div v-else>
+                <div
+                  v-if="!filtered.length"
+                  class="text-center py-6 text-medium-emphasis text-caption"
+                >
+                  No bookings found.
+                </div>
+
+                <div
+                  v-for="item in mobilePaged"
+                  :key="item._id"
+                  class="booking-card"
+                  :data-row-id="item._id"
+                  @click="showDetails(item)"
+                >
+                  <!-- top: time + status -->
+                  <div class="bc-top">
+                    <div>
+                      <div class="bc-time mono">
+                        {{ item.timeStart }} – {{ item.timeEnd }}
+                      </div>
+                      <div class="bc-date text-caption">
+                        {{ item.tripDate || '—' }}
+                      </div>
+                    </div>
+                    <v-chip
+                      :color="statusColor(item.status)"
+                      size="small"
+                      label
+                      class="bc-status-chip"
+                    >
+                      <i :class="fixFA(statusIconFA(item.status))" class="mr-1"></i>
+                      {{ item.status }}
+                    </v-chip>
+                  </div>
+
+                  <!-- middle: category + requester -->
+                  <div class="bc-middle">
+                    <div class="d-flex align-center" style="gap:6px;">
+                      <v-chip
+                        :color="item.category === 'Car' ? 'primary' : 'orange'"
+                        size="x-small"
+                        label
+                      >
+                        <i :class="categoryIconFA(item.category)" class="mr-1"></i>
+                        {{ item.category }}
+                      </v-chip>
+
+                      <v-chip
+                        v-if="item.isMine"
+                        size="x-small"
+                        color="primary"
+                        variant="elevated"
+                      >
+                        Mine
+                      </v-chip>
+                    </div>
+                    <div class="bc-requester">
+                      <div class="font-weight-600">
+                        {{ item.employee?.name || '—' }}
+                      </div>
+                      <div class="text-caption text-medium-emphasis">
+                        {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- body: itinerary + purpose -->
+                  <div class="bc-body">
+                    <div class="lbl">Route</div>
+                    <div class="val">
+                      {{ prettyStops(item.stops) }}
+                      <v-btn
+                        v-if="item.ticketUrl"
+                        size="x-small"
+                        color="indigo"
+                        variant="tonal"
+                        class="ml-2"
+                        @click.stop="openTicket(item.ticketUrl)"
+                      >
+                        <template #prepend>
+                          <i class="fa-solid fa-paperclip"></i>
+                        </template>
+                        Ticket
+                      </v-btn>
+                    </div>
+
+                    <div
+                      class="text-caption mt-2"
+                      v-if="item.purpose || item.notes"
+                    >
+                      <span class="text-medium-emphasis">Purpose:</span>
+                      {{ item.purpose || '—' }}
+                      <span v-if="item.notes">
+                        • <span class="text-medium-emphasis">Notes:</span> {{ item.notes }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- bottom: pax + actions -->
+                  <div class="bc-bottom">
+                    <div class="text-caption text-medium-emphasis">
+                      Pax: <strong>{{ item.passengers ?? 1 }}</strong>
+                    </div>
+
+                    <div class="bc-actions">
+                      <v-btn
+                        v-if="item.isMine"
+                        size="small"
+                        variant="text"
+                        color="error"
+                        :disabled="!canCancel(item)"
+                        :loading="cancelLoading === String(item._id)"
+                        @click.stop="cancelBooking(item)"
+                      >
+                        <template #prepend>
+                          <i class="fa-solid fa-ban"></i>
+                        </template>
+                        Cancel
+                      </v-btn>
+
+                      <v-btn
+                        size="small"
+                        variant="tonal"
+                        color="primary"
+                        @click.stop="showDetails(item)"
+                      >
+                        <template #prepend>
+                          <i class="fa-solid fa-circle-info"></i>
+                        </template>
+                        Details
+                      </v-btn>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- mobile footer / pagination -->
+                <div class="table-footer mt-1" v-if="pageCount > 1">
+                  <div class="tf-left">
+                    <div class="text-caption text-medium-emphasis d-none d-sm-inline">
+                      Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalItems }}
+                    </div>
+                    <div class="text-caption text-medium-emphasis d-sm-none">
+                      {{ page }} / {{ pageCount }}
+                    </div>
+                  </div>
+
+                  <div class="tf-middle">
+                    <!-- no rows-per-page selector on mobile -->
+                  </div>
+
+                  <div class="tf-right">
+                    <v-pagination
+                      v-model="page"
+                      :length="pageCount"
+                      :total-visible="3"
+                      density="comfortable"
+                    >
+                      <template #first>
+                        <i class="fa-solid fa-angles-left"></i>
+                      </template>
+                      <template #prev>
+                        <i class="fa-solid fa-angle-left" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #next>
+                        <i class="fa-solid fa-angle-right" style="margin-top: 10px;"></i>
+                      </template>
+                      <template #last>
+                        <i class="fa-solid fa-angles-right"></i>
+                      </template>
+                    </v-pagination>
+                  </div>
+                </div>
+              </div>
             </div>
           </v-card-text>
         </v-card>
@@ -660,7 +850,7 @@ watch([filtered, itemsPerPage], () => {
   align-items:center;
   justify-content:space-between;
   padding: 14px 18px;
-  background: linear-gradient(90deg, #0f719e 0%, #b3b4df 60%, #ae9aea 100%);
+  background: linear-gradient(90deg, #0f719e 0%, #6ca9f5 45%, #ae9aea 100%);
   color:#fff;
 }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
@@ -672,8 +862,10 @@ watch([filtered, itemsPerPage], () => {
   border-radius: 14px;
 }
 .glass {
-  background: rgba(255,255,255,.62);
-  backdrop-filter: blur(6px);
+  background: radial-gradient(circle at 0 0, rgba(59,130,246,.06), transparent 60%),
+              radial-gradient(circle at 100% 100%, rgba(45,212,191,.06), transparent 60%),
+              rgba(255,255,255,.85);
+  backdrop-filter: blur(8px);
 }
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
 
@@ -728,7 +920,7 @@ watch([filtered, itemsPerPage], () => {
   transition: background 120ms ease;
 }
 
-/* ——— Responsive table footer ——— */
+/* ——— Footer ——— */
 .table-footer{
   display:flex;
   align-items:center;
@@ -744,6 +936,119 @@ watch([filtered, itemsPerPage], () => {
 /* tighter pagination buttons and icon alignment */
 :deep(.v-pagination .v-btn){ min-width: 36px; }
 :deep(.v-pagination .v-btn i.fa-solid){ line-height: 1; }
+
+/* ========== MOBILE CARD STYLES ========== */
+.mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.booking-card {
+  position: relative;
+  border-radius: 16px;
+  padding: 10px 13px 12px;
+  margin-bottom: 4px;
+  border: 1px solid rgba(148,163,184,.35);
+  background:
+    radial-gradient(circle at 0 0, rgba(59,130,246,.12), transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(129,140,248,.12), transparent 55%),
+    rgba(255,255,255,.96);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(15,23,42,0.10);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+/* left color strip */
+.booking-card::before{
+  content:'';
+  position:absolute;
+  left:0;
+  top:9px;
+  bottom:9px;
+  width:3px;
+  border-radius:999px;
+  background: linear-gradient(180deg,#0f719e,#22c55e);
+  opacity:.9;
+}
+
+/* small gradient badge behind status chip */
+.booking-card::after{
+  content:'';
+  position:absolute;
+  right:-30px;
+  top:-30px;
+  width:80px;
+  height:80px;
+  background: radial-gradient(circle, rgba(59,130,246,.25), transparent 55%);
+  opacity:.7;
+  pointer-events:none;
+}
+
+.bc-top {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-time {
+  font-weight: 700;
+  font-size: .9rem;
+  color:#0f172a;
+}
+.bc-date {
+  margin-top: 1px;
+  font-size:.75rem;
+  color:#64748b;
+}
+
+.bc-status-chip {
+  font-size: .72rem;
+  box-shadow: 0 0 0 1px rgba(15,23,42,.04);
+}
+
+.bc-middle {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-top: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-requester {
+  text-align: right;
+}
+
+.bc-body {
+  font-size: .8rem;
+  margin-top: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-bottom {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-top: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-actions {
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
 
 /* On very narrow screens, stretch footer sections to full width */
 @media (max-width: 600px){

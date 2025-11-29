@@ -51,7 +51,7 @@ const headers = [
   { title: 'Time',        key: 'time',       sortable: true,  width: 240 },
   { title: 'Category',    key: 'category',   sortable: true,  width: 120 },
   { title: 'Requester',   key: 'requester',  sortable: true,  width: 360 },
-  { title: 'Itinerary',   key: 'itinerary',  sortable: false, width: 350 },
+  { title: 'Destination', key: 'destination',sortable: false, width: 350 },
   { title: 'Pax',         key: 'passengers', sortable: true,  width: 70,  align: 'center' },
   { title: 'Purpose',     key: 'purpose',    sortable: false, width: 260 },
   { title: 'Assigned',    key: 'assigned',   sortable: false, width: 160 },
@@ -164,6 +164,13 @@ const totalItems = computed(() => filtered.value?.length || 0)
 const rangeStart = computed(() => totalItems.value ? (page.value - 1) * itemsPerPage.value + 1 : 0)
 const rangeEnd   = computed(() => Math.min(page.value * itemsPerPage.value, totalItems.value))
 
+/* For mobile cards: use same page & itemsPerPage */
+const visibleRows = computed(() => {
+  const per = itemsPerPage.value || 10
+  const start = (page.value - 1) * per
+  return filtered.value.slice(start, start + per)
+})
+
 watch([filtered, itemsPerPage], () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
@@ -171,9 +178,7 @@ watch([filtered, itemsPerPage], () => {
 /* ───────── Realtime ───────── */
 // new booking created
 function onCreated(doc) {
-  // if this booking is for another date, ignore
   if (doc?.tripDate && selectedDate.value && doc.tripDate !== selectedDate.value) return
-  // instead of pushing half data (no populated employee), just reload
   loadSchedule()
 }
 
@@ -208,13 +213,13 @@ function onDriverAck(p) {
   if (it) it.assignment = { ...(it.assignment || {}), driverAck: p.response, driverAckAt: p.at }
 }
 
-// messenger acknowledges (future use in UI)
+// messenger acknowledges
 function onMessengerAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.assignment = { ...(it.assignment || {}), messengerAck: p.response, messengerAckAt: p.at }
 }
 
-// booking fields updated (tripDate/time/category/notes/…)
+// booking fields updated
 function onUpdated(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (!it) return
@@ -267,7 +272,7 @@ const assignLoading = ref(false)
 const assignError = ref('')
 
 const assignRole = ref('DRIVER')
-const assignLockedRole = ref('DRIVER') // role allowed for this booking
+const assignLockedRole = ref('DRIVER')
 const people = ref([])
 const selectedLoginId = ref('')
 
@@ -292,7 +297,6 @@ async function loadPeopleAndAvailability(item) {
   people.value = []
   busyMap.value = new Map()
 
-  // preselect current assignee (driver or messenger) based on booking type
   const currentLoginId = assignRole.value === 'MESSENGER'
     ? item?.assignment?.messengerId
     : item?.assignment?.driverId
@@ -367,9 +371,9 @@ async function submitAssign() {
   assignError.value = ''
   try {
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
-      driverId: selectedLoginId.value,   // backend uses role to decide driver vs messenger
+      driverId: selectedLoginId.value,
       role: assignRole.value,
-      status: 'PENDING'                  // new assignment must start as PENDING
+      status: 'PENDING'
     })
 
     const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
@@ -387,9 +391,6 @@ async function submitAssign() {
           driverAck: 'PENDING'
         }
       }
-
-      // always reset status to PENDING when swapping person (frontend view);
-      // backend will also broadcast via socket.
       it.status = 'PENDING'
     }
 
@@ -462,7 +463,6 @@ async function saveEdit() {
   const timeStart = `${editForm.value.timeStartHour}:${editForm.value.timeStartMinute}`
   const timeEnd   = `${editForm.value.timeEndHour}:${editForm.value.timeEndMinute}`
 
-  // simple validation: end must be after start
   if (timeEnd <= timeStart) {
     editError.value = 'End time must be after start time.'
     return
@@ -477,7 +477,6 @@ async function saveEdit() {
     category: editForm.value.category
   }
 
-  // 👉 detect any schedule change
   const scheduleChanged =
     old.tripDate  !== payload.tripDate ||
     old.timeStart !== payload.timeStart ||
@@ -486,10 +485,8 @@ async function saveEdit() {
 
   editLoading.value = true
   try {
-    // 1) update date / time / category
     await api.patch(`/admin/car-bookings/${old._id}`, payload)
 
-    // local UI update
     const it = rows.value.find(x => String(x._id) === String(old._id))
     if (it) {
       it.tripDate  = payload.tripDate
@@ -498,11 +495,10 @@ async function saveEdit() {
       it.category  = payload.category
     }
 
-    // 2) if schedule changed -> tell backend to reopen to PENDING (admin only)
     if (scheduleChanged) {
       await api.patch(`/admin/car-bookings/${old._id}/status`, {
         status: 'PENDING',
-        forceReopen: true          // 🔥 special flag for backend
+        forceReopen: true
       })
 
       if (it) {
@@ -592,7 +588,8 @@ async function saveEdit() {
               {{ error }}
             </v-alert>
 
-            <div class="table-scroll">
+            <!-- DESKTOP/TABLET: TABLE VIEW -->
+            <div v-if="!isMobile" class="table-scroll">
               <v-data-table
                 :headers="headers"
                 :items="filtered"
@@ -633,7 +630,8 @@ async function saveEdit() {
                   </div>
                 </template>
 
-                <template #item.itinerary="{ item }">
+                <!-- Destination column -->
+                <template #item.destination="{ item }">
                   <div class="truncate-2">
                     {{ prettyStops(item.stops) }}
                     <v-btn
@@ -693,7 +691,6 @@ async function saveEdit() {
                 </template>
 
                 <template #item.actions="{ item }">
-                  <!-- Edit schedule (date/time/category) -->
                   <v-btn
                     size="small"
                     variant="text"
@@ -820,6 +817,215 @@ async function saveEdit() {
                 </template>
               </v-data-table>
             </div>
+
+            <!-- MOBILE: CARD VIEW -->
+            <div v-else class="mobile-list">
+              <div v-if="loading" class="py-4">
+                <v-skeleton-loader type="list-item-three-line@4" />
+              </div>
+
+              <template v-else>
+                <div
+                  v-if="!filtered.length"
+                  class="text-center py-6 text-medium-emphasis text-caption"
+                >
+                  No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
+                </div>
+
+                <div
+                  v-for="item in visibleRows"
+                  :key="item._id"
+                  class="booking-card"
+                >
+                  <!-- top: date/time + status -->
+                  <div class="bc-top">
+                    <div>
+                      <div class="bc-date">
+                        {{ item.tripDate || selectedDate }}
+                      </div>
+                      <div class="bc-time mono">
+                        {{ item.timeStart }} – {{ item.timeEnd }}
+                      </div>
+                    </div>
+
+                    <v-chip :color="statusColor(item.status)" size="small" label class="bc-status-chip">
+                      <v-icon :icon="statusIcon(item.status)" size="16" class="mr-1" />
+                      {{ item.status }}
+                    </v-chip>
+                  </div>
+
+                  <!-- requester + assignee -->
+                  <div class="bc-middle">
+                    <div class="bc-requester">
+                      <div class="bc-req-name">
+                        {{ item.employee?.name || '—' }}
+                      </div>
+                      <div class="bc-req-meta text-caption text-medium-emphasis">
+                        {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+                      </div>
+                    </div>
+                    <div class="bc-assignee">
+                      <template v-if="assigneeName(item)">
+                        <v-chip
+                          :color="assigneeColor(item)"
+                          size="x-small"
+                          class="assignee-chip"
+                          label
+                        >
+                          <v-icon :icon="assigneeIcon(item)" size="14" class="mr-1" />
+                          {{ assigneeName(item) }}
+                        </v-chip>
+                      </template>
+                      <template v-else>
+                        <v-chip
+                          color="grey"
+                          size="x-small"
+                          variant="tonal"
+                          class="assignee-chip"
+                          label
+                        >
+                          <v-icon icon="mdi-account-off-outline" size="14" class="mr-1" />
+                          Unassigned
+                        </v-chip>
+                      </template>
+                    </div>
+                  </div>
+
+                  <!-- body: destination, purpose, driver response -->
+                  <div class="bc-body">
+                    <div class="lbl">Destination</div>
+                    <div class="bc-itinerary">
+                      {{ prettyStops(item.stops) }}
+                      <v-btn
+                        v-if="item.ticketUrl"
+                        size="x-small"
+                        color="indigo"
+                        variant="tonal"
+                        class="ml-2"
+                        @click.stop="openTicket(item.ticketUrl)"
+                      >
+                        <v-icon icon="mdi-paperclip" size="14" class="mr-1" />
+                        Ticket
+                      </v-btn>
+                    </div>
+
+                    <div class="lbl mt-2">Purpose</div>
+                    <div class="purpose-text-mobile">
+                      {{ item.purpose || '—' }}
+                    </div>
+
+                    <div class="lbl mt-2">Driver response</div>
+                    <div>
+                      <v-chip :color="ackColor(item.assignment?.driverAck || 'PENDING')" size="x-small" label>
+                        <v-icon :icon="ackIcon(item.assignment?.driverAck || 'PENDING')" size="14" class="mr-1" />
+                        {{ item.assignment?.driverAck || 'PENDING' }}
+                      </v-chip>
+                    </div>
+                  </div>
+
+                  <!-- bottom: pax + actions -->
+                  <div class="bc-bottom">
+                    <div class="text-caption text-medium-emphasis">
+                      Pax: <strong>{{ item.passengers ?? 1 }}</strong>
+                    </div>
+
+                    <div class="bc-actions">
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        color="primary"
+                        @click.stop="openEditDialog(item)"
+                      >
+                        <v-icon icon="mdi-calendar-clock" size="16" class="mr-1" />
+                        Edit
+                      </v-btn>
+
+                      <v-menu location="bottom end">
+                        <template #activator="{ props }">
+                          <v-btn
+                            v-bind="props"
+                            size="x-small"
+                            variant="tonal"
+                            color="primary"
+                            :loading="!!updating[item._id]"
+                            :disabled="!hasAssignee(item)"
+                          >
+                            <v-icon icon="mdi-sync" size="16" class="mr-1" />
+                            Next
+                          </v-btn>
+                        </template>
+                        <v-list density="compact" min-width="220">
+                          <v-list-subheader>Next status</v-list-subheader>
+                          <template v-if="nextStatuses(item.status).length">
+                            <v-list-item
+                              v-for="s in nextStatuses(item.status)"
+                              :key="s"
+                              @click.stop="updateStatus(item, s)"
+                            >
+                              <template #prepend>
+                                <v-icon :icon="statusIcon(s)" size="18" />
+                              </template>
+                              <v-list-item-title>{{ s }}</v-list-item-title>
+                            </v-list-item>
+                          </template>
+                          <v-list-item v-else disabled>
+                            <template #prepend>
+                              <v-icon icon="mdi-lock-outline" size="18" />
+                            </template>
+                            <v-list-item-title>No further changes</v-list-item-title>
+                          </v-list-item>
+                        </v-list>
+                      </v-menu>
+
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        color="secondary"
+                        @click.stop="openAssignDialog(item)"
+                      >
+                        <v-icon icon="mdi-badge-account-horizontal-outline" size="16" class="mr-1" />
+                        Assign
+                      </v-btn>
+
+                      <v-btn
+                        size="x-small"
+                        variant="text"
+                        color="secondary"
+                        @click.stop="showDetails(item)"
+                      >
+                        <v-icon icon="mdi-information-outline" size="16" class="mr-1" />
+                        Details
+                      </v-btn>
+                    </div>
+                  </div>
+                </div>
+              </template>
+
+              <!-- same footer for mobile -->
+              <div class="table-footer mt-2">
+                <div class="tf-left">
+                  <div class="text-caption text-medium-emphasis">
+                    {{ page }} / {{ pageCount }}
+                  </div>
+                </div>
+                <div class="tf-middle" />
+                <div class="tf-right">
+                  <v-pagination
+                    v-model="page"
+                    :length="pageCount"
+                    :total-visible="3"
+                    density="comfortable"
+                  >
+                    <template #prev>
+                      <v-icon icon="mdi-chevron-left" size="18" />
+                    </template>
+                    <template #next>
+                      <v-icon icon="mdi-chevron-right" size="18" />
+                    </template>
+                  </v-pagination>
+                </div>
+              </div>
+            </div>
           </v-card-text>
         </v-card>
       </div>
@@ -868,7 +1074,7 @@ async function saveEdit() {
             </v-col>
 
             <v-col cols="12">
-              <div class="lbl">Itinerary</div>
+              <div class="lbl">Destination</div>
               <div class="val">
                 <div v-if="(detailItem?.stops || []).length" class="stops">
                   <div v-for="(s,i) in detailItem.stops" :key="i" class="stop">
@@ -1199,14 +1405,6 @@ async function saveEdit() {
 .hero-inner {
   width: 100%;
 }
-.hero-left { display:flex; flex-direction:column; gap:6px; }
-.hero-title {
-  display:flex;
-  align-items:center;
-  gap:10px;
-  font-weight:800;
-  color:#fff;
-}
 
 .soft-card {
   border: 1px solid rgba(209,218,229,.14);
@@ -1268,7 +1466,6 @@ async function saveEdit() {
   white-space: pre-wrap;
 }
 
-/* bigger link icon for map */
 .link-icon {
   font-size: 16px;
 }
@@ -1311,6 +1508,147 @@ async function saveEdit() {
 
 :deep(.v-pagination .v-btn .v-icon){ line-height: 1; }
 
+/* ===== MOBILE CARD STYLES ===== */
+.mobile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.booking-card {
+  position: relative;
+  border-radius: 16px;
+  padding: 10px 13px 12px;
+  margin-bottom: 4px;
+  border: 1px solid rgba(148,163,184,.35);
+  background:
+    radial-gradient(circle at 0 0, rgba(59,130,246,.12), transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(129,140,248,.12), transparent 55%),
+    rgba(255,255,255,.96);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(15,23,42,0.10);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+/* left color strip */
+.booking-card::before{
+  content:'';
+  position:absolute;
+  left:0;
+  top:9px;
+  bottom:9px;
+  width:3px;
+  border-radius:999px;
+  background: linear-gradient(180deg,#0f719e,#22c55e);
+  opacity:.9;
+}
+
+/* small gradient badge behind status chip */
+.booking-card::after{
+  content:'';
+  position:absolute;
+  right:-30px;
+  top:-30px;
+  width:80px;
+  height:80px;
+  background: radial-gradient(circle, rgba(59,130,246,.25), transparent 55%);
+  opacity:.7;
+  pointer-events:none;
+}
+
+.bc-top {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-time {
+  font-weight: 700;
+  font-size: .9rem;
+  color:#0f172a;
+}
+.bc-date {
+  margin-bottom: 2px;
+  font-size:.78rem;
+  color:#64748b;
+}
+
+.bc-status-chip {
+  font-size: .72rem;
+  box-shadow: 0 0 0 1px rgba(15,23,42,.04);
+}
+
+.bc-middle {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  margin-top: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-requester {
+  flex:1;
+}
+.bc-req-name {
+  font-weight: 600;
+  font-size: .9rem;
+}
+.bc-req-meta {
+  font-size: .78rem;
+}
+
+.bc-assignee {
+  display:flex;
+  align-items:flex-start;
+  justify-content:flex-end;
+}
+
+.bc-body {
+  font-size: .8rem;
+  margin-top: 4px;
+  position: relative;
+  z-index: 1;
+}
+.bc-itinerary {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px;
+  font-size:.8rem;
+}
+
+.purpose-text-mobile {
+  font-size:.82rem;
+  font-weight:500;
+  color:#1f2937;
+}
+
+.bc-bottom {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-top: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.bc-actions {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:4px;
+}
+
+/* responsive tweaks */
 @media (max-width: 600px){
   .admin-car-page {
     padding: 0 !important;

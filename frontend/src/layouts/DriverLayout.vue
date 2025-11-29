@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer   = ref(true)
 const rail     = ref(false)
-const appTitle = 'Driver'
+const appTitle = ''
 
 /** Single section: Transportation */
 const sections = [
@@ -83,7 +83,7 @@ function logout() {
         :permanent="$vuetify.display.mdAndUp"
         expand-on-hover
       >
-        <div class="drawer-head">
+        <!-- <div class="drawer-head">
           <div class="brand">
             <v-icon icon="mdi-steering" size="22" class="mr-2" />
             Driver
@@ -91,7 +91,7 @@ function logout() {
           <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
             <v-icon :icon="rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left'" />
           </v-btn>
-        </div>
+        </div> -->
 
         <v-divider class="divider" />
 

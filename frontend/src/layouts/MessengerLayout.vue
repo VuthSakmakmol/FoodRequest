@@ -10,7 +10,7 @@ const auth   = useAuth()
 
 const drawer   = ref(true)
 const rail     = ref(false)
-const appTitle = 'Messenger'
+const appTitle = ''
 
 /** Sections (one category for now) */
 const sections = [
@@ -82,13 +82,13 @@ function logout() {
         expand-on-hover
       >
         <div class="drawer-head">
-          <div class="brand">
+          <!-- <div class="brand">
             <v-icon icon="mdi-motorbike" size="22" class="mr-2" />
             Messenger
-          </div>
-          <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
+          </div> -->
+          <!-- <v-btn icon variant="text" class="rail-toggle" @click="rail = !rail">
             <v-icon :icon="rail ? 'mdi-arrow-expand-right' : 'mdi-arrow-collapse-left'" />
-          </v-btn>
+          </v-btn> -->
         </div>
 
         <v-divider class="divider" />
