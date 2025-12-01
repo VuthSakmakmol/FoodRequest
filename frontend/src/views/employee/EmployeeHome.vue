@@ -35,14 +35,13 @@ const form = ref({
 
   orderType: 'Daily meal',
   meals: [],
-  eatDate: dayjs().format('YYYY-MM-DD'),   // will be overridden by route if provided
+  eatDate: dayjs().format('YYYY-MM-DD'),
 
   eatStartHour: '',
   eatStartMinute: '',
   eatEndHour: '',
   eatEndMinute: '',
 
-  // Simple HH:mm used by Recurring section; OK to leave empty
   eatTimeStart: '',
 
   quantity: 1,
@@ -60,11 +59,11 @@ const form = ref({
 
   // 🔁 recurring (Daily)
   recurring: false,
-  endDate: '',          // 'YYYY-MM-DD'
+  endDate: '',
   skipHolidays: false,
 })
 
-/* 🔗 If calendar opened with ?eatDate=YYYY-MM-DD, apply it (no past dates) */
+/* If calendar opened with ?eatDate=YYYY-MM-DD, apply it (no past dates) */
 const qEatDate = typeof route.query.eatDate === 'string' ? route.query.eatDate : ''
 if (qEatDate && /^\d{4}-\d{2}-\d{2}$/.test(qEatDate)) {
   let d = dayjs(qEatDate, 'YYYY-MM-DD', true)
@@ -94,7 +93,6 @@ async function loadEmployees() {
       isActive: !!e.isActive,
     }))
 
-    // restore last selection
     const savedId = localStorage.getItem('employeeId') || ''
     if (savedId && !form.value.employeeId) {
       const exists = employees.value.some(e => String(e.employeeId) === String(savedId))
@@ -173,6 +171,7 @@ function buildMenuCountsArray(menuCountsObj) {
   for (const it of entries) map.set(it.choice, (map.get(it.choice) || 0) + it.count)
   return Array.from(map, ([choice, count]) => ({ choice, count }))
 }
+
 function buildDietaryCountsArray(dietaryCountsObj) {
   const temp = Object.entries(dietaryCountsObj || {})
     .map(([allergen, v]) => ({ allergen, count: Number(v?.count || 0), menu: v?.menu || 'Standard' }))
@@ -186,6 +185,7 @@ function buildDietaryCountsArray(dietaryCountsObj) {
   }
   return Array.from(map.values())
 }
+
 function buildPayloadFromForm(f) {
   const simpleStart = f.eatTimeStart && /^\d{2}:\d{2}$/.test(f.eatTimeStart) ? f.eatTimeStart : null
 
@@ -451,7 +451,6 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
             </v-col>
 
             <v-col cols="12" md="5">
-              <!-- 🔗 pass route down so OrderDetailSection can see ?eatDate=... -->
               <OrderDetailSection
                 :form="form"
                 :is-timed-order="isTimedOrder"
@@ -586,31 +585,8 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
 .slim-toolbar {
   background: linear-gradient(90deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
 }
-.section {
-  background: #fafafb;
-  border: 1px dashed rgba(100,116,139,.25);
-}
-.hdr {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  margin-bottom:6px;
-}
-.hdr .t {
-  font-weight: 600;
-  font-size: .95rem;
-}
-.n {
-  width:18px;
-  height:18px;
-  border-radius:999px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  background:#6b7280;
-  color:#fff;
-  font-size:11px;
-  font-weight:700;
+.sticky-col {
+  align-self:flex-start;
 }
 :deep(.v-input){
   margin-bottom:6px !important;
@@ -619,11 +595,6 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
   padding-top:6px;
   padding-bottom:6px;
 }
-.sticky-col {
-  align-self:flex-start;
-}
-
-/* Recurring preview table */
 :deep(.v-table thead th){
   background: #f8fafc;
   font-weight: 600;

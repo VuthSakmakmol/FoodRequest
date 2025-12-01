@@ -257,9 +257,11 @@ exports.createRequest = async (req, res, next) => {
 
     const dietaryCounts = coerceDietaryCounts(body.dietaryCounts);
 
-    // Common payload bits
+    // Common payload bits (will be reused for each occurrence)
     const baseDoc = {
       orderDate: new Date(),
+
+      // eatDate will be overridden per day in recurring flow
       eatDate,
       eatTimeStart: body.eatTimeStart || null,
       eatTimeEnd: body.eatTimeEnd || null,
@@ -285,7 +287,7 @@ exports.createRequest = async (req, res, next) => {
     };
 
     // ─────────────────────────────────────────────────────────────
-    // RECURRING FLOW
+    // RECURRING FLOW (CarBooking-style: create ALL bookings now)
     // ─────────────────────────────────────────────────────────────
     if (body?.recurring?.enabled) {
       if (!body.endDate && !body.recurring.endDate) {
@@ -297,6 +299,7 @@ exports.createRequest = async (req, res, next) => {
       const endDateObj = new Date(`${endDateISO}T00:00:00.000Z`);
       const skipHolidays = !!body.recurring.skipHolidays;
 
+      // "Series" header
       const tpl = await RecurringTemplate.create({
         owner: {
           employeeId: emp.employeeId,
@@ -316,7 +319,7 @@ exports.createRequest = async (req, res, next) => {
         dietaryOther: body.dietaryOther || '',
 
         frequency: 'Daily',
-        startDate: new Date(dayjs(eatDate).format('YYYY-MM-DD') + 'T00:00:00.000Z'),
+        startDate: new Date(`${eatISO}T00:00:00.000Z`),
         endDate: endDateObj,
         skipHolidays,
 
@@ -325,59 +328,71 @@ exports.createRequest = async (req, res, next) => {
 
         timezone: 'Asia/Phnom_Penh',
         status: 'ACTIVE',
-        nextRunAt: dayjs(eatDate).add(1, 'day').startOf('day').toDate(),
+        nextRunAt: null,      // we expand immediately
         skipDates: []
       });
 
-      const occurrenceDate = eatISO;
-      const existing = await FoodRequest.findOne({
-        'recurring.templateId': tpl._id,
-        'recurring.occurrenceDate': occurrenceDate
-      }).lean();
+      // Build all occurrences from eatDate → endDate (inclusive)
+      const docsToCreate = [];
+      let cursor = dayjs(eatISO);
+      const last = dayjs(endDateISO);
 
-      if (existing) {
-        try {
-          await sendToAll(newRequestMsg(existing));
-          await notifyChefs(chefNewRequestDM(existing));
-          if (emp.telegramChatId) {
-            await sendDM(String(emp.telegramChatId), employeeNewRequestDM(existing));
-          }
-        } catch (e) {
-          console.warn('[Telegram] notify failed:', e?.message);
+      while (cursor.isSame(last) || cursor.isBefore(last)) {
+        const iso = cursor.format('YYYY-MM-DD');
+        const holiday = isHoliday(iso);
+
+        if (skipHolidays && holiday) {
+          cursor = cursor.add(1, 'day');
+          continue;
         }
 
-        broadcastFood(req.io, 'foodRequest:created', existing);
-        return res.status(200).json(existing);
+        const eatDateObj = new Date(`${iso}T00:00:00.000Z`);
+
+        const payload = {
+          ...baseDoc,
+          eatDate: eatDateObj,
+          recurring: {
+            enabled: true,
+            frequency: 'Daily',
+            endDate: endDateObj,
+            skipHolidays,
+            parentId: tpl._id,
+            source: 'RECURRING',
+            templateId: tpl._id,
+            occurrenceDate: iso
+          }
+        };
+
+        docsToCreate.push(payload);
+        cursor = cursor.add(1, 'day');
       }
 
-      const payload = {
-        ...baseDoc,
-        recurring: {
-          enabled: true,
-          frequency: 'Daily',
-          endDate: endDateObj,
-          skipHolidays,
-          parentId: null,
-          source: 'RECURRING',
-          templateId: tpl._id,
-          occurrenceDate
-        }
-      };
+      if (!docsToCreate.length) {
+        return res.status(400).json({
+          message: 'No days to create (all dates skipped by holiday rules).'
+        });
+      }
 
-      const doc = await FoodRequest.create(payload);
+      const createdDocs = await FoodRequest.insertMany(docsToCreate, { ordered: true });
 
       try {
-        await sendToAll(newRequestMsg(doc));
-        await notifyChefs(chefNewRequestDM(doc));
-        if (emp.telegramChatId) {
-          await sendDM(String(emp.telegramChatId), employeeNewRequestDM(doc));
+        for (const doc of createdDocs) {
+          await sendToAll(newRequestMsg(doc));                 // Group EN
+          await notifyChefs(chefNewRequestDM(doc));            // Chef KH
+          await notifyEmployeeByDoc(doc, employeeNewRequestDM);// Employee EN
+          broadcastFood(req.io, 'foodRequest:created', doc);
         }
       } catch (e) {
-        console.warn('[Telegram] new request notify failed:', e?.message);
+        console.warn('[Telegram] new recurring requests notify failed:', e?.message);
       }
 
-      broadcastFood(req.io, 'foodRequest:created', doc);
-      return res.status(201).json(doc);
+      return res.status(201).json({
+        ok: true,
+        recurring: true,
+        count: createdDocs.length,
+        templateId: tpl._id,
+        first: createdDocs[0],
+      });
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -385,15 +400,20 @@ exports.createRequest = async (req, res, next) => {
     // ─────────────────────────────────────────────────────────────
     const doc = await FoodRequest.create({
       ...baseDoc,
-      recurring: { enabled: false, frequency: null, endDate: null, skipHolidays: false, parentId: null, source: 'MANUAL' }
+      recurring: {
+        enabled: false,
+        frequency: null,
+        endDate: null,
+        skipHolidays: false,
+        parentId: null,
+        source: 'MANUAL'
+      }
     });
 
     try {
-      await sendToAll(newRequestMsg(doc));
-      await notifyChefs(chefNewRequestDM(doc));
-      if (emp.telegramChatId) {
-        await sendDM(String(emp.telegramChatId), employeeNewRequestDM(doc));
-      }
+      await sendToAll(newRequestMsg(doc));                  // Group EN
+      await notifyChefs(chefNewRequestDM(doc));             // Chef KH
+      await notifyEmployeeByDoc(doc, employeeNewRequestDM); // Employee EN
     } catch (e) {
       console.warn('[Telegram] new request notify failed:', e?.message);
     }
@@ -405,7 +425,6 @@ exports.createRequest = async (req, res, next) => {
     next(err);
   }
 };
-
 
 // ───────── LIST (public/employee/admin) ─────────
 exports.listRequests = async (req, res, next) => {
@@ -562,26 +581,38 @@ exports.updateRequest = async (req, res, next) => {
     if (dietaryOther !== undefined)    $set.dietaryOther = dietaryOther;
     if (specialInstructions !== undefined) $set.specialInstructions = specialInstructions;
 
-    // Recurring edit (UI provides endDate + skipHolidays only)
+    // Recurring edit (only tweak flags, keep templateId/occurrenceDate/source)
     if (recurring !== undefined) {
+      const curRec = current.recurring || {};
       if (recurring?.enabled) {
         const eatStr = dayjs($set.eatDate || current.eatDate).format('YYYY-MM-DD');
         const endStr = clampEndDate(eatStr, recurring.endDate || eatStr);
+        const endDateObj = new Date(`${endStr}T00:00:00.000Z`);
+
         $set.recurring = {
+          ...curRec,
           enabled: true,
           frequency: 'Daily',
-          endDate: new Date(`${endStr}T00:00:00.000Z`),
+          endDate: endDateObj,
           skipHolidays: !!recurring.skipHolidays,
-          parentId: current.recurring?.parentId || null
+          parentId: curRec.parentId || null,
         };
       } else {
         $set.recurring = {
-          enabled: false, frequency: null, endDate: null, skipHolidays: false, parentId: null
+          ...curRec,
+          enabled: false,
+          frequency: null,
+          endDate: null,
+          skipHolidays: false,
         };
       }
     }
 
-    const doc = await FoodRequest.findByIdAndUpdate(id, { $set }, { new: true, runValidators: true });
+    const doc = await FoodRequest.findByIdAndUpdate(
+      id,
+      { $set },
+      { new: true, runValidators: true }
+    );
     if (!doc) return res.status(404).json({ message: 'Not found' });
 
     // 🔴 realtime general update

@@ -3,15 +3,6 @@
 import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 
-/**
- * EXPECTED props.form fields (two-way bound by parent):
- *  - eatDate: 'YYYY-MM-DD'
- *  - eatTimeStart: 'HH:mm' (or empty → defaultMorningAlert used)
- *  - recurring: boolean
- *  - endDate: 'YYYY-MM-DD' (user picks; repeatDays is computed)
- *  - repeatDays: number (derived from eatDate..endDate inclusive)
- *  - skipHolidays: boolean
- */
 const props = defineProps({
   form: { type: Object, required: true },
   timezone: { type: String, default: 'Asia/Phnom_Penh' },
@@ -59,11 +50,9 @@ function clampEndDateToMax(eatDateStr, endDateStr, maxDays) {
 }
 
 function setRecurring(val) {
-  // No-op if already set
   if (!!props.form.recurring === val) return
   props.form.recurring = val
 
-  // If turning ON, ensure endDate exists and within maxDays
   if (val && props.form.eatDate) {
     const start = dayjs(props.form.eatDate).startOf('day')
     const maxEnd = start.add(Math.max(props.maxDays - 1, 0), 'day')
@@ -152,7 +141,6 @@ const counts = computed(() => {
 
 <template>
   <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
-    <!-- CarBooking-style gradient hero -->
     <div class="hero">
       <div class="hero-left">
         <div class="hero-title">
@@ -166,7 +154,7 @@ const counts = computed(() => {
       <v-card flat class="soft-card glass">
         <v-card-text class="pt-2">
           <v-row dense>
-            <!-- Recurring switch (same style as CarBooking) -->
+            <!-- Recurring switch -->
             <v-col cols="12" md="4" lg="3">
               <v-switch
                 :model-value="form.recurring"
@@ -284,7 +272,7 @@ const counts = computed(() => {
                 </div>
               </v-col>
 
-              <!-- Calendar (responsive) -->
+              <!-- Calendar -->
               <v-col cols="12">
                 <v-card-title class="subhdr">
                   <i class="fa-solid fa-calendar-days"></i>
@@ -355,7 +343,6 @@ const counts = computed(() => {
 </template>
 
 <style scoped>
-/* ——— CarBooking visual style ——— */
 .section { 
   background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
   border: 1px solid rgba(100,116,139,.18);
@@ -368,26 +355,16 @@ const counts = computed(() => {
 }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
 .hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
-.hero-sub { opacity:.92; font-size:.9rem; }
 
 .soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
 .glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
 
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
 
-/* ===== Field label (kept for consistency where used) ===== */
-.field-label{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-weight:600;
-  margin-bottom:6px;
-}
-
-/* ===== Compact switch ===== */
+/* Compact switch */
 .switch-compact :deep(.v-selection-control){ margin-block:-6px; }
 
-/* ===== Summary pills ===== */
+/* Summary pills */
 .preview-header{ display:flex; align-items:center; justify-content:flex-start; margin:8px 0 10px; }
 .counts{ display:flex; flex-wrap:wrap; gap:8px; }
 .pill{
@@ -398,17 +375,14 @@ const counts = computed(() => {
 .pill.create{ background:#ecfdf5; color:#065f46; }
 .pill.skipped{ background:#fef2f2; color:#991b1b; }
 
-/* ===== Calendar wrapper (responsive with horizontal scroll) ===== */
+/* Calendar wrapper (horizontal scroll) */
 .calendar-scroll{
   overflow-x:auto;
   -webkit-overflow-scrolling: touch;
   padding: 6px 12px;
 }
-
-/* Keep 7 columns readable on phones; container scrolls horizontally */
 .week-header, .preview-grid{ min-width: 860px; }
 
-/* ===== Week header (Mon..Sun) ===== */
 .week-header{
   display:grid;
   grid-template-columns:repeat(7, minmax(210px, 1fr));
@@ -422,7 +396,6 @@ const counts = computed(() => {
   opacity:.85;
 }
 
-/* ===== Calendar grid ===== */
 .preview-grid{
   display:grid;
   grid-template-columns:repeat(7, minmax(210px, 1fr));
@@ -430,7 +403,6 @@ const counts = computed(() => {
   row-gap: 14px;
 }
 
-/* ===== Day cards ===== */
 .preview-card{
   border:1px solid rgba(100,116,139,.18);
   border-radius:16px;
@@ -452,13 +424,11 @@ const counts = computed(() => {
 .preview-card.will-skip{ background:#fff7f7; border-color:#fecaca; }
 .preview-card.is-holiday .date{ color:#dc2626; font-weight:700; }
 
-/* ===== Card rows ===== */
 .date-row, .status-row{ display:flex; align-items:center; gap:8px; }
 .date-wrap{ display:flex; flex-direction:column; gap:2px; }
 .en{ display:flex; align-items:center; gap:8px; font-weight:600; }
 .date{ font-weight:700; }
 
-/* ===== Badges ===== */
 .sun-badge{
   background:#fee2e2; color:#b91c1c;
   border-radius:6px; padding:2px 6px; font-size:.72rem; font-weight:700;
@@ -471,7 +441,6 @@ const counts = computed(() => {
 }
 .badge-holiday.subtle{ background:#ffe4e6; color:#9f1239; opacity:.9; }
 
-/* ===== Small screens: compact a bit ===== */
 @media (max-width: 599px){
   .preview-card{ min-height:104px; }
 }

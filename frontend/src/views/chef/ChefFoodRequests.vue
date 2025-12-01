@@ -161,20 +161,69 @@ function toggleExpanded(id) {
   expanded.value = s
 }
 
+/* ───────── helpers for realtime filter matching ───────── */
+function matchesFilters(doc) {
+  const term = q.value.trim().toLowerCase()
+  const eatStr = doc.eatDate ? dayjs(doc.eatDate).format('YYYY-MM-DD') : null
+
+  // Date filter: single day
+  if (filterDate.value && eatStr && eatStr !== filterDate.value) {
+    return false
+  }
+
+  // Status filter
+  if (status.value === 'ACTIVE') {
+    if (['DELIVERED', 'CANCELED'].includes(doc.status)) return false
+  } else if (status.value && status.value !== 'ALL') {
+    if (doc.status !== status.value) return false
+  }
+
+  // Search filter (rough but good enough)
+  if (term) {
+    const haystack = [
+      doc.employee?.name,
+      doc.employee?.employeeId,
+      doc.employee?.department,
+      doc.orderType,
+      (doc.meals || []).join(', '),
+      (doc.menuChoices || []).join(', '),
+      doc.specialInstructions,
+      doc.requestId
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+
+    if (!haystack.includes(term)) return false
+  }
+
+  return true
+}
+
 /* ───────── CRUD / data load ───────── */
 const BASE = '/chef/food-requests' // chef namespace (mirrors admin endpoints)
 
 function upsertRow(doc) {
   const d = normalize(doc)
-  const i = rows.value.findIndex(r => r._id === d._id)
-  if (status.value === 'ACTIVE' && ['DELIVERED', 'CANCELED'].includes(d.status)) {
-    if (i !== -1) rows.value.splice(i, 1)
+  const idx = rows.value.findIndex(r => r._id === d._id)
+
+  // If this doc does NOT match current filters → ensure it’s removed from the list
+  if (!matchesFilters(d)) {
+    if (idx !== -1) {
+      rows.value.splice(idx, 1)
+    }
     expanded.value.delete(d._id)
     return
   }
-  if (i === -1) rows.value.unshift(d)
-  else rows.value[i] = d
+
+  // Otherwise, insert/update
+  if (idx === -1) {
+    rows.value.unshift(d)
+  } else {
+    rows.value[idx] = d
+  }
 }
+
 function removeRowById(id) {
   const i = rows.value.findIndex(r => r._id === id)
   if (i !== -1) rows.value.splice(i, 1)
@@ -249,17 +298,22 @@ onMounted(async () => {
   }
 
   await load()
+
+  // realtime bindings
   socket.on('foodRequest:created', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:updated', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:statusChanged', (doc) => doc && upsertRow(doc))
   socket.on('foodRequest:deleted', ({ _id }) => removeRowById(String(_id || '')))
 })
+
 onBeforeUnmount(() => {
   socket.off('foodRequest:created')
   socket.off('foodRequest:updated')
   socket.off('foodRequest:statusChanged')
   socket.off('foodRequest:deleted')
 })
+
+// whenever filters change → reload from server
 watch([q, status, filterDate], () => { page.value = 1; load() })
 
 /* ───────── paging ───────── */
@@ -274,20 +328,15 @@ const pagedRows = computed(() => {
 })
 
 /* ───────── workflow ───────── */
-/* ───────── workflow ───────── */
 const nextSteps = (s) => {
   switch (s) {
     case 'NEW':
-      // Chef can only move NEW → ACCEPTED
       return ['ACCEPTED']
     case 'ACCEPTED':
-      // ACCEPTED → COOKING
       return ['COOKING']
     case 'COOKING':
-      // COOKING → READY
       return ['READY']
     case 'READY':
-      // READY → DELIVERED
       return ['DELIVERED']
     default:
       return []
@@ -737,16 +786,6 @@ function resetFilters() {
 
       <v-divider />
       <div class="d-flex flex-wrap align-center justify-space-between px-4 py-3 gap-2">
-        <!-- <v-select
-          v-if="isMobile"
-          v-model="perPage"
-          :items="perPageOptions"
-          density="compact"
-          label="Rows"
-          hide-details
-          variant="outlined"
-          style="max-width: 140px"
-        /> -->
         <v-pagination
           v-if="perPage !== 'All'"
           v-model="page"

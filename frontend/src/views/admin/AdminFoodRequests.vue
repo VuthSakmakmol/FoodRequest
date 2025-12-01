@@ -11,10 +11,12 @@ import { useDisplay } from 'vuetify'
 import * as XLSX from 'xlsx'
 
 const { mdAndUp } = useDisplay()
+const isMobile = computed(() => !mdAndUp.value)
+
 const auth  = useAuth()
 const route = useRoute()
 
-/* ───────── Mini i18n (EN→KM for table/details only) ───────── */
+/* ───────── i18n maps still kept for future use (but NOT rendered) ───────── */
 const KM = {
   Status: 'ស្ថានភាព',
   'Requester (ID & Name)': 'អ្នកស្នើ (លេខ & ឈ្មោះ)',
@@ -29,13 +31,6 @@ const KM = {
   'Hide details': 'លាក់ព័ត៌មាន',
   'No requests found.': 'រកមិនឃើញទិន្នន័យទេ។',
   Quantity: 'បរិមាណ',
-  'Selected menus': 'ម៉ឺនុយដែលបានជ្រើសរើស',
-  'Other dietary note': 'សម្គាល់អាហារូបត្ថម្ភផ្សេងទៀត',
-  'Special instruction': 'សេចក្តីណែនាំពិសេស',
-  Recurring: 'កំណត់ម្ដងហើយកើតឡើងថេរ',
-  'Menu totals match quantity': 'ចំនួនម៉ឺនុយត្រូវនឹងបរិមាណ',
-  'Menu totals differ from quantity': 'ចំនួនម៉ឺនុយមិនត្រូវនឹងបរិមាណ',
-
   ACTIVE: 'សកម្ម',
   ALL: 'ទាំងអស់',
   NEW: 'ថ្មី',
@@ -47,7 +42,7 @@ const KM = {
 }
 const tkm = (en) => KM[en] || en
 
-/* Khmer labels for menu/allergen (details tree) */
+/* Khmer labels for menu/allergen (only used for logic / export if needed) */
 const MENU_KM_MAP = {
   Standard: 'ញាំទូទៅ',
   Vegetarian: 'មិនញាំសាច់',
@@ -65,7 +60,7 @@ const ALLERGEN_KM_MAP = {
   Others: 'ផ្សេងទៀត',
 }
 
-/* Khmer labels for order type (table cell) */
+/* Khmer labels for order type (not rendered) */
 const ORDER_TYPE_KM_MAP = {
   'Daily meal': 'អាហារប្រចាំថ្ងៃ',
   'Meeting catering': 'អាហារប្រជុំ',
@@ -200,8 +195,7 @@ onMounted(async () => {
   localStorage.setItem('authRole', auth.user?.role || '')
   subscribeRoleIfNeeded()
 
-  // 🔗 If navigated from AdminFoodCalendar, use that date,
-  // otherwise default to TODAY only
+  // date from calendar → focus a single day, else today
   const qDate = route.query.date
   if (qDate) {
     const dStr = dayjs(qDate).isValid()
@@ -237,7 +231,6 @@ onBeforeUnmount(() => {
 
 watch([q, status, fromDate, toDate], () => { page.value = 1; load() })
 
-// Also react if route query changes while we stay on this page
 watch(
   () => route.query.date,
   (val) => {
@@ -597,70 +590,188 @@ async function exportExcel() {
       <v-divider />
 
       <v-card-text class="pa-0">
-        <div class="table-wrap">
+        <!-- MOBILE: CARD LIST (English only) -->
+        <div v-if="isMobile" class="mobile-list-wrap">
+          <v-skeleton-loader
+            v-if="loading"
+            type="card@3"
+            class="mb-2"
+          />
+          <template v-else>
+            <div v-if="!pagedRows.length" class="text-center py-6 text-medium-emphasis">
+              No requests found.
+            </div>
+
+            <div v-else class="req-card-list">
+              <v-card
+                v-for="r in pagedRows"
+                :key="r._id"
+                class="req-card"
+                rounded="xl"
+                elevation="2"
+                :class="{ 'highlight-row': route.query.focus === r._id }"
+              >
+                <v-card-text class="py-3 px-3">
+                  <!-- top: status + dates/time -->
+                  <div class="card-top">
+                    <div>
+                      <v-chip
+                        :color="COLOR[r.status]"
+                        size="small"
+                        label
+                      >
+                        {{ r.status }}
+                      </v-chip>
+                      <div class="text-caption text-medium-emphasis mt-1">
+                        {{ fmtDate(r.orderDate) }} → {{ fmtDate(r.eatDate) }}
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <div class="card-time">
+                        {{ r.eatTimeStart || '—' }}
+                        <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
+                      </div>
+                      <div class="text-caption text-medium-emphasis">
+                        {{ r.employee?.department || '—' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <v-divider class="my-2" />
+
+                  <!-- requester -->
+                  <div class="card-row">
+                    <div class="lbl">Requester (ID & Name)</div>
+                    <div class="val">
+                      {{ r.employee?.name || '—' }}
+                      <div class="text-caption text-medium-emphasis">
+                        ID {{ r.employee?.employeeId || '—' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- order type -->
+                  <div class="card-row">
+                    <div class="lbl">Order Type</div>
+                    <div class="val">
+                      {{ r.orderType || '—' }}
+                    </div>
+                  </div>
+
+                  <!-- meals / qty -->
+                  <div class="card-row">
+                    <div class="lbl">Meals</div>
+                    <div class="val">
+                      {{ (r.meals || []).join(', ') || '—' }}
+                      <div class="text-caption text-medium-emphasis mt-1">
+                        Qty: {{ r.quantity }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- location -->
+                  <div class="card-row">
+                    <div class="lbl">Location</div>
+                    <div class="val">
+                      {{ r?.location?.kind || '—' }}
+                      <span v-if="r?.location?.other"> — {{ r.location.other }}</span>
+                    </div>
+                  </div>
+
+                  <!-- actions: status buttons -->
+                  <div class="card-actions-row">
+                    <div class="mb-2">
+                      <v-btn
+                        v-for="s in nextSteps(r.status)" :key="s"
+                        size="small" class="mr-1 mb-1"
+                        :color="s==='CANCELED' ? 'red' : (s==='DELIVERED' ? 'green' : 'primary')"
+                        variant="tonal"
+                        style="height: 35px;"
+                        :disabled="!r._id"
+                        @click="updateStatus(r, s)"
+                      >
+                        {{ s }}
+                      </v-btn>
+                    </div>
+
+                    <v-btn
+                      size="small"
+                      variant="text"
+                      color="primary"
+                      @click="toggleExpanded(r._id)"
+                    >
+                      {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
+                    </v-btn>
+                  </div>
+
+                  <!-- details tree inside card (English only) -->
+                  <v-expand-transition>
+                    <div v-if="isExpanded(r._id)" class="mt-2 card-details-tree">
+                      <div class="tree">
+                        <div class="tree-node root">
+                          <div class="node-label two-lines">
+                            <div><strong>Quantity</strong> {{ r.quantity }}</div>
+                          </div>
+                          <div class="children">
+                            <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
+                              <div class="tree-node">
+                                <div class="node-label two-lines">
+                                  <div>
+                                    <span class="arrow">→</span>
+                                    <strong>{{ menuName }}</strong> ×{{ menuCnt }}
+                                  </div>
+                                </div>
+                                <div
+                                  class="children"
+                                  v-if="
+                                    Array.from(
+                                      (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                    ).length
+                                  "
+                                >
+                                  <div
+                                    class="tree-node leaf"
+                                    v-for="[allergen, aCnt] in Array.from(
+                                      (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                    )"
+                                    :key="menuName + '_' + allergen"
+                                  >
+                                    <div class="node-label two-lines">
+                                      <div>
+                                        <span class="arrow small">↳</span>
+                                        {{ allergen }} ×{{ aCnt }}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </v-expand-transition>
+                </v-card-text>
+              </v-card>
+            </div>
+          </template>
+        </div>
+
+        <!-- DESKTOP/TABLE (English only) -->
+        <div v-else class="table-wrap">
           <v-table density="comfortable" class="min-width-table align-left comfy-cells row-hover">
             <thead>
               <tr>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">{{ tkm('Status') }}</div>
-                    <div class="km">{{ tkm('Status') }}</div>
-                  </div>
-                </th>
-                <th style="width:320px;">
-                  <div class="hdr-2l">
-                    <div class="en">Actions</div>
-                    <div class="km">{{ tkm('Actions') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Requester (ID & Name)</div>
-                    <div class="km">{{ tkm('Requester (ID & Name)') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Order Date</div>
-                    <div class="km">{{ tkm('Order Date') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Eat Date</div>
-                    <div class="km">{{ tkm('Eat Date') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Time</div>
-                    <div class="km">{{ tkm('Time') }}</div>
-                  </div>
-                </th>
-                <th class="d-none d-sm-table-cell">
-                  <div class="hdr-2l">
-                    <div class="en">Dept</div>
-                    <div class="km">{{ tkm('Dept') }}</div>
-                  </div>
-                </th>
-                <th class="d-none d-md-table-cell">
-                  <div class="hdr-2l">
-                    <div class="en">Order Type</div>
-                    <div class="km">{{ tkm('Type') }}</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Meals</div>
-                    <div class="km">អាហារ</div>
-                  </div>
-                </th>
-                <th>
-                  <div class="hdr-2l">
-                    <div class="en">Qty</div>
-                    <div class="km">{{ tkm('Qty') }}</div>
-                  </div>
-                </th>
+                <th><span class="hdr-en">Status</span></th>
+                <th style="width:320px;"><span class="hdr-en">Actions</span></th>
+                <th><span class="hdr-en">Requester (ID & Name)</span></th>
+                <th><span class="hdr-en">Order Date</span></th>
+                <th><span class="hdr-en">Eat Date</span></th>
+                <th><span class="hdr-en">Time</span></th>
+                <th class="d-none d-sm-table-cell"><span class="hdr-en">Dept</span></th>
+                <th class="d-none d-md-table-cell"><span class="hdr-en">Order Type</span></th>
+                <th><span class="hdr-en">Meals</span></th>
+                <th><span class="hdr-en">Qty</span></th>
               </tr>
             </thead>
 
@@ -669,10 +780,7 @@ async function exportExcel() {
                 <tr :class="{ 'highlight-row': route.query.focus === r._id }">
                   <td>
                     <v-chip :color="COLOR[r.status]" size="small" label>
-                      <div class="chip-2l">
-                        <div class="en">{{ r.status }}</div>
-                        <div class="km">{{ tkm(r.status) }}</div>
-                      </div>
+                      {{ r.status }}
                     </v-chip>
                   </td>
                   <td>
@@ -686,48 +794,32 @@ async function exportExcel() {
                         :disabled="!r._id"
                         @click="updateStatus(r, s)"
                       >
-                        <div class="cell-2l">
-                          <div class="en">{{ s }}</div>
-                          <div class="km">{{ tkm(s) }}</div>
-                        </div>
+                        {{ s }}
                       </v-btn>
                     </div>
                     <v-btn size="small" variant="text" color="secondary" @click="toggleExpanded(r._id)">
-                      <span class="en">{{ isExpanded(r._id) ? 'Hide details' : 'Details' }}</span>
-                      <span class="km ml-1">({{ isExpanded(r._id) ? tkm('Hide details') : tkm('Details') }})</span>
+                      {{ isExpanded(r._id) ? 'Hide details' : 'Details' }}
                     </v-btn>
                   </td>
 
                   <td>
-                    <div class="cell-2l">
-                      <div class="en">{{ r.employee?.employeeId || '—' }} — {{ r.employee?.name || '—' }}</div>
-                    </div>
+                    {{ r.employee?.employeeId || '—' }} — {{ r.employee?.name || '—' }}
                   </td>
 
                   <td>{{ fmtDate(r.orderDate) }}</td>
                   <td>{{ fmtDate(r.eatDate) }}</td>
 
                   <td>
-                    <div class="cell-2l">
-                      <div class="en">
-                        {{ r.eatTimeStart || '—' }}
-                        <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
-                      </div>
-                    </div>
+                    {{ r.eatTimeStart || '—' }}
+                    <span v-if="r.eatTimeEnd"> – {{ r.eatTimeEnd }}</span>
                   </td>
 
                   <td class="d-none d-sm-table-cell">{{ r.employee?.department || '—' }}</td>
                   <td class="d-none d-md-table-cell">
-                    <div class="cell-2l">
-                      <div class="en">{{ r.orderType }}</div>
-                      <div class="km">{{ orderTypeKM(r.orderType) }}</div>
-                    </div>
+                    {{ r.orderType }}
                   </td>
                   <td>
-                    <div class="cell-2l">
-                      <div class="en">{{ (r.meals || []).join(', ') || '—' }}</div>
-                      <div class="km">{{ mealListKM(r.meals) }}</div>
-                    </div>
+                    {{ (r.meals || []).join(', ') || '—' }}
                   </td>
                   <td>{{ r.quantity }}</td>
                 </tr>
@@ -740,25 +832,33 @@ async function exportExcel() {
                         <div class="tree">
                           <div class="tree-node root">
                             <div class="node-label two-lines">
-                              <div class="en"><strong>{{ tkm('Quantity') }}</strong> {{ r.quantity }}</div>
-                              <div class="km">{{ tkm('Quantity') }}</div>
+                              <div><strong>Quantity</strong> {{ r.quantity }}</div>
                             </div>
                             <div class="children">
                               <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                                 <div class="tree-node">
                                   <div class="node-label two-lines">
-                                    <div class="en"><span class="arrow">→</span><strong>{{ menuName }}</strong> ×{{ menuCnt }}</div>
-                                    <div class="km">{{ menuKM(menuName) }}</div>
+                                    <div>
+                                      <span class="arrow">→</span>
+                                      <strong>{{ menuName }}</strong> ×{{ menuCnt }}
+                                    </div>
                                   </div>
-                                  <div class="children" v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length">
+                                  <div
+                                    class="children"
+                                    v-if="Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries()).length"
+                                  >
                                     <div
                                       class="tree-node leaf"
-                                      v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
+                                      v-for="[allergen, aCnt] in Array.from(
+                                        (dietaryByMenu(r).get(menuName) || new Map()).entries()
+                                      )"
                                       :key="menuName + '_' + allergen"
                                     >
                                       <div class="node-label two-lines">
-                                        <div class="en"><span class="arrow small">↳</span>{{ allergen }} ×{{ aCnt }}</div>
-                                        <div class="km">{{ allergenKM(allergen) }}</div>
+                                        <div>
+                                          <span class="arrow small">↳</span>
+                                          {{ allergen }} ×{{ aCnt }}
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
@@ -775,7 +875,7 @@ async function exportExcel() {
 
               <tr v-if="!pagedRows.length && !loading">
                 <td colspan="9" class="text-center py-6 text-medium-emphasis">
-                  {{ tkm('No requests found.') }}
+                  No requests found.
                 </td>
               </tr>
             </tbody>
@@ -785,15 +885,9 @@ async function exportExcel() {
 
       <v-divider />
       <div class="d-flex flex-wrap align-center justify-space-between px-4 py-3 gap-2">
-        <div class="text-caption text-medium-emphasis">
-          Showing
-          <b>{{ perPage === 'All' ? 1 : Math.min((page - 1) * perPage + 1, totalItems) }}</b>
-          -
-          <b>{{ perPage === 'All' ? totalItems : Math.min(page * perPage, totalItems) }}</b>
-          of <b>{{ totalItems }}</b>
-        </div>
-        <v-select v-if="!mdAndUp" v-model="perPage" :items="perPageOptions" density="compact"
-                  label="Rows" hide-details variant="outlined" style="max-width: 140px" />
+
+        <!-- <v-select v-if="!mdAndUp" v-model="perPage" :items="perPageOptions" density="compact"
+                  label="Rows" hide-details variant="outlined" style="max-width: 140px" /> -->
         <v-pagination v-if="perPage !== 'All'" v-model="page" :length="totalPages" :total-visible="7" density="comfortable" />
       </div>
     </v-card>
@@ -819,15 +913,10 @@ async function exportExcel() {
   .v-toolbar{ padding-left: .5rem; padding-right: .5rem; }
 }
 
-/* bilingual headers */
-.hdr-2l .en{ font-weight:600; }
-.hdr-2l .km{ font-size:.82rem; opacity:.85; }
-
-/* two-line cells/chips */
-.cell-2l{ display:flex; flex-direction:column; line-height:1.1; }
-.cell-2l .km{ font-size:.86rem; opacity:.9; }
-.chip-2l{ display:flex; flex-direction:column; line-height:1; }
-.chip-2l .km{ font-size:.78em; opacity:.9; }
+/* simple header text */
+.hdr-en{
+  font-weight: 600;
+}
 
 /* Details tree */
 .details-row{ background: rgba(0,0,0,0.02); }
@@ -838,20 +927,13 @@ async function exportExcel() {
 .tree .leaf .node-label{ background: rgba(234,179,8,.12); }
 .arrow{ font-weight:700; } .arrow.small{ opacity:.9; }
 .children{ margin-left:1.2rem; padding-left:.6rem; border-left:2px dashed rgba(0,0,0,.15); margin-top:.35rem; }
-.ok{ color:#16a34a; } .warn{ color:#dc2626; }
 
 /* Display utility for small screens */
 .d-none{ display:none !important; }
 @media (min-width: 600px){ .d-sm-table-cell{ display: table-cell !important; } }
 @media (min-width: 960px){ .d-md-table-cell{ display: table-cell !important; } }
 
-/* Khmer font helper */
-.km{
-  font-family: 'Kantumruy Pro', system-ui, -apple-system, Segoe UI, Roboto,
-               'Helvetica Neue', Arial, 'Noto Sans Khmer', sans-serif;
-}
-
-/* ---------- NEW: Left alignment + comfy spacing + hover ---------- */
+/* Left alignment + comfy spacing + hover */
 .align-left :deep(table thead th),
 .align-left :deep(table tbody td){
   text-align: left !important;
@@ -874,11 +956,59 @@ async function exportExcel() {
   text-align: left !important;
 }
 
-/* Highlight focused row from calendar */
+/* Highlight focused row from calendar (table or card) */
 .highlight-row{
   background-color: #fff8e1 !important;
 }
 
-/* Small km margin helper */
-.ml-1{ margin-left: .25rem; }
+/* ---------- MOBILE CARD LAYOUT ---------- */
+.mobile-list-wrap{
+  padding: 8px 8px 4px;
+}
+.req-card-list{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.req-card{
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: radial-gradient(circle at top left, #eff6ff 0, #ffffff 38%, #f8fafc 100%);
+  box-shadow: 0 10px 24px rgba(15,23,42,0.14);
+}
+.card-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:8px;
+}
+.card-time{
+  font-size:.9rem;
+  font-weight:600;
+}
+.card-row{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin-top:6px;
+}
+.card-row .lbl{
+  min-width:90px;
+  font-size:.78rem;
+  color:#64748b;
+  padding-top:2px;
+}
+.card-row .val{
+  font-weight:500;
+  font-size:.9rem;
+}
+.card-actions-row{
+  margin-top:10px;
+}
+.card-details-tree{
+  margin-top:4px;
+}
+
+/* Small margin helper */
+.mr-1{ margin-right: .25rem; }
 </style>
