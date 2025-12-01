@@ -329,88 +329,18 @@ function onHotkey(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !loading.value) submit()
 }
 
-/* Holidays + recurring preview */
+/* Holidays for RecurringBookingSection calendar */
 const customHolidaySet = ref(new Set())
-const holidaysLoading  = ref(false)
 
 async function loadHolidays() {
-  holidaysLoading.value = true
   try {
     const { data } = await api.get('/public/holidays')
     customHolidaySet.value = new Set(data?.holidays || [])
   } catch (e) {
     console.warn('[holidays] fetch failed', e)
-  } finally {
-    holidaysLoading.value = false
   }
 }
 loadHolidays()
-
-const fmtFullDate = (d) => dayjs(d).format('ddd, D MMM YYYY')
-const timeLabel = computed(() => {
-  const f = form.value
-  if (f.eatTimeStart && /^\d{2}:\d{2}$/.test(f.eatTimeStart)) return f.eatTimeStart
-  if (f.eatStartHour && f.eatStartMinute) {
-    return `${String(f.eatStartHour).padStart(2,'0')}:${String(f.eatStartMinute).padStart(2,'0')}`
-  }
-  return '—'
-})
-
-const menuSummary = computed(() => {
-  const f = form.value
-  const qty = Number(f.quantity || 0)
-  const specials = Object.entries(f.menuCounts || {})
-    .filter(([k]) => k !== 'Standard')
-    .reduce((sum, [,v]) => sum + Number(v || 0), 0)
-
-  const standard = Math.max(0, qty - specials)
-  const parts = []
-  if (standard > 0) parts.push(`Standard × ${standard}`)
-  for (const [k, v] of Object.entries(f.menuCounts || {})) {
-    if (k === 'Standard') continue
-    const n = Number(v || 0)
-    if (n > 0) parts.push(`${k} × ${n}`)
-  }
-  return parts.join(', ') || ('Standard × ' + qty)
-})
-
-const recurringList = computed(() => {
-  const f = form.value
-  if (!f.recurring || !f.eatDate || !f.endDate) return []
-
-  const out = []
-  let d = dayjs(f.eatDate)
-  const end = dayjs(f.endDate)
-  const meals = (f.meals || []).join(', ')
-  while (d.isSame(end) || d.isBefore(end)) {
-    const iso = d.format('YYYY-MM-DD')
-    const isSunday = d.day() === 0
-    const isCustom = customHolidaySet.value.has(iso)
-    const isHoliday = isSunday || isCustom
-
-    const included = !(f.skipHolidays && isHoliday)
-
-    out.push({
-      iso,
-      label: fmtFullDate(iso),
-      time: timeLabel.value,
-      meals,
-      qty: Number(f.quantity || 0),
-      menus: menuSummary.value,
-      location: f.location === 'Other' ? (f.locationOther || 'Other') : (f.location || '—'),
-      isHoliday,
-      isSunday,
-      isCustom,
-      included,
-      status: included ? 'Will create' : 'Skipped',
-      reason: isHoliday ? 'Holiday' : ''
-    })
-    d = d.add(1, 'day')
-  }
-  return out
-})
-
-const recurringCount = computed(() => recurringList.value.filter(d => d.included).length)
 </script>
 
 <template>
@@ -471,82 +401,6 @@ const recurringCount = computed(() => recurringList.value.filter(d => d.included
 
             <v-col cols="12">
               <RecurringBookingSection :form="form" :holidays="[...customHolidaySet]" />
-            </v-col>
-
-            <!-- recurring preview table -->
-            <v-col cols="12" v-if="form.recurring">
-              <v-card class="rounded-lg mt-2" elevation="0" variant="outlined">
-                <v-toolbar flat density="compact">
-                  <v-toolbar-title class="text-subtitle-1 font-weight-bold">
-                    Recurring schedule preview
-                    <v-progress-circular
-                      v-if="holidaysLoading"
-                      indeterminate
-                      size="16"
-                      width="2"
-                      class="ml-2"
-                    />
-                  </v-toolbar-title>
-                  <v-spacer />
-                  <v-chip size="small" color="primary" variant="flat">
-                    {{ recurringCount }} day{{ recurringCount === 1 ? '' : 's' }}
-                  </v-chip>
-                </v-toolbar>
-
-                <v-divider />
-
-                <v-card-text class="pa-0">
-                  <v-table density="comfortable" class="text-body-2">
-                    <thead>
-                      <tr>
-                        <th style="width: 220px;">Date</th>
-                        <th style="width: 88px;">Time</th>
-                        <th>Meals</th>
-                        <th style="width: 84px;">Qty</th>
-                        <th>Menus</th>
-                        <th style="width: 200px;">Location</th>
-                        <th style="width: 120px;">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="d in recurringList" :key="d.iso">
-                        <td>
-                          <span>{{ d.label }}</span>
-                          <v-chip
-                            v-if="d.isHoliday"
-                            size="x-small"
-                            color="red"
-                            class="ml-2"
-                            variant="tonal"
-                            label
-                          >
-                            Holiday
-                          </v-chip>
-                        </td>
-                        <td>{{ d.time }}</td>
-                        <td>{{ d.meals || '—' }}</td>
-                        <td>{{ d.qty }}</td>
-                        <td>{{ d.menus }}</td>
-                        <td>{{ d.location }}</td>
-                        <td>
-                          <v-chip :color="d.included ? 'green' : 'grey'" size="small" label>
-                            {{ d.status }}
-                            <template v-if="!d.included && d.reason">
-                              ({{ d.reason }})
-                            </template>
-                          </v-chip>
-                        </td>
-                      </tr>
-
-                      <tr v-if="!recurringList.length">
-                        <td colspan="7" class="text-medium-emphasis">
-                          No days to show. Pick an End Date on the Recurring section.
-                        </td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </v-card-text>
-              </v-card>
             </v-col>
           </v-row>
         </v-form>

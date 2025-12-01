@@ -3,10 +3,19 @@
 import { ref, computed, watch } from 'vue'
 import dayjs from 'dayjs'
 
+/**
+ * EXPECTED props.form fields (two-way bound by parent):
+ *  - eatDate: 'YYYY-MM-DD'
+ *  - recurring: boolean
+ *  - endDate: 'YYYY-MM-DD' (user picks; repeatDays is computed)
+ *  - repeatDays: number (derived from eatDate..endDate inclusive)
+ *  - skipHolidays: boolean
+ *
+ * Time (eatTimeStart / eatTimeEnd) is controlled ONLY by OrderDetailSection.
+ * Recurring just reuses whatever is in the main form and does NOT change it.
+ */
 const props = defineProps({
   form: { type: Object, required: true },
-  timezone: { type: String, default: 'Asia/Phnom_Penh' },
-  defaultMorningAlert: { type: String, default: '07:00' },
   maxDays: { type: Number, default: 30 },
   // Optional holiday list in 'YYYY-MM-DD'
   holidays: { type: Array, default: () => [] },
@@ -14,23 +23,7 @@ const props = defineProps({
 
 /* ---------- helpers ---------- */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
-const triggerTime = computed(() => props.form.eatTimeStart || props.defaultMorningAlert)
 
-/* ---------- native time input ---------- */
-const timeValue = computed({
-  get: () => props.form.eatTimeStart || '',
-  set: (v) => {
-    const [h = '07', m = '00'] = String(v || '').split(':')
-    props.form.eatTimeStart = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-  }
-})
-
-/* ---------- holiday logic (Sunday + supplied dates) ---------- */
-const holidaySet = computed(() => new Set(props.holidays || []))
-const isSunday   = (d) => dayjs(d).day() === 0
-const isHoliday  = (d) => isSunday(d) || holidaySet.value.has(d)
-
-/* ---------- end date source-of-truth ---------- */
 const endDateMenu = ref(false)
 
 const daysBetweenInclusive = (startStr, endStr) => {
@@ -49,6 +42,7 @@ function clampEndDateToMax(eatDateStr, endDateStr, maxDays) {
   return end.format('YYYY-MM-DD')
 }
 
+/* ---------- recurring toggle ---------- */
 function setRecurring(val) {
   if (!!props.form.recurring === val) return
   props.form.recurring = val
@@ -57,9 +51,11 @@ function setRecurring(val) {
     const start = dayjs(props.form.eatDate).startOf('day')
     const maxEnd = start.add(Math.max(props.maxDays - 1, 0), 'day')
     const curEnd = props.form.endDate ? dayjs(props.form.endDate) : start
-    const end = !curEnd.isValid() || curEnd.isBefore(start) ? start
-      : curEnd.isAfter(maxEnd) ? maxEnd
-      : curEnd
+    const end = !curEnd.isValid() || curEnd.isBefore(start)
+      ? start
+      : curEnd.isAfter(maxEnd)
+        ? maxEnd
+        : curEnd
     props.form.endDate = end.format('YYYY-MM-DD')
   }
 }
@@ -70,6 +66,11 @@ function setEndDateAndRepeat(endDateStr) {
   props.form.endDate    = clamped
   props.form.repeatDays = daysBetweenInclusive(props.form.eatDate, clamped)
 }
+
+/* ---------- holiday logic (Sunday + supplied dates) ---------- */
+const holidaySet = computed(() => new Set(props.holidays || []))
+const isSunday   = (d) => dayjs(d).day() === 0
+const isHoliday  = (d) => isSunday(d) || holidaySet.value.has(d)
 
 /* ---------- guards & syncing ---------- */
 watch(
@@ -141,6 +142,7 @@ const counts = computed(() => {
 
 <template>
   <v-sheet class="section pa-0 overflow-hidden" rounded="lg">
+    <!-- CarBooking-style gradient hero -->
     <div class="hero">
       <div class="hero-left">
         <div class="hero-title">
@@ -155,7 +157,7 @@ const counts = computed(() => {
         <v-card-text class="pt-2">
           <v-row dense>
             <!-- Recurring switch -->
-            <v-col cols="12" md="4" lg="3">
+            <v-col cols="12" md="3">
               <v-switch
                 :model-value="form.recurring"
                 @update:model-value="val => setRecurring(!!val)"
@@ -166,26 +168,6 @@ const counts = computed(() => {
             </v-col>
 
             <template v-if="form.recurring">
-              <!-- Time -->
-              <v-col cols="12" sm="6" md="4" lg="3">
-                <v-card-title class="subhdr">
-                  <i class="fa-solid fa-clock"></i>
-                  <span>Time</span>
-                </v-card-title>
-                <v-text-field
-                  v-model="timeValue"
-                  type="time"
-                  step="60"
-                  density="compact"
-                  variant="outlined"
-                  hide-details
-                  placeholder="HH:mm"
-                />
-                <div class="text-caption mt-1">
-                  Auto-create at <strong>{{ triggerTime || defaultMorningAlert }}</strong> ({{ timezone }}).
-                </div>
-              </v-col>
-
               <!-- End Date -->
               <v-col cols="12" sm="6" md="4" lg="3">
                 <v-card-title class="subhdr">
@@ -235,7 +217,7 @@ const counts = computed(() => {
               </v-col>
 
               <!-- Skip holidays -->
-              <v-col cols="12" md="4" lg="3">
+              <v-col cols="12" sm="6" md="4" lg="3">
                 <v-card-title class="subhdr">
                   <i class="fa-solid fa-umbrella-beach"></i>
                   <span>Skip Holidays</span>
@@ -272,7 +254,7 @@ const counts = computed(() => {
                 </div>
               </v-col>
 
-              <!-- Calendar -->
+              <!-- Calendar (responsive) -->
               <v-col cols="12">
                 <v-card-title class="subhdr">
                   <i class="fa-solid fa-calendar-days"></i>
@@ -329,10 +311,6 @@ const counts = computed(() => {
                     </div>
                   </div>
                 </div>
-
-                <div v-if="!gridCells.length" class="text-caption mt-2">
-                  Set an <strong>Eat Date</strong> and a valid <strong>End Date</strong> to see the preview.
-                </div>
               </v-col>
             </template>
           </v-row>
@@ -343,6 +321,7 @@ const counts = computed(() => {
 </template>
 
 <style scoped>
+/* ——— CarBooking visual style ——— */
 .section { 
   background: linear-gradient(180deg, rgba(99,102,241,.06), rgba(16,185,129,.05));
   border: 1px solid rgba(100,116,139,.18);
@@ -355,16 +334,17 @@ const counts = computed(() => {
 }
 .hero-left { display:flex; flex-direction:column; gap:6px; }
 .hero-title { display:flex; align-items:center; gap:10px; font-weight:700; font-size:1.05rem; }
+.hero-sub { opacity:.92; font-size:.9rem; }
 
 .soft-card { border: 1px solid rgba(100,116,139,.14); border-radius: 14px; }
 .glass { background: rgba(255,255,255,.62); backdrop-filter: blur(6px); }
 
 .subhdr { display:flex; align-items:center; gap:10px; font-weight:700; }
 
-/* Compact switch */
+/* ===== Compact switch ===== */
 .switch-compact :deep(.v-selection-control){ margin-block:-6px; }
 
-/* Summary pills */
+/* ===== Summary pills ===== */
 .preview-header{ display:flex; align-items:center; justify-content:flex-start; margin:8px 0 10px; }
 .counts{ display:flex; flex-wrap:wrap; gap:8px; }
 .pill{
@@ -375,7 +355,7 @@ const counts = computed(() => {
 .pill.create{ background:#ecfdf5; color:#065f46; }
 .pill.skipped{ background:#fef2f2; color:#991b1b; }
 
-/* Calendar wrapper (horizontal scroll) */
+/* ===== Calendar wrapper ===== */
 .calendar-scroll{
   overflow-x:auto;
   -webkit-overflow-scrolling: touch;
