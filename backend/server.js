@@ -81,6 +81,16 @@ app.use('/api', rateLimit({
 app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 
 /* ───────────────── Routes ───────────────── */
+
+//========================== ADMIN PANEL (Leave module) ===========================
+// Admin routes (management panel)
+app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'));
+app.use('/api/admin', require('./routes/admin-user.routes'));
+app.use('/api/admin/leave', require('./routes/leave/leaveProfile-admin.routes'))
+app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'))
+
+
+
 // Auth
 app.use('/api/auth',   require('./routes/auth.routes'));
 
@@ -122,6 +132,9 @@ app.use('/api/public/transport', require('./routes/transportation/carBooking.pub
 
 // Public routes (holidays)
 app.use('/api/public', require('./routes/public-holidays.routes'));
+
+// ─────────── Leave module ───────────
+app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
 
 /* ───────────────── 404 for API ───────────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));

@@ -17,6 +17,9 @@ const goCar  = () => go('employee-car-booking')
 /* Login button → go to login page (from there they choose role/layout by account) */
 const goLogin = () => go('admin-login')
 
+/* NEW: Leave Request (Expat) → dedicated leave login */
+const goLeave = () => go('leave-login')
+
 /* Scroll to services; if missing, fallback to employee food page */
 const scrollToServices = () => {
   if (servicesRef.value) {
@@ -220,12 +223,13 @@ const scrollToServices = () => {
               </v-card>
             </v-col>
 
-            <!-- Leave Request for Expat (in development) -->
+            <!-- Leave Request for Expat (LIVE → login) -->
             <v-col cols="12" md="6">
               <v-card
-                class="service-card disabled"
+                class="service-card"
                 rounded="xl"
-                elevation="2"
+                elevation="4"
+                @click="goLeave"
               >
                 <div class="service-card-inner">
                   <div class="icon-pill leave">
@@ -234,26 +238,30 @@ const scrollToServices = () => {
                   <div class="service-text">
                     <div class="service-label-row">
                       <span class="service-label">Leave Request (Expat)</span>
-                      <span class="service-chip dev-chip">
-                        <v-icon size="16" class="mr-1">mdi-wrench</v-icon>
-                        In development
+                      <span class="service-chip">
+                        <v-icon size="16" class="mr-1">mdi-airplane</v-icon>
+                        Expat Portal
                       </span>
                     </div>
                     <div class="service-subtitle">
                       Submit and track leave requests for expatriate employees.
                       <span class="km">
-                        In development process.
+                        Request annual leave, sick leave, unpaid leave and more.
                       </span>
                     </div>
                     <div class="service-meta">
                       <span>
-                        <v-icon size="16" class="mr-1 meta-icon">mdi-timer-sand</v-icon>
-                        Coming soon
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-login</v-icon>
+                        Login required
+                      </span>
+                      <span>
+                        <v-icon size="16" class="mr-1 meta-icon">mdi-telegram</v-icon>
+                        Manager Telegram alert
                       </span>
                     </div>
                   </div>
                   <div class="service-arrow">
-                    <v-icon size="20">mdi-lock</v-icon>
+                    <v-icon size="22">mdi-arrow-right</v-icon>
                   </div>
                 </div>
               </v-card>

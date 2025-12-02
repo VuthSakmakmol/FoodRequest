@@ -12,8 +12,17 @@ const signToken = (user) =>
 
 // Map portals -> allowed roles
 const PORTAL_ROLES = {
-  chef: new Set(['CHEF', 'ADMIN']), // change to new Set(['CHEF']) if ONLY chefs may enter
+  chef: new Set(['CHEF', 'ADMIN']),
+  // ✅ new leave portal (for expat leave module)
+  leave: new Set([
+    'LEAVE_USER',
+    'LEAVE_MANAGER',
+    'LEAVE_GM',
+    'LEAVE_ADMIN',
+    'ADMIN',          // allow root admin to enter everything
+  ]),
 }
+
 
 exports.login = async (req, res, next) => {
   try {

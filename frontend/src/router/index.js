@@ -8,6 +8,7 @@ const AdminLayout     = () => import('@/layouts/AdminLayout.vue')
 const ChefLayout      = () => import('@/layouts/ChefLayout.vue')
 const DriverLayout    = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
+const ExpatLayout     = () => import('@/layouts/ExpatLayout.vue')
 
 // Public
 const GreetingPage    = () => import('@/views/GreetingPage.vue')
@@ -42,18 +43,35 @@ const DriverCarCalendar = () => import('@/views/driver/DriverCarCalendar.vue')
 const MessengerAssignment  = () => import('@/views/messenger/MessengerCarBooking.vue')
 const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
+// Expat Leave
+const ExpatLeaveHome  = () => import('@/views/expat/ExpatLeaveHome.vue')
+const ExpatLeaveAdmin = () => import('@/views/expat/AdminLeaveRequests.vue')
+
 // 🔹 Decide "home" route by role
 function homeByRole(role) {
   switch (role) {
     case 'ADMIN':
     case 'ROOT_ADMIN':
       return { name: 'admin-requests' }
+
     case 'CHEF':
       return { name: 'chef-requests' }
+
     case 'DRIVER':
       return { name: 'driver-car-booking' }
+
     case 'MESSENGER':
       return { name: 'messenger-assignment' }
+
+    // Leave roles
+    case 'LEAVE_USER':
+    case 'LEAVE_MANAGER':
+    case 'LEAVE_GM':
+      return { name: 'expat-leave-home' }
+
+    case 'LEAVE_ADMIN':
+      return { name: 'expat-leave-admin' }
+
     default:
       return { name: 'employee-request' }
   }
@@ -75,15 +93,23 @@ const router = createRouter({
       meta: { public: true }
     },
 
-    // Public login
+    // Public login (food/transport portal)
     {
       name: 'admin-login',
       path: '/admin/login',
       component: AdminLogin,
-      meta: { public: true }
+      meta: { public: true, portal: 'admin' }
     },
 
-    // Employee area  ✅ SPECIAL: public-style, no meta.requiresRole
+    // Public login for Expat Leave portal
+    {
+      name: 'leave-login',
+      path: '/leave/login',
+      component: AdminLogin, // reuse same UI
+      meta: { public: true, portal: 'leave' }
+    },
+
+    // Employee area (public style; employees + guests)
     {
       path: '/employee',
       component: EmployeeLayout,
@@ -98,7 +124,7 @@ const router = createRouter({
       ]
     },
 
-    // Admin area (ADMIN + ROOT_ADMIN)
+    // Admin area (Food/Transport) – normal admins only
     {
       path: '/admin',
       component: AdminLayout,
@@ -113,7 +139,7 @@ const router = createRouter({
       ]
     },
 
-    // Chef (CHEF)
+    // Chef
     {
       path: '/chef',
       component: ChefLayout,
@@ -125,7 +151,7 @@ const router = createRouter({
       ]
     },
 
-    // Driver (DRIVER)
+    // Driver
     {
       path: '/driver',
       component: DriverLayout,
@@ -137,7 +163,7 @@ const router = createRouter({
       ]
     },
 
-    // Messenger (MESSENGER)
+    // Messenger
     {
       path: '/messenger',
       component: MessengerLayout,
@@ -146,6 +172,36 @@ const router = createRouter({
         { path: '', redirect: { name: 'messenger-assignment' } },
         { name: 'messenger-assignment', path: 'assignment', component: MessengerAssignment },
         { name: 'messenger-calendar',   path: 'calendar',   component: MessengerCarCalendar }
+      ]
+    },
+
+    // Expat Leave (ONLY leave roles)
+    {
+      path: '/expat',
+      component: ExpatLayout,
+      children: [
+        {
+          path: 'leave',
+          name: 'expat-leave-home',
+          component: ExpatLeaveHome,
+          meta: {
+            requiresRole: [
+              'LEAVE_USER',
+              'LEAVE_MANAGER',
+              'LEAVE_GM',
+              'LEAVE_ADMIN'
+            ]
+          }
+        },
+        {
+          path: 'leave-admin',
+          name: 'expat-leave-admin',
+          component: ExpatLeaveAdmin,
+          meta: {
+            // ✅ ONLY Leave Admin can CRUD leave setup
+            requiresRole: ['LEAVE_ADMIN']
+          }
+        }
       ]
     },
 
@@ -166,8 +222,11 @@ router.beforeEach((to) => {
   const requiredRoles = to.meta?.requiresRole || null
   const isEmployeeArea = to.path.startsWith('/employee')
 
-  // 1. Logged in & visiting greeting/login → send to homeByRole
-  if (role && (to.name === 'greeting' || to.name === 'admin-login')) {
+  // 1. Logged in & visiting greeting or any login → send to homeByRole
+  if (
+    role &&
+    (to.name === 'greeting' || to.name === 'admin-login' || to.name === 'leave-login')
+  ) {
     const target = homeByRole(role)
     if (target.name !== to.name) {
       return target
@@ -177,13 +236,13 @@ router.beforeEach((to) => {
 
   // 2. Employee area special rules
   if (isEmployeeArea) {
-    // Guests (no login) → allowed
+    // Guests → allowed
     if (!auth.token || !role) return true
 
     // Real employees → allowed
     if (role === 'EMPLOYEE') return true
 
-    // Logged in but other roles → go back to their layout
+    // Other roles → back to their own home
     const target = homeByRole(role)
     if (target.name !== to.name) return target
     return true
@@ -192,7 +251,7 @@ router.beforeEach((to) => {
   // 3. Public routes → always allowed
   if (isPublic) return true
 
-  // 4. Non-public routes (admin/chef/driver/messenger) require login
+  // 4. Non-public routes require login
   if (!auth.token || !role) {
     if (to.name !== 'greeting') {
       return { name: 'greeting' }

@@ -2,7 +2,17 @@
 const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 
-const ROLES = Object.freeze(['ADMIN', 'CHEF', 'DRIVER', 'MESSENGER'])
+// ✅ extended roles (future-proof)
+const ROLES = Object.freeze([
+  'ADMIN',
+  'CHEF',
+  'DRIVER',
+  'MESSENGER',
+  'LEAVE_USER',    // expat / employee who requests leave
+  'LEAVE_MANAGER', // approver (line manager)
+  'LEAVE_GM',      // final approver
+  'LEAVE_ADMIN',   // HR / system admin for leave
+])
 
 const UserSchema = new mongoose.Schema({
   loginId:      { type: String, required: true, unique: true, trim: true },
