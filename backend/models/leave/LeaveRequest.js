@@ -1,4 +1,4 @@
-// models/leave/LeaveRequest.js
+// backend/models/leave/LeaveRequest.js
 const mongoose = require('mongoose')
 
 const STATUS = Object.freeze([
@@ -10,7 +10,7 @@ const STATUS = Object.freeze([
 ])
 
 const LeaveRequestSchema = new mongoose.Schema({
-  // Who is taking leave (we’ll assume loginId = employeeId for expat users)
+  // Who is taking leave
   employeeId: {
     type: String,
     required: true,
@@ -32,13 +32,12 @@ const LeaveRequestSchema = new mongoose.Schema({
     uppercase: true,
   },
 
-  // Date range (local Dates, no time)
   startDate: {
-    type: String, // format YYYY-MM-DD
+    type: String, // YYYY-MM-DD
     required: true,
   },
   endDate: {
-    type: String, // format YYYY-MM-DD
+    type: String, // YYYY-MM-DD
     required: true,
   },
 
@@ -60,7 +59,7 @@ const LeaveRequestSchema = new mongoose.Schema({
     default: 'PENDING_MANAGER',
   },
 
-  // Approver mapping (we will wire this later)
+  // Approver mapping
   managerLoginId: {
     type: String,
     default: '',
@@ -72,12 +71,22 @@ const LeaveRequestSchema = new mongoose.Schema({
     trim: true,
   },
 
-  // For future: soft delete, comments, etc.
+  // Manager decision
+  managerComment: { type: String, default: '' },
+  managerDecisionAt: { type: Date },
+
+  // GM decision
+  gmComment: { type: String, default: '' },
+  gmDecisionAt: { type: Date },
+
+  // For future: soft delete, etc.
   cancelledAt: { type: Date, default: null },
   cancelledBy: { type: String, default: '' },
 }, { timestamps: true })
 
 LeaveRequestSchema.index({ employeeId: 1, startDate: 1 })
 LeaveRequestSchema.index({ requesterLoginId: 1, createdAt: -1 })
+LeaveRequestSchema.index({ managerLoginId: 1, status: 1 })
+LeaveRequestSchema.index({ gmLoginId: 1, status: 1 })
 
 module.exports = mongoose.model('LeaveRequest', LeaveRequestSchema)

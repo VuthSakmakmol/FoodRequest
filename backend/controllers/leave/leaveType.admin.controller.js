@@ -2,16 +2,130 @@
 const LeaveType = require('../../models/leave/LeaveType')
 
 /**
- * GET /api/admin/leave/types
- * List all leave types for admin screen
+ * System leave types – hard business rules
+ *
+ * AL = 18 days/year (1.5 per month)
+ * MC = 60 days/year
+ * MA = 90 days fixed
+ * SP = 7 days/year
+ * UL = unlimited (no balance, no yearly limit)
  */
-exports.listTypes = async (req, res, next) => {
+const SYSTEM_TYPES = [
+  {
+    code: 'AL',
+    name: 'Annual Leave',
+    description: 'Annual Leave (AL)',
+    requiresBalance: true,
+    yearlyEntitlement: 18,
+    accrualPerMonth: 1.5,
+    yearlyLimit: 18,
+    fixedDurationDays: 0,
+    allowNegative: true,   // can borrow via SP
+    isSystem: true,
+    isActive: true,
+    order: 1,
+  },
+  {
+    code: 'MC',
+    name: 'Sick Leave (MC)',
+    description: 'Sick Leave (MC)',
+    requiresBalance: true,
+    yearlyEntitlement: 60,
+    accrualPerMonth: 0,
+    yearlyLimit: 60,
+    fixedDurationDays: 0,
+    allowNegative: false,
+    isSystem: true,
+    isActive: true,
+    order: 2,
+  },
+  {
+    code: 'MA',
+    name: 'Maternity Leave (MA)',
+    description: 'Maternity Leave (fixed 90 days)',
+    requiresBalance: true,
+    yearlyEntitlement: 90,
+    accrualPerMonth: 0,
+    yearlyLimit: 90,
+    fixedDurationDays: 90, // enforce 90 days
+    allowNegative: false,
+    isSystem: true,
+    isActive: true,
+    order: 3,
+  },
+  {
+    code: 'SP',
+    name: 'Special Leave (SP)',
+    description: 'Special Leave (borrow from future AL, max 7 days/year)',
+    requiresBalance: true,
+    yearlyEntitlement: 7,
+    accrualPerMonth: 0,
+    yearlyLimit: 7,
+    fixedDurationDays: 0,
+    allowNegative: true, // borrowing
+    isSystem: true,
+    isActive: true,
+    order: 4,
+  },
+  {
+    code: 'UL',
+    name: 'Unpaid Leave (UL)',
+    description: 'Unpaid Leave (no yearly limit)',
+    requiresBalance: false,
+    yearlyEntitlement: 0,
+    accrualPerMonth: 0,
+    yearlyLimit: 0,
+    fixedDurationDays: 0,
+    allowNegative: false,
+    isSystem: true,
+    isActive: true,
+    order: 5,
+  },
+]
+
+/**
+ * Seed / sync the 5 system leave types.
+ * Call this once after Mongo is connected (in server.js).
+ */
+async function ensureSystemTypes() {
+  const bulkOps = SYSTEM_TYPES.map(t => ({
+    updateOne: {
+      filter: { code: t.code },
+      update: {
+        $set: {
+          name: t.name,
+          description: t.description,
+          requiresBalance: t.requiresBalance,
+          yearlyEntitlement: t.yearlyEntitlement,
+          accrualPerMonth: t.accrualPerMonth,
+          yearlyLimit: t.yearlyLimit,
+          fixedDurationDays: t.fixedDurationDays,
+          allowNegative: t.allowNegative,
+          isSystem: true,
+          isActive: true, // 👈 always active by default
+          order: t.order,
+        },
+      },
+      upsert: true,
+    },
+  }))
+
+  if (bulkOps.length) {
+    await LeaveType.bulkWrite(bulkOps)
+  }
+}
+
+/**
+ * GET /api/admin/leave/types
+ * List all leave types (admin view)
+ */
+async function listLeaveTypes(req, res, next) {
   try {
-    const types = await LeaveType.find({})
-      .sort({ code: 1 })
+    const docs = await LeaveType.find({})
+      .sort({ order: 1, code: 1 })
       .lean()
 
-    res.json(types)
+    res.json(docs)
   } catch (err) {
     next(err)
   }
@@ -19,32 +133,36 @@ exports.listTypes = async (req, res, next) => {
 
 /**
  * POST /api/admin/leave/types
- * Body: { code, name, description, yearlyEntitlement, isActive }
+ * Create a new (non-system) leave type
  */
-exports.createType = async (req, res, next) => {
+async function createLeaveType(req, res, next) {
   try {
     let {
       code,
       name,
       description = '',
+      requiresBalance = true,
       yearlyEntitlement = 0,
+      accrualPerMonth = 0,
+      yearlyLimit = 0,
+      fixedDurationDays = 0,
+      allowNegative = false,
       isActive = true,
+      order = 0,
     } = req.body || {}
 
     code = String(code || '').trim().toUpperCase()
     name = String(name || '').trim()
 
     if (!code || !name) {
-      return res.status(400).json({
-        message: 'Code and Name are required',
-      })
+      return res.status(400).json({ message: 'Code and Name are required.' })
     }
 
-    // prevent duplicate code
-    const existing = await LeaveType.findOne({ code })
-    if (existing) {
-      return res.status(409).json({
-        message: `Leave type with code "${code}" already exists`,
+    // Prevent accidental re-creation of system codes here
+    const reservedCodes = SYSTEM_TYPES.map(t => t.code)
+    if (reservedCodes.includes(code)) {
+      return res.status(400).json({
+        message: `Code "${code}" is reserved as a system type. Use ensureSystemTypes / seed, not UI.`,
       })
     }
 
@@ -52,17 +170,22 @@ exports.createType = async (req, res, next) => {
       code,
       name,
       description,
-      yearlyEntitlement: Number(yearlyEntitlement || 0),
-      isActive: Boolean(isActive),
+      requiresBalance,
+      yearlyEntitlement,
+      accrualPerMonth,
+      yearlyLimit,
+      fixedDurationDays,
+      allowNegative,
+      isActive,
+      isSystem: false, // created via UI are always non-system
+      order,
     })
 
     res.status(201).json(doc)
   } catch (err) {
-    // handle Mongo duplicate key just in case unique index exists
-    if (err.code === 11000) {
-      return res.status(409).json({
-        message: 'Leave type code already exists',
-      })
+    // Handle duplicate key error nicely
+    if (err.code === 11000 && err.keyPattern && err.keyPattern.code) {
+      return res.status(400).json({ message: 'Code already exists.' })
     }
     next(err)
   }
@@ -70,85 +193,102 @@ exports.createType = async (req, res, next) => {
 
 /**
  * PUT /api/admin/leave/types/:id
- * Body: { code?, name?, description?, yearlyEntitlement?, isActive? }
+ * Update an existing leave type
+ *
+ * - For system types (isSystem: true), only allow:
+ *   name, description, isActive, order
+ * - For non-system, allow full field update.
  */
-exports.updateType = async (req, res, next) => {
+async function updateLeaveType(req, res, next) {
   try {
     const { id } = req.params
-    const {
-      code,
-      name,
-      description,
-      yearlyEntitlement,
-      isActive,
-    } = req.body || {}
-
-    const update = {}
-
-    if (code !== undefined) {
-      const clean = String(code || '').trim().toUpperCase()
-      if (!clean) {
-        return res.status(400).json({ message: 'Code cannot be empty' })
-      }
-      update.code = clean
-    }
-
-    if (name !== undefined) {
-      const clean = String(name || '').trim()
-      if (!clean) {
-        return res.status(400).json({ message: 'Name cannot be empty' })
-      }
-      update.name = clean
-    }
-
-    if (description !== undefined) {
-      update.description = String(description || '')
-    }
-
-    if (yearlyEntitlement !== undefined) {
-      update.yearlyEntitlement = Number(yearlyEntitlement || 0)
-    }
-
-    if (isActive !== undefined) {
-      update.isActive = Boolean(isActive)
-    }
-
-    const doc = await LeaveType.findByIdAndUpdate(
-      id,
-      { $set: update },
-      { new: true }
-    )
-
+    const doc = await LeaveType.findById(id)
     if (!doc) {
-      return res.status(404).json({ message: 'Leave type not found' })
+      return res.status(404).json({ message: 'Leave type not found.' })
     }
 
+    const body = req.body || {}
+    const isSystem = doc.isSystem
+
+    // Fields allowed for system vs non-system
+    const baseEditable = ['name', 'description', 'isActive', 'order']
+    const fullEditable = [
+      'name',
+      'description',
+      'requiresBalance',
+      'yearlyEntitlement',
+      'accrualPerMonth',
+      'yearlyLimit',
+      'fixedDurationDays',
+      'allowNegative',
+      'isActive',
+      'order',
+    ]
+
+    const editableFields = isSystem ? baseEditable : fullEditable
+
+    for (const key of editableFields) {
+      if (Object.prototype.hasOwnProperty.call(body, key)) {
+        doc[key] = body[key]
+      }
+    }
+
+    // Never allow code or isSystem to be changed via API
+    if (Object.prototype.hasOwnProperty.call(body, 'code')) {
+      // ignore
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'isSystem')) {
+      // ignore
+    }
+
+    await doc.save()
     res.json(doc)
   } catch (err) {
-    if (err.code === 11000) {
-      return res.status(409).json({
-        message: 'Leave type code already exists',
-      })
-    }
     next(err)
   }
 }
 
 /**
  * DELETE /api/admin/leave/types/:id
+ * Delete a leave type
+ *
+ * - System types (AL/MC/MA/SP/UL) cannot be deleted.
  */
-exports.deleteType = async (req, res, next) => {
+async function deleteLeaveType(req, res, next) {
   try {
     const { id } = req.params
-
-    const doc = await LeaveType.findByIdAndDelete(id)
+    const doc = await LeaveType.findById(id)
 
     if (!doc) {
-      return res.status(404).json({ message: 'Leave type not found' })
+      return res.status(404).json({ message: 'Leave type not found.' })
     }
 
-    res.json({ message: 'Deleted', id })
+    if (doc.isSystem) {
+      return res.status(400).json({
+        message: `Cannot delete system leave type "${doc.code}".`,
+      })
+    }
+
+    await doc.deleteOne()
+    res.json({ message: 'Leave type deleted.' })
   } catch (err) {
     next(err)
   }
+}
+
+/* Exports */
+module.exports = {
+  listLeaveTypes,
+  createLeaveType,
+  updateLeaveType,
+  deleteLeaveType,
+
+  // aliases
+  list: listLeaveTypes,
+  create: createLeaveType,
+  update: updateLeaveType,
+  remove: deleteLeaveType,
+
+  // system seeding
+  ensureSystemTypes,
 }

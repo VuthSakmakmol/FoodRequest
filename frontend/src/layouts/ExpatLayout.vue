@@ -12,8 +12,18 @@ const drawer   = ref(true)
 const rail     = ref(false)
 const appTitle = 'Expat Leave Portal'
 
+const userRole = computed(() => auth.user?.role || '')
+
+function hasAnyRole(...roles) {
+  return roles.includes(userRole.value)
+}
+
 const isLeaveAdmin = computed(() =>
-  auth.user?.role === 'LEAVE_ADMIN' || auth.user?.role === 'ADMIN'
+  hasAnyRole('LEAVE_ADMIN', 'ADMIN')
+)
+
+const isManagerOrGM = computed(() =>
+  hasAnyRole('LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN')
 )
 
 /** Sections (collapsible, same style as AdminLayout) */
@@ -22,42 +32,73 @@ const sections = [
     key: 'my-leave',
     header: 'My Leave',
     icon: 'mdi-airplane',
+    roles: ['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'],
     children: [
-      { label: 'Request Leave', icon: 'mdi-calendar-plus',         to: { name: 'expat-leave-home' } },
-      { label: 'My Requests',   icon: 'mdi-format-list-bulleted',  to: { name: 'expat-leave-my-requests' } },
+      {
+        label: 'Request Leave',
+        icon: 'mdi-calendar-plus',
+        to: { name: 'expat-leave-request' } // <-- main request page
+      },
+      {
+        label: 'My Requests',
+        icon: 'mdi-format-list-bulleted',
+        to: { name: 'expat-leave-my-requests' }
+      },
+    ],
+  },
+  {
+    key: 'approvals',
+    header: 'Approvals',
+    icon: 'mdi-clipboard-check-multiple-outline',
+    roles: ['LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'],
+    children: [
+      {
+        label: 'Manager Inbox',
+        icon: 'mdi-account-tie',
+        to: { name: 'expat-leave-manager-inbox' },
+      },
+      {
+        label: 'GM Inbox',
+        icon: 'mdi-account-star',
+        to: { name: 'expat-leave-gm-inbox' },
+      },
     ],
   },
   {
     key: 'leave-admin',
     header: 'Leave Admin',
     icon: 'mdi-shield-account',
-    adminOnly: true,
+    roles: ['LEAVE_ADMIN', 'ADMIN'],
     children: [
       {
         label: 'Leave Types',
         icon: 'mdi-cog-outline',
-        to: { name: 'expat-leave-admin-types' },      // AdminLeaveTypes.vue
+        to: { name: 'expat-leave-admin-types' },
       },
       {
         label: 'Expat Profiles',
         icon: 'mdi-account-group-outline',
-        to: { name: 'expat-leave-admin-profiles' },   // AdminExpatProfiles.vue
+        to: { name: 'expat-leave-admin-profiles' },
       },
     ],
   },
 ]
 
 /** Open state (open a section if current route is inside it) */
-const open = reactive(Object.fromEntries(
-  sections.map(s => [
-    s.key,
-    s.children.some(c => c.to?.name === route.name),
-  ])
-))
+const open = reactive(
+  Object.fromEntries(
+    sections.map(s => [
+      s.key,
+      s.children.some(c => c.to?.name === route.name),
+    ])
+  )
+)
 
 /** Helpers */
 const initials = computed(() =>
-  (auth.user?.name || auth.user?.loginId || 'U').slice(0, 2).toUpperCase()
+  (auth.user?.name || auth.user?.loginId || auth.user?.id || 'U')
+    .slice(0, 2)
+    .toUpperCase()
 )
 
 function go(it) {
@@ -69,8 +110,9 @@ function isActive(it) {
 }
 
 function showSection(section) {
-  if (!section.adminOnly) return true
-  return isLeaveAdmin.value
+  // If no roles specified → visible for everyone logged-in
+  if (!section.roles || !section.roles.length) return true
+  return section.roles.includes(userRole.value)
 }
 
 function logout() {
@@ -96,7 +138,9 @@ function logout() {
           <v-avatar size="24" class="chip-avatar mr-1">
             <span class="chip-initials">{{ initials }}</span>
           </v-avatar>
-          <span class="chip-text">{{ auth.user.name || auth.user.loginId }}</span>
+          <span class="chip-text">
+            {{ auth.user.name || auth.user.loginId || auth.user.id }}
+          </span>
           <span class="chip-role">({{ auth.user.role }})</span>
         </v-chip>
         <v-btn size="small" class="logout" variant="flat" @click="logout">
@@ -115,8 +159,7 @@ function logout() {
         :permanent="$vuetify.display.mdAndUp"
         expand-on-hover
       >
-        <!-- optional drawer header, keep commented if you don't need it -->
-        <!--
+        <!-- Optional header
         <div class="drawer-head">
           <div class="brand">
             <v-icon icon="mdi-airplane" size="22" class="mr-2" />
@@ -175,7 +218,6 @@ function logout() {
       <!-- MAIN -->
       <v-main class="main">
         <v-container fluid class="content">
-          <!-- AdminLeaveTypes / AdminExpatProfiles / MyLeave etc render here -->
           <router-view />
         </v-container>
       </v-main>

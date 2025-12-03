@@ -13,6 +13,8 @@ const { Server }  = require('socket.io');
 
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime');
 const { startRecurringEngine } = require('./services/recurring.engine');
+// 🔹 NEW: ensure system leave types (AL / MC / MA / SP / UL)
+const { ensureSystemTypes } = require('./controllers/leave/leaveType.admin.controller');
 
 const app = express();
 
@@ -83,13 +85,13 @@ app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 /* ───────────────── Routes ───────────────── */
 
 //========================== ADMIN PANEL (Leave module) ===========================
-// Admin routes (management panel)
-app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
-app.use('/api/admin/leave', require('./routes/leave/leaveProfile-admin.routes'))
-app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'))
-app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'))
-
-
+// Leave requests (employee + manager + gm)
+app.use('/api/leave/requests', require('./routes/leave/leave.routes'));
+// Leave admin (profiles + types)
+app.use('/api/admin/leave', require('./routes/leave/leaveProfile-admin.routes'));
+app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'));
+app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'));
+app.use('/api/admin/leave', require('./routes/leave/leaveYearSheet-admin.routes'))
 // Auth
 app.use('/api/auth',   require('./routes/auth.routes'));
 
@@ -122,18 +124,17 @@ app.use('/api/driver', require('./routes/transportation/carBooking-driver.routes
 
 // Messenger routes
 app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.routes'));
-app.use('/api/messenger/car-bookings', require('./routes/transportation/carBooking-messenger.routes'))
+app.use('/api/messenger/car-bookings', require('./routes/transportation/carBooking-messenger.routes'));
 
 // Recurring engine
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'));
 app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'));
 
-
 // Public routes (holidays)
 app.use('/api/public', require('./routes/public-holidays.routes'));
 
-// ─────────── Leave module ───────────
-app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
+// ❌ (Removed duplicate)
+// app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
 
 /* ───────────────── 404 for API ───────────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));
@@ -168,14 +169,14 @@ const ioCors = hasWildcard
 
 const io = new Server(server, {
   cors: ioCors,
-  transports: ['websocket'],                    // pure WS for performance
-  perMessageDeflate: { threshold: 1024 },       // compress only bigger frames
-  maxHttpBufferSize: 1 * 1024 * 1024,           // 1MB payload cap
+  transports: ['websocket'],
+  perMessageDeflate: { threshold: 1024 },
+  maxHttpBufferSize: 1 * 1024 * 1024,
   pingInterval: 25_000,
   pingTimeout: 60_000,
   connectionStateRecovery: {
     maxDisconnectionDuration: 120_000,
-    skipMiddlewares: false,                     // re-run auth on recovery
+    skipMiddlewares: false,
   },
 });
 
@@ -192,6 +193,10 @@ const PORT = Number(process.env.PORT || 4333);
       dbName: process.env.MONGO_DB || undefined,
     });
     console.log('✅ MongoDB connected');
+
+    // 🔹 Ensure AL / MC / MA / SP / UL exist and are active
+    await ensureSystemTypes();
+    console.log('✅ System leave types ensured');
 
     server.listen(PORT, () => {
       const proto = forceHTTPS ? 'https' : 'http';

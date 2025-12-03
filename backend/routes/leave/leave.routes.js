@@ -9,8 +9,7 @@ const ctrl = require('../../controllers/leave/leaveRequest.controller')
 router.use(requireAuth)
 
 /**
- * POST /api/leave/requests
- * Create a new leave request
+ * Create a new request
  * Allowed: LEAVE_USER (expat), LEAVE_ADMIN, ADMIN
  */
 router.post(
@@ -20,20 +19,49 @@ router.post(
 )
 
 /**
- * GET /api/leave/requests/my
- * Get my own leave requests
+ * Get my requests
  * Allowed: any leave-related role + admin
  */
 router.get(
   '/my',
-  requireRole(
-    'LEAVE_USER',
-    'LEAVE_MANAGER',
-    'LEAVE_GM',
-    'LEAVE_ADMIN',
-    'ADMIN'
-  ),
+  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.listMyRequests
+)
+
+/**
+ * Manager inbox: requests waiting for THIS manager
+ */
+router.get(
+  '/manager/inbox',
+  requireRole('LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN'),
+  ctrl.listManagerInbox
+)
+
+/**
+ * Manager decision (approve / reject)
+ */
+router.post(
+  '/:id/manager-decision',
+  requireRole('LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN'),
+  ctrl.managerDecision
+)
+
+/**
+ * GM inbox: requests waiting for THIS GM
+ */
+router.get(
+  '/gm/inbox',
+  requireRole('LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
+  ctrl.listGmInbox
+)
+
+/**
+ * GM decision (approve / reject)
+ */
+router.post(
+  '/:id/gm-decision',
+  requireRole('LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
+  ctrl.gmDecision
 )
 
 module.exports = router

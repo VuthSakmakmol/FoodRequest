@@ -8,28 +8,23 @@ exports.requireAuth = (req, res, next) => {
   if (!token) return res.status(401).json({ message: 'Unauthorized' })
 
   try {
-    req.user = jwt.verify(
-      token,
-      process.env.JWT_SECRET,
-      { issuer: 'food-app', audience: 'food-web' }
-    )
+    req.user = jwt.verify(token, process.env.JWT_SECRET, {
+      issuer: 'food-app',
+      audience: 'food-web',
+    })
     next()
   } catch {
     return res.status(401).json({ message: 'Invalid token' })
   }
 }
 
-// ✅ works with requireRole('ADMIN','CHEF') OR requireRole(['ADMIN','CHEF'])
+// ✅ middleware *factory* that RETURNS a function
 exports.requireRole = (...roles) => {
-  const allowed = (roles.length === 1 && Array.isArray(roles[0]))
-    ? roles[0]
-    : roles
-
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ message: 'Unauthorized' })
     }
-    if (!allowed.includes(req.user.role)) {
+    if (!roles.includes(req.user.role)) {
       return res.status(403).json({ message: 'Forbidden' })
     }
     next()

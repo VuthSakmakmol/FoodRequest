@@ -3,56 +3,40 @@ const express = require('express')
 const router = express.Router()
 
 const { requireAuth, requireRole } = require('../../middlewares/auth')
-const ctrl = require('../../controllers/leave/leaveType.admin.controller')
+const leaveTypeAdminCtrl = require('../../controllers/leave/leaveType.admin.controller')
 
-/**
- * READ: list leave types
- * Allowed: all leave-related roles + ADMIN
- */
+// All routes here are under /api/admin/leave (when mounted in server.js)
+
+// List all leave types (admin view)
 router.get(
   '/types',
   requireAuth,
-  requireRole(
-    'LEAVE_USER',
-    'LEAVE_MANAGER',
-    'LEAVE_GM',
-    'LEAVE_ADMIN',
-    'ADMIN'
-  ),
-  ctrl.listTypes
+  requireRole('LEAVE_ADMIN', 'ADMIN'),
+  leaveTypeAdminCtrl.listLeaveTypes
 )
 
-/**
- * CREATE: leave type
- * Allowed: LEAVE_ADMIN + ADMIN only
- */
+// Create new (non-system) leave type
 router.post(
   '/types',
   requireAuth,
   requireRole('LEAVE_ADMIN', 'ADMIN'),
-  ctrl.createType
+  leaveTypeAdminCtrl.createLeaveType
 )
 
-/**
- * UPDATE: leave type
- * Allowed: LEAVE_ADMIN + ADMIN only
- */
+// Update existing leave type
 router.put(
   '/types/:id',
   requireAuth,
   requireRole('LEAVE_ADMIN', 'ADMIN'),
-  ctrl.updateType
+  leaveTypeAdminCtrl.updateLeaveType
 )
 
-/**
- * DELETE: leave type
- * Allowed: LEAVE_ADMIN + ADMIN only
- */
+// Delete leave type (non-system only)
 router.delete(
   '/types/:id',
   requireAuth,
   requireRole('LEAVE_ADMIN', 'ADMIN'),
-  ctrl.deleteType
+  leaveTypeAdminCtrl.deleteLeaveType
 )
 
 module.exports = router

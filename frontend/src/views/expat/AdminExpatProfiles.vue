@@ -1,6 +1,6 @@
 <!-- src/views/expat/AdminExpatProfiles.vue -->
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 
@@ -39,19 +39,44 @@ const profileForm = ref({
 })
 
 const profileHeaders = [
-  { title: 'Employee ID', key: 'employeeId',     width: 120 },
-  { title: 'Name',        key: 'name',           minWidth: 160 },
-  { title: 'Department',  key: 'department',     minWidth: 130 },
-  { title: 'Join Date',   key: 'joinDate',       width: 110 },
-  { title: 'Contract',    key: 'contractDate',   width: 110 },
-  { title: 'Balances',    key: 'balanceSummary', minWidth: 220 },
-  { title: 'Actions',     key: 'actions',        width: 110, align: 'end' },
+  { title: 'Employee ID',          key: 'employeeId',     width: 120 },
+  { title: 'Name',                 key: 'name',           minWidth: 160 },
+  { title: 'Department',           key: 'department',     minWidth: 130 },
+  { title: 'Join Date',            key: 'joinDate',       width: 110 },
+  { title: 'Contract',             key: 'contractDate',   width: 110 },
+  { title: 'AL',                   key: 'alUR',           width: 60, align: 'end' },
+  { title: 'SP',                   key: 'spUR',           width: 60, align: 'end' },
+  { title: 'MC',                   key: 'mcUR',           width: 60, align: 'end' },
+  { title: 'MA',                   key: 'maUR',           width: 60, align: 'end' },
+  { title: 'UL',                   key: 'ulUR',           width: 60, align: 'end' },
+  { title: 'Actions',              key: 'actions',        width: 250, align: 'end' },
 ]
 
+// find used / remain for one type in one profile
+function findUR(balances = [], code) {
+  const rec = (balances || []).find(b => b.leaveTypeCode === code) || {}
+  const ent  = Number(rec.yearlyEntitlement ?? 0)
+  const used = Number(rec.used ?? 0)
+  const rem  = rec.remaining != null
+    ? Number(rec.remaining)
+    : Math.max(ent - used, 0)
+  return { used, rem }
+}
+
+// text summary: AL: U2 / R16 | …
 function summarizeBalances(balances = []) {
   if (!balances.length) return '—'
+  const done = new Set()
   return balances
-    .map(b => `${b.leaveTypeCode}: ${b.used ?? 0}/${b.yearlyEntitlement ?? 0}`)
+    .filter(b => {
+      if (!b.leaveTypeCode || done.has(b.leaveTypeCode)) return false
+      done.add(b.leaveTypeCode)
+      return true
+    })
+    .map(b => {
+      const { used, rem } = findUR(balances, b.leaveTypeCode)
+      return `${b.leaveTypeCode}: U${used} / R${rem}`
+    })
     .join(' | ')
 }
 
@@ -105,6 +130,47 @@ function ensureAllTypesInBalances(balances) {
   return Array.from(map.values())
 }
 
+/* ─────────────────────────────
+ *  AL ACCRUAL FROM JOIN DATE
+ * ───────────────────────────── */
+
+// compute AL entitlement = monthsSinceJoin * 1.5 (cap 18)
+function computeAlEntitlementFromJoin(joinDateStr) {
+  if (!joinDateStr) return null
+  const jd = dayjs(joinDateStr)
+  if (!jd.isValid()) return null
+
+  const now = dayjs().startOf('day')
+  const months = Math.max(0, now.diff(jd.startOf('day'), 'month'))
+
+  // full-year AL entitlement (18) & per-month (1.5)
+  const fullYear = 18
+  const perMonth = 1.5
+
+  const ent = Math.min(fullYear, months * perMonth)
+  return Number(ent.toFixed(1)) // keep 1 decimal (e.g. 1.5, 3.0, …)
+}
+
+function applyAlAccrualForForm() {
+  const joinDate = profileForm.value.joinDate
+  const ent = computeAlEntitlementFromJoin(joinDate)
+  if (ent === null) return
+
+  const idx = profileForm.value.balances.findIndex(
+    b => b.leaveTypeCode === 'AL'
+  )
+  if (idx === -1) return
+
+  const b = profileForm.value.balances[idx]
+  b.yearlyEntitlement = ent
+
+  // recompute remaining based on new entitlement
+  const used = Number(b.used || 0)
+  let rem = ent - used
+  if (rem < 0) rem = 0
+  b.remaining = rem
+}
+
 function openEditProfile(p) {
   selectedProfile.value = p
   profileError.value = ''
@@ -115,8 +181,19 @@ function openEditProfile(p) {
     balances: ensureAllTypesInBalances(p.balances || []),
   }
 
+  // 🔹 after balances + joinDate loaded, adjust AL entitlement
+  applyAlAccrualForForm()
+
   profileDialog.value = true
 }
+
+// re-apply AL accrual whenever join date changes in the dialog
+watch(
+  () => profileForm.value.joinDate,
+  () => {
+    applyAlAccrualForForm()
+  }
+)
 
 function updateRemaining(idx) {
   const b = profileForm.value.balances[idx]
@@ -167,6 +244,7 @@ onMounted(async () => {
 })
 </script>
 
+
 <template>
   <v-container fluid class="pa-4">
     <v-row>
@@ -187,7 +265,7 @@ onMounted(async () => {
             <div>
               <div class="text-subtitle-1 font-weight-semibold">Expat Profiles</div>
               <div class="text-caption text-medium-emphasis">
-                Search and edit profiles and leave balances.
+                Search and edit profiles and leave usage.
               </div>
             </div>
             <v-text-field
@@ -218,11 +296,78 @@ onMounted(async () => {
                 {{ item.contractDate ? dayjs(item.contractDate).format('YYYY-MM-DD') : '—' }}
               </template>
 
+              <!-- text summary (no 0/18 style) -->
               <template #item.balanceSummary="{ item }">
                 {{ summarizeBalances(item.balances) }}
               </template>
 
+              <!-- Per-type 2-line cells -->
+              <template #item.alUR="{ item }">
+                <div class="ur-cell">
+                  <div class="ur-used">
+                    {{ findUR(item.balances, 'AL').used }}
+                  </div>
+                  <div class="ur-rem">
+                    {{ findUR(item.balances, 'AL').rem }}
+                  </div>
+                </div>
+              </template>
+
+              <template #item.spUR="{ item }">
+                <div class="ur-cell">
+                  <div class="ur-used">
+                    {{ findUR(item.balances, 'SP').used }}
+                  </div>
+                  <div class="ur-rem">
+                    {{ findUR(item.balances, 'SP').rem }}
+                  </div>
+                </div>
+              </template>
+
+              <template #item.mcUR="{ item }">
+                <div class="ur-cell">
+                  <div class="ur-used">
+                    {{ findUR(item.balances, 'MC').used }}
+                  </div>
+                  <div class="ur-rem">
+                    {{ findUR(item.balances, 'MC').rem }}
+                  </div>
+                </div>
+              </template>
+
+              <template #item.maUR="{ item }">
+                <div class="ur-cell">
+                  <div class="ur-used">
+                    {{ findUR(item.balances, 'MA').used }}
+                  </div>
+                  <div class="ur-rem">
+                    {{ findUR(item.balances, 'MA').rem }}
+                  </div>
+                </div>
+              </template>
+
+              <template #item.ulUR="{ item }">
+                <div class="ur-cell">
+                  <div class="ur-used">
+                    {{ findUR(item.balances, 'UL').used }}
+                  </div>
+                  <div class="ur-rem">
+                    {{ findUR(item.balances, 'UL').rem }}
+                  </div>
+                </div>
+              </template>
+
               <template #item.actions="{ item }">
+                <v-btn
+                  size="small"
+                  variant="outlined"
+                  color="secondary"
+                  prepend-icon="mdi-file-chart"
+                  class="mr-2"
+                  @click="$router.push({ name: 'expat-leave-year-sheet', params: { employeeId: item.employeeId } })"
+                >
+                  Sheet
+                </v-btn>
                 <v-btn
                   size="small"
                   variant="tonal"
@@ -289,7 +434,7 @@ onMounted(async () => {
           </v-row>
 
           <div class="text-subtitle-2 font-weight-semibold mb-1">
-            Leave Balances
+            Leave Usage (per year)
           </div>
 
           <v-table density="compact">
@@ -366,5 +511,22 @@ onMounted(async () => {
 <style scoped>
 .text-subtitle-1 {
   letter-spacing: 0.01em;
+}
+
+.ur-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.1;
+}
+
+.ur-used {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ur-rem {
+  font-size: 11px;
+  color: #4b5563; /* slate-ish */
 }
 </style>
