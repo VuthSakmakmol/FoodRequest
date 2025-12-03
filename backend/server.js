@@ -84,11 +84,10 @@ app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 
 //========================== ADMIN PANEL (Leave module) ===========================
 // Admin routes (management panel)
-app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'));
-app.use('/api/admin', require('./routes/admin-user.routes'));
+app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
 app.use('/api/admin/leave', require('./routes/leave/leaveProfile-admin.routes'))
 app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'))
-
+app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'))
 
 
 // Auth

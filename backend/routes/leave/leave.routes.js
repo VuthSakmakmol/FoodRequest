@@ -1,4 +1,4 @@
-// routes/leave/leave.routes.js
+// backend/routes/leave/leave.routes.js
 const express = require('express')
 const router = express.Router()
 
@@ -9,7 +9,8 @@ const ctrl = require('../../controllers/leave/leaveRequest.controller')
 router.use(requireAuth)
 
 /**
- * Create a new request
+ * POST /api/leave/requests
+ * Create a new leave request
  * Allowed: LEAVE_USER (expat), LEAVE_ADMIN, ADMIN
  */
 router.post(
@@ -19,13 +20,19 @@ router.post(
 )
 
 /**
- * Get my requests
+ * GET /api/leave/requests/my
+ * Get my own leave requests
  * Allowed: any leave-related role + admin
- * (LEAVE_MANAGER/GM may later use separate endpoints to view subordinates)
  */
 router.get(
   '/my',
-  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
+  requireRole(
+    'LEAVE_USER',
+    'LEAVE_MANAGER',
+    'LEAVE_GM',
+    'LEAVE_ADMIN',
+    'ADMIN'
+  ),
   ctrl.listMyRequests
 )
 

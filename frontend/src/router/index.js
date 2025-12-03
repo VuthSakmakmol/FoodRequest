@@ -44,8 +44,9 @@ const MessengerAssignment  = () => import('@/views/messenger/MessengerCarBooking
 const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
 // Expat Leave
-const ExpatLeaveHome  = () => import('@/views/expat/ExpatLeaveHome.vue')
-const ExpatLeaveAdmin = () => import('@/views/expat/AdminLeaveRequests.vue')
+const ExpatLeaveHome       = () => import('@/views/expat/ExpatLeaveHome.vue')
+const AdminLeaveTypes      = () => import('@/views/expat/AdminLeaveTypes.vue')
+const AdminExpatProfiles   = () => import('@/views/expat/AdminExpatProfiles.vue')
 
 // 🔹 Decide "home" route by role
 function homeByRole(role) {
@@ -70,7 +71,8 @@ function homeByRole(role) {
       return { name: 'expat-leave-home' }
 
     case 'LEAVE_ADMIN':
-      return { name: 'expat-leave-admin' }
+      // Leave admin lands directly on types master
+      return { name: 'expat-leave-admin-types' }
 
     default:
       return { name: 'employee-request' }
@@ -175,7 +177,7 @@ const router = createRouter({
       ]
     },
 
-    // Expat Leave (ONLY leave roles)
+    // Expat Leave (ONLY leave roles + ADMIN for admin screens)
     {
       path: '/expat',
       component: ExpatLayout,
@@ -189,19 +191,27 @@ const router = createRouter({
               'LEAVE_USER',
               'LEAVE_MANAGER',
               'LEAVE_GM',
-              'LEAVE_ADMIN'
+              'LEAVE_ADMIN',
+              'ADMIN',              // allow root admin to check
             ]
           }
         },
         {
-          path: 'leave-admin',
-          name: 'expat-leave-admin',
-          component: ExpatLeaveAdmin,
+          path: 'leave/admin/types',
+          name: 'expat-leave-admin-types',
+          component: AdminLeaveTypes,
           meta: {
-            // ✅ ONLY Leave Admin can CRUD leave setup
-            requiresRole: ['LEAVE_ADMIN']
+            requiresRole: ['LEAVE_ADMIN', 'ADMIN']
           }
-        }
+        },
+        {
+          path: 'leave/admin/profiles',
+          name: 'expat-leave-admin-profiles',
+          component: AdminExpatProfiles,
+          meta: {
+            requiresRole: ['LEAVE_ADMIN', 'ADMIN']
+          }
+        },
       ]
     },
 
