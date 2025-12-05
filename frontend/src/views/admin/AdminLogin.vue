@@ -1,12 +1,13 @@
 <!-- frontend/src/views/admin/AdminLogin.vue -->
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
 import Swal from 'sweetalert2'
 
 const router = useRouter()
-const auth = useAuth()
+const route  = useRoute()
+const auth   = useAuth()
 
 const loginId  = ref('')
 const password = ref('')
@@ -33,16 +34,34 @@ async function submit() {
     await auth.login(id, password.value)
     await Swal.fire({ icon: 'success', title: 'Welcome', timer: 900, showConfirmButton: false })
 
-    // Route by role (CHEF goes to chef-requests)
-    const role = auth.user?.role
-    if (role === 'CHEF') {
-      router.push({ name: 'chef-requests' })
-    } else if (role === 'DRIVER') {
-      router.push({ name: 'driver-car-booking' })
-    } else if (role === 'MESSENGER') {
-      router.push({ name: 'messenger-assignment' })
+    const role   = auth.user?.role
+    const portal = route.meta?.portal || 'admin' // 'admin' or 'leave'
+
+    // 🔹 If coming from /leave/login → go to Leave/Expat layouts
+    if (portal === 'leave') {
+      if (role === 'LEAVE_ADMIN' || role === 'ADMIN') {
+        router.push({ name: 'leave-admin-types' })
+      } else if (role === 'LEAVE_MANAGER') {
+        router.push({ name: 'leave-manager-inbox' })
+      } else if (role === 'LEAVE_GM') {
+        router.push({ name: 'leave-gm-inbox' })
+      } else if (role === 'LEAVE_USER') {
+        router.push({ name: 'leave-user-request' })
+      } else {
+        // fallback for non-leave roles using leave-login
+        router.push({ name: 'employee-request' })
+      }
     } else {
-      router.push({ name: 'admin-requests' }) // ADMIN fallback
+      // 🔹 Normal admin portal (food / transport)
+      if (role === 'CHEF') {
+        router.push({ name: 'chef-requests' })
+      } else if (role === 'DRIVER') {
+        router.push({ name: 'driver-car-booking' })
+      } else if (role === 'MESSENGER') {
+        router.push({ name: 'messenger-assignment' })
+      } else {
+        router.push({ name: 'admin-requests' }) // ADMIN / ROOT_ADMIN / others
+      }
     }
   } catch (e) {
     await Swal.fire({
@@ -64,7 +83,9 @@ async function submit() {
           <v-icon icon="mdi-shield-account-outline" size="32" class="text-primary-dark" />
         </v-avatar>
         <div class="text-h5 font-weight-bold">Sign in</div>
-        <div class="text-subtitle-2 text-grey mt-1">Admin • Chef • Driver • Messenger</div>
+        <div class="text-subtitle-2 text-grey mt-1">
+          Admin • Chef • Driver • Messenger • Leave Portal
+        </div>
       </div>
 
       <v-text-field

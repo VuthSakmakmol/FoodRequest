@@ -8,7 +8,12 @@ const AdminLayout     = () => import('@/layouts/AdminLayout.vue')
 const ChefLayout      = () => import('@/layouts/ChefLayout.vue')
 const DriverLayout    = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
-const ExpatLayout     = () => import('@/layouts/ExpatLayout.vue')
+
+// 🔹 New Leave/Expat layouts (role-specific)
+const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
+const GMLeaveExpat    = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
+const MGRLeaveExpat   = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
+const UserLeaveExpat  = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
 
 // Public
 const GreetingPage    = () => import('@/views/GreetingPage.vue')
@@ -43,7 +48,7 @@ const DriverCarCalendar = () => import('@/views/driver/DriverCarCalendar.vue')
 const MessengerAssignment  = () => import('@/views/messenger/MessengerCarBooking.vue')
 const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
-// Expat Leave (split pages)
+// Expat Leave (views)
 const ExpatRequestLeave   = () => import('@/views/expat/RequestLeave.vue')
 const ExpatMyRequests     = () => import('@/views/expat/MyRequests.vue')
 const AdminLeaveTypes     = () => import('@/views/expat/AdminLeaveTypes.vue')
@@ -68,15 +73,18 @@ function homeByRole(role) {
     case 'MESSENGER':
       return { name: 'messenger-assignment' }
 
-    // Leave roles
+    // Leave roles → go to their dedicated leave layouts
     case 'LEAVE_USER':
+      return { name: 'leave-user-request' }
+
     case 'LEAVE_MANAGER':
+      return { name: 'leave-manager-inbox' }
+
     case 'LEAVE_GM':
-      return { name: 'expat-leave-request' }
+      return { name: 'leave-gm-inbox' }
 
     case 'LEAVE_ADMIN':
-      // Leave admin lands directly on types master
-      return { name: 'expat-leave-admin-types' }
+      return { name: 'leave-admin-types' }
 
     default:
       return { name: 'employee-request' }
@@ -181,74 +189,133 @@ const router = createRouter({
       ]
     },
 
-    // Expat Leave (ONLY leave roles + ADMIN for admin screens)
+    // 🔹 Leave / Expat – split layouts by role, under /leave/...
+
+    // LEAVE_USER (normal expat)
     {
-      path: '/expat',
-      component: ExpatLayout,
+      path: '/leave/user',
+      component: UserLeaveExpat,
+      meta: {
+        requiresRole: [
+          'LEAVE_USER',
+          'LEAVE_MANAGER',
+          'LEAVE_GM',
+          'LEAVE_ADMIN',
+          'ADMIN',
+        ]
+      },
       children: [
-        // redirect old /expat/leave → /expat/leave/request
+        { path: '', redirect: { name: 'leave-user-request' } },
         {
-          path: 'leave',
-          redirect: { name: 'expat-leave-request' }
+          path: 'request',
+          name: 'leave-user-request',
+          component: ExpatRequestLeave
         },
         {
-          path: 'leave/request',
-          name: 'expat-leave-request',
-          component: ExpatRequestLeave,
-          meta: {
-            requiresRole: [
-              'LEAVE_USER',
-              'LEAVE_MANAGER',
-              'LEAVE_GM',
-              'LEAVE_ADMIN',
-              'ADMIN', // allow admin/root to test
-            ]
-          }
+          path: 'my-requests',
+          name: 'leave-user-my-requests',
+          component: ExpatMyRequests
+        },
+      ]
+    },
+
+    // LEAVE_MANAGER
+    {
+      path: '/leave/manager',
+      component: MGRLeaveExpat,
+      meta: { requiresRole: ['LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN'] },
+      children: [
+        { path: '', redirect: { name: 'leave-manager-inbox' } },
+        {
+          path: 'request',
+          name: 'leave-manager-request',
+          component: ExpatRequestLeave
         },
         {
-          path: 'leave/my-requests',
-          name: 'expat-leave-my-requests',
-          component: ExpatMyRequests,
-          meta: {
-            requiresRole: [
-              'LEAVE_USER',
-              'LEAVE_MANAGER',
-              'LEAVE_GM',
-              'LEAVE_ADMIN',
-              'ADMIN',
-            ]
-          }
+          path: 'my-requests',
+          name: 'leave-manager-my-requests',
+          component: ExpatMyRequests
         },
         {
-          path: 'leave/admin/types',
-          name: 'expat-leave-admin-types',
-          component: AdminLeaveTypes,
-          meta: {
-            requiresRole: ['LEAVE_ADMIN', 'ADMIN']
-          }
+          path: 'inbox',
+          name: 'leave-manager-inbox',
+          component: ManagerLeaveInbox
+        },
+      ]
+    },
+
+    // LEAVE_GM
+    {
+      path: '/leave/gm',
+      component: GMLeaveExpat,
+      meta: { requiresRole: ['LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'] },
+      children: [
+        { path: '', redirect: { name: 'leave-gm-inbox' } },
+        {
+          path: 'request',
+          name: 'leave-gm-request',
+          component: ExpatRequestLeave
         },
         {
-          path: 'leave/admin/profiles',
-          name: 'expat-leave-admin-profiles',
-          component: AdminExpatProfiles,
-          meta: {
-            requiresRole: ['LEAVE_ADMIN', 'ADMIN']
-          }
+          path: 'my-requests',
+          name: 'leave-gm-my-requests',
+          component: ExpatMyRequests
         },
         {
-          path: 'leave/manager-inbox',
-          name: 'expat-leave-manager-inbox',
-          component: ManagerLeaveInbox,
-          meta: { requiresRole: ['LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN'] }
+          path: 'inbox',
+          name: 'leave-gm-inbox',
+          component: GmLeaveInbox
+        },
+      ]
+    },
+
+    // LEAVE_ADMIN (master)
+    {
+      path: '/leave/admin',
+      component: AdminLeaveExpat,
+      meta: { requiresRole: ['LEAVE_ADMIN', 'ADMIN'] },
+      children: [
+        { path: '', redirect: { name: 'leave-admin-types' } },
+
+        // Admin master data
+        {
+          path: 'types',
+          name: 'leave-admin-types',
+          component: AdminLeaveTypes
         },
         {
-          path: 'leave/gm-inbox',
-          name: 'expat-leave-gm-inbox',
-          component: GmLeaveInbox,
-          meta: { requiresRole: ['LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'] }
+          path: 'profiles',
+          name: 'leave-admin-profiles',
+          component: AdminExpatProfiles
+        },
+
+        // Admin ability to open manager/GM inbox if needed
+        {
+          path: 'manager-inbox',
+          name: 'leave-admin-manager-inbox',
+          component: ManagerLeaveInbox
         },
         {
-          path: 'leave/profiles/:employeeId/year-sheet',
+          path: 'gm-inbox',
+          name: 'leave-admin-gm-inbox',
+          component: GmLeaveInbox
+        },
+
+        // Admin own leave request pages (optional but nice)
+        {
+          path: 'request',
+          name: 'leave-admin-request',
+          component: ExpatRequestLeave
+        },
+        {
+          path: 'my-requests',
+          name: 'leave-admin-my-requests',
+          component: ExpatMyRequests
+        },
+
+        // Year sheet – keep old name for compatibility
+        {
+          path: 'profiles/:employeeId/year-sheet',
           name: 'expat-leave-year-sheet',
           component: AdminExpatYearSheet,
           meta: {

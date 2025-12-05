@@ -11,25 +11,32 @@ const loading = ref(false)
 const error   = ref('')
 const sheet   = ref(null) // { employee, period, totals, requests }
 
-/** helper to map status colors / labels if you want */
+/* ─────────────────────────────
+ *  Status → chip color
+ * ───────────────────────────── */
 const STATUS_COLOR = {
   PENDING_MANAGER: 'amber',
-  PENDING_GM: 'blue',
-  APPROVED: 'green',
-  REJECTED: 'red',
-  CANCELLED: 'grey',
+  PENDING_GM:      'blue',
+  APPROVED:        'green',
+  REJECTED:        'red',
+  CANCELLED:       'grey',
 }
 const statusColor = s => STATUS_COLOR[s] || 'grey'
 
+/* ─────────────────────────────
+ *  Load from backend
+ * ───────────────────────────── */
 const employeeId = computed(() => route.params.employeeId)
 
-/** Load year sheet from backend */
 async function fetchYearSheet() {
   if (!employeeId.value) return
   loading.value = true
   error.value   = ''
+
   try {
-    const res = await api.get(`/admin/leave/profiles/${employeeId.value}/year-sheet`)
+    const res = await api.get(
+      `/admin/leave/profiles/${employeeId.value}/year-sheet`
+    )
     sheet.value = res.data || null
   } catch (e) {
     console.error('fetchYearSheet error', e)
@@ -39,18 +46,20 @@ async function fetchYearSheet() {
   }
 }
 
-/** rows shaped for table with 1 column per leave type */
+/* ─────────────────────────────
+ *  Table rows (1 row per request)
+ * ───────────────────────────── */
 const rows = computed(() => {
   if (!sheet.value) return []
   const reqs = sheet.value.requests || []
 
   return reqs.map((r, index) => {
-    const days = r.totalDays ||
+    const days =
+      r.totalDays ||
       (r.startDate && r.endDate
         ? dayjs(r.endDate).diff(dayjs(r.startDate), 'day') + 1
         : 0)
 
-    // map leaveTypeCode → columns
     const base = {
       no: index + 1,
       from: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
@@ -68,6 +77,7 @@ const rows = computed(() => {
       status: r.status,
     }
 
+    // put days into the correct leave-type column
     if (['AL', 'UL', 'SP', 'MC', 'MA'].includes(r.leaveTypeCode)) {
       base[r.leaveTypeCode] = days
     }
@@ -76,32 +86,36 @@ const rows = computed(() => {
   })
 })
 
-/** headers for Vuetify table */
+/* ─────────────────────────────
+ *  Vuetify headers
+ * ───────────────────────────── */
 const headers = [
-  { title: 'No',          key: 'no',        width: 60, align: 'center' },
-  { title: 'From',        key: 'from',      width: 110 },
-  { title: 'To',          key: 'to',        width: 110 },
-  { title: 'Day(s)',      key: 'days',      width: 80, align: 'end' },
-  { title: 'Annual (AL)', key: 'AL',        width: 110, align: 'end' },
-  { title: 'Unpaid (UL)', key: 'UL',        width: 110, align: 'end' },
-  { title: 'Special (SP)',key: 'SP',        width: 110, align: 'end' },
-  { title: 'Sick (MC)',   key: 'MC',        width: 110, align: 'end' },
-  { title: 'Maternity (MA)', key: 'MA',     width: 140, align: 'end' },
-  { title: 'Request By',  key: 'requestBy', minWidth: 160 },
-  { title: 'Supervisor',  key: 'supervisor', minWidth: 140 },
-  { title: 'GM',          key: 'gm',        minWidth: 140 },
-  { title: 'Remark',      key: 'remark',    minWidth: 200 },
-  { title: 'Status',      key: 'status',    width: 110 },
+  { title: 'No',            key: 'no',        width: 60,  align: 'center' },
+  { title: 'From',          key: 'from',      width: 110 },
+  { title: 'To',            key: 'to',        width: 110 },
+  { title: 'Day(s)',        key: 'days',      width: 80,  align: 'end' },
+  { title: 'Annual (AL)',   key: 'AL',        width: 110, align: 'end' },
+  { title: 'Unpaid (UL)',   key: 'UL',        width: 110, align: 'end' },
+  { title: 'Special (SP)',  key: 'SP',        width: 110, align: 'end' },
+  { title: 'Sick (MC)',     key: 'MC',        width: 110, align: 'end' },
+  { title: 'Maternity (MA)',key: 'MA',        width: 140, align: 'end' },
+  { title: 'Request By',    key: 'requestBy', minWidth: 160 },
+  { title: 'Supervisor',    key: 'supervisor',minWidth: 140 },
+  { title: 'GM',            key: 'gm',        minWidth: 140 },
+  { title: 'Remark',        key: 'remark',    minWidth: 200 },
+  { title: 'Status',        key: 'status',    width: 110 },
 ]
 
-/** small helper for summary pills */
+/* ─────────────────────────────
+ *  Totals helper (if needed later)
+ * ───────────────────────────── */
 const summaryByCode = computed(() => {
-  const out = {}
-  if (!sheet.value) return out
+  const map = {}
+  if (!sheet.value) return map
   for (const t of sheet.value.totals || []) {
-    out[t.code] = t
+    map[t.code] = t
   }
-  return out
+  return map
 })
 
 onMounted(fetchYearSheet)
@@ -120,8 +134,9 @@ onMounted(fetchYearSheet)
       </v-col>
     </v-row>
 
+    <!-- MAIN CONTENT -->
     <v-row v-if="sheet">
-      <!-- Employee info + period -->
+      <!-- LEFT : employee + balances -->
       <v-col cols="12" md="4">
         <v-card rounded="xl" elevation="3" class="mb-4">
           <v-card-title class="text-subtitle-1 font-weight-semibold pb-1">
@@ -138,7 +153,6 @@ onMounted(fetchYearSheet)
           </v-card-text>
         </v-card>
 
-        <!-- Small summary chips per leave type -->
         <v-card rounded="xl" elevation="2">
           <v-card-title class="text-subtitle-1 font-weight-semibold pb-1">
             Balances (current year)
@@ -152,10 +166,8 @@ onMounted(fetchYearSheet)
                 sm="6"
                 class="pb-2"
               >
-                <div class="d-flex align-center justify-space-between">
-                  <div class="text-caption font-weight-medium">
-                    {{ t.code }} – {{ t.name }}
-                  </div>
+                <div class="text-caption font-weight-medium">
+                  {{ t.code }} – {{ t.name }}
                 </div>
                 <div class="text-body-2">
                   Used: {{ t.usedApproved }} /
@@ -168,7 +180,7 @@ onMounted(fetchYearSheet)
         </v-card>
       </v-col>
 
-      <!-- Year sheet table -->
+      <!-- RIGHT : year records -->
       <v-col cols="12" md="8">
         <v-card rounded="xl" elevation="3">
           <v-card-title class="d-flex align-center justify-space-between">
@@ -218,6 +230,7 @@ onMounted(fetchYearSheet)
       </v-col>
     </v-row>
 
+    <!-- NO SHEET -->
     <v-row v-else-if="!loading">
       <v-col cols="12">
         <v-alert type="info" variant="tonal">
@@ -226,6 +239,7 @@ onMounted(fetchYearSheet)
       </v-col>
     </v-row>
 
+    <!-- ERROR -->
     <v-row v-if="error">
       <v-col cols="12">
         <v-alert type="error" variant="tonal" class="mt-3">
