@@ -1,0 +1,401 @@
+<!-- src/views/employee/carbooking/sections/TripDetailSection.vue -->
+<script setup>
+import { ref, computed, watch, onMounted } from 'vue'
+import dayjs from 'dayjs'
+import utc from 'dayjs/plugin/utc'
+import timezone from 'dayjs/plugin/timezone'
+import api from '@/utils/api'
+import { useToast } from '@/composables/useToast'
+
+dayjs.extend(utc)
+dayjs.extend(timezone)
+
+const props = defineProps({
+  form: Object,
+  CATEGORY: Array,
+  LOCATIONS: Array,
+  PASSENGER_OPTIONS: Array
+})
+const emit = defineEmits(['capacity-change'])
+
+const { showToast } = useToast()
+
+const MAX_CAR = 3
+const MAX_MSGR = 1
+const TIMEZONE = 'Asia/Phnom_Penh'
+
+const availLoading = ref(false)
+const availError = ref('')
+const availableCar = ref(null)
+const availableMsgr = ref(null)
+
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+const MINUTES = ['00', '30']
+
+const startTime = computed(() =>
+  props.form.startHour && props.form.startMinute
+    ? `${props.form.startHour}:${props.form.startMinute}`
+    : ''
+)
+const endTime = computed(() =>
+  props.form.endHour && props.form.endMinute
+    ? `${props.form.endHour}:${props.form.endMinute}`
+    : ''
+)
+const isCarSelected = computed(() => props.form.category === 'Car')
+
+function toMin (hhmm) {
+  if (!hhmm) return null
+  const [h, m] = hhmm.split(':').map(n => parseInt(n || '0', 10))
+  return h * 60 + (m || 0)
+}
+
+/* time validation with toast (no Swal) */
+function validateTime () {
+  const now = dayjs().tz(TIMEZONE)
+  const currentMinutes = now.hour() * 60 + now.minute()
+
+  if (props.form.startHour && !props.form.startMinute) props.form.startMinute = '00'
+  if (props.form.endHour && !props.form.endMinute) props.form.endMinute = '00'
+
+  const s = toMin(`${props.form.startHour || '00'}:${props.form.startMinute || '00'}`)
+  const e = toMin(`${props.form.endHour || '00'}:${props.form.endMinute || '00'}`)
+  const isToday = props.form.tripDate === now.format('YYYY-MM-DD')
+
+  if (isToday && props.form.startHour && s < currentMinutes) {
+    showToast({
+      type: 'warning',
+      title: 'Invalid start time',
+      message: 'Start time cannot be earlier than current time.'
+    })
+
+    const nextHalf = now.minute() < 30 ? now.minute(30) : now.add(1, 'hour').minute(0)
+    props.form.startHour = nextHalf.hour().toString().padStart(2, '0')
+    props.form.startMinute = nextHalf.minute().toString().padStart(2, '0')
+  }
+
+  if (props.form.endHour && e <= s) {
+    showToast({
+      type: 'warning',
+      title: 'Invalid end time',
+      message: 'End time must be later than start time.'
+    })
+    props.form.endHour = ''
+    props.form.endMinute = ''
+  }
+}
+
+/* availability check */
+async function refreshAvailability () {
+  availError.value = ''
+  availableCar.value = null
+  availableMsgr.value = null
+
+  const haveAll = props.form.tripDate && startTime.value && endTime.value
+  if (!haveAll) return
+
+  availLoading.value = true
+  try {
+    const [carRes, msgrRes] = await Promise.all([
+      api.get('/public/transport/checkAvailability', {
+        params: {
+          date: props.form.tripDate,
+          start: startTime.value,
+          end: endTime.value,
+          category: 'Car'
+        }
+      }),
+      api.get('/public/transport/checkAvailability', {
+        params: {
+          date: props.form.tripDate,
+          start: startTime.value,
+          end: endTime.value,
+          category: 'Messenger'
+        }
+      })
+    ])
+
+    availableCar.value = carRes.data?.available ?? MAX_CAR
+    availableMsgr.value = msgrRes.data?.available ?? MAX_MSGR
+    const noneLeft = isCarSelected.value ? availableCar.value === 0 : availableMsgr.value === 0
+    emit('capacity-change', noneLeft)
+  } catch (err) {
+    availError.value = err?.response?.data?.message || err?.message || 'Failed to check availability'
+  } finally {
+    availLoading.value = false
+  }
+}
+
+/* watchers */
+watch(() => [props.form.startHour, props.form.startMinute], validateTime)
+watch(() => [props.form.endHour, props.form.endMinute], validateTime)
+watch(() => [props.form.tripDate, props.form.category], refreshAvailability)
+watch(
+  () => [props.form.startHour, props.form.startMinute, props.form.endHour, props.form.endMinute],
+  refreshAvailability
+)
+
+onMounted(refreshAvailability)
+</script>
+
+<template>
+  <section
+    class="rounded-2xl border border-slate-200 bg-white shadow-sm
+           dark:border-slate-700 dark:bg-slate-900"
+  >
+    <!-- header -->
+    <header
+      class="flex items-center gap-2
+             rounded-t-2xl border-b border-slate-200
+             bg-gradient-to-r from-[#5d7884] via-[#9293d4] to-[#786e95]
+             px-3 py-2 text-white
+             dark:border-slate-700"
+    >
+      <i class="fa-solid fa-route text-xs"></i>
+      <span class="text-sm font-semibold">Order Detail</span>
+    </header>
+
+    <div class="bg-slate-50/60 px-3 pb-3 pt-2 dark:bg-slate-900/70">
+      <!-- availability pills -->
+      <div
+        class="mb-3 rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
+               dark:border-slate-700 dark:bg-slate-950/80"
+      >
+        <div class="flex flex-wrap items-center gap-2 text-[11px]">
+          <!-- car pill -->
+          <span
+            :class="[
+              'inline-flex items-center gap-1 rounded-full px-3 py-1 font-semibold',
+              availLoading
+                ? 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                : availError
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'
+                  : (availableCar > 0
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
+                      : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200')
+            ]"
+          >
+            <i class="fa-solid fa-car text-[10px]"></i>
+            <template v-if="availLoading">Checking…</template>
+            <template v-else-if="availError">Cars: error</template>
+            <template v-else>Available cars: {{ availableCar ?? 0 }}</template>
+          </span>
+
+          <!-- messenger pill -->
+          <span
+            :class="[
+              'inline-flex items-center gap-1 rounded-full px-3 py-1 font-semibold',
+              availLoading
+                ? 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                : availError
+                  ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200'
+                  : (availableMsgr > 0
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
+                      : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200')
+            ]"
+          >
+            <i class="fa-solid fa-motorcycle text-[10px]"></i>
+            <template v-if="availLoading">Checking…</template>
+            <template v-else-if="availError">Messenger: error</template>
+            <template v-else>Available messenger: {{ availableMsgr ?? 0 }}</template>
+          </span>
+
+          <span
+            v-if="availError"
+            class="text-[11px] text-rose-600 dark:text-rose-300"
+          >
+            {{ availError }}
+          </span>
+        </div>
+      </div>
+
+      <!-- schedule -->
+      <div
+        class="mb-3 rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
+               dark:border-slate-700 dark:bg-slate-950/80"
+      >
+        <div class="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+          <i class="fa-solid fa-calendar-days text-[11px]"></i>
+          <span>Schedule</span>
+        </div>
+
+        <div class="grid gap-3 text-xs md:grid-cols-2">
+          <div>
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>Category</span>
+              <span class="required-star">*</span>
+            </label>
+            <select
+              v-model="props.form.category"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">Select category</option>
+              <option
+                v-for="c in CATEGORY"
+                :key="c"
+                :value="c"
+              >
+                {{ c }}
+              </option>
+            </select>
+          </div>
+
+          <div>
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>Confirm Date</span>
+              <span class="required-star">*</span>
+            </label>
+            <input
+              v-model="props.form.tripDate"
+              type="date"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- time & passengers -->
+      <div
+        class="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
+               dark:border-slate-700 dark:bg-slate-950/80"
+      >
+        <div class="mb-2 flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+          <i class="fa-solid fa-clock text-[11px]"></i>
+          <span>Time &amp; Passengers</span>
+        </div>
+
+        <div class="grid gap-3 text-xs md:grid-cols-4">
+          <!-- start hour -->
+          <div>
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>Start Hour</span>
+              <span class="required-star">*</span>
+            </label>
+            <select
+              v-model="props.form.startHour"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">HH</option>
+              <option v-for="h in HOURS" :key="h" :value="h">{{ h }}</option>
+            </select>
+          </div>
+
+          <!-- start minute -->
+          <div>
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>Start Minute</span>
+              <span class="required-star">*</span>
+            </label>
+            <select
+              v-model="props.form.startMinute"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">MM</option>
+              <option v-for="m in MINUTES" :key="m" :value="m">{{ m }}</option>
+            </select>
+          </div>
+
+          <!-- end hour -->
+          <div>
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>End Hour</span>
+              <span class="required-star">*</span>
+            </label>
+            <select
+              v-model="props.form.endHour"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">HH</option>
+              <option v-for="h in HOURS" :key="h" :value="h">{{ h }}</option>
+            </select>
+          </div>
+
+          <!-- end minute -->
+          <div>
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>End Minute</span>
+              <span class="required-star">*</span>
+            </label>
+            <select
+              v-model="props.form.endMinute"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">MM</option>
+              <option v-for="m in MINUTES" :key="m" :value="m">{{ m }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mt-3 grid gap-3 text-xs md:grid-cols-3">
+          <!-- passengers -->
+          <div v-if="isCarSelected">
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>Passengers</span>
+              <span class="required-star">*</span>
+            </label>
+            <select
+              v-model="props.form.passengers"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="">Select</option>
+              <option value="0">0</option>
+              <option
+                v-for="p in PASSENGER_OPTIONS"
+                :key="p"
+                :value="p"
+              >
+                {{ p }}
+              </option>
+            </select>
+          </div>
+
+          <!-- customer contact -->
+          <div :class="isCarSelected ? 'md:col-span-2' : 'md:col-span-3'">
+            <label class="flex items-center text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+              <span>Customer Contact Number</span>
+            </label>
+            <input
+              v-model="props.form.customerContact"
+              type="tel"
+              class="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+              placeholder="Optional"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.required-star {
+  color: #ef4444;
+  font-size: 1.1em;
+  margin-left: 2px;
+  line-height: 1;
+}
+</style>

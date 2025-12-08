@@ -1,3 +1,4 @@
+//src/utils/normalizePayload.js
 export function buildMenuCountsForSubmit(menuCountsObj = {}) {
   // Send ONLY specials; Standard is derived on the backend
   const out = {}

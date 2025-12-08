@@ -96,14 +96,15 @@ const User = require('../models/User')
     // If that’s driver01, do this:
     const drivers = [
       { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '7163451169' },
-      { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '1385447458' },
-      { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '1763789850' },
+      { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '5534785017' },
+      { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '5534785017' },
     ]
 
     // bong nith  1055055243 
     // bong rida  661186113
     // Ah Mab 1102968377
     // Bro Ant 7163451169
+    // Bong Cheat 5534785017
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):
     const messengers = [

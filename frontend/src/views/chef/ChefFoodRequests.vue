@@ -1,4 +1,4 @@
-<!-- src/views/chef/ChefFoodRequests.vue -->
+<!-- src/views/chef/ChefFoodBooking.vue -->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'

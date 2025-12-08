@@ -1,4 +1,4 @@
-<!-- src/views/admin/AdminFoodCalendar.vue -->
+<!-- src/views/admin/foodBooking/AdminFoodCalendar.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'

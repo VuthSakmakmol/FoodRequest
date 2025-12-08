@@ -1,4 +1,4 @@
-<!-- src/views/admin/AdminFoodRequests.vue -->
+<!-- src/views/admin/foodBooking/AdminFoodBooking.vue -->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'

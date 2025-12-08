@@ -1,4 +1,4 @@
-<!-- src/views/employee/EmployeeRequestHistory.vue -->
+<!-- src/views/employee/foodBooking/EmployeeFoodBooking.vue -->
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
