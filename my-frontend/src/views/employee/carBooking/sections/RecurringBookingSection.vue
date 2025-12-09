@@ -207,13 +207,12 @@ function onEndDateInput (e) {
     <header
       class="flex items-center justify-between
              rounded-t-2xl border-b border-slate-200
-             bg-gradient-to-r from-[#5d7884] via-[#9293d4] to-[#786e95]
-             px-3 py-2 text-white
-             dark:border-slate-700"
+             rounded-t-2xl
+               bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+               px-4 py-3 text-white"
     >
       <div class="flex flex-col">
-        <div class="flex items-center gap-2 text-sm font-semibold">
-          <i class="fa-solid fa-rotate-right text-xs"></i>
+        <div class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80">
           <span>Recurring Booking</span>
         </div>
         <p class="text-[11px] text-slate-100/80">
@@ -222,7 +221,6 @@ function onEndDateInput (e) {
       </div>
     </header>
 
-    <div class="bg-slate-50/60 px-3 pb-3 pt-2 dark:bg-slate-900/70">
       <div
         class="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
                dark:border-slate-700 dark:bg-slate-950/80"
@@ -440,6 +438,5 @@ function onEndDateInput (e) {
           </div>
         </template>
       </div>
-    </div>
   </section>
 </template>

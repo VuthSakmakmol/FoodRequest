@@ -147,12 +147,11 @@ onMounted(refreshAvailability)
     <header
       class="flex items-center gap-2
              rounded-t-2xl border-b border-slate-200
-             bg-gradient-to-r from-[#5d7884] via-[#9293d4] to-[#786e95]
-             px-3 py-2 text-white
-             dark:border-slate-700"
+             rounded-t-2xl
+               bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+               px-4 py-3 text-white"
     >
-      <i class="fa-solid fa-route text-xs"></i>
-      <span class="text-sm font-semibold">Order Detail</span>
+      <span class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80">Order Detail</span>
     </header>
 
     <div class="bg-slate-50/60 px-3 pb-3 pt-2 dark:bg-slate-900/70">

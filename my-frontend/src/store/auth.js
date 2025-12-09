@@ -73,7 +73,7 @@ export const useAuth = defineStore('auth', {
     },
 
     restore() {
-      const storedUser = localStorage.getItem('user')
+      const storedUser  = localStorage.getItem('user')
       const storedToken = localStorage.getItem('token')
 
       if (storedToken) {
@@ -89,6 +89,7 @@ export const useAuth = defineStore('auth', {
     },
 
     logout() {
+      // leave role room if any
       if (this.user?.role) {
         try {
           unsubscribeRole(this.user.role)
@@ -97,15 +98,42 @@ export const useAuth = defineStore('auth', {
         }
       }
 
-      this.user = null
+      // reset store state
+      this.user  = null
       this.token = ''
       this.ready = false
 
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
-
+      // clear HTTP + socket auth
       this._applyTokenHeader('')
-      setSocketAuthToken('') // drop JWT from socket
+      setSocketAuthToken('')
+
+      // ---- CLEAR STORAGE KEYS ----
+      try {
+        const toRemove = [
+          'token',
+          'user',
+          'loginId',
+          'lastLoginId',
+          'role',
+          'theme',
+        ]
+        toRemove.forEach(k => localStorage.removeItem(k))
+
+        // if you also store anything in sessionStorage, wipe it
+        sessionStorage.clear()
+      } catch {
+        // ignore storage errors
+      }
+
+      // ---- CLEAR COOKIES (loginId / role / theme) ----
+      try {
+        const cookieNames = ['loginId', 'role', 'theme']
+        cookieNames.forEach(name => {
+          document.cookie = `${name}=; Max-Age=0; path=/`
+        })
+      } catch {
+        // ignore cookie errors
+      }
     },
   },
 })

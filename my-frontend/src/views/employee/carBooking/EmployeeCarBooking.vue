@@ -421,10 +421,9 @@ watch(
     >
       <!-- Header / Hero -->
       <div
-        class="rounded-t-2xl border-b border-slate-200 bg-gradient-to-r
-               from-[#0f719e] via-[#b3b4df] to-[#ae9aea]
-               px-3 py-2 text-slate-900
-               dark:border-slate-700 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 dark:text-slate-100"
+        class="rounded-t-2xl border-b border-slate-200 rounded-t-2xl
+               bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+               px-4 py-3 text-white"
       >
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex flex-col leading-tight">
@@ -433,16 +432,6 @@ watch(
                      text-slate-800/80 dark:text-slate-200/80"
             >
               Car Booking
-            </span>
-            <span class="text-sm font-semibold">
-              Employee request form
-            </span>
-          </div>
-          <div class="flex flex-col items-end text-[11px] text-slate-900/80 dark:text-slate-100/80">
-            <span>Date: {{ form.tripDate }}</span>
-            <span class="flex gap-2">
-              <span>Car left: {{ availableCar }}</span>
-              <span>Messenger left: {{ availableMsgr }}</span>
             </span>
           </div>
         </div>

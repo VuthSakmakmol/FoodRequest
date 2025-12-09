@@ -1454,16 +1454,8 @@ watch([selectedDate, statusFilter], () => {
   flex-direction: column;
   gap: 10px;
 }
-.messenger-card {
-  background: radial-gradient(
-    circle at top left,
-    #eff6ff 0,
-    #ffffff 38%,
-    #f8fafc 100%
-  );
-}
 
-/* in dark mode Tailwind's dark: classes handle background; keep gradient for light */
+/* card layout (background handled by Tailwind + dark: classes) */
 .card-top {
   display: flex;
   justify-content: space-between;
@@ -1524,7 +1516,7 @@ watch([selectedDate, statusFilter], () => {
   background: #e5edff;
 }
 
-/* dark mode tweak for buttons (Tailwind dark: handles most, but keep neutral if no dark support) */
+/* dark mode tweak for buttons (if Tailwind dark: not applied here) */
 @media (prefers-color-scheme: dark) {
   .pagination-btn {
     background: #020617;

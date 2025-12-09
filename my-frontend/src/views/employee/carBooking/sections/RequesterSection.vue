@@ -55,25 +55,18 @@ watch(
     <header
       class="flex items-center justify-between
              rounded-t-2xl border-b border-slate-200
-             bg-gradient-to-r from-[#5d7884] via-[#9293d4] to-[#786e95]
-             px-3 py-2 text-white
-             dark:border-slate-700"
+             rounded-t-2xl
+            bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+            px-4 py-3 text-white"
     >
       <div class="flex flex-col">
         <span class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80">
-          Requester
-        </span>
-        <span class="text-sm font-semibold">
           Employee information
         </span>
       </div>
     </header>
 
     <!-- Body -->
-    <div
-      class="px-3 pb-3 pt-2 bg-slate-50/60
-             dark:bg-slate-900/70"
-    >
       <div
         class="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
                dark:border-slate-700 dark:bg-slate-950/80"
@@ -187,7 +180,6 @@ watch(
           </div>
         </div>
       </div>
-    </div>
   </section>
 </template>
 

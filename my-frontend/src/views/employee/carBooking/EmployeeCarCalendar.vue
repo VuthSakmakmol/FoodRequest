@@ -203,9 +203,9 @@ onMounted(async () => {
         class="flex flex-wrap items-center justify-between gap-2
                px-3 py-2
                rounded-t-2xl border-b border-slate-400
-               bg-gradient-to-r from-sky-900 via-slate-800 to-sky-700
-               text-slate-50
-               dark:border-slate-700 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900"
+               rounded-t-2xl
+               bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+               px-4 py-3 text-white"
       >
         <div class="flex items-center gap-2">
           <button
