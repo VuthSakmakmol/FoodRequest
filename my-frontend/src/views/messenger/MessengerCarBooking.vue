@@ -27,7 +27,7 @@ const TEXT = {
   close:            { en: 'Close',                         km: 'បិទ' },
 
   nextStatuses:     { en: 'Next statuses',                 km: 'ស្ថានភាពបន្ទាប់' },
-  noBookings:       { en: 'No bookings found',             km: 'មិនមានការកក់រថយន្តទេ' },
+  noBookings:       { en: 'No bookings found',             km: 'មិនមានការកក់ទេ' },
   agree:            { en: 'Accept',                        km: 'យល់ព្រម' },
   routeTitle:       { en: 'Route / Destinations',          km: 'ផ្លូវដំណើរ / គោលដៅ' },
   driverResponse:   { en: 'Messenger response',            km: 'ការឆ្លើយតបអ្នកបើកម៉ូតូ' },
@@ -53,7 +53,10 @@ const rows    = ref([])
 
 const route = useRoute()
 
-const selectedDate = ref('')
+
+const todayStr = new Date().toISOString().slice(0, 10)
+const selectedDate = ref(todayStr)
+
 const statusFilter = ref('ALL')
 const qSearch      = ref('')
 
@@ -138,7 +141,8 @@ const STATUS_LABEL = {
   ASSIGNED: { en: 'Assigned',          km: 'បានចាត់ចែង' },
   ACCEPTED: { en: 'Accepted',          km: 'បានព្រមទទួល' },
   ON_ROAD : { en: 'On road',           km: 'កំពុងធ្វើដំណើរ' },
-  ARRIVING: { en: 'Arriving soon',     km: 'ជិតដល់គោលដៅ' },
+  ARRIVING: { en: 'Arrived',           km: 'ដល់គោលដៅ' },
+  COMEBACK:{ en: 'Return trip',        km: 'កំពុងត្រឡប់មកវិញ' },
   COMPLETED:{ en: 'Completed',         km: 'បានបញ្ចប់' },
   DELAYED : { en: 'Delayed',           km: 'យឺតយ៉ាវ' },
   CANCELLED:{ en: 'Cancelled',         km: 'បានបោះបង់' },
@@ -168,16 +172,17 @@ const categoryLabel = c =>
 
 /* Status filter options (label depends on language) */
 const statusOptions = computed(() => [
-  { label: t('statusAll'), value: 'ALL' },
-  { label: statusLabel('PENDING'),   value: 'PENDING' },
-  { label: statusLabel('ASSIGNED'),  value: 'ASSIGNED' },
-  { label: statusLabel('ACCEPTED'),  value: 'ACCEPTED' },
-  { label: statusLabel('ON_ROAD'),   value: 'ON_ROAD' },
-  { label: statusLabel('ARRIVING'),  value: 'ARRIVING' },
-  { label: statusLabel('COMPLETED'), value: 'COMPLETED' },
-  { label: statusLabel('DELAYED'),   value: 'DELAYED' },
-  { label: statusLabel('CANCELLED'), value: 'CANCELLED' },
-  { label: statusLabel('DECLINED'),  value: 'DECLINED' },
+  { label: t('statusAll'),              value: 'ALL' },
+  { label: statusLabel('PENDING'),      value: 'PENDING' },
+  { label: statusLabel('ASSIGNED'),     value: 'ASSIGNED' },
+  { label: statusLabel('ACCEPTED'),     value: 'ACCEPTED' },
+  { label: statusLabel('ON_ROAD'),      value: 'ON_ROAD' },
+  { label: statusLabel('ARRIVING'),     value: 'ARRIVING' },
+  { label: statusLabel('COMEBACK'),     value: 'COMEBACK' },
+  { label: statusLabel('COMPLETED'),    value: 'COMPLETED' },
+  { label: statusLabel('DELAYED'),      value: 'DELAYED' },
+  { label: statusLabel('CANCELLED'),    value: 'CANCELLED' },
+  { label: statusLabel('DECLINED'),     value: 'DECLINED' },
 ])
 
 /* ─────────────── HEADERS ─────────────── */
@@ -203,6 +208,7 @@ const STATUS_BADGE_CLASS = {
   ACCEPTED:  'bg-emerald-100 text-emerald-900 border-emerald-500 dark:bg-emerald-900/40 dark:text-emerald-100 dark:border-emerald-500',
   ON_ROAD:   'bg-sky-100 text-sky-900 border-sky-500 dark:bg-sky-900/40 dark:text-sky-100 dark:border-sky-500',
   ARRIVING:  'bg-teal-100 text-teal-900 border-teal-500 dark:bg-teal-900/40 dark:text-teal-100 dark:border-teal-500',
+  COMEBACK:  'bg-indigo-100 text-indigo-900 border-indigo-500 dark:bg-indigo-900/40 dark:text-indigo-100 dark:border-indigo-500',
   COMPLETED: 'bg-lime-100 text-lime-900 border-lime-500 dark:bg-lime-900/40 dark:text-lime-100 dark:border-lime-500',
   DELAYED:   'bg-amber-100 text-amber-900 border-amber-500 dark:bg-amber-900/40 dark:text-amber-100 dark:border-amber-500',
   CANCELLED: 'bg-rose-100 text-rose-900 border-rose-500 dark:bg-rose-900/40 dark:text-rose-100 dark:border-rose-500',
@@ -220,6 +226,7 @@ const STATUS_ICON_FA = {
   ACCEPTED:  'fa-regular fa-circle-check',
   ON_ROAD:   'fa-solid fa-motorcycle',
   ARRIVING:  'fa-solid fa-flag-checkered',
+  COMEBACK:  'fa-solid fa-rotate-left',
   COMPLETED: 'fa-solid fa-check-double',
   DELAYED:   'fa-solid fa-triangle-exclamation',
   CANCELLED: 'fa-regular fa-circle-xmark',
@@ -368,19 +375,21 @@ const canRespond = it => {
   return isMine(it) && !['ACCEPTED', 'DECLINED'].includes(ack)
 }
 
+/* NEW FLOW: COMEBACK + same as driver */
 const terminalStates = ['CANCELLED', 'COMPLETED']
 const ALLOWED_NEXT = {
   ACCEPTED: ['ON_ROAD', 'DELAYED'],
-  ON_ROAD:  ['ARRIVING', 'DELAYED'],
-  ARRIVING: ['COMPLETED', 'DELAYED'],
-  DELAYED:  ['ON_ROAD', 'ARRIVING'],
+  ON_ROAD:  ['ARRIVING', 'DELAYED', 'COMEBACK'],
+  ARRIVING: ['COMEBACK', 'DELAYED'],
+  COMEBACK: ['COMPLETED', 'DELAYED'],
+  DELAYED:  ['ON_ROAD', 'ARRIVING', 'COMEBACK'],
 }
 const nextStatusesFor = from =>
   ALLOWED_NEXT[String(from || '').toUpperCase()] || []
 
 const canChangeStatus = it =>
   isMine(it) &&
-  (it?.assignment?.messengerAck === 'ACCEPTED') &&
+  String(it?.assignment?.messengerAck || '').toUpperCase() === 'ACCEPTED' &&
   !terminalStates.includes(String(it?.status || '').toUpperCase())
 
 /* ─────────────── ACTIONS ─────────────── */

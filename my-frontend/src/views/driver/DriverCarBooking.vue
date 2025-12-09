@@ -53,7 +53,10 @@ const rows    = ref([])
 
 const route = useRoute()
 
-const selectedDate = ref('')
+// default to today's date in local time (YYYY-MM-DD)
+const todayStr = new Date().toLocaleDateString('en-CA')
+const selectedDate = ref(todayStr)
+
 const statusFilter = ref('ALL')
 const qSearch      = ref('')
 
@@ -130,15 +133,16 @@ function useDevIdentity() {
 
 /* ─────────────── LABEL MAPS (EN + KM) ─────────────── */
 const STATUS_LABEL = {
-  PENDING : { en: 'Pending',           km: 'កំពុងរង់ចាំ' },
-  ASSIGNED: { en: 'Assigned',          km: 'បានចាត់ចែង' },
-  ACCEPTED: { en: 'Accepted',          km: 'បានព្រមទទួល' },
-  ON_ROAD : { en: 'On road',           km: 'កំពុងធ្វើដំណើរ' },
-  ARRIVING: { en: 'Arriving soon',     km: 'ជិតដល់គោលដៅ' },
-  COMPLETED:{ en: 'Completed',         km: 'បានបញ្ចប់' },
-  DELAYED : { en: 'Delayed',           km: 'យឺតយ៉ាវ' },
-  CANCELLED:{ en: 'Cancelled',         km: 'បានបោះបង់' },
-  DECLINED: { en: 'Declined',          km: 'បដិសេធ' },
+  PENDING   : { en: 'Pending',            km: 'កំពុងរង់ចាំ' },
+  ASSIGNED  : { en: 'Assigned',           km: 'បានចាត់ចែង' },
+  ACCEPTED  : { en: 'Accepted',           km: 'បានព្រមទទួល' },
+  ON_ROAD   : { en: 'On road',            km: 'ចេញធ្វើដំណើរ' },
+  ARRIVING  : { en: 'Arrived',            km: 'ដល់គោលដៅ' },
+  COMPLETED : { en: 'Completed',          km: 'បានបញ្ចប់' },
+  COMEBACK  : { en: 'Come back',          km: 'ត្រលប់មកវិញ' },
+  DELAYED   : { en: 'Delayed',            km: 'យឺតយ៉ាវ' },
+  CANCELLED : { en: 'Cancelled',          km: 'បានបោះបង់' },
+  DECLINED  : { en: 'Declined',           km: 'បដិសេធ' },
 }
 const statusLabel = s => {
   const code = String(s || '').toUpperCase()
@@ -147,8 +151,8 @@ const statusLabel = s => {
 
 const ACK_LABEL = {
   PENDING : { en: 'No reply yet',      km: 'មិនទាន់ឆ្លើយ' },
-  ACCEPTED: { en: 'Accepted',         km: 'ព្រមទទួល' },
-  DECLINED: { en: 'Declined',         km: 'បដិសេធ' },
+  ACCEPTED: { en: 'Accepted',          km: 'ព្រមទទួល' },
+  DECLINED: { en: 'Declined',          km: 'បដិសេធ' },
 }
 const ackLabel = s => {
   const code = String(s || '').toUpperCase()
@@ -164,16 +168,17 @@ const categoryLabel = c =>
 
 /* Status filter options (label depends on language) */
 const statusOptions = computed(() => [
-  { label: t('statusAll'), value: 'ALL' },
-  { label: statusLabel('PENDING'),   value: 'PENDING' },
-  { label: statusLabel('ASSIGNED'),  value: 'ASSIGNED' },
-  { label: statusLabel('ACCEPTED'),  value: 'ACCEPTED' },
-  { label: statusLabel('ON_ROAD'),   value: 'ON_ROAD' },
-  { label: statusLabel('ARRIVING'),  value: 'ARRIVING' },
-  { label: statusLabel('COMPLETED'), value: 'COMPLETED' },
-  { label: statusLabel('DELAYED'),   value: 'DELAYED' },
-  { label: statusLabel('CANCELLED'), value: 'CANCELLED' },
-  { label: statusLabel('DECLINED'),  value: 'DECLINED' },
+  { label: t('statusAll'),          value: 'ALL' },
+  { label: statusLabel('PENDING'),  value: 'PENDING' },
+  { label: statusLabel('ASSIGNED'), value: 'ASSIGNED' },
+  { label: statusLabel('ACCEPTED'), value: 'ACCEPTED' },
+  { label: statusLabel('ON_ROAD'),  value: 'ON_ROAD' },
+  { label: statusLabel('ARRIVING'), value: 'ARRIVING' },
+  { label: statusLabel('COMPLETED'),value: 'COMPLETED' },
+  { label: statusLabel('COMEBACK'), value: 'COMEBACK' },
+  { label: statusLabel('DELAYED'),  value: 'DELAYED' },
+  { label: statusLabel('CANCELLED'),value: 'CANCELLED' },
+  { label: statusLabel('DECLINED'), value: 'DECLINED' },
 ])
 
 /* ─────────────── ROLE / HEADERS ─────────────── */
@@ -191,7 +196,7 @@ const headers = computed(() => [
   { title: t('tableRequester'),   key: 'requester',   width: 230 },
   { title: t('tableDestination'), key: 'destination' },
   { title: t('tablePassengers'),  key: 'passengers',  width: 70,  align: 'center' },
-  { title: t('tableStatus'),      key: 'status',      width: 150, align: 'right' },
+  { title: t('tableStatus'),      key: 'status',      width: 180, align: 'right' },
   { title: roleLabel.value,       key: 'driverAck',   width: 150, align: 'right' },
   { title: t('tableActions'),     key: 'actions',     width: 260, align: 'right' },
 ])
@@ -210,6 +215,8 @@ const STATUS_BADGE_CLASS = {
     'bg-teal-100 text-teal-900 border-teal-500 dark:bg-teal-900/40 dark:text-teal-100 dark:border-teal-500',
   COMPLETED:
     'bg-lime-100 text-lime-900 border-lime-500 dark:bg-lime-900/40 dark:text-lime-100 dark:border-lime-500',
+  COMEBACK:
+    'bg-indigo-100 text-indigo-900 border-indigo-500 dark:bg-indigo-900/40 dark:text-indigo-100 dark:border-indigo-500',
   DELAYED:
     'bg-amber-100 text-amber-900 border-amber-500 dark:bg-amber-900/40 dark:text-amber-100 dark:border-amber-500',
   CANCELLED:
@@ -230,6 +237,7 @@ const STATUS_ICON_FA = {
   ON_ROAD:   'fa-solid fa-truck-fast',
   ARRIVING:  'fa-solid fa-flag-checkered',
   COMPLETED: 'fa-solid fa-check-double',
+  COMEBACK:  'fa-solid fa-arrow-rotate-left',
   DELAYED:   'fa-solid fa-triangle-exclamation',
   CANCELLED: 'fa-regular fa-circle-xmark',
   DECLINED:  'fa-regular fa-circle-xmark',
@@ -256,6 +264,15 @@ const ACK_ICON_FA = {
   DECLINED: 'fa-regular fa-thumbs-down',
 }
 const ackIconClass = s => ACK_ICON_FA[String(s || '').toUpperCase()] || 'fa-regular fa-circle-question'
+
+/* current ACK based on role (driver vs messenger) */
+const currentAck = item => {
+  const isMessenger = identity.value?.role === 'MESSENGER'
+  const raw = isMessenger
+    ? (item?.assignment?.messengerAck || 'PENDING')
+    : (item?.assignment?.driverAck || 'PENDING')
+  return String(raw || 'PENDING').toUpperCase()
+}
 
 /* destination text helper */
 function destText(s = {}) {
@@ -375,27 +392,39 @@ const isMine = it =>
     it?.assignment?.driverId || it?.assignment?.messengerId || it?.driverId || ''
   ).toLowerCase() === String(identity.value?.loginId || '').toLowerCase()
 
-const canRespond = it => {
-  const ack =
-    identity.value?.role === 'MESSENGER'
-      ? String(it?.assignment?.messengerAck || '').toUpperCase()
-      : String(it?.assignment?.driverAck || '').toUpperCase()
-  return isMine(it) && !['ACCEPTED', 'DECLINED'].includes(ack)
-}
+const canRespond = it =>
+  isMine(it) && !['ACCEPTED', 'DECLINED'].includes(currentAck(it))
 
-const terminalStates = ['CANCELLED', 'COMPLETED']
+/**
+ * TERMINAL states from driver perspective:
+ * - COMPLETED (finished)
+ * - CANCELLED / DECLINED (no more update)
+ * COMEBACK is NOT terminal (can still go to COMPLETED)
+ */
+const terminalStates = ['CANCELLED', 'COMPLETED', 'DECLINED']
+
+/**
+ * Driver journey – aligned with backend FORWARD:
+ * PENDING → ACCEPTED (admin)
+ * ACCEPTED → ON_ROAD
+ * ON_ROAD  → ARRIVING
+ * ARRIVING → COMEBACK
+ * COMEBACK → COMPLETED
+ * DELAYED  → ON_ROAD / ARRIVING / COMEBACK
+ */
 const ALLOWED_NEXT = {
-  ACCEPTED: ['ON_ROAD', 'DELAYED'],
-  ON_ROAD: ['ARRIVING', 'DELAYED'],
-  ARRIVING: ['COMPLETED', 'DELAYED'],
-  DELAYED: ['ON_ROAD', 'ARRIVING'],
+  ACCEPTED : ['ON_ROAD', 'DELAYED'],
+  ON_ROAD  : ['ARRIVING', 'DELAYED'],
+  ARRIVING : ['COMEBACK', 'DELAYED'],
+  COMEBACK : ['COMPLETED', 'DELAYED'],
+  DELAYED  : ['ON_ROAD', 'ARRIVING', 'COMEBACK'],
 }
 const nextStatusesFor = from =>
   ALLOWED_NEXT[String(from || '').toUpperCase()] || []
 
 const canChangeStatus = it =>
   isMine(it) &&
-  ((it?.assignment?.driverAck || it?.assignment?.messengerAck) === 'ACCEPTED') &&
+  currentAck(it) === 'ACCEPTED' &&
   !terminalStates.includes(String(it?.status || '').toUpperCase())
 
 /* ─────────────── ACTIONS ─────────────── */
@@ -497,7 +526,7 @@ async function setDriverStatus(item, nextStatus) {
 }
 
 /* ─────────────── SOCKET HANDLERS ─────────────── */
-function onCreated(doc) {
+async function onCreated(doc) {
   if (!doc?._id) return
 
   const myLogin = (identity.value?.loginId || '').toLowerCase()
@@ -506,20 +535,7 @@ function onCreated(doc) {
   const mine = myLogin && (driverId === myLogin || messengerId === myLogin)
   if (!mine) return
 
-  const tripDate = doc.tripDate || doc.date
-  if (selectedDate.value && tripDate !== selectedDate.value) return
-
-  const st = String(doc.status || '').toUpperCase()
-  if (statusFilter.value !== 'ALL' && st !== statusFilter.value) return
-
-  const exists = rows.value.some(x => String(x._id) === String(doc._id))
-  if (!exists) {
-    rows.value.push({
-      ...doc,
-      stops: doc.stops || [],
-      assignment: doc.assignment || {},
-    })
-  }
+  await loadList()
 }
 
 function onStatus(p) {
@@ -663,8 +679,7 @@ watch([selectedDate, statusFilter], () => {
       class="driver-shell rounded-2xl border border-slate-300 bg-slate-100/80 shadow-sm
              dark:border-slate-700 dark:bg-slate-900/90"
     >
-      <!-- HERO FILTER BAR -->
-            <!-- HERO FILTER BAR (compact) -->
+      <!-- HERO FILTER BAR (compact) -->
       <div
         class="flex flex-wrap items-center gap-2 border-b border-slate-400
                bg-gradient-to-r from-sky-900 via-slate-800 to-sky-700
@@ -687,7 +702,7 @@ watch([selectedDate, statusFilter], () => {
         </div>
 
         <!-- Status -->
-        <div class="flex-1 min-w-[130px] max-w-[170px]">
+        <div class="flex-1 min-w-[130px] max-w-[190px]">
           <label class="mb-0.5 block text-[10px] font-medium text-sky-100">
             {{ t('statusLabel') }}
           </label>
@@ -709,7 +724,6 @@ watch([selectedDate, statusFilter], () => {
 
         <!-- Search -->
         <div class="flex-[1.6] min-w-[180px] max-w-md">
-          <!-- hide label on very small screen to save vertical space -->
           <label class="mb-0.5 hidden text-[10px] font-medium text-sky-100 sm:block">
             {{ t('searchPlaceholder') }}
           </label>
@@ -877,16 +891,9 @@ watch([selectedDate, statusFilter], () => {
                 <div class="card-row small">
                   <div class="lbl">{{ roleLabel }}</div>
                   <div class="val">
-                    <span
-                      :class="ackBadgeClass(item.assignment?.driverAck || 'PENDING')"
-                    >
-                      <i
-                        :class="ackIconClass(item.assignment?.driverAck || 'PENDING')"
-                        class="text-[11px]"
-                      />
-                      <span>
-                        {{ ackLabel(item.assignment?.driverAck || 'PENDING') }}
-                      </span>
+                    <span :class="ackBadgeClass(currentAck(item))">
+                      <i :class="ackIconClass(currentAck(item))" class="text-[11px]" />
+                      <span>{{ ackLabel(currentAck(item)) }}</span>
                     </span>
                   </div>
                 </div>
@@ -1103,18 +1110,11 @@ watch([selectedDate, statusFilter], () => {
                     </span>
                   </td>
 
-                  <!-- driver ack -->
+                  <!-- driver/messenger ack -->
                   <td class="px-3 py-2 align-top text-right">
-                    <span
-                      :class="ackBadgeClass(item.assignment?.driverAck || 'PENDING')"
-                    >
-                      <i
-                        :class="ackIconClass(item.assignment?.driverAck || 'PENDING')"
-                        class="text-[11px]"
-                      />
-                      <span>
-                        {{ ackLabel(item.assignment?.driverAck || 'PENDING') }}
-                      </span>
+                    <span :class="ackBadgeClass(currentAck(item))">
+                      <i :class="ackIconClass(currentAck(item))" class="text-[11px]" />
+                      <span>{{ ackLabel(currentAck(item)) }}</span>
                     </span>
                   </td>
 
@@ -1357,16 +1357,9 @@ watch([selectedDate, statusFilter], () => {
               <div>
                 <div class="lbl">{{ t('driverResponse') }}</div>
                 <div class="mt-1">
-                  <span
-                    :class="ackBadgeClass(detailItem?.assignment?.driverAck || 'PENDING')"
-                  >
-                    <i
-                      :class="ackIconClass(detailItem?.assignment?.driverAck || 'PENDING')"
-                      class="text-[11px]"
-                    />
-                    <span>
-                      {{ ackLabel(detailItem?.assignment?.driverAck || 'PENDING') }}
-                    </span>
+                  <span :class="ackBadgeClass(currentAck(detailItem))">
+                    <i :class="ackIconClass(currentAck(detailItem))" class="text-[11px]" />
+                    <span>{{ ackLabel(currentAck(detailItem)) }}</span>
                   </span>
                 </div>
               </div>
@@ -1478,22 +1471,8 @@ watch([selectedDate, statusFilter], () => {
   flex-direction: column;
   gap: 10px;
 }
-.driver-card {
-  background: radial-gradient(
-    circle at top left,
-    #eff6ff 0,
-    #ffffff 38%,
-    #f8fafc 100%
-  );
-}
-:global(.dark) .driver-card {
-  background: radial-gradient(
-    circle at top left,
-    #020617 0,
-    #020617 40%,
-    #020617 100%
-  );
-}
+
+/* card layout (same behaviour as messenger) */
 .card-top {
   display: flex;
   justify-content: space-between;
@@ -1537,7 +1516,7 @@ watch([selectedDate, statusFilter], () => {
   gap: 4px;
 }
 
-/* pagination buttons */
+/* pagination buttons – copied from messenger so dark mode is the same */
 .pagination-btn {
   padding: 3px 8px;
   border-radius: 999px;
@@ -1553,13 +1532,17 @@ watch([selectedDate, statusFilter], () => {
 .pagination-btn:not(:disabled):hover {
   background: #e5edff;
 }
-:global(.dark) .pagination-btn {
-  border-color: #475569;
-  background: #020617;
-  color: #e2e8f0;
-}
-:global(.dark) .pagination-btn:not(:disabled):hover {
-  background: #0f172a;
+
+/* dark mode tweak (same trick as MessengerCarBooking.vue) */
+@media (prefers-color-scheme: dark) {
+  .pagination-btn {
+    background: #020617;
+    color: #e2e8f0;
+    border-color: #1e293b;
+  }
+  .pagination-btn:not(:disabled):hover {
+    background: #1f2937;
+  }
 }
 
 /* mobile footer stack */
@@ -1568,10 +1551,5 @@ watch([selectedDate, statusFilter], () => {
     flex-direction: column;
     align-items: flex-start;
   }
-}
-
-/* dark tweak for labels */
-:global(.dark) .lbl {
-  color: #9ca3af;
 }
 </style>

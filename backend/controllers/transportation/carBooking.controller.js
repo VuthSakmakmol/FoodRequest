@@ -19,19 +19,34 @@ const AIRPORT_DESTINATION = 'Techo International Airport';
 const MAX_CAR  = 3;
 const MAX_MSGR = 1;
 
+// ───────── status workflow (with COMEBACK) ─────────
+// Main path for driver: PENDING → ACCEPTED → ON_ROAD → ARRIVING → COMEBACK → COMPLETED
+// DELAYED / CANCELLED are side branches.
 const FORWARD = {
-  PENDING:   new Set(['ACCEPTED','CANCELLED']),
-  ACCEPTED:  new Set(['ON_ROAD','DELAYED','CANCELLED']),
-  ON_ROAD:   new Set(['ARRIVING','DELAYED','CANCELLED']),
-  ARRIVING:  new Set(['COMPLETED','DELAYED','CANCELLED']),
-  DELAYED:   new Set(['ON_ROAD','ARRIVING','CANCELLED']),
+  PENDING:   new Set(['ACCEPTED', 'CANCELLED']),
+  ACCEPTED:  new Set(['ON_ROAD', 'DELAYED', 'CANCELLED']),
+  ON_ROAD:   new Set(['ARRIVING', 'DELAYED', 'CANCELLED']),
+  ARRIVING:  new Set(['COMEBACK', 'DELAYED', 'CANCELLED']),
+  COMEBACK:  new Set(['COMPLETED', 'DELAYED', 'CANCELLED']),
+  DELAYED:   new Set(['ON_ROAD', 'ARRIVING', 'COMEBACK', 'CANCELLED']),
   COMPLETED: new Set([]),
   CANCELLED: new Set([]),
 };
 
+// allowed statuses for admin updateStatus
+const ALLOWED_STATUS = [
+  'PENDING',
+  'ACCEPTED',
+  'ON_ROAD',
+  'ARRIVING',
+  'COMEBACK',
+  'COMPLETED',
+  'DELAYED',
+  'CANCELLED',
+];
+
 /* ───────── assignment helpers ───────── */
 function hasAssignee(doc) {
-  // Car uses driverId; Messenger uses messengerId
   if (!doc?.assignment) return false;
   if (doc.category === 'Messenger') return !!doc.assignment.messengerId;
   return !!doc.assignment.driverId;
@@ -53,7 +68,6 @@ function parsePayload(req) {
   return req.body || {};
 }
 
-/* ───────────── Helper: pick identity safely ───────────── */
 function pickIdentityFrom(req) {
   const loginId =
     req.headers['x-login-id'] ||
@@ -107,15 +121,12 @@ const shape = {
   assigned: (doc) => ({
     bookingId: String(doc._id),
 
-    // driver
     driverId: doc.assignment?.driverId || '',
     driverName: doc.assignment?.driverName || '',
 
-    // messenger
     messengerId: doc.assignment?.messengerId || '',
     messengerName: doc.assignment?.messengerName || '',
 
-    // vehicle
     vehicleId: doc.assignment?.vehicleId || '',
     vehicleName: doc.assignment?.vehicleName || '',
 
@@ -172,9 +183,7 @@ async function checkAvailability(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/** PUBLIC: read-only day schedule for timelines/calendars
- *  GET /api/public/transport/schedule?date=YYYY-MM-DD&category=Car|Messenger&status=PENDING&driverId=loginId
- */
+/** PUBLIC schedule */
 async function listSchedulePublic(req, res, next) {
   try {
     const { date, category, status, driverId } = req.query;
@@ -193,7 +202,6 @@ async function listSchedulePublic(req, res, next) {
     res.json(list);
   } catch (err) { next(err); }
 }
-
 
 async function createBooking(req, res, next) {
   try {
@@ -252,12 +260,9 @@ async function createBooking(req, res, next) {
       ticketUrl
     });
 
-    // SOCKET (scoped): new booking created → ADMIN / dashboards / employee room
     broadcastCarBooking(io, doc, 'carBooking:created', shape.created(doc));
 
-    // TELEGRAM
     try {
-      console.log('[notify] REQUEST_CREATED', { bookingId: String(doc._id) });
       await notify('REQUEST_CREATED', { bookingId: doc._id, employeeName: employeeSnapshot?.name });
     } catch (e) {
       console.error('[notify error] REQUEST_CREATED', e?.message || e);
@@ -276,61 +281,51 @@ async function listMyBookings(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/* ───────── ADMIN: update status (Actions buttons + reopen) ───────── */
 async function updateStatus(req, res, next) {
   try {
     const io = req.io;
     const { id } = req.params;
-
-    // 👇 now we also accept `forceReopen` from the body
     const { status, forceReopen } = req.body || {};
-    const allowed = ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED'];
-    if (!allowed.includes(status)) throw createError(400, 'Invalid status.');
+    if (!ALLOWED_STATUS.includes(status)) throw createError(400, 'Invalid status.');
 
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
     const from = doc.status || 'PENDING';
+    const nextStatus = status;
 
-    // ───────── special case: reopen to PENDING after admin edits schedule ─────────
+    // Re-open to PENDING when editing schedule (even if already PENDING),
+    // but never from COMPLETED / CANCELLED.
     const isReopen =
       !!forceReopen &&
-      status === 'PENDING' &&
-      from !== 'PENDING' &&
-      !['COMPLETED', 'CANCELLED'].includes(from); // don’t reopen finished/cancelled trips
+      nextStatus === 'PENDING' &&
+      !['COMPLETED', 'CANCELLED'].includes(from);
 
     if (isReopen) {
-      // allow ACCEPTED/ON_ROAD/… → PENDING even though FORWARD doesn’t allow it
       doc.status = 'PENDING';
-
-      // reset acks so driver/messenger can react again
       if (doc.assignment) {
         doc.assignment.driverAck = 'PENDING';
         doc.assignment.messengerAck = 'PENDING';
       }
     } else {
-      // ───────── normal workflow enforcement ─────────
-      if (!FORWARD[from] || !FORWARD[from].has(status)) {
-        throw createError(400, `Cannot change from ${from} to ${status}`);
+      // Normal forward move
+      if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
+        throw createError(400, `Cannot change from ${from} to ${nextStatus}`);
       }
 
-      // must have assignee for any active (non-cancelled) status
-      if (status !== 'CANCELLED' && !hasAssignee(doc)) {
+      if (nextStatus !== 'CANCELLED' && !hasAssignee(doc)) {
         throw createError(400, 'You must assign a Driver/Messenger before changing status.');
       }
 
-      doc.status = status;
+      doc.status = nextStatus;
     }
 
     await doc.save();
 
-    // SOCKET (delta to all relevant rooms)
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
-    console.log('[status] updated', { bookingId: String(doc._id), newStatus: doc.status });
-
-    // TELEGRAM
     try {
-      console.log('[notify] STATUS_CHANGED', { bookingId: String(doc._id), newStatus: doc.status });
       await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name });
     } catch (e) {
       console.error('[notify error] STATUS_CHANGED', e?.message || e);
@@ -342,8 +337,7 @@ async function updateStatus(req, res, next) {
   }
 }
 
-
-/* ───────── admin assign booking ───────── */
+/* ───────── ADMIN assign booking (driver or messenger – symmetric) ───────── */
 async function assignBooking(req, res, next) {
   try {
     const io = req.io;
@@ -357,7 +351,7 @@ async function assignBooking(req, res, next) {
       assignedById = '',
       assignedByName = '',
       autoAccept = true,
-      role = 'DRIVER' // explicit role from frontend tab
+      role = 'DRIVER'
     } = req.body || {};
 
     if (!driverId) throw createError(400, 'driverId (loginId) is required.');
@@ -366,20 +360,18 @@ async function assignBooking(req, res, next) {
       throw createError(400, 'role must be DRIVER or MESSENGER');
     }
 
-    // Normalize loginId
     driverId = String(driverId).trim().toLowerCase();
 
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
-    // Resolve display name if not given
+    // resolve driver/messenger name from User collection if needed
     let resolvedName = driverName;
     if (!resolvedName && User) {
       const u = await User.findOne({ loginId: driverId }).lean();
       if (u?.name) resolvedName = u.name;
     }
 
-    // ───────── Prevent overlapping assignments for the chosen role ─────────
     const s = toMinutes(doc.timeStart), e = toMinutes(doc.timeEnd);
     const conflictField = role === 'MESSENGER' ? 'assignment.messengerId' : 'assignment.driverId';
 
@@ -397,7 +389,7 @@ async function assignBooking(req, res, next) {
       return res.status(409).json({ message: `${label} already assigned during this time.` });
     }
 
-    // ───────── Apply assignment ─────────
+    // base assignment – reset both acks to PENDING whenever admin re-assigns
     const baseAssign = {
       vehicleId: vehicleId || '',
       vehicleName: vehicleName || '',
@@ -412,7 +404,6 @@ async function assignBooking(req, res, next) {
     };
 
     if (role === 'MESSENGER') {
-      // Flip category to Messenger so UI/logic downstream stay consistent
       doc.category = 'Messenger';
       doc.assignment = {
         ...baseAssign,
@@ -422,7 +413,6 @@ async function assignBooking(req, res, next) {
         driverName: ''
       };
     } else {
-      // DRIVER role
       doc.category = 'Car';
       doc.assignment = {
         ...baseAssign,
@@ -433,7 +423,7 @@ async function assignBooking(req, res, next) {
       };
     }
 
-    // Auto-accept → move to ACCEPTED if workflow allows
+    // Business rule: admin assigning means admin already ACCEPTED the job.
     if (autoAccept) {
       const from = doc.status || 'PENDING';
       if (!FORWARD[from] || !FORWARD[from].has('ACCEPTED')) {
@@ -444,11 +434,9 @@ async function assignBooking(req, res, next) {
 
     await doc.save();
 
-    // Realtime: assignment delta + status delta
     broadcastCarBooking(io, doc, 'carBooking:assigned', shape.assigned(doc));
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
-    // Telegram
     try {
       await notify('ADMIN_ACCEPTED_ASSIGNED', {
         bookingId: doc._id,
@@ -465,8 +453,6 @@ async function assignBooking(req, res, next) {
   }
 }
 
-
-
 async function listAdmin(req, res, next) {
   try {
     const { date, status } = req.query;
@@ -478,7 +464,7 @@ async function listAdmin(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/* ───────────── LIST FOR ASSIGNEE ───────────── */
+/* ───────── LIST FOR ASSIGNEE (driver or messenger – symmetric) ───────── */
 async function listForAssignee(req, res, next) {
   try {
     const { loginId, role } = pickIdentityFrom(req);
@@ -497,13 +483,12 @@ async function listForAssignee(req, res, next) {
         { category: 'Car', 'assignment.messengerId': driverId }
       ];
     } else {
+      // fallback: treat as employee
       filter.employeeId = driverId;
     }
 
     if (date) filter.tripDate = date;
     if (status && status !== 'ALL') filter.status = status;
-
-    console.log('[ListForAssignee]', JSON.stringify({ role, loginId, driverId, filter }, null, 2));
 
     const list = await CarBooking.find(filter)
       .sort({ tripDate: -1, timeStart: 1 })
@@ -516,8 +501,7 @@ async function listForAssignee(req, res, next) {
   }
 }
 
-
-/* ───────────── DRIVER ACKNOWLEDGE ───────────── */
+/* ───────── DRIVER ACK (only ack, status unchanged) ───────── */
 async function driverAcknowledge(req, res, next) {
   try {
     const io = req.io;
@@ -543,8 +527,7 @@ async function driverAcknowledge(req, res, next) {
   }
 }
 
-
-/* ───────────── DRIVER STATUS UPDATE ───────────── */
+/* ───────── DRIVER STATUS ───────── */
 async function driverUpdateStatus(req, res, next) {
   try {
     const io = req.io;
@@ -557,31 +540,24 @@ async function driverUpdateStatus(req, res, next) {
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
-    // Must be the assigned driver
     if (String(doc.assignment?.driverId) !== String(loginId)) {
       throw createError(403, 'Not allowed: not your assigned booking.');
     }
 
-    // Enforce workflow
     const from = doc.status || 'PENDING';
     const nextStatus = (status || '').toUpperCase();
     if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
       throw createError(400, `Cannot change from ${from} to ${nextStatus}`);
     }
 
-    // Defensive: ensure booking is assigned
     if (!hasAssignee(doc)) throw createError(400, 'Booking is not assigned.');
 
     doc.status = nextStatus;
     doc.updatedAt = new Date();
     await doc.save();
 
-    // Real-time broadcast
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
-    console.log(`[driverUpdateStatus] ${loginId} → ${nextStatus} for ${id}`);
-
-    // Telegram notify
     try {
       await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: nextStatus, byName: loginId });
     } catch (err) {
@@ -595,16 +571,13 @@ async function driverUpdateStatus(req, res, next) {
   }
 }
 
-
-/* ───────── UPDATE BOOKING (CRUD → U) ─────────
-   Allows editing core fields + capacity & assignee conflict checks. */
+/* ───────── UPDATE BOOKING (admin edit schedule / category / purpose) ───────── */
 async function updateBooking(req, res, next) {
   try {
     const io = req.io;
     const { id } = req.params;
     const payload = parsePayload(req);
 
-    // never allow status/assignment changes via this endpoint
     if ('status' in payload || 'assignment' in payload) {
       throw createError(400, 'Not allowed to modify status/assignment here.');
     }
@@ -612,7 +585,6 @@ async function updateBooking(req, res, next) {
     const doc = await CarBooking.findById(id);
     if (!doc) throw createError(404, 'Booking not found.');
 
-    // Editable fields
     const editable = [
       'category','tripDate','timeStart','timeEnd','passengers',
       'customerContact','stops','purpose','notes','ticketUrl'
@@ -621,7 +593,6 @@ async function updateBooking(req, res, next) {
       if (payload[k] !== undefined) doc[k] = payload[k];
     }
 
-    // -------- basic time validity --------
     if (doc.timeStart && doc.timeEnd) {
       const s = toMinutes(doc.timeStart);
       const e = toMinutes(doc.timeEnd);
@@ -630,7 +601,6 @@ async function updateBooking(req, res, next) {
       throw createError(400, 'timeStart and timeEnd are required.');
     }
 
-    // -------- date / category sanity --------
     if (!isValidDate(doc.tripDate)) {
       throw createError(400, 'Invalid tripDate (YYYY-MM-DD).');
     }
@@ -641,7 +611,6 @@ async function updateBooking(req, res, next) {
     const s = toMinutes(doc.timeStart);
     const e = toMinutes(doc.timeEnd);
 
-    // -------- FLEET CAPACITY CHECK (same as createBooking) --------
     const active = await CarBooking.find({
       _id: { $ne: doc._id },
       tripDate: doc.tripDate,
@@ -661,10 +630,8 @@ async function updateBooking(req, res, next) {
       );
     }
 
-    // -------- ASSIGNEE AVAILABILITY (driver / messenger) --------
     const ass = doc.assignment || {};
 
-    // Check driver (if assigned)
     if (ass.driverId) {
       const others = await CarBooking.find({
         _id: { $ne: doc._id },
@@ -682,7 +649,6 @@ async function updateBooking(req, res, next) {
       }
     }
 
-    // Check messenger (if assigned)
     if (ass.messengerId) {
       const othersM = await CarBooking.find({
         _id: { $ne: doc._id },
@@ -702,10 +668,8 @@ async function updateBooking(req, res, next) {
 
     await doc.save();
 
-    // Realtime
     broadcastCarBooking(io, doc, 'carBooking:updated', shape.updated(doc));
 
-    // Optional telegram
     try {
       await notify('REQUEST_UPDATED', { bookingId: doc._id });
     } catch {}
@@ -716,9 +680,7 @@ async function updateBooking(req, res, next) {
   }
 }
 
-
-/* ───────── DELETE BOOKING (CRUD → D) ─────────
-   Hard delete. If you prefer soft delete, replace with doc.status='CANCELLED' + save. */
+/* ───────── DELETE BOOKING ───────── */
 async function deleteBooking(req, res, next) {
   try {
     const io = req.io;
@@ -728,10 +690,8 @@ async function deleteBooking(req, res, next) {
 
     await CarBooking.deleteOne({ _id: id });
 
-    // Realtime
     broadcastCarBooking(io, doc, 'carBooking:deleted', shape.deleted(doc));
 
-    // Optional telegram
     try {
       await notify('REQUEST_DELETED', { bookingId: doc._id });
     } catch {}
@@ -740,7 +700,7 @@ async function deleteBooking(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/* ───────────── MESSENGER ACKNOWLEDGE ───────────── */
+/* ───────── MESSENGER ACK (only ack, status unchanged) ───────── */
 async function messengerAcknowledge(req, res, next) {
   try {
     const io = req.io;
@@ -766,8 +726,7 @@ async function messengerAcknowledge(req, res, next) {
   }
 }
 
-
-/* ───────────── MESSENGER STATUS UPDATE ───────────── */
+/* ───────── MESSENGER STATUS (same logic as driver) ───────── */
 async function messengerUpdateStatus(req, res, next) {
   try {
     const io = req.io;
@@ -792,7 +751,6 @@ async function messengerUpdateStatus(req, res, next) {
 
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc));
 
-    // Telegram notify
     try {
       await notify('STATUS_CHANGED', {
         bookingId: doc._id,
@@ -809,10 +767,7 @@ async function messengerUpdateStatus(req, res, next) {
   }
 }
 
-
-// ─────────────────────────────
-// LIST all assigned messenger tasks
-// ─────────────────────────────
+/* ───────── LIST messenger tasks (legacy helper) ───────── */
 async function listMessengerTasks(req, res) {
   try {
     const messengerId = req.query.messengerId || req.headers['x-login-id'];
@@ -839,7 +794,6 @@ async function listMessengerTasks(req, res) {
     res.status(500).json({ message: err.message || 'Internal error' });
   }
 }
-
 
 module.exports = {
   checkAvailability,

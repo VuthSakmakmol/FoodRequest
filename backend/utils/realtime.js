@@ -7,6 +7,11 @@ const jwt = require('jsonwebtoken')
 const ROOMS = {
   ADMINS: 'admins',
   CHEFS: 'chefs',
+
+  // NEW: role-wide rooms for transportation
+  DRIVERS: 'drivers',
+  MESSENGERS: 'messengers',
+
   EMPLOYEE: (id) => `employee:${String(id)}`,
   COMPANY: (id)  => `company:${String(id)}`,
   BOOKING: (id)  => `booking:${String(id)}`,
@@ -59,7 +64,7 @@ function emitCounterpart(io, event, doc) {
 }
 
 /* ───────────────────────────
- *  NEW: central broadcast for CarBooking
+ *  Central broadcast for CarBooking
  *  (used by transportation controllers)
  * ─────────────────────────── */
 function broadcastCarBooking(io, doc, event, payload) {
@@ -70,6 +75,8 @@ function broadcastCarBooking(io, doc, event, payload) {
 
   const rooms = new Set([
     ROOMS.ADMINS,                           // all transport/admin users
+    ROOMS.DRIVERS,                         // NEW: all drivers online
+    ROOMS.MESSENGERS,                      // NEW: all messengers online
     empId && ROOMS.EMPLOYEE(empId),        // specific requester
     bookingId && ROOMS.BOOKING(bookingId), // detail page for this booking
   ])
@@ -108,7 +115,7 @@ function registerSocket(io) {
     socket.data.joined = new Set()
 
     // Basic identity from token / handshake
-    const role = str(socket.user?.role || socket.handshake.auth?.role)
+    const role = str(socket.user?.role || socket.handshake.auth?.role).toUpperCase()
     const employeeId = str(
       socket.handshake.auth?.employeeId || socket.handshake.query?.employeeId
     )
@@ -119,10 +126,15 @@ function registerSocket(io) {
     )
 
     // Auto-join default rooms based on role+identity
-    if (role === 'ADMIN') joinRoomSafe(socket, ROOMS.ADMINS)
-    if (role === 'CHEF') joinRoomSafe(socket, ROOMS.CHEFS)
+    if (role === 'ADMIN')     joinRoomSafe(socket, ROOMS.ADMINS)
+    if (role === 'CHEF')      joinRoomSafe(socket, ROOMS.CHEFS)
+
+    // NEW: drivers & messengers
+    if (role === 'DRIVER')    joinRoomSafe(socket, ROOMS.DRIVERS)
+    if (role === 'MESSENGER') joinRoomSafe(socket, ROOMS.MESSENGERS)
+
     if (employeeId) joinRoomSafe(socket, ROOMS.EMPLOYEE(employeeId))
-    if (companyId) joinRoomSafe(socket, ROOMS.COMPANY(companyId))
+    if (companyId)  joinRoomSafe(socket, ROOMS.COMPANY(companyId))
 
     dumpRooms(socket, 'post-handshake')
 
@@ -132,11 +144,16 @@ function registerSocket(io) {
       const denied = validateJoin(socket, p)
       if (denied) return safeAck(ack, { ok: false, error: denied })
 
-      if (p.role === 'ADMIN') joinRoomSafe(socket, ROOMS.ADMINS)
-      if (p.role === 'CHEF') joinRoomSafe(socket, ROOMS.CHEFS)
+      if (p.role === 'ADMIN')     joinRoomSafe(socket, ROOMS.ADMINS)
+      if (p.role === 'CHEF')      joinRoomSafe(socket, ROOMS.CHEFS)
+
+      // NEW: allow explicit subscription by role
+      if (p.role === 'DRIVER')    joinRoomSafe(socket, ROOMS.DRIVERS)
+      if (p.role === 'MESSENGER') joinRoomSafe(socket, ROOMS.MESSENGERS)
+
       if (p.employeeId) joinRoomSafe(socket, ROOMS.EMPLOYEE(p.employeeId))
-      if (p.companyId) joinRoomSafe(socket, ROOMS.COMPANY(p.companyId))
-      if (p.bookingId) joinRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
+      if (p.companyId)  joinRoomSafe(socket, ROOMS.COMPANY(p.companyId))
+      if (p.bookingId)  joinRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
 
       dumpRooms(socket, 'after-subscribe')
       safeAck(ack, { ok: true, rooms: listedRooms(socket) })
@@ -145,11 +162,16 @@ function registerSocket(io) {
     socket.on('unsubscribe', (payload = {}, ack) => {
       const p = normalizeSubPayload(payload)
 
-      if (p.role === 'ADMIN') leaveRoomSafe(socket, ROOMS.ADMINS)
-      if (p.role === 'CHEF') leaveRoomSafe(socket, ROOMS.CHEFS)
+      if (p.role === 'ADMIN')     leaveRoomSafe(socket, ROOMS.ADMINS)
+      if (p.role === 'CHEF')      leaveRoomSafe(socket, ROOMS.CHEFS)
+
+      // NEW: explicit unsubscribe by role
+      if (p.role === 'DRIVER')    leaveRoomSafe(socket, ROOMS.DRIVERS)
+      if (p.role === 'MESSENGER') leaveRoomSafe(socket, ROOMS.MESSENGERS)
+
       if (p.employeeId) leaveRoomSafe(socket, ROOMS.EMPLOYEE(p.employeeId))
-      if (p.companyId) leaveRoomSafe(socket, ROOMS.COMPANY(p.companyId))
-      if (p.bookingId) leaveRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
+      if (p.companyId)  leaveRoomSafe(socket, ROOMS.COMPANY(p.companyId))
+      if (p.bookingId)  leaveRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
 
       dumpRooms(socket, 'after-unsubscribe')
       safeAck(ack, { ok: true, rooms: listedRooms(socket) })
@@ -255,7 +277,7 @@ function safeAck(ack, payload) {
 
 function normalizeSubPayload(p = {}) {
   return {
-    role: str(p.role || ''),
+    role: str(p.role || '').toUpperCase(),
     employeeId: str(p.employeeId || ''),
     companyId: str(p.companyId || ''),
     bookingId: str(p.bookingId || ''),
@@ -266,7 +288,7 @@ function normalizeSubPayload(p = {}) {
  * Enforce simple access rules when joining rooms via `subscribe`
  */
 function validateJoin(socket, p) {
-  const role = str(socket.user?.role)
+  const role = str(socket.user?.role).toUpperCase()
   const userEmpId = str(socket.user?.employeeId)
   const userCompany = str(socket.user?.companyId)
 
@@ -277,6 +299,9 @@ function validateJoin(socket, p) {
   if (p.role === 'CHEF' && !['ADMIN', 'CHEF'].includes(role)) {
     return 'FORBIDDEN:CHEF_ROOM'
   }
+
+  // NOTE: DRIVER / MESSENGER rooms are not restricted here;
+  // any authenticated socket with role DRIVER/MESSENGER will pass.
 
   // Employee room: ADMIN can see anyone, others only their own employeeId
   if (p.employeeId) {

@@ -71,7 +71,7 @@ const CarBookingSchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMPLETED','DELAYED','CANCELLED'],
+    enum: ['PENDING','ACCEPTED','ON_ROAD','ARRIVING','COMEBACK','COMPLETED','DELAYED','CANCELLED'],
     default: 'PENDING',
     index: true
   },

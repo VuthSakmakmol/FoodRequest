@@ -1,14 +1,19 @@
 // src/composables/useDriverBookingsRealtime.js
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
-import socket, { subscribeBookingRooms } from '@/utils/socket'
+import socket, { subscribeBookingRooms, subscribeRoleIfNeeded } from '@/utils/socket'
 
 /**
  * Realtime list for the ASSIGNEE (driver/messenger).
+ * - Loads bookings assigned to the current driver from /driver or /messenger endpoints
  * - Subscribes to booking rooms for every listed booking
- * - Applies status, assigned, ack, and delete deltas live
+ * - Applies status, assignment, ack, update, and delete deltas live
+ * - Auto-reloads when a NEW booking is created/assigned for this driver
  */
-export function useDriverBookingsRealtime({ filtersRef } = {}) {
+export function useDriverBookingsRealtime({
+  filtersRef,
+  role = 'DRIVER',       // 'DRIVER' | 'MESSENGER'
+} = {}) {
   const rows    = ref([])
   const loading = ref(false)
   const error   = ref('')
@@ -25,8 +30,13 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
       if (date) params.date = date
       if (status && status !== 'ALL') params.status = status
 
-      // driver endpoint that returns bookings assigned to me
-      const { data } = await api.get('/driver/car-bookings', { params })
+      const basePath =
+        String(role).toUpperCase() === 'MESSENGER'
+          ? '/messenger/car-bookings'
+          : '/driver/car-bookings'
+
+      // backend should use JWT to know "me"
+      const { data } = await api.get(basePath, { params })
 
       rows.value = (Array.isArray(data) ? data : []).map((x) => ({
         ...x,
@@ -34,7 +44,6 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
         assignment: x.assignment || {},
       }))
 
-      // (re)join booking rooms so status pushes arrive live
       await resubscribeBookingRooms()
     } catch (e) {
       error.value =
@@ -48,7 +57,6 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
 
   async function resubscribeBookingRooms() {
     try {
-      // cleanup previous joins
       if (typeof cleanupRooms === 'function') {
         await cleanupRooms()
       }
@@ -58,29 +66,54 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
     cleanupRooms = await subscribeBookingRooms(ids)
   }
 
-  // ---- socket handlers ----
+  // ---------- socket handlers ----------
+
+  // NEW booking created; safest: reload, driver endpoint will filter only "my" jobs
+  async function onCreated(doc) {
+    // If your backend only emits created to ADMIN/COMPANY, this might never fire for driver.
+    // But if it does (especially when booking is created already assigned to driver),
+    // this guarantees the driver sees it without manual refresh.
+    await reload()
+  }
+
   function onStatus(p) {
     const it = rows.value.find(
       (x) => String(x._id) === String(p?.bookingId),
     )
-    if (it) it.status = p.status
+    if (it && p?.status) {
+      it.status = p.status
+    }
   }
 
-  function onAssigned(p) {
+  // When a booking is assigned:
+  // - If we already have it, patch assignment/status.
+  // - If we DON'T have it, reload list so the new job appears.
+  async function onAssigned(p) {
+    const id = String(p?.bookingId || '')
+    if (!id) return
+
     const it = rows.value.find(
-      (x) => String(x._id) === String(p?.bookingId),
+      (x) => String(x._id) === id,
     )
-    if (!it) return
+
+    if (!it) {
+      await reload()
+      return
+    }
 
     it.assignment = {
       ...(it.assignment || {}),
-      driverId: p.driverId,
-      driverName: p.driverName,
-      vehicleId: p.vehicleId,
-      vehicleName: p.vehicleName,
+      driverId:    p.driverId    ?? it.assignment?.driverId,
+      driverName:  p.driverName  ?? it.assignment?.driverName,
+      messengerId: p.messengerId ?? it.assignment?.messengerId,
+      messengerName: p.messengerName ?? it.assignment?.messengerName,
+      vehicleId:   p.vehicleId   ?? it.assignment?.vehicleId,
+      vehicleName: p.vehicleName ?? it.assignment?.vehicleName,
     }
 
-    if (p.status) it.status = p.status
+    if (p.status) {
+      it.status = p.status
+    }
   }
 
   function onDriverAck(p) {
@@ -114,7 +147,7 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
     Object.assign(it, p.patch || {})
   }
 
-  // auto re-subscribe when filters change (e.g., driver switches date)
+  // auto reload when filters change (date / status)
   watch(
     () => filtersRef?.value,
     () => {
@@ -124,7 +157,12 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
   )
 
   onMounted(() => {
+    // VERY IMPORTANT: join DRIVER or MESSENGER role room
+    subscribeRoleIfNeeded({ role })
+
     reload()
+
+    socket.on('carBooking:created', onCreated)
     socket.on('carBooking:status', onStatus)
     socket.on('carBooking:assigned', onAssigned)
     socket.on('carBooking:driverAck', onDriverAck)
@@ -133,6 +171,7 @@ export function useDriverBookingsRealtime({ filtersRef } = {}) {
   })
 
   onBeforeUnmount(async () => {
+    socket.off('carBooking:created', onCreated)
     socket.off('carBooking:status', onStatus)
     socket.off('carBooking:assigned', onAssigned)
     socket.off('carBooking:driverAck', onDriverAck)

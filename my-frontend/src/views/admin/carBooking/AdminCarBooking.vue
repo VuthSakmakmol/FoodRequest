@@ -13,6 +13,7 @@ const { showToast } = useToast()
 /* ───────── Responsive (no Vuetify) ───────── */
 const isMobile = ref(false)
 function updateIsMobile() {
+  if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
@@ -31,17 +32,24 @@ const updating = ref({}) // { [bookingId]: boolean }
 /* focus from calendar (highlight row/card) */
 const focusId = computed(() => String(route.query.focus || ''))
 
-/* ───────── Workflow transitions ───────── */
+/* ───────── Workflow transitions (aligned with driver/backend) ───────── */
+/**
+ * Main path:
+ * PENDING → ACCEPTED → ON_ROAD → ARRIVING → COMEBACK → COMPLETED
+ * DELAYED/CANCELLED are side branches.
+ */
 const ALLOWED_NEXT = {
-  PENDING:   ['ACCEPTED','CANCELLED'],
-  ACCEPTED:  ['ON_ROAD','DELAYED','CANCELLED'],
-  ON_ROAD:   ['ARRIVING','DELAYED','CANCELLED'],
-  ARRIVING:  ['COMPLETED','DELAYED','CANCELLED'],
-  DELAYED:   ['ON_ROAD','ARRIVING','CANCELLED'],
-  COMPLETED: [],
-  CANCELLED: []
+  PENDING   : ['ACCEPTED', 'CANCELLED'],
+  ACCEPTED  : ['ON_ROAD', 'DELAYED', 'CANCELLED'],
+  ON_ROAD   : ['ARRIVING', 'DELAYED', 'COMEBACK', 'CANCELLED'],
+  ARRIVING  : ['COMEBACK', 'DELAYED', 'CANCELLED'],   // no COMPLETED here
+  COMEBACK  : ['COMPLETED', 'DELAYED', 'CANCELLED'],  // complete only after COMEBACK
+  COMPLETED : [],
+  DELAYED   : ['ON_ROAD', 'ARRIVING', 'COMEBACK', 'CANCELLED'],
+  CANCELLED : [],
 }
-const nextStatuses = (from) => ALLOWED_NEXT[from] || []
+const nextStatuses = (from) =>
+  ALLOWED_NEXT[String(from || '').toUpperCase()] || []
 
 /* Time helpers for edit dialog */
 const HOURS   = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
@@ -88,24 +96,36 @@ const hasAssignee = (it) => {
 
 /* ───────── Status / badges (Tailwind) ───────── */
 const STATUS_BADGE_CLASS = {
-  PENDING:   'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900',
-  ACCEPTED:  'bg-sky-500 text-white',
-  ON_ROAD:   'bg-cyan-500 text-white',
-  ARRIVING:  'bg-emerald-500 text-white',
-  COMPLETED: 'bg-green-600 text-white',
-  DELAYED:   'bg-amber-400 text-slate-900',
-  CANCELLED: 'bg-red-500 text-white',
+  PENDING   : 'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900',
+  ACCEPTED  : 'bg-sky-500 text-white',
+  ON_ROAD   : 'bg-cyan-500 text-white',
+  ARRIVING  : 'bg-emerald-500 text-white',
+  COMPLETED : 'bg-green-600 text-white',
+  COMEBACK  : 'bg-indigo-500 text-white', // comeback trip
+  DELAYED   : 'bg-amber-400 text-slate-900',
+  CANCELLED : 'bg-red-500 text-white',
 }
 const statusBadgeClass = s =>
-  STATUS_BADGE_CLASS[s] || 'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900'
+  STATUS_BADGE_CLASS[String(s || '').toUpperCase()] ||
+  'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900'
 
 const ACK_BADGE_CLASS = {
-  PENDING:  'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50',
-  ACCEPTED: 'bg-emerald-500 text-white',
-  DECLINED: 'bg-red-500 text-white',
+  PENDING  : 'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50',
+  ACCEPTED : 'bg-emerald-500 text-white',
+  DECLINED : 'bg-red-500 text-white',
 }
 const ackBadgeClass = s =>
-  ACK_BADGE_CLASS[s] || 'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50'
+  ACK_BADGE_CLASS[String(s || '').toUpperCase()] ||
+  'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50'
+
+/** Driver / messenger response label for current booking */
+const responseLabel = (item) => {
+  if (!item || !item.assignment) return 'PENDING'
+  if (item.category === 'Messenger') {
+    return item.assignment.messengerAck || 'PENDING'
+  }
+  return item.assignment.driverAck || 'PENDING'
+}
 
 const categoryBadgeClass = cat =>
   cat === 'Messenger'
@@ -113,6 +133,28 @@ const categoryBadgeClass = cat =>
     : 'bg-indigo-500 text-white'
 
 const paxDisplay = p => (p ?? 1)
+
+/* ───────── Status action button appearance ───────── */
+const STATUS_ACTION_BTN_CLASS = {
+  PENDING   : 'border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100',
+  ACCEPTED  : 'border-sky-500 bg-sky-50 text-sky-700 hover:bg-sky-100',
+  ON_ROAD   : 'border-cyan-500 bg-cyan-50 text-cyan-700 hover:bg-cyan-100',
+  ARRIVING  : 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+  COMEBACK  : 'border-indigo-500 bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
+  COMPLETED : 'border-green-500 bg-green-50 text-green-700 hover:bg-green-100',
+  DELAYED   : 'border-amber-500 bg-amber-50 text-amber-700 hover:bg-amber-100',
+  CANCELLED : 'border-rose-500 bg-rose-50 text-rose-700 hover:bg-rose-100',
+}
+
+/** Unique pill style for status-change buttons (different from Edit/Assign) */
+const statusButtonClass = (s) => {
+  const base =
+    'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors'
+  const variant =
+    STATUS_ACTION_BTN_CLASS[String(s || '').toUpperCase()] ||
+    'border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100'
+  return `${base} ${variant}`
+}
 
 /* ───────── Search / filter / sort ───────── */
 const filtered = computed(() => {
@@ -130,13 +172,14 @@ const filtered = computed(() => {
         r.purpose,
         prettyStops(r.stops),
         assigneeName(r),
-        r.assignment?.driverAck
+        r.assignment?.driverAck,
+        r.assignment?.messengerAck,
       ]
         .join(' ')
         .toLowerCase()
       return hay.includes(term)
     })
-    .sort((a,b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
+    .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
 /* ───────── Pagination ───────── */
@@ -184,7 +227,7 @@ async function loadSchedule() {
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],
-      assignment: x.assignment || {}
+      assignment: x.assignment || {},
     }))
   } catch (e) {
     error.value = e?.response?.data?.message || e?.message || 'Failed to load schedule'
@@ -206,46 +249,90 @@ function onCreated(doc) {
 
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) it.status = p.status
+  if (it && p?.status) it.status = p.status
 }
 
 function onAssigned(p) {
-  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  const it = rows.value.find(
+    (x) => String(x._id) === String(p?.bookingId),
+  )
   if (!it) return
+
   it.assignment = {
     ...(it.assignment || {}),
-    driverId: p.driverId ?? it.assignment?.driverId ?? '',
-    driverName: p.driverName ?? it.assignment?.driverName ?? '',
-    messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
-    messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
-    vehicleId: p.vehicleId ?? it.assignment?.vehicleId ?? '',
-    vehicleName: p.vehicleName ?? it.assignment?.vehicleName ?? '',
-    driverAck: 'PENDING',
-    messengerAck: it.assignment?.messengerAck || 'PENDING'
+    driverId:       p.driverId       ?? it.assignment?.driverId,
+    driverName:     p.driverName     ?? it.assignment?.driverName,
+    messengerId:    p.messengerId    ?? it.assignment?.messengerId,
+    messengerName:  p.messengerName  ?? it.assignment?.messengerName,
+    driverAck:      it.assignment?.driverAck      || 'PENDING',
+    messengerAck:   it.assignment?.messengerAck   || 'PENDING',
   }
-  if (p.status) it.status = p.status
-  if (p.category) it.category = p.category
+
+  // trust backend if it sends a status
+  if (p.status) {
+    it.status = p.status
+  } else if (it.status === 'PENDING') {
+    // fallback: after admin assign, show ACCEPTED
+    it.status = 'ACCEPTED'
+  }
 }
 
+/**
+ * When driver accepts/declines, Admin view should reflect:
+ * - ACK badge
+ * - Status becomes ACCEPTED when ACK = ACCEPTED (if still PENDING)
+ */
 function onDriverAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) {
-    it.assignment = {
-      ...(it.assignment || {}),
-      driverAck: p.response,
-      driverAckAt: p.at
-    }
+  if (!it) return
+
+  const resp = String(p?.response || '').toUpperCase()
+
+  it.assignment = {
+    ...(it.assignment || {}),
+    driverAck: resp,
+    driverAckAt: p?.at,
+  }
+
+  if (resp === 'ACCEPTED' && String(it.status).toUpperCase() === 'PENDING') {
+    it.status = 'ACCEPTED'
+  }
+
+  if (resp === 'DECLINED' && String(it.status).toUpperCase() === 'ACCEPTED') {
+    it.status = 'PENDING'
   }
 }
 
+/**
+ * Messenger ACK flows similarly, but only changes status automatically
+ * for Messenger category.
+ */
 function onMessengerAck(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
-  if (it) {
-    it.assignment = {
-      ...(it.assignment || {}),
-      messengerAck: p.response,
-      messengerAckAt: p.at
-    }
+  if (!it) return
+
+  const resp = String(p?.response || '').toUpperCase()
+
+  it.assignment = {
+    ...(it.assignment || {}),
+    messengerAck: resp,
+    messengerAckAt: p?.at,
+  }
+
+  if (
+    it.category === 'Messenger' &&
+    resp === 'ACCEPTED' &&
+    String(it.status).toUpperCase() === 'PENDING'
+  ) {
+    it.status = 'ACCEPTED'
+  }
+
+  if (
+    it.category === 'Messenger' &&
+    resp === 'DECLINED' &&
+    String(it.status).toUpperCase() === 'ACCEPTED'
+  ) {
+    it.status = 'PENDING'
   }
 }
 
@@ -264,7 +351,9 @@ function onDeleted(p) {
 /* ───────── Lifecycle ───────── */
 onMounted(() => {
   updateIsMobile()
-  window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+  }
 
   try { subscribeRoleIfNeeded({ role: 'ADMIN' }) } catch {}
 
@@ -294,7 +383,10 @@ onBeforeUnmount(() => {
   socket.off('carBooking:messengerAck', onMessengerAck)
   socket.off('carBooking:updated', onUpdated)
   socket.off('carBooking:deleted', onDeleted)
-  window.removeEventListener('resize', updateIsMobile)
+
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+  }
 })
 
 watch([selectedDate, statusFilter, categoryFilter], () => {
@@ -322,8 +414,8 @@ function showDetails(item) {
 }
 
 /* ───────── Assign flow ───────── */
-const assignOpen   = ref(false)
-const assignTarget = ref(null)
+const assignOpen    = ref(false)
+const assignTarget  = ref(null)
 const assignLoading = ref(false)
 const assignError   = ref('')
 
@@ -362,13 +454,13 @@ async function loadPeopleAndAvailability(item) {
 
   const list = await fetchFirstOk([
     () => api.get(role === 'DRIVER' ? '/admin/drivers' : '/admin/messengers'),
-    () => api.get('/admin/users', { params: { role } })
+    () => api.get('/admin/users', { params: { role } }),
   ])
 
   people.value = list.map(u => ({
     _id: String(u._id || u.id || u.loginId),
     loginId: String(u.loginId || ''),
-    name: u.name || u.fullName || u.loginId || '—'
+    name: u.name || u.fullName || u.loginId || '—',
   }))
 
   try {
@@ -377,8 +469,8 @@ async function loadPeopleAndAvailability(item) {
         role,
         date: item.tripDate,
         start: item.timeStart,
-        end: item.timeEnd
-      }
+        end: item.timeEnd,
+      },
     })
     const m = new Map()
     if (Array.isArray(data)) {
@@ -402,11 +494,11 @@ async function loadPeopleAndAvailability(item) {
 
 function openAssignDialog(item) {
   assignTarget.value = item
-  assignError.value = ''
+  assignError.value  = ''
 
   const locked = item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
   assignLockedRole.value = locked
-  assignRole.value = locked
+  assignRole.value       = locked
 
   assignOpen.value = true
   loadPeopleAndAvailability(item)
@@ -447,16 +539,19 @@ async function submitAssign() {
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
       driverId: selectedLoginId.value,
       role: assignRole.value,
-      status: 'PENDING'
+      status: 'ACCEPTED',       // admin assignment = booking accepted
     })
 
-    const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
+    const it = rows.value.find(
+      x => String(x._id) === String(assignTarget.value._id),
+    )
+
     if (it) {
       if (assignRole.value === 'MESSENGER') {
         it.assignment = {
           ...(it.assignment || {}),
           messengerId: selectedLoginId.value,
-          driverAck: 'PENDING',
+          messengerAck: 'PENDING',
         }
       } else {
         it.assignment = {
@@ -465,14 +560,15 @@ async function submitAssign() {
           driverAck: 'PENDING',
         }
       }
-      it.status = 'PENDING'
+
+      it.status = 'ACCEPTED'
     }
 
     assignOpen.value = false
     showToast({
       type: 'success',
       title: 'Assigned',
-      message: 'Booking assigned successfully.',
+      message: 'Booking assigned and accepted by admin.',
     })
   } catch (e) {
     assignError.value = e?.response?.data?.message || e?.message || 'Failed to assign'
@@ -533,14 +629,14 @@ const editForm   = ref({
   timeStartMinute: '',
   timeEndHour: '',
   timeEndMinute: '',
-  category: 'Car'
+  category: 'Car',
 })
 const editLoading = ref(false)
 const editError   = ref('')
 
 function openEditDialog(item) {
   editTarget.value = item
-  editError.value = ''
+  editError.value  = ''
 
   const [sh, sm] = (item.timeStart || '08:00').split(':')
   const [eh, em] = (item.timeEnd || '09:00').split(':')
@@ -589,6 +685,8 @@ async function saveEdit() {
     old.timeEnd   !== payload.timeEnd ||
     old.category  !== payload.category
 
+  const needReopen = scheduleChanged && old.status !== 'PENDING'
+
   editLoading.value = true
   try {
     await api.patch(`/admin/car-bookings/${old._id}`, payload)
@@ -601,7 +699,7 @@ async function saveEdit() {
       it.category  = payload.category
     }
 
-    if (scheduleChanged) {
+    if (needReopen) {
       await api.patch(`/admin/car-bookings/${old._id}/status`, {
         status: 'PENDING',
         forceReopen: true,
@@ -702,6 +800,7 @@ async function saveEdit() {
           <option value="ON_ROAD">ON_ROAD</option>
           <option value="ARRIVING">ARRIVING</option>
           <option value="COMPLETED">COMPLETED</option>
+          <option value="COMEBACK">COMEBACK</option>
           <option value="DELAYED">DELAYED</option>
           <option value="CANCELLED">CANCELLED</option>
         </select>
@@ -723,7 +822,7 @@ async function saveEdit() {
         <input
           v-model="qSearch"
           type="text"
-          placeholder="Search requester / purpose / destination / assignee / driverResp"
+          placeholder="Search requester / purpose / destination / assignee / response"
           class="h-8 w-full max-w-xs flex-1 rounded-lg border border-slate-300 bg-white px-2 text-xs
                  text-slate-900 placeholder-slate-400
                  outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
@@ -850,7 +949,7 @@ async function saveEdit() {
               </div>
             </div>
 
-            <!-- body: destination, purpose, driver response -->
+            <!-- body: destination, purpose, response -->
             <div class="bc-body">
               <div class="lbl">Destination</div>
               <div class="bc-itinerary">
@@ -859,7 +958,7 @@ async function saveEdit() {
                   v-if="item.ticketUrl"
                   type="button"
                   class="ml-2 inline-flex items-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100
-                         dark:border-slate-500 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                         dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                   @click.stop="openTicket(item.ticketUrl)"
                 >
                   Ticket
@@ -871,13 +970,13 @@ async function saveEdit() {
                 {{ item.purpose || '—' }}
               </div>
 
-              <div class="lbl mt-2">Driver response</div>
+              <div class="lbl mt-2">Driver / Messenger response</div>
               <div>
                 <span
                   class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                  :class="ackBadgeClass(item.assignment?.driverAck || 'PENDING')"
+                  :class="ackBadgeClass(responseLabel(item))"
                 >
-                  {{ item.assignment?.driverAck || 'PENDING' }}
+                  {{ responseLabel(item) }}
                 </span>
               </div>
             </div>
@@ -901,9 +1000,7 @@ async function saveEdit() {
                   v-for="s in nextStatuses(item.status)"
                   :key="s"
                   type="button"
-                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold
-                         border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100
-                         dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/60"
+                  :class="[statusButtonClass(s), 'disabled:opacity-50']"
                   :disabled="!hasAssignee(item) || !!updating[item._id]"
                   @click.stop="updateStatus(item, s)"
                 >
@@ -988,7 +1085,7 @@ async function saveEdit() {
                   Assigned
                 </th>
                 <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">
-                  Driver Resp.
+                  Driver / Messenger Resp.
                 </th>
                 <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">
                   Status
@@ -1091,9 +1188,9 @@ async function saveEdit() {
                     <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
                       <span
                         class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                        :class="ackBadgeClass(item.assignment?.driverAck || 'PENDING')"
+                        :class="ackBadgeClass(responseLabel(item))"
                       >
-                        {{ item.assignment?.driverAck || 'PENDING' }}
+                        {{ responseLabel(item) }}
                       </span>
                     </td>
 
@@ -1112,9 +1209,7 @@ async function saveEdit() {
                           v-for="s in nextStatuses(item.status)"
                           :key="s"
                           type="button"
-                          class="inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold
-                                 border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100
-                                 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/60 disabled:opacity-50"
+                          :class="[statusButtonClass(s), 'disabled:opacity-50']"
                           :disabled="!hasAssignee(item) || !!updating[item._id]"
                           @click="updateStatus(item, s)"
                         >
@@ -1250,13 +1345,13 @@ async function saveEdit() {
               </div>
             </div>
             <div>
-              <div class="lbl">Driver response</div>
+              <div class="lbl">Driver / Messenger response</div>
               <div class="val">
                 <span
                   class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                  :class="ackBadgeClass(detailItem?.assignment?.driverAck || 'PENDING')"
+                  :class="ackBadgeClass(responseLabel(detailItem))"
                 >
-                  {{ detailItem?.assignment?.driverAck || 'PENDING' }}
+                  {{ responseLabel(detailItem) }}
                 </span>
               </div>
             </div>
