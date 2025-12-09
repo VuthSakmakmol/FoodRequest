@@ -664,35 +664,37 @@ watch([selectedDate, statusFilter], () => {
              dark:border-slate-700 dark:bg-slate-900/90"
     >
       <!-- HERO FILTER BAR -->
+            <!-- HERO FILTER BAR (compact) -->
       <div
-        class="flex flex-wrap items-end gap-3 border-b border-slate-400
+        class="flex flex-wrap items-center gap-2 border-b border-slate-400
                bg-gradient-to-r from-sky-900 via-slate-800 to-sky-700
-               px-3 py-3 text-slate-50
+               px-2 sm:px-3 py-1.5 sm:py-2
+               text-slate-50
                dark:border-slate-700 dark:from-slate-950 dark:via-slate-900 dark:to-slate-800"
       >
         <!-- Date -->
-        <div class="flex-1 min-w-[140px] max-w-[180px]">
-          <label class="mb-1 block text-[11px] font-medium text-sky-100">
+        <div class="flex-1 min-w-[120px] max-w-[150px]">
+          <label class="mb-0.5 block text-[10px] font-medium text-sky-100">
             {{ t('dateLabel') }}
           </label>
           <input
             v-model="selectedDate"
             type="date"
-            class="w-full rounded-xl border border-sky-400 bg-sky-900/40 px-2.5 py-1.5
-                   text-xs text-sky-50 outline-none
+            class="w-full rounded-lg border border-sky-400 bg-sky-900/40 px-2 py-1
+                   text-[11px] text-sky-50 outline-none
                    dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
           />
         </div>
 
         <!-- Status -->
-        <div class="flex-1 min-w-[160px] max-w-[200px]">
-          <label class="mb-1 block text-[11px] font-medium text-sky-100">
+        <div class="flex-1 min-w-[130px] max-w-[170px]">
+          <label class="mb-0.5 block text-[10px] font-medium text-sky-100">
             {{ t('statusLabel') }}
           </label>
           <select
             v-model="statusFilter"
-            class="w-full rounded-xl border border-sky-400 bg-sky-900/40 px-2.5 py-1.5
-                   text-xs text-sky-50 outline-none
+            class="w-full rounded-lg border border-sky-400 bg-sky-900/40 px-2 py-1
+                   text-[11px] text-sky-50 outline-none
                    dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
           >
             <option
@@ -706,21 +708,22 @@ watch([selectedDate, statusFilter], () => {
         </div>
 
         <!-- Search -->
-        <div class="flex-1 min-w-[220px] max-w-md">
-          <label class="mb-1 block text-[11px] font-medium text-sky-100">
+        <div class="flex-[1.6] min-w-[180px] max-w-md">
+          <!-- hide label on very small screen to save vertical space -->
+          <label class="mb-0.5 hidden text-[10px] font-medium text-sky-100 sm:block">
             {{ t('searchPlaceholder') }}
           </label>
           <div
-            class="flex items-center rounded-xl border border-sky-400 bg-sky-900/40
-                   px-2.5 py-1.5 text-xs
+            class="flex items-center rounded-lg border border-sky-400 bg-sky-900/40
+                   px-2 py-1 text-[11px]
                    dark:border-slate-600 dark:bg-slate-900"
           >
-            <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-200/80 dark:text-slate-300" />
+            <i class="fa-solid fa-magnifying-glass mr-1.5 text-[11px] text-sky-200/80 dark:text-slate-300" />
             <input
               v-model="qSearch"
               type="text"
               :placeholder="t('searchPlaceholder')"
-              class="flex-1 bg-transparent text-xs text-sky-50 outline-none
+              class="flex-1 bg-transparent text-[11px] text-sky-50 outline-none
                      placeholder:text-sky-300/70
                      dark:text-slate-100 dark:placeholder:text-slate-500"
             />
@@ -728,10 +731,10 @@ watch([selectedDate, statusFilter], () => {
         </div>
 
         <!-- Language toggle -->
-        <div class="ml-auto flex items-center gap-1">
+        <div class="ml-auto flex items-center gap-1 mt-1 sm:mt-0">
           <button
             type="button"
-            class="rounded-full px-3 py-1 text-[11px] font-semibold transition
+            class="rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition
                    border border-slate-200/60"
             :class="lang === 'km'
               ? 'bg-amber-300 text-slate-900'
@@ -742,7 +745,7 @@ watch([selectedDate, statusFilter], () => {
           </button>
           <button
             type="button"
-            class="rounded-full px-3 py-1 text-[11px] font-semibold transition
+            class="rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition
                    border border-slate-200/60"
             :class="lang === 'en'
               ? 'bg-amber-300 text-slate-900'
