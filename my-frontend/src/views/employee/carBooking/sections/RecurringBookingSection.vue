@@ -211,13 +211,18 @@ function onEndDateInput (e) {
                bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
                px-4 py-3 text-white"
     >
-      <div class="flex flex-col">
-        <div class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80">
-          <span>Recurring Booking</span>
+      <div class="flex items-center gap-3">
+        <span
+          class="inline-flex h-8 w-8 items-center justify-center rounded-2xl
+                bg-white/90 text-emerald-600 text-sm shadow-sm"
+        >
+          <i class="fa-solid fa-rotate-right"></i>
+        </span>
+        <div class="space-y-0.5">
+          <h2 class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80t">
+            Recure booking
+          </h2>
         </div>
-        <p class="text-[11px] text-slate-100/80">
-          Repeat the same booking on multiple days.
-        </p>
       </div>
     </header>
 

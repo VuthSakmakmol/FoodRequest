@@ -341,8 +341,9 @@ watch([q, status, filterDate], () => {
     >
       <!-- Hero / filters bar -->
       <div
-        class="border-b border-slate-400 bg-gradient-to-r from-sky-900 via-slate-800 to-sky-700
-               px-3 py-3 sm:px-4 sm:py-3.5 text-slate-50"
+        class="bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400 rounded-t-2xl
+             px-4 py-3 text-white
+             dark:border-slate-700"
       >
         <!-- Desktop layout -->
         <div

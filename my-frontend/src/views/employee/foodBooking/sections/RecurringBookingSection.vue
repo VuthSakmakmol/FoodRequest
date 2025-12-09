@@ -148,18 +148,23 @@ const maxEndDate = computed(() => {
 </script>
 
 <template>
+  <!-- OUTER CARD (same pattern as Requester) -->
   <section
-    class="rounded-2xl border border-slate-500 dark:border-slate-700
-           bg-white/90 dark:bg-slate-900/90 shadow-sm overflow-hidden mt-3"
+    class="mt-3 rounded-2xl border border-slate-200 bg-white shadow-sm
+           dark:border-slate-700 dark:bg-slate-900 overflow-hidden"
   >
-    <!-- Header (black style) -->
+    <!-- Gradient header -->
     <header
-      class="px-4 py-3 border-b border-slate-500 dark:border-slate-700
-             bg-slate-900 dark:bg-slate-950 text-white"
+      class="flex items-center justify-between
+             rounded-t-2xl border-b border-slate-200
+             bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+             px-4 py-3 text-white
+             dark:border-slate-700"
     >
       <div class="flex items-center gap-3">
         <span
-          class="inline-flex h-8 w-8 items-center justify-center rounded-2xl bg-white/10 shadow-sm text-sm"
+          class="inline-flex h-8 w-8 items-center justify-center rounded-2xl
+                 bg-white/90 text-sky-700 text-sm shadow-sm"
         >
           <i class="fa-solid fa-rotate-right" />
         </span>
@@ -167,265 +172,272 @@ const maxEndDate = computed(() => {
           <h2 class="text-sm font-semibold leading-tight">
             Recurring Order
           </h2>
-          <p class="text-[11px] leading-snug opacity-90">
+          <p class="text-[11px] leading-snug text-sky-50/90">
             Repeat the same booking across multiple days, with smart holiday skipping.
           </p>
         </div>
       </div>
     </header>
 
-    <!-- Body -->
-    <div class="p-4">
-      <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
-        <!-- Toggle -->
-        <div class="md:col-span-3 flex flex-col gap-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-medium text-slate-700 dark:text-slate-200">
-              Recurring
-            </span>
+    <!-- Wrapper + inner card -->
+    <div
+      class="rounded-b-2xl border-t border-slate-200 bg-slate-50/80 p-3
+             dark:border-slate-700 dark:bg-slate-950/80"
+    >
+      <div
+        class="rounded-xl border border-slate-200 bg-white/95 p-4 shadow-sm
+               dark:border-slate-700 dark:bg-slate-950/90"
+      >
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
+          <!-- Toggle -->
+          <div class="md:col-span-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-medium text-slate-700 dark:text-slate-200">
+                Recurring
+              </span>
 
-            <button
-              type="button"
-              class="inline-flex items-center rounded-full border border-slate-500/80 dark:border-slate-600/80
-                     bg-slate-50/80 dark:bg-slate-900/80 px-1.5 py-0.5 text-[11px]
-                     text-slate-700 dark:text-slate-200 shadow-sm"
-              @click="setRecurring(!form.recurring)"
-            >
-              <span
-                class="inline-flex h-5 w-9 rounded-full transition"
-                :class="form.recurring
-                  ? 'bg-emerald-400/90 justify-end'
-                  : 'bg-slate-400/80 justify-start'"
+              <button
+                type="button"
+                class="inline-flex items-center rounded-full border border-slate-400/80
+                       bg-slate-50/80 px-1.5 py-0.5 text-[11px]
+                       text-slate-700 shadow-sm
+                       dark:border-slate-600/80 dark:bg-slate-900/80 dark:text-slate-200"
+                @click="setRecurring(!form.recurring)"
               >
                 <span
-                  class="h-4 w-4 m-[2px] rounded-full bg-white shadow-sm"
-                />
-              </span>
-              <span class="ml-1.5 font-semibold">
-                {{ form.recurring ? 'On' : 'Off' }}
-              </span>
-            </button>
-          </div>
-
-          <p class="text-[11px] text-slate-500 dark:text-slate-500">
-            Turn this on if you want the same food request repeated over a date range.
-          </p>
-        </div>
-
-        <!-- Content when recurring ON -->
-        <template v-if="form.recurring">
-          <!-- End date + info -->
-          <div class="md:col-span-4 space-y-2">
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-calendar-check text-[13px] text-emerald-500" />
-              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-                End Date
-              </h3>
-            </div>
-
-            <div class="space-y-1">
-              <label
-                class="block text-[11px] font-medium text-slate-700 dark:text-slate-200"
-              >
-                Repeat until
-              </label>
-              <input
-                v-model="form.endDate"
-                type="date"
-                :min="form.eatDate || undefined"
-                :max="maxEndDate"
-                class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                       bg-white dark:bg-slate-900 px-3 py-2 text-sm
-                       text-slate-900 dark:text-slate-100
-                       focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400"
-              />
-            </div>
-
-            <p class="text-[11px] text-slate-600 dark:text-slate-400">
-              From
-              <strong>{{ fmtDate(form.eatDate) || '—' }}</strong>
-              to
-              <strong>{{ fmtDate(form.endDate) || '—' }}</strong>
-              <span
-                v-if="form.eatDate && form.endDate"
-              >
-                ({{ daysBetweenInclusive(form.eatDate, form.endDate) }} days)
-              </span>
-            </p>
-            <p class="text-[11px] text-slate-500 dark:text-slate-500">
-              Maximum {{ maxDays }} consecutive days are allowed.
-            </p>
-          </div>
-
-          <!-- Skip holidays -->
-          <div class="md:col-span-3 space-y-2">
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-umbrella-beach text-[13px] text-amber-500" />
-              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-                Skip Holidays
-              </h3>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <label
-                class="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"
-              >
-                <input
-                  v-model="form.skipHolidays"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-slate-500 dark:border-slate-600
-                         text-emerald-500 focus:ring-emerald-400"
-                />
-                <span>
-                  Skip Sundays and configured holidays.
+                  class="inline-flex h-5 w-9 rounded-full transition"
+                  :class="form.recurring
+                    ? 'bg-emerald-400/90 justify-end'
+                    : 'bg-slate-400/80 justify-start'"
+                >
+                  <span
+                    class="m-[2px] h-4 w-4 rounded-full bg-white shadow-sm"
+                  />
                 </span>
-              </label>
+                <span class="ml-1.5 font-semibold">
+                  {{ form.recurring ? 'On' : 'Off' }}
+                </span>
+              </button>
             </div>
 
             <p class="text-[11px] text-slate-500 dark:text-slate-500">
-              When enabled, no request will be created on Sundays and dates listed in the holiday set.
+              Turn this on if you want the same food request repeated over a date range.
             </p>
           </div>
 
-          <!-- Summary -->
-          <div class="md:col-span-12 space-y-2">
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-list-check text-[13px] text-sky-500" />
-              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-                Summary
-              </h3>
+          <!-- Content when recurring ON -->
+          <template v-if="form.recurring">
+            <!-- End date + info -->
+            <div class="md:col-span-4 space-y-2">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-calendar-check text-[13px] text-emerald-500" />
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-100">
+                  End Date
+                </h3>
+              </div>
+
+              <div class="space-y-1">
+                <label
+                  class="block text-[11px] font-medium text-slate-700 dark:text-slate-200"
+                >
+                  Repeat until
+                </label>
+                <input
+                  v-model="form.endDate"
+                  type="date"
+                  :min="form.eatDate || undefined"
+                  :max="maxEndDate"
+                  class="block w-full rounded-xl border border-slate-400
+                         bg-white px-3 py-2 text-sm text-slate-900
+                         focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-sky-400
+                         dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                />
+              </div>
+
+              <p class="text-[11px] text-slate-600 dark:text-slate-400">
+                From
+                <strong>{{ fmtDate(form.eatDate) || '—' }}</strong>
+                to
+                <strong>{{ fmtDate(form.endDate) || '—' }}</strong>
+                <span v-if="form.eatDate && form.endDate">
+                  ({{ daysBetweenInclusive(form.eatDate, form.endDate) }} days)
+                </span>
+              </p>
+              <p class="text-[11px] text-slate-500 dark:text-slate-500">
+                Maximum {{ maxDays }} consecutive days are allowed.
+              </p>
             </div>
 
-            <div class="flex flex-wrap gap-2 mt-1">
-              <span
-                class="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 text-indigo-700
-                       dark:bg-indigo-950/40 dark:text-indigo-200
-                       border border-indigo-200 dark:border-indigo-700/60
-                       px-3 py-1 text-[11px] font-medium"
-              >
-                <i class="fa-solid fa-list text-[11px]" />
-                Total days: {{ counts.total }}
-              </span>
+            <!-- Skip holidays -->
+            <div class="md:col-span-3 space-y-2">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-umbrella-beach text-[13px] text-amber-500" />
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-100">
+                  Skip Holidays
+                </h3>
+              </div>
 
-              <span
-                class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-700
-                       dark:bg-emerald-950/40 dark:text-emerald-200
-                       border border-emerald-200 dark:border-emerald-700/60
-                       px-3 py-1 text-[11px] font-medium"
-              >
-                <i class="fa-solid fa-circle-check text-[11px]" />
-                Will create: {{ counts.create }}
-              </span>
+              <div class="flex items-center gap-2">
+                <label
+                  class="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-slate-200"
+                >
+                  <input
+                    v-model="form.skipHolidays"
+                    type="checkbox"
+                    class="h-4 w-4 rounded border-slate-500 text-emerald-500
+                           focus:ring-emerald-400
+                           dark:border-slate-600"
+                  />
+                  <span>Skip Sundays and configured holidays.</span>
+                </label>
+              </div>
 
-              <span
-                v-if="form.skipHolidays"
-                class="inline-flex items-center gap-1.5 rounded-full bg-rose-50 text-rose-700
-                       dark:bg-rose-950/40 dark:text-rose-200
-                       border border-rose-200 dark:border-rose-700/60
-                       px-3 py-1 text-[11px] font-medium"
-              >
-                <i class="fa-solid fa-ban text-[11px]" />
-                Skipped: {{ counts.skipped }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Calendar preview -->
-          <div class="md:col-span-12 space-y-2">
-            <div class="flex items-center gap-2">
-              <i class="fa-solid fa-calendar-days text-[13px] text-indigo-500" />
-              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-                Preview Calendar
-              </h3>
+              <p class="text-[11px] text-slate-500 dark:text-slate-500">
+                When enabled, no request will be created on Sundays and dates listed in the holiday set.
+              </p>
             </div>
 
-            <div class="mt-1 overflow-x-auto">
-              <div class="min-w-[860px] space-y-2">
-                <!-- Header -->
-                <div class="grid grid-cols-7 gap-3 text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+            <!-- Summary -->
+            <div class="md:col-span-12 space-y-2">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-list-check text-[13px] text-sky-500" />
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-100">
+                  Summary
+                </h3>
+              </div>
+
+              <div class="mt-1 flex flex-wrap gap-2">
+                <span
+                  class="inline-flex items-center gap-1.5 rounded-full border border-indigo-200
+                         bg-indigo-50 px-3 py-1 text-[11px] font-medium text-indigo-700
+                         dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200"
+                >
+                  <i class="fa-solid fa-list text-[11px]" />
+                  Total days: {{ counts.total }}
+                </span>
+
+                <span
+                  class="inline-flex items-center gap-1.5 rounded-full border border-emerald-200
+                         bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-700
+                         dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-200"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Will create: {{ counts.create }}
+                </span>
+
+                <span
+                  v-if="form.skipHolidays"
+                  class="inline-flex items-center gap-1.5 rounded-full border border-rose-200
+                         bg-rose-50 px-3 py-1 text-[11px] font-medium text-rose-700
+                         dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                >
+                  <i class="fa-solid fa-ban text-[11px]" />
+                  Skipped: {{ counts.skipped }}
+                </span>
+              </div>
+            </div>
+
+            <!-- Calendar preview -->
+            <div class="md:col-span-12 space-y-2">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-calendar-days text-[13px] text-indigo-500" />
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-100">
+                  Preview Calendar
+                </h3>
+              </div>
+
+              <div class="mt-1 overflow-x-auto">
+                <div class="min-w-[860px] space-y-2">
+                  <!-- Header -->
                   <div
-                    v-for="w in weekHeader"
-                    :key="w"
-                    class="text-center uppercase tracking-wide"
+                    class="grid grid-cols-7 gap-3 text-[11px] font-semibold
+                           text-slate-600 dark:text-slate-400"
                   >
-                    {{ w }}
+                    <div
+                      v-for="w in weekHeader"
+                      :key="w"
+                      class="text-center uppercase tracking-wide"
+                    >
+                      {{ w }}
+                    </div>
                   </div>
-                </div>
 
-                <!-- Grid -->
-                <div class="grid grid-cols-7 gap-3">
-                  <div
-                    v-for="cell in gridCells"
-                    :key="cell.key"
-                    class="min-h-[110px] rounded-2xl border text-xs
-                           border-slate-500 dark:border-slate-700
-                           bg-slate-50/80 dark:bg-slate-900/70
-                           px-3 py-2.5 flex flex-col gap-2"
-                    :class="{
-                      'opacity-0 border-none bg-transparent p-0 min-h-0': cell.isSpacer,
-                      'bg-emerald-50/70 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700/70':
-                        !cell.isSpacer && cell.willCreate,
-                      'bg-rose-50/70 border-rose-200 dark:bg-rose-950/30 dark:border-rose-700/70':
-                        !cell.isSpacer && !cell.willCreate
-                    }"
-                  >
-                    <template v-if="!cell.isSpacer">
-                      <div class="flex items-center gap-2">
-                        <i class="fa-solid fa-calendar-day text-[11px] text-slate-500 dark:text-slate-500" />
-                        <div class="flex flex-col">
-                          <div class="flex items-center gap-1">
-                            <span class="font-semibold text-slate-800 dark:text-slate-100">
-                              {{ cell.weekday }}
-                            </span>
-                            <span
-                              v-if="cell.isSunday"
-                              class="text-[10px] px-1.5 py-0.5 rounded-full
-                                     bg-rose-100 text-rose-700
-                                     dark:bg-rose-900/70 dark:text-rose-100 font-semibold"
-                            >
-                              Sun
+                  <!-- Grid -->
+                  <div class="grid grid-cols-7 gap-3">
+                    <div
+                      v-for="cell in gridCells"
+                      :key="cell.key"
+                      class="flex min-h-[110px] flex-col gap-2 rounded-2xl border px-3 py-2.5 text-xs
+                             border-slate-400 bg-slate-50/80
+                             dark:border-slate-700 dark:bg-slate-900/70"
+                      :class="{
+                        'opacity-0 border-none bg-transparent p-0 min-h-0': cell.isSpacer,
+                        'bg-emerald-50/70 border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-700/70':
+                          !cell.isSpacer && cell.willCreate,
+                        'bg-rose-50/70 border-rose-200 dark:bg-rose-950/30 dark:border-rose-700/70':
+                          !cell.isSpacer && !cell.willCreate
+                      }"
+                    >
+                      <template v-if="!cell.isSpacer">
+                        <div class="flex items-center gap-2">
+                          <i
+                            class="fa-solid fa-calendar-day text-[11px]
+                                   text-slate-500 dark:text-slate-500"
+                          />
+                          <div class="flex flex-col">
+                            <div class="flex items-center gap-1">
+                              <span class="font-semibold text-slate-800 dark:text-slate-100">
+                                {{ cell.weekday }}
+                              </span>
+                              <span
+                                v-if="cell.isSunday"
+                                class="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold
+                                       text-rose-700 dark:bg-rose-900/70 dark:text-rose-100"
+                              >
+                                Sun
+                              </span>
+                            </div>
+                            <span class="text-[11px] text-slate-600 dark:text-slate-400">
+                              {{ cell.date }}
                             </span>
                           </div>
-                          <span class="text-[11px] text-slate-600 dark:text-slate-400">
-                            {{ cell.date }}
+                        </div>
+
+                        <div class="flex items-center gap-1.5 text-[11px]">
+                          <i
+                            v-if="cell.willCreate"
+                            class="fa-solid fa-circle-check text-emerald-500"
+                          />
+                          <i
+                            v-else
+                            class="fa-solid fa-ban text-rose-500"
+                          />
+                          <span
+                            :class="cell.willCreate
+                              ? 'text-emerald-700 dark:text-emerald-200'
+                              : 'text-rose-700 dark:text-rose-200'"
+                          >
+                            {{ cell.willCreate ? 'Will create' : 'Skipped' }}
                           </span>
                         </div>
-                      </div>
 
-                      <div class="flex items-center gap-1.5 text-[11px]">
-                        <i
-                          v-if="cell.willCreate"
-                          class="fa-solid fa-circle-check text-emerald-500"
-                        />
-                        <i
-                          v-else
-                          class="fa-solid fa-ban text-rose-500"
-                        />
-                        <span
-                          :class="cell.willCreate
-                            ? 'text-emerald-700 dark:text-emerald-200'
-                            : 'text-rose-700 dark:text-rose-200'"
+                        <div
+                          v-if="cell.isHoliday"
+                          class="mt-auto inline-flex items-center gap-1 rounded-full
+                                 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-700
+                                 dark:bg-amber-900/60 dark:text-amber-100"
                         >
-                          {{ cell.willCreate ? 'Will create' : 'Skipped' }}
-                        </span>
-                      </div>
-
-                      <div
-                        v-if="cell.isHoliday"
-                        class="mt-auto inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full
-                               bg-amber-50 text-amber-700
-                               dark:bg-amber-900/60 dark:text-amber-100"
-                      >
-                        <i class="fa-solid fa-sun" />
-                        <span>Holiday</span>
-                      </div>
-                    </template>
+                          <i class="fa-solid fa-sun" />
+                          <span>Holiday</span>
+                        </div>
+                      </template>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-        </template>
+          </template>
+        </div>
       </div>
     </div>
   </section>

@@ -176,342 +176,336 @@ watch(
 </script>
 
 <template>
+  <!-- OUTER CARD (same style as Requester) -->
   <section
-    class="rounded-2xl border border-slate-500 dark:border-slate-700
-           bg-white/90 dark:bg-slate-900/90 shadow-sm overflow-hidden"
+    class="rounded-2xl border border-slate-200 bg-white shadow-sm
+           dark:border-slate-700 dark:bg-slate-900 overflow-hidden"
   >
-    <!-- Header -->
+    <!-- Gradient header -->
     <header
-      class="px-4 py-3 border-b border-slate-500 dark:border-slate-700
-             bg-slate-900 dark:bg-slate-950 text-white"
+      class="flex items-center justify-between
+             rounded-t-2xl border-b border-slate-200
+             bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+             px-4 py-3 text-white
+             dark:border-slate-700"
     >
       <div class="flex items-center gap-3">
         <span
           class="inline-flex h-8 w-8 items-center justify-center rounded-2xl
-                 bg-sky-500 text-slate-950 text-sm"
+                 bg-white/90 text-sky-700 text-sm shadow-sm"
         >
           <i class="fa-solid fa-bowl-food" />
         </span>
         <div class="space-y-0.5">
-          <h2 class="text-sm font-semibold leading-tight">
+          <h2 class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80">
             Order Detail
           </h2>
-          <p class="text-[11px] leading-snug text-slate-300">
-            Date, location, time and how many people you are ordering for.
-          </p>
         </div>
       </div>
     </header>
 
-    <!-- Body -->
-    <div class="p-4 space-y-5">
-      <!-- Date & Type -->
-      <section class="space-y-2">
-        <div class="flex items-center gap-2">
-          <i class="fa-solid fa-calendar-day text-[13px] text-sky-500" />
-          <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-            Date &amp; Type
-          </h3>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <!-- Eat Date -->
-          <div class="space-y-1">
-            <label
-              class="block text-xs font-medium text-slate-700 dark:text-slate-200"
-            >
-              Eat Date
-            </label>
-            <input
-              v-model="props.form.eatDate"
-              type="date"
-              :min="minEatDate"
-              class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                     bg-white dark:bg-slate-900 px-3 py-2 text-sm
-                     text-slate-900 dark:text-slate-100
-                     focus:outline-none
-                     focus:ring-2 focus:ring-sky-500
-                     focus:border-sky-500"
-            />
-          </div>
-
-          <!-- Order Type -->
-          <div class="space-y-1">
-            <label
-              class="block text-xs font-medium text-slate-700 dark:text-slate-200"
-            >
-              Order Type
-            </label>
-            <select
-              v-model="props.form.orderType"
-              class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                     bg-white dark:bg-slate-900 px-3 py-2 text-sm
-                     text-slate-900 dark:text-slate-100
-                     focus:outline-none
-                     focus:ring-2 focus:ring-sky-500
-                     focus:border-sky-500"
-            >
-              <option
-                v-for="opt in ORDER_TYPES"
-                :key="opt.value"
-                :value="opt.value"
-              >
-                {{ opt.title }} — {{ opt.subtitle }}
-              </option>
-            </select>
-          </div>
-        </div>
-      </section>
-
-      <!-- Location -->
-      <section class="space-y-2">
-        <div class="flex items-center gap-2">
-          <i class="fa-solid fa-location-dot text-[13px] text-sky-500" />
-          <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-            Location
-          </h3>
-        </div>
-
-        <div class="space-y-2">
-          <div class="space-y-1">
-            <label
-              class="block text-xs font-medium text-slate-700 dark:text-slate-200"
-            >
-              Location
-            </label>
-            <select
-              v-model="props.form.location"
-              class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                     bg-white dark:bg-slate-900 px-3 py-2 text-sm
-                     text-slate-900 dark:text-slate-100
-                     focus:outline-none
-                     focus:ring-2 focus:ring-sky-500
-                     focus:border-sky-500"
-            >
-              <option
-                v-for="loc in LOCATIONS"
-                :key="loc.value"
-                :value="loc.value"
-              >
-                {{ loc.title }} — {{ loc.subtitle }}
-              </option>
-            </select>
-          </div>
-
-          <div v-if="showOtherLocation" class="space-y-1">
-            <label
-              class="block text-xs font-medium text-slate-700 dark:text-slate-200"
-            >
-              Other Location
-            </label>
-            <input
-              v-model="props.form.locationOther"
-              type="text"
-              placeholder="e.g. Building B, Meeting Room 2, Warehouse gate…"
-              class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                     bg-white dark:bg-slate-900 px-3 py-2 text-sm
-                     text-slate-900 dark:text-slate-100
-                     focus:outline-none
-                     focus:ring-2 focus:ring-sky-500
-                     focus:border-sky-500"
-            />
-          </div>
-        </div>
-      </section>
-
-      <!-- Time -->
-      <section
-        v-if="isTimedOrder"
-        class="space-y-2"
+    <!-- INNER WRAPPER -->
+    <div
+      class="rounded-b-2xl border-t border-slate-200 bg-slate-50/80 p-3
+             dark:border-slate-700 dark:bg-slate-950/80"
+    >
+      <!-- INNER CARD -->
+      <div
+        class="rounded-xl border border-slate-200 bg-white/95 p-4 shadow-sm
+               dark:border-slate-700 dark:bg-slate-950/90"
       >
-        <div class="flex items-center gap-2">
-          <i class="fa-solid fa-clock text-[13px] text-sky-500" />
-          <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-            Eat Time
-          </h3>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <!-- Start -->
-          <div class="space-y-1">
-            <div class="text-[11px] font-medium text-slate-600 dark:text-slate-300">
-              Eat Start
+        <div class="space-y-5">
+          <!-- Date & Type -->
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-calendar-day text-[13px] text-sky-500" />
+              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
+                Date &amp; Type
+              </h3>
             </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <!-- Eat Date -->
+              <div class="space-y-1">
+                <label
+                  class="block text-xs font-medium text-slate-700 dark:text-slate-200"
+                >
+                  Eat Date
+                </label>
+                <input
+                  v-model="props.form.eatDate"
+                  type="date"
+                  :min="minEatDate"
+                  class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                         bg-white px-3 py-2 text-sm
+                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                         focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+
+              <!-- Order Type -->
+              <div class="space-y-1">
+                <label
+                  class="block text-xs font-medium text-slate-700 dark:text-slate-200"
+                >
+                  Order Type
+                </label>
+                <select
+                  v-model="props.form.orderType"
+                  class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                         bg-white px-3 py-2 text-sm
+                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                         focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                >
+                  <option
+                    v-for="opt in ORDER_TYPES"
+                    :key="opt.value"
+                    :value="opt.value"
+                  >
+                    {{ opt.title }} — {{ opt.subtitle }}
+                  </option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <!-- Location -->
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-location-dot text-[13px] text-sky-500" />
+              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
+                Location
+              </h3>
+            </div>
+
+            <div class="space-y-2">
+              <div class="space-y-1">
+                <label
+                  class="block text-xs font-medium text-slate-700 dark:text-slate-200"
+                >
+                  Location
+                </label>
+                <select
+                  v-model="props.form.location"
+                  class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                         bg-white px-3 py-2 text-sm
+                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                         focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                >
+                  <option
+                    v-for="loc in LOCATIONS"
+                    :key="loc.value"
+                    :value="loc.value"
+                  >
+                    {{ loc.title }} — {{ loc.subtitle }}
+                  </option>
+                </select>
+              </div>
+
+              <div v-if="showOtherLocation" class="space-y-1">
+                <label
+                  class="block text-xs font-medium text-slate-700 dark:text-slate-200"
+                >
+                  Other Location
+                </label>
+                <input
+                  v-model="props.form.locationOther"
+                  type="text"
+                  placeholder="e.g. Building B, Meeting Room 2, Warehouse gate…"
+                  class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                         bg-white px-3 py-2 text-sm
+                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                         focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                />
+              </div>
+            </div>
+          </section>
+
+          <!-- Time -->
+          <section
+            v-if="isTimedOrder"
+            class="space-y-2"
+          >
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-clock text-[13px] text-sky-500" />
+              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
+                Eat Time
+              </h3>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <!-- Start -->
+              <div class="space-y-1">
+                <div class="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                  Eat Start
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <select
+                    v-model="props.form.eatStartHour"
+                    class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                           bg-white px-2.5 py-1.5 text-sm
+                           text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                           focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  >
+                    <option value="">HH</option>
+                    <option
+                      v-for="h in HOURS"
+                      :key="h"
+                      :value="h"
+                    >
+                      {{ h }}
+                    </option>
+                  </select>
+
+                  <select
+                    v-model="props.form.eatStartMinute"
+                    class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                           bg-white px-2.5 py-1.5 text-sm
+                           text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                           focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  >
+                    <option value="">MM</option>
+                    <option
+                      v-for="m in MINUTES"
+                      :key="m"
+                      :value="m"
+                    >
+                      {{ m }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- End -->
+              <div class="space-y-1">
+                <div class="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                  Eat End
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <select
+                    v-model="props.form.eatEndHour"
+                    class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                           bg-white px-2.5 py-1.5 text-sm
+                           text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                           focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  >
+                    <option value="">HH</option>
+                    <option
+                      v-for="h in HOURS"
+                      :key="h"
+                      :value="h"
+                    >
+                      {{ h }}
+                    </option>
+                  </select>
+
+                  <select
+                    v-model="props.form.eatEndMinute"
+                    class="block w-full rounded-xl border border-slate-400 dark:border-slate-600
+                           bg-white px-2.5 py-1.5 text-sm
+                           text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                           focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  >
+                    <option value="">MM</option>
+                    <option
+                      v-for="m in MINUTES"
+                      :key="m"
+                      :value="m"
+                    >
+                      {{ m }}
+                    </option>
+                  </select>
+                </div>
+
+                <p
+                  v-if="timeError"
+                  class="mt-1 text-[11px] text-red-500 dark:text-red-300"
+                >
+                  {{ timeError }}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Meals -->
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-utensils text-[13px] text-sky-500" />
+              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
+                Meal
+              </h3>
+            </div>
+
             <div class="grid grid-cols-2 gap-2">
-              <select
-                v-model="props.form.eatStartHour"
-                class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                       bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm
-                       text-slate-900 dark:text-slate-100
-                       focus:outline-none
-                       focus:ring-2 focus:ring-sky-500
-                       focus:border-sky-500"
+              <button
+                v-for="m in MEALS"
+                :key="m"
+                type="button"
+                :disabled="isMealDisabled(m)"
+                class="flex flex-col gap-0.5 rounded-xl px-3 py-2.5 text-left text-xs font-semibold
+                       shadow-sm transition sm:text-[13px]
+                       disabled:cursor-not-allowed disabled:opacity-50"
+                :class="props.form.meals.includes(m)
+                  ? 'border border-sky-500 bg-sky-500 text-white shadow-md'
+                  : 'border border-slate-400 bg-slate-50/80 text-slate-900 hover:border-sky-500 hover:bg-sky-50/70 dark:border-slate-600 dark:bg-slate-900/60 dark:text-slate-50 dark:hover:border-sky-400 dark:hover:bg-slate-800/80'"
+                @click="
+                  props.form.meals = props.form.meals.includes(m)
+                    ? props.form.meals.filter(x => x !== m)
+                    : [...props.form.meals, m]
+                "
               >
-                <option value="">HH</option>
-                <option
-                  v-for="h in HOURS"
-                  :key="h"
-                  :value="h"
-                >
-                  {{ h }}
-                </option>
-              </select>
-
-              <select
-                v-model="props.form.eatStartMinute"
-                class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                       bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm
-                       text-slate-900 dark:text-slate-100
-                       focus:outline-none
-                       focus:ring-2 focus:ring-sky-500
-                       focus:border-sky-500"
-              >
-                <option value="">MM</option>
-                <option
-                  v-for="m in MINUTES"
-                  :key="m"
-                  :value="m"
-                >
+                <span class="text-[13px] leading-tight">
                   {{ m }}
-                </option>
-              </select>
-            </div>
-          </div>
-
-          <!-- End -->
-          <div class="space-y-1">
-            <div class="text-[11px] font-medium text-slate-600 dark:text-slate-300">
-              Eat End
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <select
-                v-model="props.form.eatEndHour"
-                class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                       bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm
-                       text-slate-900 dark:text-slate-100
-                       focus:outline-none
-                       focus:ring-2 focus:ring-sky-500
-                       focus:border-sky-500"
-              >
-                <option value="">HH</option>
-                <option
-                  v-for="h in HOURS"
-                  :key="h"
-                  :value="h"
-                >
-                  {{ h }}
-                </option>
-              </select>
-
-              <select
-                v-model="props.form.eatEndMinute"
-                class="block w-full rounded-xl border border-slate-500 dark:border-slate-700
-                       bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm
-                       text-slate-900 dark:text-slate-100
-                       focus:outline-none
-                       focus:ring-2 focus:ring-sky-500
-                       focus:border-sky-500"
-              >
-                <option value="">MM</option>
-                <option
-                  v-for="m in MINUTES"
-                  :key="m"
-                  :value="m"
-                >
-                  {{ m }}
-                </option>
-              </select>
+                </span>
+                <span class="km text-[11px] opacity-80">
+                  {{ MEAL_KM[m] }}
+                </span>
+              </button>
             </div>
 
             <p
-              v-if="timeError"
+              v-if="!props.form.meals.length"
               class="mt-1 text-[11px] text-red-500 dark:text-red-300"
             >
-              {{ timeError }}
+              Please select at least one meal.
             </p>
-          </div>
-        </div>
-      </section>
+          </section>
 
-      <!-- Meals -->
-      <section class="space-y-2">
-        <div class="flex items-center gap-2">
-          <i class="fa-solid fa-utensils text-[13px] text-sky-500" />
-          <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-            Meal
-          </h3>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            v-for="m in MEALS"
-            :key="m"
-            type="button"
-            :disabled="isMealDisabled(m)"
-            class="rounded-xl px-3 py-2.5 text-left text-xs sm:text-[13px] font-semibold
-                   transition shadow-sm flex flex-col gap-0.5
-                   disabled:opacity-50 disabled:cursor-not-allowed"
-            :class="props.form.meals.includes(m)
-              ? 'bg-sky-500 text-white border border-sky-500 shadow-md'
-              : 'bg-slate-50/80 border border-slate-500 text-slate-900 hover:border-sky-500 hover:bg-sky-50/70 dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-50 dark:hover:border-sky-400 dark:hover:bg-slate-800/80'"
-            @click="
-              props.form.meals = props.form.meals.includes(m)
-                ? props.form.meals.filter(x => x !== m)
-                : [...props.form.meals, m]
-            "
-          >
-            <span class="text-[13px] leading-tight">
-              {{ m }}
-            </span>
-            <span class="text-[11px] km opacity-80">
-              {{ MEAL_KM[m] }}
-            </span>
-          </button>
-        </div>
-
-        <p
-          v-if="!props.form.meals.length"
-          class="mt-1 text-[11px] text-red-500 dark:text-red-300"
-        >
-          Please select at least one meal.
-        </p>
-      </section>
-
-      <!-- Quantity -->
-      <section class="space-y-2">
-        <div class="flex items-center gap-2">
-          <i class="fa-solid fa-people-group text-[13px] text-sky-500" />
-          <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
-            Quantity
-          </h3>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div class="space-y-1">
-            <label
-              class="block text-xs font-medium text-slate-700 dark:text-slate-200"
-            >
-              Number of people
-            </label>
+          <!-- Quantity -->
+          <section class="space-y-2">
             <div class="flex items-center gap-2">
-              <input
-                v-model.number="props.form.quantity"
-                type="number"
-                min="1"
-                class="block w-28 rounded-xl border border-slate-500 dark:border-slate-700
-                       bg-white dark:bg-slate-900 px-3 py-2 text-sm
-                       text-slate-900 dark:text-slate-100
-                       focus:outline-none
-                       focus:ring-2 focus:ring-sky-500
-                       focus:border-sky-500"
-              />
-              <span class="text-[11px] text-slate-600 dark:text-slate-400">
-                people
-              </span>
+              <i class="fa-solid fa-people-group text-[13px] text-sky-500" />
+              <h3 class="text-xs font-semibold tracking-wide text-slate-700 dark:text-slate-100 uppercase">
+                Quantity
+              </h3>
             </div>
-          </div>
+
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="space-y-1">
+                <label
+                  class="block text-xs font-medium text-slate-700 dark:text-slate-200"
+                >
+                  Number of people
+                </label>
+                <div class="flex items-center gap-2">
+                  <input
+                    v-model.number="props.form.quantity"
+                    type="number"
+                    min="1"
+                    class="block w-28 rounded-xl border border-slate-400 dark:border-slate-600
+                           bg-white px-3 py-2 text-sm
+                           text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                           focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                  />
+                  <span class="text-[11px] text-slate-600 dark:text-slate-400">
+                    people
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-      </section>
+      </div>
     </div>
   </section>
 </template>

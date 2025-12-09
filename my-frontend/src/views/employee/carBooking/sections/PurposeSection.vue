@@ -94,7 +94,19 @@ function onTicketChange (e) {
                bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
                px-4 py-3 text-white"
     >
-      <span class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80">Purpose</span>
+      <div class="flex items-center gap-3">
+        <span
+          class="inline-flex h-8 w-8 items-center justify-center rounded-2xl
+                 bg-white/90 text-emerald-600 text-sm shadow-sm"
+        >
+          <i class="fa-solid fa-car-side"></i>
+        </span>
+        <div class="space-y-0.5">
+          <h2 class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80t">
+            Purpose
+          </h2>
+        </div>
+      </div>
     </header>
 
       <div

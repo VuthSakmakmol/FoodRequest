@@ -417,13 +417,8 @@ loadHolidays()
 </script>
 
 <template>
-  <!-- Tight padding; layout already has bg-slate-50 -->
-  <div class="px-1 py-1 sm:px-0">
+
     <!-- Main card -->
-    <div
-      class="rounded-2xl border border-slate-600 bg-slate-100/90 shadow-sm
-             dark:border-slate-700 dark:bg-slate-900/80"
-    >
       <!-- Alerts -->
       <div v-if="error" class="px-2 pt-2 sm:px-3">
         <div
@@ -455,7 +450,7 @@ loadHolidays()
           <div class="grid grid-cols-12 gap-3 sm:gap-4">
             <!-- STEP 1: Requester -->
             <section
-              class="col-span-12 rounded-xl border border-slate-500 bg-slate-50/80 p-3
+              class="col-span-12 rounded-xl border border-slate-400 bg-slate-50/80 p-3
                      dark:border-slate-700/80 dark:bg-slate-900/70
                      md:col-span-4"
             >
@@ -469,7 +464,7 @@ loadHolidays()
 
             <!-- STEP 2: Order details -->
             <section
-              class="col-span-12 rounded-xl border border-slate-500 bg-slate-50 p-3
+              class="col-span-12 rounded-xl border border-slate-400 bg-slate-50 p-3
                      shadow-[0_4px_10px_rgba(15,23,42,0.04)]
                      dark:border-slate-700/80 dark:bg-slate-900
                      md:col-span-8"
@@ -485,7 +480,7 @@ loadHolidays()
 
             <!-- STEP 3: Menu & allergy -->
             <section
-              class="col-span-12 rounded-xl border border-slate-500 bg-slate-50 p-3
+              class="col-span-12 rounded-xl border border-slate-400 bg-slate-50 p-3
                      shadow-[0_4px_10px_rgba(15,23,42,0.04)]
                      dark:border-slate-700/80 dark:bg-slate-900"
             >
@@ -499,7 +494,7 @@ loadHolidays()
 
             <!-- STEP 4: Recurring -->
             <section
-              class="col-span-12 rounded-xl border border-slate-500 bg-slate-50/80 p-3
+              class="col-span-12 rounded-xl border border-slate-400 bg-slate-50/80 p-3
                      dark:border-slate-700/80 dark:bg-slate-900/70"
             >
               <RecurringBookingSection :form="form" :holidays="[...customHolidaySet]" />
@@ -510,26 +505,10 @@ loadHolidays()
 
       <!-- Bottom toolbar -->
       <div
-        class="flex items-center justify-end gap-2 border-t border-slate-500
+        class="flex items-center justify-end gap-2 border-t border-slate-400
                bg-slate-100/80 px-2 py-1.5 text-[11px]
                dark:border-slate-800 dark:bg-slate-900/80 sm:px-3"
       >
-        <span class="hidden text-[10px] text-slate-500 dark:text-slate-400 sm:inline">
-          Tip:
-          <kbd
-            class="rounded border border-slate-400/60 bg-slate-800/80 px-1 text-[9px] text-slate-100"
-          >
-            Ctrl
-          </kbd>
-          +
-          <kbd
-            class="rounded border border-slate-400/60 bg-slate-800/80 px-1 text-[9px] text-slate-100"
-          >
-            Enter
-          </kbd>
-          to submit
-        </span>
-
         <button
           type="button"
           class="inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-semibold
@@ -557,6 +536,5 @@ loadHolidays()
           Submit
         </button>
       </div>
-    </div>
-  </div>
+
 </template>

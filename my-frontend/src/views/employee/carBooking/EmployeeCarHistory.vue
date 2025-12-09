@@ -326,7 +326,7 @@ function goLast  () { page.value = pageCount.value }
             </div>
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-slate-800"
+              class="inline-flex items-center gap-2 rounded-full bg-slate-500 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-slate-500"
               @click="loadSchedule"
             >
               <i
@@ -424,8 +424,8 @@ function goLast  () { page.value = pageCount.value }
           <div v-if="!isMobile" class="hidden md:block">
             <div class="overflow-x-auto">
               <table class="min-w-full text-xs">
-                <thead class="border-b border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/60">
-                  <tr class="text-[11px] uppercase tracking-wide text-slate-500">
+                <thead class="border-b border-slate-200  bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/60">
+                  <tr class="text-[11px] uppercase tracking-wide text-slate-800 dark:text-slate-200 ">
                     <th class="px-3 py-2 text-left">Time</th>
                     <th class="px-3 py-2 text-left">Category</th>
                     <th class="px-3 py-2 text-left">Requester</th>
