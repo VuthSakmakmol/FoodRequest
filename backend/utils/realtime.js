@@ -8,13 +8,16 @@ const ROOMS = {
   ADMINS: 'admins',
   CHEFS: 'chefs',
 
-  // NEW: role-wide rooms for transportation
+  // role-wide rooms for transportation
   DRIVERS: 'drivers',
   MESSENGERS: 'messengers',
 
   EMPLOYEE: (id) => `employee:${String(id)}`,
   COMPANY: (id)  => `company:${String(id)}`,
   BOOKING: (id)  => `booking:${String(id)}`,
+
+  // per-loginId room, used by leave module etc.
+  USER: (loginId) => `user:${String(loginId)}`,
 }
 
 const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
@@ -75,14 +78,50 @@ function broadcastCarBooking(io, doc, event, payload) {
 
   const rooms = new Set([
     ROOMS.ADMINS,                           // all transport/admin users
-    ROOMS.DRIVERS,                         // NEW: all drivers online
-    ROOMS.MESSENGERS,                      // NEW: all messengers online
-    empId && ROOMS.EMPLOYEE(empId),        // specific requester
-    bookingId && ROOMS.BOOKING(bookingId), // detail page for this booking
+    ROOMS.DRIVERS,                          // all drivers online
+    ROOMS.MESSENGERS,                       // all messengers online
+    empId && ROOMS.EMPLOYEE(empId),         // specific requester
+    bookingId && ROOMS.BOOKING(bookingId),  // detail page for this booking
   ])
 
   for (const room of rooms) {
-    if (room) emitToRoom(io, room, event, payload)
+    if (room) emitToRoom(io, room, event, payload || (doc.toObject ? doc.toObject() : doc))
+  }
+}
+
+/* ───────────────────────────
+ *  Central broadcast for LeaveRequest
+ *  (used by leave controllers)
+ * ─────────────────────────── */
+function broadcastLeaveRequest(io, doc, event, payload) {
+  if (!io || !doc || !event) return
+
+  const employeeId     = str(doc.employeeId || '')
+  const requesterLogin = str(doc.requesterLoginId || '')
+  const managerLoginId = str(doc.managerLoginId || '')
+  const gmLoginId      = str(doc.gmLoginId || '')
+
+  const body = payload || (doc.toObject ? doc.toObject() : doc)
+
+  // helpful debug
+  log('leave:broadcast', event, {
+    id: body._id,
+    employeeId,
+    requesterLogin,
+    managerLoginId,
+    gmLoginId,
+  })
+
+  const rooms = new Set([
+    ROOMS.ADMINS,                                // leave admins / global viewers
+    employeeId && ROOMS.EMPLOYEE(employeeId),    // expat by employeeId
+    requesterLogin && ROOMS.USER(requesterLogin),// expat by loginId
+    managerLoginId && ROOMS.USER(managerLoginId),// manager
+    gmLoginId && ROOMS.USER(gmLoginId),          // GM
+  ])
+
+  for (const room of rooms) {
+    if (room) emitToRoom(io, room, event, body)
   }
 }
 
@@ -117,24 +156,45 @@ function registerSocket(io) {
     // Basic identity from token / handshake
     const role = str(socket.user?.role || socket.handshake.auth?.role).toUpperCase()
     const employeeId = str(
-      socket.handshake.auth?.employeeId || socket.handshake.query?.employeeId
+      socket.handshake.auth?.employeeId ||
+      socket.handshake.query?.employeeId ||
+      socket.user?.employeeId
     )
     const companyId = str(
       socket.user?.companyId ||
-        socket.handshake.auth?.companyId ||
-        socket.handshake.query?.companyId
+      socket.handshake.auth?.companyId ||
+      socket.handshake.query?.companyId
     )
+
+    // 🔧 IMPORTANT: support both `id` and `loginId` from JWT
+    const loginId = str(
+      socket.user?.id ||
+      socket.user?.loginId ||
+      socket.handshake.auth?.loginId
+    )
+
+    // Debug identity
+    log('SOCKET IDENTITY', {
+      socketId: socket.id,
+      role,
+      employeeId,
+      companyId,
+      loginId,
+    })
 
     // Auto-join default rooms based on role+identity
     if (role === 'ADMIN')     joinRoomSafe(socket, ROOMS.ADMINS)
     if (role === 'CHEF')      joinRoomSafe(socket, ROOMS.CHEFS)
 
-    // NEW: drivers & messengers
+    // drivers & messengers
     if (role === 'DRIVER')    joinRoomSafe(socket, ROOMS.DRIVERS)
     if (role === 'MESSENGER') joinRoomSafe(socket, ROOMS.MESSENGERS)
 
     if (employeeId) joinRoomSafe(socket, ROOMS.EMPLOYEE(employeeId))
     if (companyId)  joinRoomSafe(socket, ROOMS.COMPANY(companyId))
+
+    // personal user room (loginId) for leave module
+    if (loginId)    joinRoomSafe(socket, ROOMS.USER(loginId))
 
     dumpRooms(socket, 'post-handshake')
 
@@ -147,13 +207,14 @@ function registerSocket(io) {
       if (p.role === 'ADMIN')     joinRoomSafe(socket, ROOMS.ADMINS)
       if (p.role === 'CHEF')      joinRoomSafe(socket, ROOMS.CHEFS)
 
-      // NEW: allow explicit subscription by role
+      // explicit subscription by role
       if (p.role === 'DRIVER')    joinRoomSafe(socket, ROOMS.DRIVERS)
       if (p.role === 'MESSENGER') joinRoomSafe(socket, ROOMS.MESSENGERS)
 
       if (p.employeeId) joinRoomSafe(socket, ROOMS.EMPLOYEE(p.employeeId))
       if (p.companyId)  joinRoomSafe(socket, ROOMS.COMPANY(p.companyId))
       if (p.bookingId)  joinRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
+      if (p.loginId)    joinRoomSafe(socket, ROOMS.USER(p.loginId))
 
       dumpRooms(socket, 'after-subscribe')
       safeAck(ack, { ok: true, rooms: listedRooms(socket) })
@@ -165,13 +226,14 @@ function registerSocket(io) {
       if (p.role === 'ADMIN')     leaveRoomSafe(socket, ROOMS.ADMINS)
       if (p.role === 'CHEF')      leaveRoomSafe(socket, ROOMS.CHEFS)
 
-      // NEW: explicit unsubscribe by role
+      // explicit unsubscribe by role
       if (p.role === 'DRIVER')    leaveRoomSafe(socket, ROOMS.DRIVERS)
       if (p.role === 'MESSENGER') leaveRoomSafe(socket, ROOMS.MESSENGERS)
 
       if (p.employeeId) leaveRoomSafe(socket, ROOMS.EMPLOYEE(p.employeeId))
       if (p.companyId)  leaveRoomSafe(socket, ROOMS.COMPANY(p.companyId))
       if (p.bookingId)  leaveRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
+      if (p.loginId)    leaveRoomSafe(socket, ROOMS.USER(p.loginId))
 
       dumpRooms(socket, 'after-unsubscribe')
       safeAck(ack, { ok: true, rooms: listedRooms(socket) })
@@ -188,7 +250,6 @@ function registerSocket(io) {
       const bookingId = str(payload.bookingId)
       if (!bookingId) return
 
-      // Simple backpressure: do nothing if underlying buffer is big
       const buf = socket.conn?.transport?.bufferSize ?? 0
       if (buf > 64 * 1024) return
 
@@ -223,7 +284,6 @@ function attachDebugEndpoints(app) {
     const rooms = []
 
     for (const [name, set] of io.sockets.adapter.rooms) {
-      // Skip individual socket rooms
       if (socketIds.has(name)) continue
       rooms.push({ name, listeners: set.size })
     }
@@ -277,10 +337,11 @@ function safeAck(ack, payload) {
 
 function normalizeSubPayload(p = {}) {
   return {
-    role: str(p.role || '').toUpperCase(),
+    role:       str(p.role || '').toUpperCase(),
     employeeId: str(p.employeeId || ''),
-    companyId: str(p.companyId || ''),
-    bookingId: str(p.bookingId || ''),
+    companyId:  str(p.companyId || ''),
+    bookingId:  str(p.bookingId || ''),
+    loginId:    str(p.loginId || ''),
   }
 }
 
@@ -288,9 +349,10 @@ function normalizeSubPayload(p = {}) {
  * Enforce simple access rules when joining rooms via `subscribe`
  */
 function validateJoin(socket, p) {
-  const role = str(socket.user?.role).toUpperCase()
-  const userEmpId = str(socket.user?.employeeId)
+  const role        = str(socket.user?.role).toUpperCase()
+  const userEmpId   = str(socket.user?.employeeId)
   const userCompany = str(socket.user?.companyId)
+  const userLoginId = str(socket.user?.id || socket.user?.loginId)
 
   // Admin room: only ADMIN
   if (p.role === 'ADMIN' && role !== 'ADMIN') return 'FORBIDDEN:ADMIN_ROOM'
@@ -299,9 +361,6 @@ function validateJoin(socket, p) {
   if (p.role === 'CHEF' && !['ADMIN', 'CHEF'].includes(role)) {
     return 'FORBIDDEN:CHEF_ROOM'
   }
-
-  // NOTE: DRIVER / MESSENGER rooms are not restricted here;
-  // any authenticated socket with role DRIVER/MESSENGER will pass.
 
   // Employee room: ADMIN can see anyone, others only their own employeeId
   if (p.employeeId) {
@@ -317,6 +376,13 @@ function validateJoin(socket, p) {
     }
   }
 
+  // User room: ADMIN can see anyone, others only themselves
+  if (p.loginId) {
+    if (role !== 'ADMIN' && p.loginId !== userLoginId) {
+      return 'FORBIDDEN:USER_ROOM'
+    }
+  }
+
   // Booking room: currently no extra checks
   return ''
 }
@@ -329,6 +395,7 @@ module.exports = {
   emitToRoom,
   emitCounterpart,
   broadcastCarBooking,
+  broadcastLeaveRequest,
   registerSocket,
   attachDebugEndpoints,
 }

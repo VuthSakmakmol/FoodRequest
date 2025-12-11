@@ -55,6 +55,7 @@ const subscribedRoles = new Set()
 const joinedBookings  = new Set()
 const joinedEmployees = new Set()
 const joinedCompanies = new Set()
+const joinedUsers     = new Set()
 
 function waitConnected() {
   return new Promise((resolve) => {
@@ -80,17 +81,15 @@ export function setSocketAuthToken(token) {
     return
   }
 
-  // attach token to next handshake
   socket.auth = authToken ? { ...(socket.auth || {}), token: authToken } : {}
 
-  // force a reconnect so server sees new JWT
   if (socket.connected) {
     socket.disconnect()
   }
   socket.connect()
 }
 
-/* ---------- ROLE rooms (ADMIN, CHEF, DRIVER, MESSENGER) ---------- */
+/* ---------- ROLE rooms (ADMIN, CHEF, DRIVER, MESSENGER, LEAVE_MANAGER, LEAVE_GM, etc.) ---------- */
 export async function subscribeRole(role) {
   role = String(role || '').toUpperCase()
   if (!role || subscribedRoles.has(role)) return
@@ -109,7 +108,17 @@ export async function unsubscribeRole(role) {
   subscribedRoles.delete(role)
 }
 
-/* ---------- BOOKING rooms (for driver/messenger live status) ---------- */
+/* Helper: accept either string or { role } */
+export function subscribeRoleIfNeeded(payload = {}) {
+  const role =
+    typeof payload === 'string'
+      ? String(payload || '').toUpperCase()
+      : String(payload.role || '').toUpperCase()
+
+  if (role) subscribeRole(role)
+}
+
+/* ---------- BOOKING rooms ---------- */
 export async function subscribeBookingRooms(ids = []) {
   await waitConnected()
 
@@ -121,7 +130,6 @@ export async function subscribeBookingRooms(ids = []) {
     joinedBookings.add(id)
   })
 
-  // return cleanup function
   return async () => {
     await waitConnected()
     uniq.forEach((id) => {
@@ -132,7 +140,7 @@ export async function subscribeBookingRooms(ids = []) {
   }
 }
 
-/* ---------- EMPLOYEE + COMPANY rooms (for employee/my-booking & dashboards) ---------- */
+/* ---------- EMPLOYEE + COMPANY + USER rooms ---------- */
 export async function subscribeEmployeeIfNeeded(employeeId) {
   const id = String(employeeId || '')
   if (!id || joinedEmployees.has(id)) return
@@ -151,13 +159,17 @@ export async function subscribeCompanyIfNeeded(companyId) {
   joinedCompanies.add(id)
 }
 
+export async function subscribeUserIfNeeded(loginId) {
+  const id = String(loginId || '')
+  if (!id || joinedUsers.has(id)) return
+
+  await waitConnected()
+  s.emit('subscribe', { loginId: id }, () => {})
+  joinedUsers.add(id)
+}
+
 /* ---------- small helpers ---------- */
 export function onSocket(event, handler) {
   s.on(event, handler)
   return () => s.off(event, handler)
-}
-
-export function subscribeRoleIfNeeded(payload = {}) {
-  const role = String(payload.role || '').toUpperCase()
-  if (role) subscribeRole(role)
 }

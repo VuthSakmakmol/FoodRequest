@@ -27,14 +27,14 @@ const LEAVE_ADMIN_CONFIG = {
   loginId: 'leave_admin',
   name: 'Leave Admin',
   password: DEFAULT_LEAVE_ADMIN_PWD,
-  telegramChatId: '',          // optional
+  telegramChatId: '899957340',          
 }
 
 const GM_CONFIG = {
   loginId: 'leave_gm',
   name: 'Expat GM',
   password: DEFAULT_GM_PWD,
-  telegramChatId: '', // 👈 put GM Telegram chat ID here if any
+  telegramChatId: '7163451169', 
 }
 
 const MANAGERS = [
@@ -42,8 +42,8 @@ const MANAGERS = [
     loginId: 'leave_mgr_hr',
     name: 'HR Manager',
     password: DEFAULT_MANAGER_PWD,
-    telegramChatId: '661186113', // 👉 manager telegramChatId
-    employees: ['51310021', '51510016', '51710019'],
+    telegramChatId: '7163451169', 
+    employees: ['52520351', '51510016', '51710019'],
   },
   // add more managers here...
 ]

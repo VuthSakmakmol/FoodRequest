@@ -86,7 +86,9 @@ app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 
 //========================== ADMIN PANEL (Leave module) ===========================
 // Leave requests (employee + manager + gm)
-app.use('/api/leave/requests', require('./routes/leave/leave.routes'));
+app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
+console.log('[mount] /api/leave/requests -> leave.routes')
+
 // Leave admin (profiles + types)
 app.use('/api/admin/leave', require('./routes/leave/leaveProfile-admin.routes'));
 app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'));

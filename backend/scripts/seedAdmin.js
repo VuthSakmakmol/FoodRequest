@@ -4,7 +4,7 @@ const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 const User = require('../models/User')
 
-;(async () => {
+(async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI, {})
 
@@ -105,6 +105,7 @@ const User = require('../models/User')
     // Ah Mab 1102968377
     // Bro Ant 7163451169
     // Bong Cheat 5534785017
+    // Kakvey 899957340
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):
     const messengers = [

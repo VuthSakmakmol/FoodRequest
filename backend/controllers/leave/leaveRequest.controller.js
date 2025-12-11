@@ -1,14 +1,26 @@
 // backend/controllers/leave/leaveRequest.controller.js
+/* eslint-disable no-console */
+
 const LeaveRequest  = require('../../models/leave/LeaveRequest')
 const LeaveType     = require('../../models/leave/LeaveType')
 const LeaveProfile  = require('../../models/leave/LeaveProfile')
 const { enumerateLocalDates } = require('../../utils/datetime')
-const { notifyNewLeaveToManager } = require('../../services/leave/leave.telegram.notify')
+const {
+  notifyNewLeaveToManager,
+  notifyManagerDecision,
+  notifyNewLeaveToGm,
+  notifyGmDecision,
+} = require('../../services/leave/leave.telegram.notify')
+const { broadcastLeaveRequest } = require('../../utils/realtime')
 
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
+const DEBUG =
+  String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
 
-
-// apply approved leave usage into LeaveProfile.balances
+/* ────────────────────────────────────────────────
+ * Helper: apply approved leave usage into profile
+ * ────────────────────────────────────────────────
+ */
 async function applyApprovedLeaveToProfile(reqDoc) {
   const days = Number(reqDoc.totalDays || 0)
   if (!days) return
@@ -25,8 +37,12 @@ async function applyApprovedLeaveToProfile(reqDoc) {
   const profile = await LeaveProfile.findOne({ employeeId })
   if (!profile) return
 
+  if (!Array.isArray(profile.balances)) {
+    profile.balances = []
+  }
+
   // find / create balance row for this type
-  let bal = (profile.balances || []).find(
+  let bal = profile.balances.find(
     b => String(b.leaveTypeCode).toUpperCase() === leaveTypeCode
   )
 
@@ -40,7 +56,8 @@ async function applyApprovedLeaveToProfile(reqDoc) {
     profile.balances.push(bal)
   }
 
-  // If this type does not require balance (UL), just track used
+  // If this type does not require balance (e.g. UL),
+  // we just track "used" but don't touch "remaining"
   if (!type.requiresBalance) {
     bal.used = Number(bal.used || 0) + days
   } else {
@@ -48,7 +65,6 @@ async function applyApprovedLeaveToProfile(reqDoc) {
     const currentRem    = Number(bal.remaining || 0)
 
     if (!allowNegative && currentRem < days) {
-      // safety net – in theory we already validated before approval
       throw new Error(
         `Insufficient balance for ${leaveTypeCode}. Remaining ${currentRem}, requested ${days}`
       )
@@ -66,24 +82,27 @@ async function applyApprovedLeaveToProfile(reqDoc) {
   await profile.save()
 }
 
+/* Small helper to get io instance safely */
+function getIo(req) {
+  return req.io || req.app?.get('io') || null
+}
 
-/**
+/* ────────────────────────────────────────────────
  * POST /api/leave/requests
  * Body: { leaveTypeCode, startDate, endDate, reason }
  * Creates a new request for the logged-in user (expat).
+ * ────────────────────────────────────────────────
  */
 exports.createMyRequest = async (req, res, next) => {
   try {
     const { leaveTypeCode, startDate, endDate, reason = '' } = req.body || {}
 
-    // loginId from JWT = req.user.id (see signToken in auth.controller.js)
     const requesterLoginId = String(req.user?.id || '').trim()
-    if (!requesterLoginId) {
+    const employeeId       = String(req.user?.employeeId || requesterLoginId).trim()
+
+    if (!requesterLoginId || !employeeId) {
       return res.status(400).json({ message: 'Missing requester identity' })
     }
-
-    // For now we assume: expat loginId == employeeId (employee code)
-    const employeeId = requesterLoginId
 
     if (!leaveTypeCode || !startDate || !endDate) {
       return res.status(400).json({
@@ -122,7 +141,7 @@ exports.createMyRequest = async (req, res, next) => {
       })
     }
 
-    // Calculate days inclusive using helper (no weekend/holiday logic yet)
+    // Calculate days inclusive using helper
     const dates = enumerateLocalDates(startDate, endDate, DEFAULT_TZ)
     const totalDays = dates.length
 
@@ -143,16 +162,32 @@ exports.createMyRequest = async (req, res, next) => {
       gmLoginId,
     })
 
+    if (DEBUG) {
+      console.log('[leave] createMyRequest ->', {
+        employeeId,
+        managerLoginId,
+        gmLoginId,
+        id: doc._id.toString(),
+      })
+    }
+
     // 🔔 Telegram DM to manager (if chatId available)
     try {
       await notifyNewLeaveToManager(doc)
     } catch (e) {
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message)
-      }
+      console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message)
     }
 
-    // TODO (later): emit socket event
+    // 🌐 Real-time: new leave request created (expat + manager + GM + admins)
+    try {
+      const io = getIo(req)
+      if (io) {
+        broadcastLeaveRequest(io, doc, 'leave:req:created')
+        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+      }
+    } catch (e) {
+      console.warn('⚠️ leave:req:created emit failed:', e?.message)
+    }
 
     res.status(201).json(doc)
   } catch (err) {
@@ -160,18 +195,19 @@ exports.createMyRequest = async (req, res, next) => {
   }
 }
 
-/**
+/* ────────────────────────────────────────────────
  * GET /api/leave/requests/my
- * Returns leave requests for the logged-in user (by employeeId / loginId).
+ * Returns leave requests for the logged-in user.
+ * ────────────────────────────────────────────────
  */
 exports.listMyRequests = async (req, res, next) => {
   try {
-    const loginId = String(req.user?.id || '').trim()
-    if (!loginId) {
+    const requesterLoginId = String(req.user?.id || '').trim()
+    const employeeId       = String(req.user?.employeeId || requesterLoginId).trim()
+
+    if (!employeeId) {
       return res.status(400).json({ message: 'Missing user identity' })
     }
-
-    const employeeId = loginId
 
     const docs = await LeaveRequest.find({ employeeId })
       .sort({ createdAt: -1 })
@@ -183,9 +219,58 @@ exports.listMyRequests = async (req, res, next) => {
   }
 }
 
-/**
+/* ────────────────────────────────────────────────
+ * PATCH /api/leave/requests/:id/cancel
+ * Only requester can cancel; only while PENDING_MANAGER or PENDING_GM
+ * ────────────────────────────────────────────────
+ */
+exports.cancelMyRequest = async (req, res, next) => {
+  try {
+    const loginId = String(req.user?.id || '').trim()
+    const { id }  = req.params
+
+    if (!loginId) {
+      return res.status(400).json({ message: 'Missing user identity' })
+    }
+
+    const doc = await LeaveRequest.findById(id)
+    if (!doc) {
+      return res.status(404).json({ message: 'Request not found' })
+    }
+
+    if (String(doc.requesterLoginId || '') !== loginId) {
+      return res.status(403).json({ message: 'Not your request' })
+    }
+
+    if (!['PENDING_MANAGER', 'PENDING_GM'].includes(doc.status)) {
+      return res.status(400).json({ message: 'Cannot cancel at this stage' })
+    }
+
+    doc.status        = 'CANCELLED'
+    doc.cancelledAt   = new Date()
+    doc.cancelledById = loginId
+
+    await doc.save()
+
+    try {
+      const io = getIo(req)
+      if (io) {
+        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+      }
+    } catch (e) {
+      console.warn('⚠️ leave:req:cancel emit failed:', e?.message)
+    }
+
+    res.json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+/* ────────────────────────────────────────────────
  * GET /api/leave/requests/manager/inbox
- * Manager sees requests waiting for them
+ * Manager(or admin) inbox
+ * ────────────────────────────────────────────────
  */
 exports.listManagerInbox = async (req, res, next) => {
   try {
@@ -194,10 +279,18 @@ exports.listManagerInbox = async (req, res, next) => {
       return res.status(400).json({ message: 'Missing user identity' })
     }
 
-    const docs = await LeaveRequest.find({
-      managerLoginId: loginId,
-      status: 'PENDING_MANAGER',
-    })
+    const rawRoles = Array.isArray(req.user?.roles) ? req.user.roles : []
+    const baseRole = req.user?.role ? [req.user.role] : []
+    const roles    = [...new Set([...rawRoles, ...baseRole])]
+
+    const isAdminViewer =
+      roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')
+
+    const criteria = isAdminViewer
+      ? {}
+      : { managerLoginId: loginId }
+
+    const docs = await LeaveRequest.find(criteria)
       .sort({ createdAt: -1 })
       .lean()
 
@@ -207,9 +300,10 @@ exports.listManagerInbox = async (req, res, next) => {
   }
 }
 
-/**
+/* ────────────────────────────────────────────────
  * POST /api/leave/requests/:id/manager-decision
  * Body: { action: 'APPROVE' | 'REJECT', comment? }
+ * ────────────────────────────────────────────────
  */
 exports.managerDecision = async (req, res, next) => {
   try {
@@ -224,7 +318,7 @@ exports.managerDecision = async (req, res, next) => {
     const doc = await LeaveRequest.findById(id)
     if (!doc) return res.status(404).json({ message: 'Request not found' })
 
-    if (doc.managerLoginId !== loginId) {
+    if (String(doc.managerLoginId || '') !== loginId) {
       return res.status(403).json({ message: 'Not your request' })
     }
 
@@ -245,7 +339,39 @@ exports.managerDecision = async (req, res, next) => {
 
     await doc.save()
 
-    // TODO: notify GM or employee via telegram
+    if (DEBUG) {
+      console.log('[leave] managerDecision ->', {
+        id: doc._id.toString(),
+        status: doc.status,
+      })
+    }
+
+    // 🔔 Telegram: notify employee about manager decision
+    try {
+      await notifyManagerDecision(doc)
+    } catch (e) {
+      console.warn('⚠️ notifyManagerDecision failed:', e?.message)
+    }
+
+    // 🔔 Telegram: if forwarded to GM, alert GM
+    if (doc.status === 'PENDING_GM') {
+      try {
+        await notifyNewLeaveToGm(doc)
+      } catch (e) {
+        console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message)
+      }
+    }
+
+    // 🌐 Real-time: manager decision (expat, manager, GM, admins)
+    try {
+      const io = getIo(req)
+      if (io) {
+        broadcastLeaveRequest(io, doc, 'leave:req:manager-decision')
+        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+      }
+    } catch (e) {
+      console.warn('⚠️ leave:req:manager-decision emit failed:', e?.message)
+    }
 
     res.json(doc)
   } catch (err) {
@@ -253,9 +379,10 @@ exports.managerDecision = async (req, res, next) => {
   }
 }
 
-/**
+/* ────────────────────────────────────────────────
  * GET /api/leave/requests/gm/inbox
- * GM sees requests waiting for GM approval
+ * GM(or admin) inbox
+ * ────────────────────────────────────────────────
  */
 exports.listGmInbox = async (req, res, next) => {
   try {
@@ -264,10 +391,18 @@ exports.listGmInbox = async (req, res, next) => {
       return res.status(400).json({ message: 'Missing user identity' })
     }
 
-    const docs = await LeaveRequest.find({
-      gmLoginId: loginId,
-      status: 'PENDING_GM',
-    })
+    const rawRoles = Array.isArray(req.user?.roles) ? req.user.roles : []
+    const baseRole = req.user?.role ? [req.user.role] : []
+    const roles    = [...new Set([...rawRoles, ...baseRole])]
+
+    const isAdminViewer =
+      roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')
+
+    const criteria = isAdminViewer
+      ? {}
+      : { gmLoginId: loginId }
+
+    const docs = await LeaveRequest.find(criteria)
       .sort({ createdAt: -1 })
       .lean()
 
@@ -277,9 +412,10 @@ exports.listGmInbox = async (req, res, next) => {
   }
 }
 
-/**
+/* ────────────────────────────────────────────────
  * POST /api/leave/requests/:id/gm-decision
  * Body: { action: 'APPROVE' | 'REJECT', comment? }
+ * ────────────────────────────────────────────────
  */
 exports.gmDecision = async (req, res, next) => {
   try {
@@ -294,7 +430,7 @@ exports.gmDecision = async (req, res, next) => {
     const doc = await LeaveRequest.findById(id)
     if (!doc) return res.status(404).json({ message: 'Request not found' })
 
-    if (doc.gmLoginId !== loginId) {
+    if (String(doc.gmLoginId || '') !== loginId) {
       return res.status(403).json({ message: 'Not your request' })
     }
 
@@ -315,14 +451,38 @@ exports.gmDecision = async (req, res, next) => {
 
     await doc.save()
 
+    if (DEBUG) {
+      console.log('[leave] gmDecision ->', {
+        id: doc._id.toString(),
+        status: doc.status,
+      })
+    }
+
     // ✅ Only when APPROVED we apply usage into profile
     if (doc.status === 'APPROVED') {
       try {
         await applyApprovedLeaveToProfile(doc)
       } catch (applyErr) {
         console.error('applyApprovedLeaveToProfile error:', applyErr)
-        // we still return success; you can change to res.status(500) if you want it strict
       }
+    }
+
+    // 🔔 Telegram: final decision to employee
+    try {
+      await notifyGmDecision(doc)
+    } catch (e) {
+      console.warn('⚠️ notifyGmDecision failed:', e?.message)
+    }
+
+    // 🌐 Real-time: GM decision
+    try {
+      const io = getIo(req)
+      if (io) {
+        broadcastLeaveRequest(io, doc, 'leave:req:gm-decision')
+        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+      }
+    } catch (e) {
+      console.warn('⚠️ leave:req:gm-decision emit failed:', e?.message)
     }
 
     res.json(doc)

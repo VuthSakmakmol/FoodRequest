@@ -56,7 +56,7 @@ function toggleArrayValue(arr, val) {
     : [...(arr || []), val]
 }
 
-/* --- Menu math (same as original) --- */
+/* --- Menu math --- */
 const assignedMenus = computed(() => {
   const map = props.form?.menuCounts || {}
   let total = 0
@@ -74,7 +74,6 @@ const standardCount = computed(() => {
   return Math.max(total - used, 0)
 })
 
-/* limits for dietary allocations – independent pool but capped by total quantity */
 function menuLimit() {
   return Number(props.form?.quantity || 0)
 }
@@ -107,7 +106,7 @@ function onDietaryCountInput(item) {
   )
 }
 
-/* cleanup if a special menu gets unselected, wipe its count so Standard rises back */
+/* cleanup if a special menu gets unselected */
 watch(
   () => selectedMenus.value.slice(),
   choices => {
@@ -125,12 +124,12 @@ watch(
 </script>
 
 <template>
-  <!-- OUTER CARD like Requester -->
+  <!-- OUTER CARD -->
   <section
     class="rounded-2xl border border-slate-200 bg-white shadow-sm
            dark:border-slate-700 dark:bg-slate-900"
   >
-    <!-- Gradient header (same style as Requester) -->
+    <!-- HEADER -->
     <header
       class="flex items-center justify-between
              rounded-t-2xl border-b border-slate-200
@@ -153,7 +152,7 @@ watch(
       </div>
     </header>
 
-    <!-- INNER CARD BODY (same pattern as Requester body) -->
+    <!-- BODY -->
     <div
       class="rounded-b-2xl border-t border-slate-200 bg-slate-50/80 p-3
              dark:border-slate-700 dark:bg-slate-950/80"
@@ -173,8 +172,8 @@ watch(
               <span>Menu Choices</span>
             </h3>
 
-            <!-- Compact grid -->
-            <div class="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
+            <!-- ✅ more responsive grid -->
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
               <div
                 v-for="mc in MENU_CHOICES"
                 :key="mc"
@@ -185,11 +184,9 @@ watch(
                   type="button"
                   class="flex w-full flex-col rounded-xl border px-3 py-2.5 text-left text-xs
                          font-semibold shadow-sm transition sm:text-[13px]"
-                  :class="
-                    selectedMenus.includes(mc)
-                      ? 'border-sky-500 bg-sky-500 text-white'
-                      : 'border-slate-500 bg-slate-50/80 text-slate-700 hover:border-sky-500 hover:bg-sky-50/60 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-sky-400 dark:hover:bg-slate-800/80'
-                  "
+                  :class="selectedMenus.includes(mc)
+                    ? 'border-sky-500 bg-sky-500 text-white'
+                    : 'border-slate-500 bg-slate-50/80 text-slate-700 hover:border-sky-500 hover:bg-sky-50/60 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-sky-400 dark:hover:bg-slate-800/80'"
                   @click="
                     props.form.menuChoices = toggleArrayValue(selectedMenus, mc);
                     if (mc !== 'Standard') ensureMenuCountKey(mc);
@@ -200,28 +197,24 @@ watch(
                     <span
                       v-if="mc === 'Standard'"
                       class="text-[10px] font-medium"
-                      :class="
-                        selectedMenus.includes(mc)
-                          ? 'text-sky-50/90'
-                          : 'text-slate-500 dark:text-slate-300'
-                      "
+                      :class="selectedMenus.includes(mc)
+                        ? 'text-sky-50/90'
+                        : 'text-slate-500 dark:text-slate-300'"
                     >
                       ({{ standardCount }})
                     </span>
                   </span>
                   <span
                     class="mt-0.5 text-[11px] km leading-snug"
-                    :class="
-                      selectedMenus.includes(mc)
-                        ? 'text-sky-50/90'
-                        : 'text-slate-500 dark:text-slate-400'
-                    "
+                    :class="selectedMenus.includes(mc)
+                      ? 'text-sky-50/90'
+                      : 'text-slate-500 dark:text-slate-400'"
                   >
                     {{ MENU_KM[mc] }}
                   </span>
                 </button>
 
-                <!-- People input (Standard readonly) -->
+                <!-- People input -->
                 <div class="flex items-center gap-2 pl-0.5">
                   <span class="w-12 text-[11px] text-slate-600 dark:text-slate-300">
                     People
@@ -265,7 +258,7 @@ watch(
                    dark:via-slate-700"
           ></div>
 
-          <!-- Allergies (2-row grid) -->
+          <!-- Allergies -->
           <div class="space-y-3">
             <h3
               class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.25em]
@@ -275,26 +268,23 @@ watch(
               <span>Dietary &amp; Allergies</span>
             </h3>
 
-            <div class="grid grid-rows-2 grid-flow-col gap-3">
+            <!-- ✅ FIXED GRID: responsive columns, no overflow -->
+            <div class="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               <div
                 v-for="item in ALLERGENS"
                 :key="item"
                 class="space-y-2 rounded-xl px-2 py-2"
-                :class="
-                  selectedDietary.includes(item)
-                    ? 'border border-sky-200/70 bg-sky-50/80 dark:border-sky-800/60 dark:bg-sky-900/30'
-                    : 'border border-transparent'
-                "
+                :class="selectedDietary.includes(item)
+                  ? 'border border-sky-200/70 bg-sky-50/80 dark:border-sky-800/60 dark:bg-sky-900/30'
+                  : 'border border-transparent'"
               >
                 <button
                   type="button"
                   class="flex w-full flex-col rounded-lg border px-2.5 py-1.5 text-left text-[12px]
                          shadow-sm transition"
-                  :class="
-                    selectedDietary.includes(item)
-                      ? 'border-sky-500 bg-sky-500 text-white'
-                      : 'border-slate-500 bg-slate-50/80 text-slate-700 hover:border-sky-500 hover:bg-sky-50/60 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-sky-400 dark:hover:bg-slate-800/80'
-                  "
+                  :class="selectedDietary.includes(item)
+                    ? 'border-sky-500 bg-sky-500 text-white'
+                    : 'border-slate-500 bg-slate-50/80 text-slate-700 hover:border-sky-500 hover:bg-sky-50/60 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100 dark:hover:border-sky-400 dark:hover:bg-slate-800/80'"
                   @click="
                     props.form.dietary = toggleArrayValue(selectedDietary, item);
                     ensureDietaryKey(item);
@@ -305,11 +295,9 @@ watch(
                   </span>
                   <span
                     class="mt-0.5 text-[11px] km leading-snug"
-                    :class="
-                      selectedDietary.includes(item)
-                        ? 'text-sky-50/90'
-                        : 'text-slate-500 dark:text-slate-400'
-                    "
+                    :class="selectedDietary.includes(item)
+                      ? 'text-sky-50/90'
+                      : 'text-slate-500 dark:text-slate-400'"
                   >
                     {{ ALLERGEN_KM[item] }}
                   </span>

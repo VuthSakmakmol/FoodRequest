@@ -1,7 +1,7 @@
 // src/store/auth.js
 import { defineStore } from 'pinia'
 import api from '@/utils/api'
-import socket, {
+import {
   subscribeRole,
   unsubscribeRole,
   setSocketAuthToken,
@@ -29,22 +29,31 @@ export const useAuth = defineStore('auth', {
       this.user = data.user
       this.token = data.token
 
-      // persist
+      // persist full user + token
       localStorage.setItem('token', this.token)
       localStorage.setItem('user', JSON.stringify(this.user))
+
+      // convenience: store loginId / employeeId / role separately
+      const loginKey = this.user?.id || this.user?.loginId || loginId
+      const empId    = this.user?.employeeId || ''
+      const role     = this.user?.role || ''
+
+      if (loginKey) localStorage.setItem('loginId', loginKey)
+      if (empId)    localStorage.setItem('employeeId', empId)
+      if (role)     localStorage.setItem('role', role)
 
       // attach token for HTTP
       this._applyTokenHeader(this.token)
 
-      // also attach token for WebSocket
+      // attach token for WebSocket
       setSocketAuthToken(this.token)
 
       // join a role room for realtime updates
-      if (this.user?.role) {
-        subscribeRole(this.user.role)
+      if (role) {
+        subscribeRole(role)
       }
 
-      return data.user
+      return this.user
     },
 
     async fetchMe() {
@@ -56,13 +65,23 @@ export const useAuth = defineStore('auth', {
 
       try {
         this._applyTokenHeader(this.token)
-        setSocketAuthToken(this.token) // in case of refresh
+        // in case of page refresh: make sure WS also has token
+        setSocketAuthToken(this.token)
 
         const { data } = await api.get('/auth/me')
         this.user = data
         localStorage.setItem('user', JSON.stringify(this.user))
 
-        if (this.user?.role) subscribeRole(this.user.role)
+        const loginKey = this.user?.id || this.user?.loginId || ''
+        const empId    = this.user?.employeeId || ''
+        const role     = this.user?.role || ''
+
+        if (loginKey) localStorage.setItem('loginId', loginKey)
+        if (empId)    localStorage.setItem('employeeId', empId)
+        if (role)     localStorage.setItem('role', role)
+
+        if (role) subscribeRole(role)
+
         return data
       } catch (e) {
         this.logout()
@@ -84,15 +103,18 @@ export const useAuth = defineStore('auth', {
 
       if (storedUser) {
         this.user = JSON.parse(storedUser)
-        if (this.user?.role) subscribeRole(this.user.role)
+        const role = this.user?.role || localStorage.getItem('role') || ''
+        if (role) subscribeRole(role)
       }
     },
 
     logout() {
+      const role = this.user?.role || localStorage.getItem('role')
+
       // leave role room if any
-      if (this.user?.role) {
+      if (role) {
         try {
-          unsubscribeRole(this.user.role)
+          unsubscribeRole(role)
         } catch {
           // ignore socket errors on logout
         }
@@ -113,6 +135,7 @@ export const useAuth = defineStore('auth', {
           'token',
           'user',
           'loginId',
+          'employeeId',
           'lastLoginId',
           'role',
           'theme',

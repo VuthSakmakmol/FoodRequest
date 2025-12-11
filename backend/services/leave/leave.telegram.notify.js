@@ -1,88 +1,148 @@
-// services/leave.telegram.notify.js
+// backend/services/leave/leave.telegram.notify.js
+/* eslint-disable no-console */
 const User = require('../../models/User')
+const { sendDM } = require('../transport.telegram.service')  // ✅ reuse working DM
+const msg = require('./leave.telegram.messages')
 
-// Reuse existing transport Telegram sender, if present
-let notifyFn = null
-try {
-  // same module carBooking uses: ../../services/transport.telegram.notify
-  // relative from /services is './transport.telegram.notify'
-  const transportNotify = require('./transport.telegram.notify')
-  notifyFn = transportNotify?.notify || null
-} catch {
-  notifyFn = null
-}
-
-const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+const DEBUG =
+  String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
 
 function log(...args) {
-  if (!isProd) console.log('[leave.notify]', ...args)
+  if (DEBUG) console.log('[leave.notify]', ...args)
 }
 
-/**
- * Build a very simple manager message for a new leave request.
- */
-function buildManagerText(doc) {
-  const {
-    employeeId,
-    leaveTypeCode,
-    startDate,
-    endDate,
-    totalDays,
-    reason,
-  } = doc
-
-  const safeReason = String(reason || '').trim()
-  const shortReason = safeReason ? (safeReason.length > 120 ? safeReason.slice(0, 117) + '…' : safeReason) : '—'
-
-  return [
-    '📅 *New Leave Request*',
-    '',
-    `👤 Employee: ${employeeId}`,
-    `🏷 Type: ${leaveTypeCode}`,
-    `🗓 Dates: ${startDate} → ${endDate} (${totalDays} day(s))`,
-    '',
-    `📝 Reason: ${shortReason}`,
-  ].join('\n')
+async function findUser(loginId) {
+  if (!loginId) return null
+  const clean = String(loginId).trim()
+  if (!clean) return null
+  return User.findOne({ loginId: clean }).lean()
 }
 
-/**
- * Notify manager via Telegram when a new leave request is created.
- * - Find manager User by loginId
- * - Use their telegramChatId
- */
+/* ─────────────────────────────
+ * New request → DM Manager
+ * ───────────────────────────── */
 async function notifyNewLeaveToManager(doc) {
-  if (!doc) return
-  if (!notifyFn) {
-    log('notifyNewLeaveToManager: notifyFn not available, skip.')
-    return
+  try {
+    if (!doc) return
+
+    const managerLoginId = doc.managerLoginId
+    if (!managerLoginId) {
+      log('No managerLoginId on doc; skip notifyNewLeaveToManager')
+      return
+    }
+
+    const [mgrUser, empUser] = await Promise.all([
+      findUser(managerLoginId),
+      findUser(doc.employeeId || doc.requesterLoginId),
+    ])
+
+    const chatId = mgrUser?.telegramChatId
+    if (!chatId) {
+      log('Manager has no telegramChatId; skip', managerLoginId)
+      return
+    }
+
+    const employeeName =
+      empUser?.name || doc.employeeId || doc.requesterLoginId
+
+    const text = msg.managerNewRequest(doc, employeeName)
+
+    log('DM → Manager', { chatId, managerLoginId })
+    await sendDM(chatId, text)
+  } catch (err) {
+    console.error('[leave.notify] notifyNewLeaveToManager error:', err.message)
   }
+}
 
-  const managerLoginId = String(doc.managerLoginId || '').trim()
-  if (!managerLoginId) {
-    log('notifyNewLeaveToManager: no managerLoginId on doc, skip.')
-    return
+/* ─────────────────────────────
+ * Request forwarded to GM (PENDING_GM) → DM GM
+ * ───────────────────────────── */
+async function notifyNewLeaveToGm(doc) {
+  try {
+    if (!doc) return
+
+    const gmLoginId = doc.gmLoginId
+    if (!gmLoginId) {
+      log('No gmLoginId on doc; skip notifyNewLeaveToGm')
+      return
+    }
+
+    const [gmUser, empUser] = await Promise.all([
+      findUser(gmLoginId),
+      findUser(doc.employeeId || doc.requesterLoginId),
+    ])
+
+    const chatId = gmUser?.telegramChatId
+    if (!chatId) {
+      log('GM has no telegramChatId; skip', gmLoginId)
+      return
+    }
+
+    const employeeName =
+      empUser?.name || doc.employeeId || doc.requesterLoginId
+
+    const text = msg.gmNewRequest(doc, employeeName)
+
+    log('DM → GM', { chatId, gmLoginId })
+    await sendDM(chatId, text)
+  } catch (err) {
+    console.error('[leave.notify] notifyNewLeaveToGm error:', err.message)
   }
+}
 
-  const manager = await User.findOne({ loginId: managerLoginId, isActive: true })
-    .select('loginId name telegramChatId')
-    .lean()
+/* ─────────────────────────────
+ * Manager decision → DM Employee
+ * ───────────────────────────── */
+async function notifyManagerDecision(doc) {
+  try {
+    if (!doc) return
 
-  if (!manager) {
-    log('notifyNewLeaveToManager: manager user not found:', managerLoginId)
-    return
+    const employeeLoginId = doc.employeeId || doc.requesterLoginId
+    const empUser = await findUser(employeeLoginId)
+    const chatId = empUser?.telegramChatId
+
+    if (!chatId) {
+      log('Employee has no telegramChatId; skip notifyManagerDecision', employeeLoginId)
+      return
+    }
+
+    const text = msg.employeeDecision(doc, 'Manager')
+
+    log('DM → Employee (manager decision)', { chatId, employeeLoginId })
+    await sendDM(chatId, text)
+  } catch (err) {
+    console.error('[leave.notify] notifyManagerDecision error:', err.message)
   }
+}
 
-  if (!manager.telegramChatId) {
-    log('notifyNewLeaveToManager: manager has no telegramChatId:', managerLoginId)
-    return
+/* ─────────────────────────────
+ * GM final decision → DM Employee
+ * ───────────────────────────── */
+async function notifyGmDecision(doc) {
+  try {
+    if (!doc) return
+
+    const employeeLoginId = doc.employeeId || doc.requesterLoginId
+    const empUser = await findUser(employeeLoginId)
+    const chatId = empUser?.telegramChatId
+
+    if (!chatId) {
+      log('Employee has no telegramChatId; skip notifyGmDecision', employeeLoginId)
+      return
+    }
+
+    const text = msg.employeeDecision(doc, 'GM')
+
+    log('DM → Employee (GM decision)', { chatId, employeeLoginId })
+    await sendDM(chatId, text)
+  } catch (err) {
+    console.error('[leave.notify] notifyGmDecision error:', err.message)
   }
-
-  const text = buildManagerText(doc)
-  await notifyFn(manager.telegramChatId, text, { parse_mode: 'Markdown' })
-
-  log(`DM sent to manager=${managerLoginId} chatId=${manager.telegramChatId}`)
 }
 
 module.exports = {
   notifyNewLeaveToManager,
+  notifyNewLeaveToGm,
+  notifyManagerDecision,
+  notifyGmDecision,
 }
