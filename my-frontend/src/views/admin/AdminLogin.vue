@@ -154,7 +154,9 @@ async function submit() {
               v-model="loginId"
               type="text"
               autocomplete="username"
-              class="block w-full bg-slate-900/60 border border-slate-700 rounded-xl py-2 pl-8 pr-3 text-sm outline-none text-slate-100 placeholder-slate-500
+              class="block w-full bg-slate-900/60 border border-slate-700 rounded-xl py-2 pl-8 pr-3
+                     text-[16px] leading-tight
+                     outline-none text-slate-100 placeholder-slate-500
                      focus:ring-2 focus:ring-[oklch(60%_0.118_184.704)]/80 focus:border-[oklch(60%_0.118_184.704)] transition"
               placeholder="Enter your login ID"
             />
@@ -171,7 +173,9 @@ async function submit() {
               v-model="password"
               :type="showPwd ? 'text' : 'password'"
               autocomplete="current-password"
-              class="block w-full bg-slate-900/60 border border-slate-700 rounded-xl py-2 px-3 pr-18 text-sm outline-none text-slate-100 placeholder-slate-500
+              class="block w-full bg-slate-900/60 border border-slate-700 rounded-xl py-2 px-3 pr-18
+                     text-[16px] leading-tight
+                     outline-none text-slate-100 placeholder-slate-500
                      focus:ring-2 focus:ring-[oklch(60%_0.118_184.704)]/80 focus:border-[oklch(60%_0.118_184.704)] transition"
               placeholder="••••••••"
               @keydown="onCapsCheck"

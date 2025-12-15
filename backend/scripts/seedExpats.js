@@ -43,7 +43,7 @@ const MANAGERS = [
     name: 'HR Manager',
     password: DEFAULT_MANAGER_PWD,
     telegramChatId: '7163451169', 
-    employees: ['52520351', '51510016', '51710019'],
+    employees: ['51821047','52520351', '51510016', '51710019'],
   },
   // add more managers here...
 ]

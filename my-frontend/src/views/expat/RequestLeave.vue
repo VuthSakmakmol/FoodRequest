@@ -5,6 +5,8 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { subscribeEmployeeIfNeeded, onSocket } from '@/utils/socket'
 
+import UserLeaveProfile from '@/views/expat/user/UserLeaveProfile.vue'
+
 const emit = defineEmits(['submitted'])
 const { showToast } = useToast()
 
@@ -194,7 +196,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="px-1 py-1 sm:px-3">
+  <div class="px-1 py-1 sm:px-3 space-y-3">
+    <!-- ✅ NEW: My remaining leave panel (responsive, read-only) -->
+    <UserLeaveProfile />
+
+    <!-- Request form -->
     <div
       class="rounded-2xl border border-slate-200 bg-white shadow-sm
              dark:border-slate-800 dark:bg-slate-900"
@@ -261,70 +267,71 @@ onBeforeUnmount(() => {
             >
               Holiday Leave Type
             </label>
-            <div class="relative">
-              <select
-                id="leaveType"
-                v-model="form.leaveTypeCode"
-                :disabled="loadingTypes || !leaveTypes.length"
-                class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
-                       shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
-                       disabled:cursor-not-allowed disabled:bg-slate-100
-                       dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800"
+
+            <select
+              id="leaveType"
+              v-model="form.leaveTypeCode"
+              :disabled="loadingTypes || !leaveTypes.length"
+              class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
+                     shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
+                     disabled:cursor-not-allowed disabled:bg-slate-100
+                     dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800"
+            >
+              <option value="" disabled>
+                {{ loadingTypes ? 'Loading holiday types…' : 'Select holiday leave type' }}
+              </option>
+              <option
+                v-for="t in leaveTypes"
+                :key="t.code"
+                :value="t.code"
               >
-                <option value="" disabled>
-                  {{ loadingTypes ? 'Loading holiday types…' : 'Select holiday leave type' }}
-                </option>
-                <option
-                  v-for="t in leaveTypes"
-                  :key="t.code"
-                  :value="t.code"
-                >
-                  {{ t.name }} ({{ t.code }})
-                </option>
-              </select>
-            </div>
+                {{ t.name }} ({{ t.code }})
+              </option>
+            </select>
+
             <p class="text-[11px] text-slate-500 dark:text-slate-400">
               These options are configured by HR / Admin for expat holiday entitlement.
             </p>
           </div>
 
-          <!-- Start date -->
-          <div class="space-y-1.5">
-            <label
-              for="startDate"
-              class="block text-xs font-medium text-slate-700 dark:text-slate-300"
-            >
-              Start Date
-            </label>
-            <input
-              id="startDate"
-              v-model="form.startDate"
-              type="date"
-              class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
-                     shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
-                     dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-          </div>
+          <!-- Dates -->
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div class="space-y-1.5">
+              <label
+                for="startDate"
+                class="block text-xs font-medium text-slate-700 dark:text-slate-300"
+              >
+                Start Date
+              </label>
+              <input
+                id="startDate"
+                v-model="form.startDate"
+                type="date"
+                class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
+                       shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
+                       dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+            </div>
 
-          <!-- End date -->
-          <div class="space-y-1.5">
-            <label
-              for="endDate"
-              class="block text-xs font-medium text-slate-700 dark:text-slate-300"
-            >
-              End Date
-            </label>
-            <input
-              id="endDate"
-              v-model="form.endDate"
-              type="date"
-              class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
-                     shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
-                     dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-            <p class="text-[11px] text-slate-500 dark:text-slate-400">
-              Inclusive of both start and end dates.
-            </p>
+            <div class="space-y-1.5">
+              <label
+                for="endDate"
+                class="block text-xs font-medium text-slate-700 dark:text-slate-300"
+              >
+                End Date
+              </label>
+              <input
+                id="endDate"
+                v-model="form.endDate"
+                type="date"
+                class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
+                       shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
+                       dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+              <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                Inclusive of both start and end dates.
+              </p>
+            </div>
           </div>
 
           <!-- Reason -->
@@ -348,16 +355,10 @@ onBeforeUnmount(() => {
 
           <!-- Inline messages -->
           <div v-if="formError || formSuccess" class="space-y-1">
-            <p
-              v-if="formError"
-              class="text-[11px] text-rose-600 dark:text-rose-400"
-            >
+            <p v-if="formError" class="text-[11px] text-rose-600 dark:text-rose-400">
               {{ formError }}
             </p>
-            <p
-              v-if="formSuccess"
-              class="text-[11px] text-emerald-600 dark:text-emerald-400"
-            >
+            <p v-if="formSuccess" class="text-[11px] text-emerald-600 dark:text-emerald-400">
               {{ formSuccess }}
             </p>
           </div>
@@ -375,6 +376,7 @@ onBeforeUnmount(() => {
             >
               Reset
             </button>
+
             <button
               type="submit"
               class="inline-flex items-center justify-center rounded-full bg-sky-600 px-3 py-1.5 text-xs sm:text-sm

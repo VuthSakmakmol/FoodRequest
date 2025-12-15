@@ -18,23 +18,6 @@ const sidebarOpen = ref(true)
 /* Nav groups (GM Expat Leave) */
 const groups = [
   {
-    key: 'my-leave',
-    header: 'My Leave',
-    icon: 'fa-solid fa-plane-departure',
-    children: [
-      {
-        label: 'Request Leave',
-        icon: 'fa-regular fa-calendar-plus',
-        to: { name: 'leave-gm-request' },
-      },
-      {
-        label: 'My Requests',
-        icon: 'fa-solid fa-list-ul',
-        to: { name: 'leave-gm-my-requests' },
-      },
-    ],
-  },
-  {
     key: 'approvals',
     header: 'Approvals',
     icon: 'fa-solid fa-clipboard-check',
@@ -368,7 +351,7 @@ function toggleAuth() {
                px-2 py-1.5 text-[13px] shadow-sm
                dark:border-slate-800 dark:bg-slate-950/95"
       >
-        <div class="flex items-center gap-2">
+        <div class="flex h-9 items-center gap-2">
           <button
             type="button"
             class="inline-flex h-8 w-8 items-center justify-center rounded-md
@@ -377,20 +360,6 @@ function toggleAuth() {
           >
             <i class="fa-solid fa-bars text-[13px]"></i>
           </button>
-<div
-            v-if="auth.user"
-            class="hidden items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1.5 text-[11px]
-                   dark:flex dark:border-slate-700 dark:bg-slate-900"
-          >
-            <div
-              class="flex h-7 w-7 items-center justify-center rounded-full
-                     bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
-            >
-              {{ initials }}
-            </div>
-            <div class="flex flex-col h-10 leading-tight">
-            </div>
-          </div>
         </div>
       </header>
 

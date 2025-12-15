@@ -2,7 +2,7 @@
 require('dotenv').config()
 const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
-const User = require('../models/User')
+const User = require('../models/User');
 
 (async () => {
   try {
@@ -95,7 +95,7 @@ const User = require('../models/User')
     // You said one driver(messenger) chat ID is 537250678 — attach it to the right user(s).
     // If that’s driver01, do this:
     const drivers = [
-      { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '7163451169' },
+      { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '1893892841' },
       { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '5534785017' },
       { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '5534785017' },
     ]
@@ -106,6 +106,7 @@ const User = require('../models/User')
     // Bro Ant 7163451169
     // Bong Cheat 5534785017
     // Kakvey 899957340
+    // Bong Hong 1893892841
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):
     const messengers = [

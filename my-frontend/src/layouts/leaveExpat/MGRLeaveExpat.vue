@@ -18,23 +18,6 @@ const sidebarOpen = ref(true)
 /* Nav groups (Manager Expat Leave) */
 const groups = [
   {
-    key: 'my-leave',
-    header: 'My Leave',
-    icon: 'fa-solid fa-plane-departure',
-    children: [
-      {
-        label: 'Request Leave',
-        icon: 'fa-regular fa-calendar-plus',
-        to: { name: 'leave-manager-request' },
-      },
-      {
-        label: 'My Requests',
-        icon: 'fa-solid fa-list-ul',
-        to: { name: 'leave-manager-my-requests' },
-      },
-    ],
-  },
-  {
     key: 'approvals',
     header: 'Approvals',
     icon: 'fa-solid fa-clipboard-check',
