@@ -4,6 +4,8 @@
 const LeaveRequest  = require('../../models/leave/LeaveRequest')
 const LeaveType     = require('../../models/leave/LeaveType')
 const LeaveProfile  = require('../../models/leave/LeaveProfile')
+const EmployeeDirectory = require('../../models/EmployeeDirectory')
+
 const { enumerateLocalDates } = require('../../utils/datetime')
 const {
   notifyNewLeaveToManager,
@@ -85,6 +87,55 @@ async function applyApprovedLeaveToProfile(reqDoc) {
 /* Small helper to get io instance safely */
 function getIo(req) {
   return req.io || req.app?.get('io') || null
+}
+
+/* ────────────────────────────────────────────────
+ * Attach employeeName/department from EmployeeDirectory
+ * ────────────────────────────────────────────────
+ */
+async function attachEmployeeInfo(docs = []) {
+  const ids = [...new Set(
+    (docs || [])
+      .map(d => String(d.employeeId || '').trim())
+      .filter(Boolean)
+  )]
+
+  if (!ids.length) return docs
+
+  // Adjust fields here if your EmployeeDirectory uses different names
+  const emps = await EmployeeDirectory.find(
+    { employeeId: { $in: ids } },
+    { employeeId: 1, name: 1, department: 1 }
+  ).lean()
+
+  const map = new Map(emps.map(e => [String(e.employeeId || '').trim(), e]))
+
+  return (docs || []).map(d => {
+    const emp = map.get(String(d.employeeId || '').trim())
+    return {
+      ...d,
+      employeeName: emp?.name || d.employeeName || '',
+      department: emp?.department || d.department || '',
+    }
+  })
+}
+
+async function attachEmployeeInfoToOne(doc) {
+  if (!doc) return doc
+  const raw = typeof doc.toObject === 'function' ? doc.toObject() : doc
+  const employeeId = String(raw.employeeId || '').trim()
+  if (!employeeId) return raw
+
+  const emp = await EmployeeDirectory.findOne(
+    { employeeId },
+    { employeeId: 1, name: 1, department: 1 }
+  ).lean()
+
+  return {
+    ...raw,
+    employeeName: emp?.name || raw.employeeName || '',
+    department: emp?.department || raw.department || '',
+  }
 }
 
 /* ────────────────────────────────────────────────
@@ -171,25 +222,28 @@ exports.createMyRequest = async (req, res, next) => {
       })
     }
 
-    // 🔔 Telegram DM to manager (if chatId available)
+    // enrich for response + realtime payload
+    const payload = await attachEmployeeInfoToOne(doc)
+
+    // 🔔 Telegram DM to manager
     try {
       await notifyNewLeaveToManager(doc)
     } catch (e) {
       console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message)
     }
 
-    // 🌐 Real-time: new leave request created (expat + manager + GM + admins)
+    // 🌐 Real-time: created/updated
     try {
       const io = getIo(req)
       if (io) {
-        broadcastLeaveRequest(io, doc, 'leave:req:created')
-        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+        broadcastLeaveRequest(io, payload, 'leave:req:created')
+        broadcastLeaveRequest(io, payload, 'leave:req:updated')
       }
     } catch (e) {
       console.warn('⚠️ leave:req:created emit failed:', e?.message)
     }
 
-    res.status(201).json(doc)
+    res.status(201).json(payload)
   } catch (err) {
     next(err)
   }
@@ -213,7 +267,10 @@ exports.listMyRequests = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .lean()
 
-    res.json(docs)
+    // optional: also include name/department for "My requests" screen
+    const enriched = await attachEmployeeInfo(docs)
+
+    res.json(enriched)
   } catch (err) {
     next(err)
   }
@@ -252,16 +309,18 @@ exports.cancelMyRequest = async (req, res, next) => {
 
     await doc.save()
 
+    const payload = await attachEmployeeInfoToOne(doc)
+
     try {
       const io = getIo(req)
       if (io) {
-        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+        broadcastLeaveRequest(io, payload, 'leave:req:updated')
       }
     } catch (e) {
       console.warn('⚠️ leave:req:cancel emit failed:', e?.message)
     }
 
-    res.json(doc)
+    res.json(payload)
   } catch (err) {
     next(err)
   }
@@ -294,7 +353,9 @@ exports.listManagerInbox = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .lean()
 
-    res.json(docs)
+    const enriched = await attachEmployeeInfo(docs)
+
+    res.json(enriched)
   } catch (err) {
     next(err)
   }
@@ -362,18 +423,20 @@ exports.managerDecision = async (req, res, next) => {
       }
     }
 
-    // 🌐 Real-time: manager decision (expat, manager, GM, admins)
+    const payload = await attachEmployeeInfoToOne(doc)
+
+    // 🌐 Real-time: manager decision
     try {
       const io = getIo(req)
       if (io) {
-        broadcastLeaveRequest(io, doc, 'leave:req:manager-decision')
-        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+        broadcastLeaveRequest(io, payload, 'leave:req:manager-decision')
+        broadcastLeaveRequest(io, payload, 'leave:req:updated')
       }
     } catch (e) {
       console.warn('⚠️ leave:req:manager-decision emit failed:', e?.message)
     }
 
-    res.json(doc)
+    res.json(payload)
   } catch (err) {
     next(err)
   }
@@ -406,7 +469,9 @@ exports.listGmInbox = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .lean()
 
-    res.json(docs)
+    const enriched = await attachEmployeeInfo(docs)
+
+    res.json(enriched)
   } catch (err) {
     next(err)
   }
@@ -474,18 +539,20 @@ exports.gmDecision = async (req, res, next) => {
       console.warn('⚠️ notifyGmDecision failed:', e?.message)
     }
 
+    const payload = await attachEmployeeInfoToOne(doc)
+
     // 🌐 Real-time: GM decision
     try {
       const io = getIo(req)
       if (io) {
-        broadcastLeaveRequest(io, doc, 'leave:req:gm-decision')
-        broadcastLeaveRequest(io, doc, 'leave:req:updated')
+        broadcastLeaveRequest(io, payload, 'leave:req:gm-decision')
+        broadcastLeaveRequest(io, payload, 'leave:req:updated')
       }
     } catch (e) {
       console.warn('⚠️ leave:req:gm-decision emit failed:', e?.message)
     }
 
-    res.json(doc)
+    res.json(payload)
   } catch (err) {
     next(err)
   }

@@ -14,7 +14,8 @@ const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
 const GMLeaveExpat    = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
 const MGRLeaveExpat   = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
 const UserLeaveExpat  = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
-
+const ManagerProfile  = () => import('@/views/expat/manager/Profile.vue')
+const getMyProfile    = () => import('@/views/expat/generalManager/Profile.vue')
 // Public
 const GreetingPage    = () => import('@/views/GreetingPage.vue')
 
@@ -241,6 +242,12 @@ const router = createRouter({
           name: 'leave-manager-inbox',
           component: ManagerLeaveInbox
         },
+        {
+          path: 'profile/:employeeId?',
+          name: 'leave-manager-profile',
+          component: ManagerProfile,
+          meta: { title: 'Employee Leave Profile' }
+        }
       ]
     },
 
@@ -266,6 +273,12 @@ const router = createRouter({
           name: 'leave-gm-inbox',
           component: GmLeaveInbox
         },
+        {
+          path: 'profile/:employeeId?',
+          name: 'leave-gm-profile',
+          component: getMyProfile,
+          meta: { title: 'Employee leave profile'}
+        }
       ]
     },
 

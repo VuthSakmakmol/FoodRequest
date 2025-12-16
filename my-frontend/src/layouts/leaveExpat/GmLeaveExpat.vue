@@ -27,8 +27,15 @@ const groups = [
         icon: 'fa-solid fa-star',
         to: { name: 'leave-gm-inbox' },
       },
+        {
+        label: 'Profile',
+        header: 'Profile',
+        icon: 'fa-solid fa-user-group',
+        to: { name: 'leave-gm-profile'}
+      }
     ],
   },
+
 ]
 
 /* Open/close state (accordion) */

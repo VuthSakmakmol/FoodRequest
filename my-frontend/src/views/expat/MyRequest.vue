@@ -297,14 +297,11 @@ onBeforeUnmount(() => {
           class="flex flex-wrap items-end justify-between gap-4"
         >
           <div class="flex flex-col gap-1 min-w-[220px]">
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">
-              Expat Holiday
-            </p>
             <p class="text-sm font-semibold">
               My Leave Requests
             </p>
             <p class="text-[11px] text-sky-50/90">
-              Track your submitted holiday requests and their approval status.
+              Track your submitted leave requests and their approval status.
             </p>
           </div>
 
@@ -382,13 +379,13 @@ onBeforeUnmount(() => {
         <div v-else class="space-y-2">
           <div>
             <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">
-              Expat Holiday
+              Expat leave
             </p>
             <p class="text-sm font-semibold">
               My Leave Requests
             </p>
             <p class="text-[11px] text-sky-50/90">
-              All your expat holiday requests & status.
+              All your expat leave requests & status.
             </p>
           </div>
 

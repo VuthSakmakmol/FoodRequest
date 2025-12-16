@@ -13,7 +13,7 @@ const { showToast } = useToast()
 /* ───────── Employee identity for realtime ───────── */
 const employeeId = ref((localStorage.getItem('employeeId') || '').toString())
 
-/* ───────── LEAVE TYPES (Expat holiday only) ───────── */
+/* ───────── LEAVE TYPES (Expat only) ───────── */
 
 const loadingTypes = ref(false)
 const leaveTypes = ref([])
@@ -34,20 +34,20 @@ async function fetchLeaveTypes() {
 
     if (!data.length) {
       typesError.value =
-        'No holiday leave types configured yet. Please contact HR / Admin.'
+        'No leave types configured yet. Please contact HR / Admin.'
     }
   } catch (e) {
     console.error('fetchLeaveTypes error', e)
     typesError.value =
       e?.response?.data?.message ||
-      'Unable to load holiday leave types. Please contact HR / Admin.'
+      'Unable to load leave types. Please contact HR / Admin.'
     leaveTypes.value = []
   } finally {
     loadingTypes.value = false
   }
 }
 
-/* ───────── NEW EXPAT HOLIDAY LEAVE REQUEST ───────── */
+/* ───────── NEW EXPAT LEAVE REQUEST ───────── */
 
 const form = ref({
   leaveTypeCode: '',
@@ -104,11 +104,11 @@ async function submitRequest() {
 
     await api.post('/leave/requests', payload)
 
-    formSuccess.value = 'Holiday leave request submitted successfully.'
+    formSuccess.value = 'leave request submitted successfully.'
     showToast({
       type: 'success',
       title: 'Submitted',
-      message: 'Your expat holiday leave request has been sent for approval.'
+      message: 'Your leave request has been sent for approval.'
     })
 
     resetForm()
@@ -212,15 +212,11 @@ onBeforeUnmount(() => {
       >
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">
-              Expat Holiday
-            </p>
             <h2 class="text-sm font-semibold">
-              Request Holiday Leave
+              Request Leave
             </h2>
             <p class="mt-0.5 text-[11px] text-sky-50/90">
-              Use this form to request holiday leave as a foreign employee
-              (not for flight booking).
+              Use this form to request leave as a foreign employee
             </p>
           </div>
 
@@ -238,9 +234,6 @@ onBeforeUnmount(() => {
             <div class="space-y-0.5">
               <p class="font-medium text-sky-50">
                 Plan ahead
-              </p>
-              <p class="text-[11px] text-sky-100/80">
-                Submit leave before booking flights or long holidays.
               </p>
             </div>
           </div>
@@ -265,7 +258,7 @@ onBeforeUnmount(() => {
               for="leaveType"
               class="block text-xs font-medium text-slate-700 dark:text-slate-300"
             >
-              Holiday Leave Type
+              Leave Type
             </label>
 
             <select
@@ -278,7 +271,7 @@ onBeforeUnmount(() => {
                      dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800"
             >
               <option value="" disabled>
-                {{ loadingTypes ? 'Loading holiday types…' : 'Select holiday leave type' }}
+                {{ loadingTypes ? 'Loading leave types…' : 'Select leave type' }}
               </option>
               <option
                 v-for="t in leaveTypes"
@@ -290,7 +283,7 @@ onBeforeUnmount(() => {
             </select>
 
             <p class="text-[11px] text-slate-500 dark:text-slate-400">
-              These options are configured by HR / Admin for expat holiday entitlement.
+              These options are configured by HR / Admin for expat leave.
             </p>
           </div>
 

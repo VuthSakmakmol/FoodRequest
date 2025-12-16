@@ -27,6 +27,11 @@ const groups = [
         icon: 'fa-solid fa-user-tie',
         to: { name: 'leave-manager-inbox' },
       },
+      {
+        label: 'Profile',
+        icon: 'fa-solid fa-id-badge',
+        to: { name: 'leave-manager-profile' },
+      },
     ],
   },
 ]
@@ -93,11 +98,12 @@ function toggleAuth() {
           'border-emerald-400/70 text-emerald-100': t.type === 'success',
           'border-red-400/70 text-red-100': t.type === 'error',
           'border-amber-400/70 text-amber-100': t.type === 'warning',
+          'border-sky-400/70 text-sky-100': t.type === 'info',
         }"
       >
         <div class="flex-1">
           <div class="mb-0.5 font-semibold">
-            {{ t.title || (t.type === 'success' ? 'Success' : t.type === 'error' ? 'Error' : 'Notice') }}
+            {{ t.title || (t.type === 'success' ? 'Success' : t.type === 'error' ? 'Error' : t.type === 'warning' ? 'Notice' : 'Info') }}
           </div>
           <p class="text-xs leading-snug">
             {{ t.message }}
@@ -190,10 +196,7 @@ function toggleAuth() {
                 @click="handleNavClick(it)"
               >
                 <i :class="[it.icon, 'text-[12px]']"></i>
-                <span
-                  v-if="sidebarOpen"
-                  class="truncate"
-                >
+                <span v-if="sidebarOpen" class="truncate">
                   {{ it.label }}
                 </span>
               </button>
@@ -351,7 +354,7 @@ function toggleAuth() {
                px-2 py-1.5 text-[13px] shadow-sm
                dark:border-slate-800 dark:bg-slate-950/95"
       >
-        <div class="flex items-center h-10 gap-2">
+        <div class="flex items-center h-10 gap-2 min-w-0">
           <button
             type="button"
             class="inline-flex h-8 w-8 items-center justify-center rounded-md
@@ -360,18 +363,34 @@ function toggleAuth() {
           >
             <i class="fa-solid fa-bars text-[13px]"></i>
           </button>
-          <div class="flex flex-col leading-tight">
-  
+
+          <div class="flex flex-col leading-tight min-w-0">
+            <div class="truncate text-[11px] font-semibold text-slate-900 dark:text-slate-50">
+              {{ appTitle }}
+            </div>
+            <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+              {{ auth.user?.name || auth.user?.loginId || 'Manager' }} · {{ auth.user?.role || 'LEAVE_MANAGER' }}
+            </div>
           </div>
         </div>
 
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                   text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            @click="toggleAuth"
+          >
+            <i class="fa-solid fa-arrow-right-from-bracket text-[10px]"></i>
+            Logout
+          </button>
+        </div>
       </header>
 
       <!-- Content -->
       <main
-        class="flex-1 overflow-auto bg-slate-50
-               px-1 py-1 text-sm
-               dark:bg-slate-950"
+        class="flex-1 overflow-auto bg-slate-50 px-1 py-1 text-sm dark:bg-slate-950"
       >
         <router-view />
       </main>

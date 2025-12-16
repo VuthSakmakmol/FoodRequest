@@ -84,22 +84,27 @@ app.use((req, _res, next) => { req.io = app.get('io'); next(); });
 
 /* ───────────────── Routes ───────────────── */
 
+
 //========================== ADMIN PANEL (Leave module) ===========================
 // Leave requests (employee + manager + gm)
 app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
-console.log('[mount] /api/leave/requests -> leave.routes')
-
-// Leave admin (profiles + types)
 app.use('/api/admin/leave', require('./routes/leave/leaveProfile-admin.routes'));
 app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'));
 app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'));
 app.use('/api/admin/leave', require('./routes/leave/leaveYearSheet-admin.routes'))
+app.use('/api/leave/profile', require('./routes/leave/leaveProfile.routes'))
+
 // Auth
 app.use('/api/auth',   require('./routes/auth.routes'));
 
+
+// ========================== Public ================================
 // Directory/public
 app.use('/api/public', require('./routes/public-directory.routes'));
 app.use('/api/public', require('./routes/food/food-public.routes'));
+
+
+// =========================== Food ==================================
 
 // Admin (Food)
 app.use('/api/admin',  require('./routes/food/food-admin.routes'));
@@ -111,7 +116,9 @@ app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'));
 // Static uploads
 app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || 'uploads')));
 
-// ─────────── Transportation ───────────
+
+
+// ============================== Transportation ===========================
 
 // Employee + Public
 app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'));
@@ -132,11 +139,11 @@ app.use('/api/messenger/car-bookings', require('./routes/transportation/carBooki
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'));
 app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'));
 
+
+// ======================================  Holiday =================================
 // Public routes (holidays)
 app.use('/api/public', require('./routes/public-holidays.routes'));
 
-// ❌ (Removed duplicate)
-// app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
 
 /* ───────────────── 404 for API ───────────────── */
 app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }));

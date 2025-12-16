@@ -1,25 +1,23 @@
 <!-- src/views/expat/ManagerLeaveInbox.vue -->
 <script setup>
-import {
-  ref,
-  computed,
-  onMounted,
-  onBeforeUnmount,
-  watch
-} from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
+const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* Only real LEAVE_MANAGER can make decisions */
-const canManagerDecide = computed(() =>
-  auth.user?.role === 'LEAVE_MANAGER'
-)
+/* ✅ Manager decide check (supports role + roles[]) */
+const canManagerDecide = computed(() => {
+  const r1 = String(auth.user?.role || '')
+  const r2 = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  return r1 === 'LEAVE_MANAGER' || r2.includes('LEAVE_MANAGER')
+})
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -36,11 +34,11 @@ const search = ref('')
 const statusTab = ref('PENDING_MANAGER') // 'PENDING_MANAGER' | 'PENDING_GM'
 
 /* Filters */
-const fromDate = ref(dayjs().format('YYYY-MM-DD')) // default today
-const toDate = ref(dayjs().format('YYYY-MM-DD'))   // default today
-const employeeFilter = ref('')                     // expat ID filter
+const fromDate = ref(dayjs().format('YYYY-MM-DD'))
+const toDate = ref(dayjs().format('YYYY-MM-DD'))
+const employeeFilter = ref('')
 
-/* ───────── Pagination ───────── */
+/* Pagination */
 const page = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
@@ -69,7 +67,6 @@ function statusChipClasses(status) {
   }
 }
 
-/* Weight so we can sort queue nicely */
 function statusWeight(s) {
   switch (s) {
     case 'PENDING_MANAGER': return 0
@@ -81,8 +78,17 @@ function statusWeight(s) {
   }
 }
 
-/* ───────── Data + Filtering ───────── */
+/* ✅ Go to Profile page and auto-select that expat */
+function goProfile(row) {
+  const empId = String(row?.employeeId || '').trim()
+  if (!empId) return
+  router.push({
+    name: 'leave-manager-profile',
+    query: { employeeId: empId }
+  })
+}
 
+/* ───────── Data ───────── */
 async function fetchInbox() {
   try {
     loading.value = true
@@ -93,51 +99,26 @@ async function fetchInbox() {
     showToast({
       type: 'error',
       title: 'Failed to load',
-      message:
-        e?.response?.data?.message || 'Unable to load manager inbox.',
+      message: e?.response?.data?.message || 'Unable to load manager inbox.',
     })
   } finally {
     loading.value = false
   }
 }
 
-/**
- * Tabs behaviour:
- * - Pending (Manager) tab:
- *     ➜ show ALL requests for this manager
- *       (PENDING_MANAGER, PENDING_GM, APPROVED, REJECTED, CANCELLED)
- *       so row NEVER disappears after manager clicks Approve.
- *     ➜ sorted so PENDING_MANAGER and PENDING_GM stay at top.
- *
- * - Sent to GM tab:
- *     ➜ only show requests that have gone to GM or finished at GM
- *       (PENDING_GM, APPROVED, REJECTED).
- *
- * Extra filters:
- * - Date filter = startDate in [fromDate, toDate] (defaults to today)
- * - Expat ID filter = substring match on employeeId
- */
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
 
-  const fromVal = fromDate.value
-    ? dayjs(fromDate.value).startOf('day').valueOf()
-    : null
-  const toVal = toDate.value
-    ? dayjs(toDate.value).endOf('day').valueOf()
-    : null
+  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
+  const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
 
   let list = [...rows.value]
 
-  // Expat ID filter (employeeId)
   if (empQ) {
-    list = list.filter(r =>
-      String(r.employeeId || '').toLowerCase().includes(empQ)
-    )
+    list = list.filter(r => String(r.employeeId || '').toLowerCase().includes(empQ))
   }
 
-  // Search
   if (q) {
     list = list.filter(r =>
       String(r.employeeId || '').toLowerCase().includes(q) ||
@@ -147,16 +128,12 @@ const filteredRows = computed(() => {
     )
   }
 
-  // Status tab behaviour
+  // Tab filter
   if (statusTab.value === 'PENDING_GM') {
-    list = list.filter(r =>
-      ['PENDING_GM', 'APPROVED', 'REJECTED'].includes(r.status)
-    )
-  } else {
-    // PENDING_MANAGER tab => no additional status filter
+    list = list.filter(r => ['PENDING_GM', 'APPROVED', 'REJECTED'].includes(r.status))
   }
 
-  // Date filter based on startDate (holiday start)
+  // Date filter by startDate
   if (fromVal !== null || toVal !== null) {
     list = list.filter(r => {
       if (!r.startDate) return false
@@ -167,14 +144,11 @@ const filteredRows = computed(() => {
     })
   }
 
-  // Sort: by status weight then createdAt desc
+  // Sort by status priority, then created desc
   list.sort((a, b) => {
     const sw = statusWeight(a.status) - statusWeight(b.status)
     if (sw !== 0) return sw
-    return (
-      new Date(b.createdAt || 0).getTime() -
-      new Date(a.createdAt || 0).getTime()
-    )
+    return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
   })
 
   return list
@@ -193,16 +167,12 @@ const pageCount = computed(() => {
   return Math.ceil(filteredRows.value.length / per) || 1
 })
 
-/* Reset to first page when filters change */
 watch(
   () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value],
-  () => {
-    page.value = 1
-  }
+  () => { page.value = 1 }
 )
 
 /* ───────── Confirm dialog ───────── */
-
 const confirmDialog = ref({
   open: false,
   action: 'APPROVE', // 'APPROVE' | 'REJECT'
@@ -211,7 +181,6 @@ const confirmDialog = ref({
 })
 
 function openDecisionDialog(row, action) {
-  // safety: admin / other roles should not decide
   if (!canManagerDecide.value) {
     showToast({
       type: 'error',
@@ -220,7 +189,6 @@ function openDecisionDialog(row, action) {
     })
     return
   }
-
   confirmDialog.value.open = true
   confirmDialog.value.row = row
   confirmDialog.value.action = action
@@ -249,6 +217,8 @@ const confirmPrimaryClasses = computed(() =>
     : 'bg-rose-600 hover:bg-rose-700 text-white'
 )
 
+const rejectNeedsComment = computed(() => confirmDialog.value.action === 'REJECT')
+
 async function submitDecision() {
   const { row, action, comment } = confirmDialog.value
   if (!row || !action) {
@@ -256,12 +226,24 @@ async function submitDecision() {
     return
   }
 
+  if (action === 'REJECT' && !String(comment || '').trim()) {
+    showToast({
+      type: 'warning',
+      title: 'Comment required',
+      message: 'Please write a reason before rejecting.',
+    })
+    return
+  }
+
   try {
     loading.value = true
-    await api.post(`/leave/requests/${row._id}/manager-decision`, {
-      action,
-      comment: comment || '',
-    })
+
+    const payload =
+      action === 'APPROVE'
+        ? { action }
+        : { action, comment: String(comment || '').trim() }
+
+    await api.post(`/leave/requests/${row._id}/manager-decision`, payload)
 
     showToast({
       type: 'success',
@@ -276,32 +258,23 @@ async function submitDecision() {
     showToast({
       type: 'error',
       title: 'Update failed',
-      message:
-        e?.response?.data?.message ||
-        'Unable to update this leave request.',
+      message: e?.response?.data?.message || 'Unable to update this leave request.',
     })
   } finally {
     loading.value = false
   }
 }
 
-/* ───────── Realtime (Socket.IO) ───────── */
-
+/* ───────── Realtime ───────── */
 const offHandlers = []
 let refreshTimer = null
 
-function triggerRealtimeRefresh(reason = '') {
-  // small debounce so multiple events within 150ms only trigger 1 fetch
+function triggerRealtimeRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(() => {
-    // console.log('[ManagerInbox] realtime refresh:', reason)
-    fetchInbox()
-  }, 150)
+  refreshTimer = setTimeout(() => fetchInbox(), 150)
 }
 
 function setupRealtime() {
-  // Ensure we join the right role rooms (LEAVE_MANAGER etc.)
-  // pass extra info in case your socket utils use it
   subscribeRoleIfNeeded({
     role: auth.user?.role,
     employeeId: auth.user?.employeeId,
@@ -309,9 +282,8 @@ function setupRealtime() {
     company: auth.user?.companyCode,
   })
 
-  // New leave request created (for this manager)
   const offCreated = onSocket('leave:req:created', (payload = {}) => {
-    triggerRealtimeRefresh('created')
+    triggerRealtimeRefresh()
     if (payload.status === 'PENDING_MANAGER') {
       showToast({
         type: 'info',
@@ -321,110 +293,47 @@ function setupRealtime() {
     }
   })
 
-  // Generic update (cancel, edit, etc.)
-  const offUpdated = onSocket('leave:req:updated', () => {
-    triggerRealtimeRefresh('updated')
-  })
-
-  // When any manager decision happens (another tab / device)
-  const offManager = onSocket('leave:req:manager-decision', () => {
-    triggerRealtimeRefresh('manager-decision')
-  })
-
-  // When GM makes a decision on something that was sent to GM
-  const offGm = onSocket('leave:req:gm-decision', (payload = {}) => {
-    triggerRealtimeRefresh('gm-decision')
-    const status = String(payload.status || '')
-    if (status === 'APPROVED') {
-      showToast({
-        type: 'success',
-        title: 'GM approved',
-        message: 'GM approved a leave request you sent.'
-      })
-    } else if (status === 'REJECTED') {
-      showToast({
-        type: 'error',
-        title: 'GM rejected',
-        message: 'GM rejected a leave request you sent.'
-      })
-    }
-  })
+  const offUpdated = onSocket('leave:req:updated', () => triggerRealtimeRefresh())
+  const offManager = onSocket('leave:req:manager-decision', () => triggerRealtimeRefresh())
+  const offGm = onSocket('leave:req:gm-decision', () => triggerRealtimeRefresh())
 
   offHandlers.push(offCreated, offUpdated, offManager, offGm)
 }
 
-/* ───────── lifecycle ───────── */
-
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') {
-    window.addEventListener('resize', updateIsMobile)
-  }
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   await fetchInbox()
   setupRealtime()
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') {
-    window.removeEventListener('resize', updateIsMobile)
-  }
-  if (refreshTimer) {
-    clearTimeout(refreshTimer)
-  }
-  offHandlers.forEach(off => {
-    try { off && off() } catch {}
-  })
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (refreshTimer) clearTimeout(refreshTimer)
+  offHandlers.forEach(off => { try { off && off() } catch {} })
 })
 </script>
 
 <template>
   <div class="px-1 py-1 sm:px-3">
-    <div
-      class="rounded-2xl border border-slate-200 bg-white shadow-sm
-             dark:border-slate-800 dark:bg-slate-900"
-    >
-      <!-- Gradient header -->
-      <div
-        class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500
-               px-4 py-3 text-white"
-      >
-        <!-- Desktop header -->
-        <div
-          v-if="!isMobile"
-          class="flex flex-wrap items-end justify-between gap-4"
-        >
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <!-- Header -->
+      <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+        <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-col gap-1 min-w-[220px]">
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">
-              Expat Leave
-            </p>
-            <p class="text-sm font-semibold">
-              Manager Inbox
-            </p>
-            <p class="text-[11px] text-sky-50/90">
-              Review and approve expatriate leave requests assigned to you.
-            </p>
+            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
+            <p class="text-sm font-semibold">Manager Inbox</p>
+            <p class="text-[11px] text-sky-50/90">Review and approve expatriate leave requests assigned to you.</p>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
             <!-- Search -->
             <div class="min-w-[220px] max-w-xs">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">
-                Search
-              </label>
-              <div
-                class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30
-                       px-2.5 py-1.5 text-xs"
-              >
-                <i
-                  class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80"
-                />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Employee / type / reason..."
-                  class="flex-1 bg-transparent text-[11px] outline-none
-                         placeholder:text-sky-100/70"
-                />
+              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
+              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-xs">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
+                <input v-model="search" type="text" placeholder="Employee / type / reason..."
+                       class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70" />
               </div>
             </div>
 
@@ -432,24 +341,16 @@ onBeforeUnmount(() => {
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/90 mr-1">Status</span>
               <div class="flex rounded-full bg-sky-900/30 p-0.5">
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'PENDING_MANAGER'
-                    ? 'bg-white text-sky-700 shadow-sm'
-                    : 'text-sky-100 hover:bg-sky-900/50'"
-                  @click="statusTab = 'PENDING_MANAGER'"
-                >
+                <button type="button"
+                        class="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                        :class="statusTab === 'PENDING_MANAGER' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                        @click="statusTab = 'PENDING_MANAGER'">
                   Pending (Manager)
                 </button>
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'PENDING_GM'
-                    ? 'bg-white text-sky-700 shadow-sm'
-                    : 'text-sky-100 hover:bg-sky-900/50'"
-                  @click="statusTab = 'PENDING_GM'"
-                >
+                <button type="button"
+                        class="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                        :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                        @click="statusTab = 'PENDING_GM'">
                   Sent to GM
                 </button>
               </div>
@@ -458,35 +359,18 @@ onBeforeUnmount(() => {
             <!-- Date range -->
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/80">Start</span>
-              <input
-                v-model="fromDate"
-                type="date"
-                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1
-                       text-[11px] text-sky-50 outline-none
-                       focus:border-white focus:ring-1 focus:ring-white/70"
-              />
+              <input v-model="fromDate" type="date"
+                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
               <span>to</span>
-              <input
-                v-model="toDate"
-                type="date"
-                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1
-                       text-[11px] text-sky-50 outline-none
-                       focus:border-white focus:ring-1 focus:ring-white/70"
-              />
+              <input v-model="toDate" type="date"
+                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
 
             <!-- Expat ID filter -->
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/80">Expat ID</span>
-              <input
-                v-model="employeeFilter"
-                type="text"
-                placeholder="EMP001..."
-                class="w-28 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1
-                       text-[11px] text-sky-50 outline-none
-                       placeholder:text-sky-100/70
-                       focus:border-white focus:ring-1 focus:ring-white/70"
-              />
+              <input v-model="employeeFilter" type="text" placeholder="EMP001..."
+                     class="w-28 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
           </div>
         </div>
@@ -494,101 +378,49 @@ onBeforeUnmount(() => {
         <!-- Mobile header -->
         <div v-else class="space-y-2">
           <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">
-              Expat Leave
-            </p>
-            <p class="text-sm font-semibold">
-              Manager Inbox
-            </p>
-            <p class="text-[11px] text-sky-50/90">
-              Review and approve expatriate leave requests assigned to you.
-            </p>
+            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
+            <p class="text-sm font-semibold">Manager Inbox</p>
+            <p class="text-[11px] text-sky-50/90">Review and approve expatriate leave requests assigned to you.</p>
           </div>
 
           <div class="space-y-2">
-            <!-- Search -->
             <div class="space-y-1">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">
-                Search
-              </label>
-              <div
-                class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30
-                       px-2.5 py-1.5 text-[11px]"
-              >
-                <i
-                  class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80"
-                />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Employee / type / reason..."
-                  class="flex-1 bg-transparent text-[11px] outline-none
-                         placeholder:text-sky-100/70"
-                />
+              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
+              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-[11px]">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
+                <input v-model="search" type="text" placeholder="Employee / type / reason..."
+                       class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70" />
               </div>
             </div>
 
-            <!-- Filters row -->
             <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <!-- Status pills -->
               <div class="flex items-center gap-1">
                 <span class="text-sky-50/90">Status</span>
                 <div class="flex rounded-full bg-sky-900/30 p-0.5">
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'PENDING_MANAGER'
-                      ? 'bg-white text-sky-700 shadow-sm'
-                      : 'text-sky-100 hover:bg-sky-900/50'"
-                    @click="statusTab = 'PENDING_MANAGER'"
-                  >
+                  <button type="button" class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          :class="statusTab === 'PENDING_MANAGER' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                          @click="statusTab = 'PENDING_MANAGER'">
                     Manager
                   </button>
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'PENDING_GM'
-                      ? 'bg-white text-sky-700 shadow-sm'
-                      : 'text-sky-100 hover:bg-sky-900/50'"
-                    @click="statusTab = 'PENDING_GM'"
-                  >
+                  <button type="button" class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                          :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                          @click="statusTab = 'PENDING_GM'">
                     GM
                   </button>
                 </div>
               </div>
 
-              <!-- Expat ID -->
-              <div class="flex items-center gap-2">
-                <input
-                  v-model="employeeFilter"
-                  type="text"
-                  placeholder="Expat ID..."
-                  class="w-24 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1
-                         text-[11px] text-sky-50 outline-none
-                         placeholder:text-sky-100/70
-                         focus:border-white focus:ring-1 focus:ring-white/70"
-                />
-              </div>
+              <input v-model="employeeFilter" type="text" placeholder="Expat ID..."
+                     class="w-24 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
 
-            <!-- Date range -->
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
               <span class="text-sky-50/80">Start</span>
-              <input
-                v-model="fromDate"
-                type="date"
-                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1
-                       text-[11px] text-sky-50 outline-none
-                       focus:border-white focus:ring-1 focus:ring-white/70"
-              />
+              <input v-model="fromDate" type="date"
+                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
               <span>to</span>
-              <input
-                v-model="toDate"
-                type="date"
-                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1
-                       text-[11px] text-sky-50 outline-none
-                       focus:border-white focus:ring-1 focus:ring-white/70"
-              />
+              <input v-model="toDate" type="date"
+                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
           </div>
         </div>
@@ -596,76 +428,56 @@ onBeforeUnmount(() => {
 
       <!-- Body -->
       <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
-        <!-- Loading simple banner (optional) -->
-        <div
-          v-if="loading && !filteredRows.length"
-          class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
-                 text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
-        >
+        <div v-if="loading && !filteredRows.length"
+             class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
+                    text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100">
           Loading manager inbox...
         </div>
 
-        <!-- Content -->
+        <!-- Mobile cards -->
         <div v-if="isMobile" class="space-y-2">
-          <p
-            v-if="!pagedRows.length && !loading"
-            class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400"
-          >
+          <p v-if="!pagedRows.length && !loading" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
             No leave requests in your manager queue.
           </p>
 
-          <article
-            v-for="row in pagedRows"
-            :key="row._id"
-            class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
-                   shadow-[0_10px_24px_rgba(15,23,42,0.12)]
-                   dark:border-slate-700 dark:bg-slate-900/95"
-          >
+          <article v-for="row in pagedRows" :key="row._id"
+                   class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
+                          shadow-[0_10px_24px_rgba(15,23,42,0.12)]
+                          dark:border-slate-700 dark:bg-slate-900/95">
             <div class="flex items-start justify-between gap-3">
               <div class="space-y-1">
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">
                   Requested:
                   <span class="font-medium text-slate-800 dark:text-slate-100">
-                    {{
-                      row.createdAt
-                        ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm')
-                        : '—'
-                    }}
+                    {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                   </span>
                 </div>
+
+                <!-- ✅ ID + Name -->
                 <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
                   {{ row.employeeId || '—' }}
                 </div>
-                <div
-                  v-if="row.employeeName || row.department"
-                  class="text-[11px] text-slate-500 dark:text-slate-400"
-                >
-                  {{ row.employeeName || '' }}
-                  <span v-if="row.department">
-                    · {{ row.department }}
-                  </span>
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                  {{ row.employeeName || '—' }}
                 </div>
+
+                <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                  {{ row.department }}
+                </div>
+
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">
                   Date: <span class="font-medium">{{ formatRange(row) }}</span>
-                  · Days:
-                  <span class="font-semibold">
-                    {{ Number(row.totalDays || 0).toLocaleString() }}
-                  </span>
+                  · Days: <span class="font-semibold">{{ Number(row.totalDays || 0).toLocaleString() }}</span>
                 </div>
               </div>
 
               <div class="text-right space-y-1 text-[11px]">
-                <span
-                  class="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700
-                         border border-sky-100 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80"
-                >
+                <span class="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 border border-sky-100 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80">
                   {{ row.leaveTypeCode || '—' }}
                 </span>
                 <div>
-                  <span
-                    class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                    :class="statusChipClasses(row.status)"
-                  >
+                  <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                        :class="statusChipClasses(row.status)">
                     {{ row.status }}
                   </span>
                 </div>
@@ -673,189 +485,136 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-              <span class="font-medium">Reason:</span>
-              <span> {{ row.reason || '—' }}</span>
+              <span class="font-medium">Reason:</span> <span>{{ row.reason || '—' }}</span>
             </div>
 
             <div class="mt-2 flex flex-wrap justify-end gap-2">
+              <button type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
+                             text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                      @click="goProfile(row)">
+                <i class="fa-solid fa-id-badge text-[10px]" />
+                Profile
+              </button>
+
               <template v-if="canManagerDecide && row.status === 'PENDING_MANAGER'">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1
-                         text-[11px] font-semibold text-white shadow-sm
-                         hover:bg-emerald-700"
-                  @click="openDecisionDialog(row, 'APPROVE')"
-                >
+                <button type="button"
+                        class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
+                        @click="openDecisionDialog(row, 'APPROVE')">
                   <i class="fa-solid fa-check text-[10px]" />
                   Approve
                 </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1
-                         text-[11px] font-semibold text-rose-700 hover:bg-rose-50
-                         dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                  @click="openDecisionDialog(row, 'REJECT')"
-                >
+                <button type="button"
+                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50
+                               dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
+                        @click="openDecisionDialog(row, 'REJECT')">
                   <i class="fa-solid fa-xmark text-[10px]" />
                   Reject
                 </button>
               </template>
+
               <template v-else>
-                <span class="text-[11px] text-slate-400 dark:text-slate-500">
-                  No action available
-                </span>
+                <span class="text-[11px] text-slate-400 dark:text-slate-500">No action available</span>
               </template>
             </div>
           </article>
         </div>
 
-        <!-- DESKTOP: table -->
+        <!-- Desktop table -->
         <div v-else class="overflow-x-auto">
-          <table
-            class="min-w-[900px] w-full border-collapse text-xs sm:text-[13px]
-                   text-slate-700 dark:text-slate-100"
-          >
-            <thead
-              class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
-                     border-b border-slate-200
-                     dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
-            >
+          <table class="min-w-[1040px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+            <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
               <tr>
-                <th class="table-th">
-                  Requested at
-                </th>
-                <th class="table-th">
-                  Employee
-                </th>
-                <th class="table-th">
-                  Type
-                </th>
-                <th class="table-th">
-                  Date range
-                </th>
-                <th class="table-th text-right">
-                  Days
-                </th>
-                <th class="table-th">
-                  Reason
-                </th>
-                <th class="table-th text-center">
-                  Status
-                </th>
-                <th class="table-th text-right">
-                  Actions
-                </th>
+                <th class="table-th">Requested at</th>
+                <th class="table-th">Employee</th>
+                <th class="table-th">Type</th>
+                <th class="table-th">Date range</th>
+                <th class="table-th text-right">Days</th>
+                <th class="table-th">Reason</th>
+                <th class="table-th text-center">Status</th>
+                <th class="table-th text-right">Actions</th>
               </tr>
             </thead>
 
             <tbody>
-              <!-- No data -->
               <tr v-if="!loading && !filteredRows.length">
-                <td
-                  colspan="8"
-                  class="px-3 py-6 text-center text-[12px] text-slate-500
-                         border-t border-slate-200
-                         dark:border-slate-700 dark:text-slate-400"
-                >
+                <td colspan="8" class="px-3 py-6 text-center text-[12px] text-slate-500 border-t border-slate-200 dark:border-slate-700 dark:text-slate-400">
                   No leave requests in your manager queue.
                 </td>
               </tr>
 
-              <!-- Rows -->
-              <tr
-                v-for="row in pagedRows"
-                :key="row._id"
-                class="border-b border-slate-200 text-[12px]
-                       hover:bg-slate-50/80
-                       dark:border-slate-700 dark:hover:bg-slate-900/70"
-              >
+              <tr v-for="row in pagedRows" :key="row._id"
+                  class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70">
                 <td class="table-td whitespace-nowrap align-top">
-                  {{
-                    row.createdAt
-                      ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm')
-                      : '—'
-                  }}
+                  {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                 </td>
 
+                <!-- ✅ Employee: ID + Name -->
                 <td class="table-td align-top">
                   <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
                     {{ row.employeeId || '—' }}
                   </div>
-                  <div
-                    v-if="row.employeeName || row.department"
-                    class="text-[11px] text-slate-500 dark:text-slate-400"
-                  >
-                    {{ row.employeeName || '' }}
-                    <span v-if="row.department">
-                      · {{ row.department }}
-                    </span>
+                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                    {{ row.employeeName || '—' }}
+                  </div>
+                  <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                    {{ row.department }}
                   </div>
                 </td>
 
                 <td class="table-td align-top">
-                  <span
-                    class="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700
-                           border border-sky-100 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80"
-                  >
+                  <span class="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 border border-sky-100 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80">
                     {{ row.leaveTypeCode || '—' }}
                   </span>
                 </td>
 
-                <td class="table-td whitespace-nowrap align-top">
-                  {{ formatRange(row) }}
-                </td>
-
-                <td class="table-td text-right align-top">
-                  {{ Number(row.totalDays || 0).toLocaleString() }}
-                </td>
+                <td class="table-td whitespace-nowrap align-top">{{ formatRange(row) }}</td>
+                <td class="table-td text-right align-top">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
 
                 <td class="table-td align-top">
-                  <p
-                    class="text-truncate-2 text-xs sm:text-[13px] text-slate-700 dark:text-slate-100"
-                  >
+                  <p class="text-truncate-2 text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
                     {{ row.reason || '—' }}
                   </p>
                 </td>
 
                 <td class="table-td text-center align-top">
-                  <span
-                    class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                    :class="statusChipClasses(row.status)"
-                  >
+                  <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(row.status)">
                     {{ row.status }}
                   </span>
                 </td>
 
                 <td class="table-td text-right align-top">
-                  <template v-if="canManagerDecide && row.status === 'PENDING_MANAGER'">
-                    <div class="inline-flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1
-                               text-[11px] font-medium text-white shadow-sm
-                               hover:bg-emerald-700"
-                        @click="openDecisionDialog(row, 'APPROVE')"
-                      >
+                  <div class="inline-flex flex-wrap justify-end gap-2">
+                    <button type="button"
+                            class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
+                                   text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
+                                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                            @click="goProfile(row)">
+                      <i class="fa-solid fa-id-badge text-[10px]" />
+                      Profile
+                    </button>
+
+                    <template v-if="canManagerDecide && row.status === 'PENDING_MANAGER'">
+                      <button type="button"
+                              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
+                              @click="openDecisionDialog(row, 'APPROVE')">
                         <i class="fa-solid fa-check text-[10px]" />
                         Approve
                       </button>
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2.5 py-1
-                               text-[11px] font-medium text-rose-700 hover:bg-rose-50
-                               dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                        @click="openDecisionDialog(row, 'REJECT')"
-                      >
+                      <button type="button"
+                              class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50
+                                     dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
+                              @click="openDecisionDialog(row, 'REJECT')">
                         <i class="fa-solid fa-xmark text-[10px]" />
                         Reject
                       </button>
-                    </div>
-                  </template>
-                  <template v-else>
-                    <span class="text-[11px] text-slate-400 dark:text-slate-500">
-                      No action
-                    </span>
-                  </template>
+                    </template>
+
+                    <template v-else>
+                      <span class="text-[11px] text-slate-400 dark:text-slate-500">No action</span>
+                    </template>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -863,116 +622,51 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Pagination -->
-        <div
-          class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2
-                 text-[11px] text-slate-600
-                 dark:border-slate-700 dark:text-slate-300
-                 sm:flex-row sm:items-center sm:justify-between"
-        >
+        <div class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center gap-2">
             <span>Rows per page</span>
-            <select
-              v-model="perPage"
-              class="rounded-lg border border-slate-300 bg-white px-2 py-1
-                     text-[11px] dark:border-slate-600 dark:bg-slate-900"
-            >
-              <option
-                v-for="opt in perPageOptions"
-                :key="'per-' + opt"
-                :value="opt"
-              >
-                {{ opt }}
-              </option>
+            <select v-model="perPage" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900">
+              <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
             </select>
           </div>
 
           <div class="flex items-center justify-end gap-1">
-            <button
-              type="button"
-              class="pagination-btn"
-              :disabled="page <= 1"
-              @click="page = 1"
-            >
-              «
-            </button>
-            <button
-              type="button"
-              class="pagination-btn"
-              :disabled="page <= 1"
-              @click="page = Math.max(1, page - 1)"
-            >
-              Prev
-            </button>
-            <span class="px-2">
-              Page {{ page }} / {{ pageCount }}
-            </span>
-            <button
-              type="button"
-              class="pagination-btn"
-              :disabled="page >= pageCount"
-              @click="page = Math.min(pageCount, page + 1)"
-            >
-              Next
-            </button>
-            <button
-              type="button"
-              class="pagination-btn"
-              :disabled="page >= pageCount"
-              @click="page = pageCount"
-            >
-              »
-            </button>
+            <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = 1">«</button>
+            <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
+            <span class="px-2">Page {{ page }} / {{ pageCount }}</span>
+            <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
+            <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- MODAL: Manager decision -->
+    <!-- Confirm dialog -->
     <transition name="modal-fade">
-      <div
-        v-if="confirmDialog.open"
-        class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2"
-      >
-        <div
-          class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200
-                 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950"
-        >
+      <div v-if="confirmDialog.open"
+           class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
+        <div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
           <!-- Header -->
-          <div
-            class="border-b border-slate-200 bg-slate-50/80 px-4 py-3
-                   dark:border-slate-700 dark:bg-slate-900/80"
-          >
+          <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
             <div class="flex items-start justify-between gap-2">
               <div class="flex items-center gap-2">
-                <div
-                  class="inline-flex h-8 w-8 items-center justify-center rounded-full
-                         bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-200"
-                >
-                  <i
-                    v-if="confirmDialog.action === 'APPROVE'"
-                    class="fa-solid fa-check text-sm"
-                  />
-                  <i
-                    v-else
-                    class="fa-solid fa-xmark text-sm"
-                  />
+                <div class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">
+                  <i v-if="confirmDialog.action === 'APPROVE'" class="fa-solid fa-check text-sm" />
+                  <i v-else class="fa-solid fa-xmark text-sm" />
                 </div>
                 <div>
                   <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">
                     {{ confirmTitle }}
                   </div>
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                    Your decision will be saved with this request.
+                    {{ rejectNeedsComment ? 'Comment is required for rejection.' : 'No comment needed for approval.' }}
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                class="inline-flex h-7 w-7 items-center justify-center rounded-full
-                       text-slate-500 hover:bg-slate-200/60
-                       dark:text-slate-300 dark:hover:bg-slate-800/80"
-                @click="closeDecisionDialog"
-              >
+
+              <button type="button"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/80"
+                      @click="closeDecisionDialog">
                 <i class="fa-solid fa-xmark text-xs" />
               </button>
             </div>
@@ -980,66 +674,50 @@ onBeforeUnmount(() => {
 
           <!-- Body -->
           <div class="px-4 py-3">
-            <div class="text-[12px] text-slate-700 dark:text-slate-100">
-              <div v-if="confirmDialog.row" class="mb-2 text-[11px]">
-                <span class="font-semibold">
-                  {{ confirmDialog.row.employeeId }} — {{ confirmDialog.row.employeeName }}
-                </span>
-                <span class="text-slate-500 dark:text-slate-400">
-                  · {{ formatRange(confirmDialog.row) }}
-                  · {{ confirmDialog.row.leaveTypeCode }}
-                </span>
-              </div>
-              <p class="text-[11px] text-slate-500 dark:text-slate-400">
-                You can optionally add a comment that will be stored with this decision.
-              </p>
+            <!-- ✅ Show ID + Name -->
+            <div v-if="confirmDialog.row" class="mb-2 text-[11px] text-slate-700 dark:text-slate-100">
+              <span class="font-semibold">
+                {{ confirmDialog.row.employeeId || '—' }} — {{ confirmDialog.row.employeeName || '—' }}
+              </span>
+              <span class="text-slate-500 dark:text-slate-400">
+                · {{ formatRange(confirmDialog.row) }}
+                · {{ confirmDialog.row.leaveTypeCode || '—' }}
+              </span>
             </div>
 
-            <div class="mt-3">
-              <label
-                class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
-              >
-                Comment (optional)
+            <div v-if="rejectNeedsComment" class="mt-2">
+              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                Rejection comment <span class="text-rose-600">*</span>
               </label>
               <textarea
                 v-model="confirmDialog.comment"
                 rows="3"
                 class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs
-                       shadow-sm focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500
+                       shadow-sm focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500
                        dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="Add any note for employee…"
+                placeholder="Write the reason for rejection…"
               ></textarea>
+              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                Required. This will be stored with the decision.
+              </p>
             </div>
           </div>
 
           <!-- Footer -->
-          <div
-            class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5
-                   dark:border-slate-700 dark:bg-slate-900/80"
-          >
-            <button
-              type="button"
-              class="rounded-full px-3 py-1.5 text-[11px] font-medium
-                     text-slate-600 hover:bg-slate-200/70
-                     dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="closeDecisionDialog"
-            >
+          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
+            <button type="button"
+                    class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
+                    @click="closeDecisionDialog">
               Cancel
             </button>
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full px-3 py-1.5
-                     text-[11px] font-semibold shadow-sm
-                     focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-slate-50
-                     dark:focus:ring-offset-slate-900"
-              :class="confirmPrimaryClasses"
-              :disabled="loading"
-              @click="submitDecision"
-            >
-              <i
-                class="fa-solid mr-1 text-[10px]"
-                :class="confirmDialog.action === 'APPROVE' ? 'fa-check' : 'fa-xmark'"
-              />
+
+            <button type="button"
+                    class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-sm
+                           focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-900"
+                    :class="confirmPrimaryClasses"
+                    :disabled="loading"
+                    @click="submitDecision">
+              <i class="fa-solid mr-1 text-[10px]" :class="confirmDialog.action === 'APPROVE' ? 'fa-check' : 'fa-xmark'" />
               <span>{{ confirmPrimaryLabel }}</span>
             </button>
           </div>
@@ -1056,19 +734,9 @@ onBeforeUnmount(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; }
+.table-td { padding: 8px 10px; vertical-align: top; }
 
-.table-th {
-  padding: 8px 10px;
-  text-align: left;
-  font-size: 11px;
-  font-weight: 700;
-}
-.table-td {
-  padding: 8px 10px;
-  vertical-align: top;
-}
-
-/* Pagination */
 .pagination-btn {
   padding: 4px 8px;
   border-radius: 999px;
@@ -1077,23 +745,11 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: #0f172a;
 }
-.pagination-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.pagination-btn:not(:disabled):hover {
-  background: #e5edff;
-}
-.dark .pagination-btn {
-  background: #020617;
-  border-color: rgba(148, 163, 184, 0.9);
-  color: #e5e7eb;
-}
-.dark .pagination-btn:not(:disabled):hover {
-  background: #1e293b;
-}
+.pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination-btn:not(:disabled):hover { background: #e5edff; }
+.dark .pagination-btn { background: #020617; border-color: rgba(148, 163, 184, 0.9); color: #e5e7eb; }
+.dark .pagination-btn:not(:disabled):hover { background: #1e293b; }
 
-/* Modal transition */
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
