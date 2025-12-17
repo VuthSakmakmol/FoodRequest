@@ -15,7 +15,8 @@ const { toasts, removeToast } = useToast()
 /* ───────── Sidebar state ───────── */
 const sidebarOpen = ref(true)
 
-/* Nav groups (normal Expat Leave user) */
+
+/* ✅ Nav groups (add Replace Day) */
 const groups = [
   {
     key: 'my-leave',
@@ -32,9 +33,24 @@ const groups = [
         icon: 'fa-solid fa-list-ul',
         to: { name: 'leave-user-my-requests' },
       },
+
+      // ✅ NEW: Replace Day Request (create)
+      {
+        label: 'Replace Day Request',
+        icon: 'fa-solid fa-calendar-plus',
+        to: { name: 'leave-user-replace-day' },
+      },
+
+      // ✅ NEW: Replace Day List
+      {
+        label: 'Replace Day List',
+        icon: 'fa-solid fa-clipboard-list',
+        to: { name: 'leave-user-replace-list' },
+      },
     ],
   },
 ]
+
 
 /* Open/close state (accordion) */
 const open = reactive(
@@ -59,8 +75,6 @@ watch(
 const initials = computed(() =>
   (auth.user?.name || auth.user?.loginId || 'U').slice(0, 2).toUpperCase()
 )
-
-const appTitle = computed(() => route.meta?.title || 'Expat Leave Portal')
 
 function isActive(it) {
   return route.name === it?.to?.name
@@ -195,10 +209,7 @@ function toggleAuth() {
                 @click="handleNavClick(it)"
               >
                 <i :class="[it.icon, 'text-[12px]']"></i>
-                <span
-                  v-if="sidebarOpen"
-                  class="truncate"
-                >
+                <span v-if="sidebarOpen" class="truncate">
                   {{ it.label }}
                 </span>
               </button>
@@ -218,10 +229,7 @@ function toggleAuth() {
         >
           {{ initials }}
         </div>
-        <div
-          v-if="sidebarOpen"
-          class="ml-2 min-w-0 flex-1"
-        >
+        <div v-if="sidebarOpen" class="ml-2 min-w-0 flex-1">
           <div class="truncate font-semibold">
             {{ auth.user?.name || auth.user?.loginId || 'Employee' }}
           </div>
@@ -250,10 +258,7 @@ function toggleAuth() {
         class="fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-slate-300 bg-white
                text-sm shadow-lg dark:border-slate-800 dark:bg-slate-950/95 md:hidden"
       >
-        <div
-          class="flex items-center justify-between border-b border-slate-300 px-2 py-2
-                 dark:border-slate-800"
-        >
+        <div class="flex items-center justify-between border-b border-slate-300 px-2 py-2 dark:border-slate-800">
           <span class="ml-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
             Expat Leave
           </span>
@@ -291,10 +296,7 @@ function toggleAuth() {
                 ></i>
               </button>
 
-              <div
-                v-show="open[g.key]"
-                class="mt-0.5 space-y-0.5 pb-1"
-              >
+              <div v-show="open[g.key]" class="mt-0.5 space-y-0.5 pb-1">
                 <button
                   v-for="it in g.children"
                   :key="it.label + '-m'"
@@ -317,10 +319,7 @@ function toggleAuth() {
           </div>
         </nav>
 
-        <div
-          class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px]
-                 dark:border-slate-800"
-        >
+        <div class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px] dark:border-slate-800">
           <div
             class="flex h-7 w-7 items-center justify-center rounded-full
                    bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
@@ -365,17 +364,12 @@ function toggleAuth() {
           >
             <i class="fa-solid fa-bars text-[13px]"></i>
           </button>
-          <div class="flex flex-col h-10 leading-tight">
-          </div>
+          <div class="flex flex-col h-10 leading-tight"></div>
         </div>
       </header>
 
       <!-- Content -->
-      <main
-        class="flex-1 overflow-auto bg-slate-50
-               px-1 py-1 text-sm
-               dark:bg-slate-950"
-      >
+      <main class="flex-1 overflow-auto bg-slate-50 px-1 py-1 text-sm dark:bg-slate-950">
         <router-view />
       </main>
     </div>
@@ -384,11 +378,7 @@ function toggleAuth() {
 
 <style scoped>
 .fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.15s ease-out;
-}
+.fade-leave-active { transition: opacity 0.15s ease-out; }
 .fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
+.fade-leave-to { opacity: 0; }
 </style>

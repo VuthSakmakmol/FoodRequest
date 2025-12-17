@@ -16,6 +16,7 @@ const MGRLeaveExpat   = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
 const UserLeaveExpat  = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
 const ManagerProfile  = () => import('@/views/expat/manager/Profile.vue')
 const getMyProfile    = () => import('@/views/expat/generalManager/Profile.vue')
+
 // Public
 const GreetingPage    = () => import('@/views/GreetingPage.vue')
 
@@ -26,7 +27,6 @@ const EmployeeFoodCalendar = () => import('@/views/employee/foodBooking/Employee
 const EmployeeCarBooking   = () => import('@/views/employee/carBooking/EmployeeCarBooking.vue')
 const EmployeeCarHistory   = () => import('@/views/employee/carBooking/EmployeeCarHistory.vue')
 const CarBookingSchedule   = () => import('@/views/employee/carBooking/EmployeeCarCalendar.vue')
-
 
 // Admin (Food)
 const AdminLogin        = () => import('@/views/admin/AdminLogin.vue')
@@ -58,6 +58,11 @@ const AdminExpatProfiles  = () => import('@/views/expat/AdminExpatProfile.vue')
 const ManagerLeaveInbox   = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox        = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminExpatYearSheet = () => import('@/views/expat/AdminExpatYearSheet.vue')
+
+// Replace Day (User)
+const UserReplaceDay      = () => import('@/views/expat/user/UserReplaceDay.vue')
+const UserReplaceDayList  = () => import('@/views/expat/user/UserReplaceDayList.vue')
+
 
 // Decide "home" route by role
 function homeByRole(role) {
@@ -217,6 +222,18 @@ const router = createRouter({
           name: 'leave-user-my-requests',
           component: ExpatMyRequests
         },
+        {
+          path: 'replace-day',
+          name: 'leave-user-replace-day',
+          component: UserReplaceDay,
+          meta: { title: 'Replace Day' }
+        },
+        {
+          path: 'replace-day/list',
+          name: 'leave-user-replace-list',
+          component: UserReplaceDayList,
+          meta: { title: 'My Replace Day Requests' }
+        }
       ]
     },
 

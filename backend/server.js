@@ -93,7 +93,7 @@ app.use('/api/admin/leave', require('./routes/leave/leaveType-admin.routes'));
 app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'));
 app.use('/api/admin/leave', require('./routes/leave/leaveYearSheet-admin.routes'))
 app.use('/api/leave/profile', require('./routes/leave/leaveProfile.routes'))
-
+app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
 // Auth
 app.use('/api/auth',   require('./routes/auth.routes'));
 
