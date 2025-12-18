@@ -1,9 +1,10 @@
-// backend/services/telegram.polling.js
 const TelegramBot = require('node-telegram-bot-api')
 const fs = require('fs')
 const path = require('path')
 
 let botInstance = null
+let started = false
+let last409 = 0
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
@@ -17,13 +18,11 @@ function appendUpdateToFile({ chatId, update }) {
   const baseDir = path.resolve(process.cwd(), 'logs', 'telegram')
   ensureDir(baseDir)
 
-  // one file per chatId
   const filePath = path.join(baseDir, `${safeFileName(chatId)}.jsonl`)
-
   const record = {
     savedAt: new Date().toISOString(),
     chatId: String(chatId),
-    update, // full Telegram message object
+    update,
   }
 
   fs.appendFile(filePath, JSON.stringify(record) + '\n', (err) => {
@@ -31,16 +30,15 @@ function appendUpdateToFile({ chatId, update }) {
   })
 }
 
-async function clearWebhook(token) {
-  // Helps ensure polling works even if webhook was set before
+async function stopTelegramPolling() {
   try {
-    await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ drop_pending_updates: true }),
-    })
-  } catch (_) {
-    // ignore
+    if (botInstance) {
+      try { await botInstance.stopPolling() } catch (_) {}
+      try { botInstance.removeAllListeners() } catch (_) {}
+    }
+  } finally {
+    botInstance = null
+    started = false
   }
 }
 
@@ -48,40 +46,34 @@ function startTelegramPolling() {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || '').trim()
   if (!token) {
     console.log('ℹ️ Telegram polling: TELEGRAM_BOT_TOKEN missing, skip.')
-    return { stop: async () => {} }
+    return { stop: stopTelegramPolling }
   }
 
-  // Prevent double-start (nodemon restarts, etc.)
-  if (botInstance) {
+  if (started || botInstance) {
     console.log('ℹ️ Telegram polling already started, skip.')
-    return { stop: async () => {} }
+    return { stop: stopTelegramPolling }
   }
+  started = true
 
   const AUTO_REPLY_TEXT =
     '👋 Welcome to Trax Apparel Cambodia.\n\n' +
-    'Instruction: \n' +
-    '- This Chat Robotis using for notification only! \n' +
-    '- Please be aware that do not reply this robot! \n' +
-    '====================================== \n' +
+    'Instruction:\n' +
+    '- This chat robot is for notification only!\n' +
+    '- Please do not reply to this robot.\n' +
+    '======================================\n' +
     'Click this link to see our services:\n' +
     'http://178.128.48.101:4333/'
-
-  // clear webhook (so polling can receive updates)
-  clearWebhook(token)
 
   const bot = new TelegramBot(token, { polling: true })
   botInstance = bot
 
-  // ✅ Reply to EVERY message + save every update to file
   bot.on('message', async (msg) => {
     try {
       if (!msg?.chat?.id) return
       if (msg?.from?.is_bot) return
 
-      // Save update JSON (per chatId)
       appendUpdateToFile({ chatId: msg.chat.id, update: msg })
 
-      // Reply same message every time
       await bot.sendMessage(msg.chat.id, AUTO_REPLY_TEXT, {
         disable_web_page_preview: true,
       })
@@ -91,16 +83,20 @@ function startTelegramPolling() {
   })
 
   bot.on('polling_error', (e) => {
-    console.error('❌ Telegram polling_error:', e?.message || e)
+    const m = e?.message || ''
+    if (m.includes('409') || m.toLowerCase().includes('conflict')) {
+      const now = Date.now()
+      if (now - last409 > 5000) {
+        console.error('❌ Telegram polling_error: 409 Conflict (another poller is running somewhere)')
+        last409 = now
+      }
+      return
+    }
+    console.error('❌ Telegram polling_error:', m)
   })
 
-  console.log('✅ Telegram polling started (auto-reply + file logging enabled)')
-  return {
-    stop: async () => {
-      try { await bot.stopPolling() } catch (_) {}
-      botInstance = null
-    },
-  }
+  console.log('✅ Telegram polling started (log-only, no webhook)')
+  return { stop: stopTelegramPolling }
 }
 
-module.exports = { startTelegramPolling }
+module.exports = { startTelegramPolling, stopTelegramPolling }

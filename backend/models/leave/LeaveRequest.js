@@ -10,76 +10,29 @@ const STATUS = Object.freeze([
 ])
 
 const LeaveRequestSchema = new mongoose.Schema({
-  // Who is taking leave
-  employeeId: {
-    type: String,
-    required: true,
-    trim: true,
-  },
+  employeeId: { type: String, required: true, trim: true },
+  requesterLoginId: { type: String, required: true, trim: true },
 
-  // Who submitted (User.loginId)
-  requesterLoginId: {
-    type: String,
-    required: true,
-    trim: true,
-  },
+  leaveTypeCode: { type: String, required: true, trim: true, uppercase: true },
 
-  // Type code: AL, SL, UPL, ...
-  leaveTypeCode: {
-    type: String,
-    required: true,
-    trim: true,
-    uppercase: true,
-  },
+  startDate: { type: String, required: true }, // YYYY-MM-DD
+  endDate: { type: String, required: true },   // YYYY-MM-DD
 
-  startDate: {
-    type: String, // YYYY-MM-DD
-    required: true,
-  },
-  endDate: {
-    type: String, // YYYY-MM-DD
-    required: true,
-  },
+  totalDays: { type: Number, required: true, min: 0.5 },
 
-  totalDays: {
-    type: Number,
-    required: true,
-    min: 0.5,
-  },
+  reason: { type: String, default: '', trim: true },
 
-  reason: {
-    type: String,
-    default: '',
-    trim: true,
-  },
+  status: { type: String, enum: STATUS, default: 'PENDING_MANAGER' },
 
-  status: {
-    type: String,
-    enum: STATUS,
-    default: 'PENDING_MANAGER',
-  },
+  managerLoginId: { type: String, default: '', trim: true },
+  gmLoginId: { type: String, default: '', trim: true },
 
-  // Approver mapping
-  managerLoginId: {
-    type: String,
-    default: '',
-    trim: true,
-  },
-  gmLoginId: {
-    type: String,
-    default: '',
-    trim: true,
-  },
-
-  // Manager decision
   managerComment: { type: String, default: '' },
   managerDecisionAt: { type: Date },
 
-  // GM decision
   gmComment: { type: String, default: '' },
   gmDecisionAt: { type: Date },
 
-  // For future: soft delete, etc.
   cancelledAt: { type: Date, default: null },
   cancelledBy: { type: String, default: '' },
 }, { timestamps: true })

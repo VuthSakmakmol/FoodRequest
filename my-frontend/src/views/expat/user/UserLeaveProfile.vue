@@ -36,14 +36,19 @@ function num(v) {
   return Number.isFinite(n) ? n : 0
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Trust backend-computed balances. Do NOT recompute remaining here
+ * because AL can be negative (SP borrowing + alCarry debt).
+ */
 const balances = computed(() => {
   const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
-  const arr = raw.map(b => ({
+
+  const arr = raw.map((b) => ({
     leaveTypeCode: String(b?.leaveTypeCode || '').toUpperCase(),
     yearlyEntitlement: num(b?.yearlyEntitlement),
     used: num(b?.used),
-    remaining:
-      b?.remaining != null ? num(b.remaining) : Math.max(num(b?.yearlyEntitlement) - num(b?.used), 0)
+    remaining: num(b?.remaining), // ✅ backend truth (can be negative)
   }))
 
   const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
@@ -53,6 +58,7 @@ const balances = computed(() => {
     if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
     return a.leaveTypeCode.localeCompare(b.leaveTypeCode)
   })
+
   return arr
 })
 
@@ -62,7 +68,9 @@ async function fetchMyProfile(silent = false) {
     loadError.value = ''
 
     const res = await api.get('/leave/profile/my')
-    profile.value = res?.data || null
+
+    // Accept either { ...profile } or { profile: {...} }
+    profile.value = res?.data?.profile || res?.data || null
     lastUpdatedAt.value = dayjs().toISOString()
   } catch (e) {
     console.error('fetchMyProfile error', e)
@@ -72,7 +80,7 @@ async function fetchMyProfile(silent = false) {
       showToast({
         type: 'error',
         title: 'Failed to load',
-        message: loadError.value
+        message: loadError.value,
       })
     }
   } finally {
@@ -104,16 +112,25 @@ function setupRealtime() {
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
 
   offHandlers.push(
-    onSocket('leave:req:created', p => { if (isMyDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:manager-decision', p => { if (isMyDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:gm-decision', p => { if (isMyDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:updated', p => { if (isMyDoc(p)) triggerRefresh() })
+    onSocket('leave:req:created', (p) => {
+      if (isMyDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:manager-decision', (p) => {
+      if (isMyDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:gm-decision', (p) => {
+      if (isMyDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:updated', (p) => {
+      if (isMyDoc(p)) triggerRefresh()
+    })
   )
 }
 
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+
   await fetchMyProfile()
   setupRealtime()
 })
@@ -121,21 +138,33 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
-  offHandlers.forEach(off => {
-    try { off && off() } catch {}
+
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
   })
 })
 </script>
 
 <template>
-  <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <div
+    class="rounded-2xl border border-slate-200 bg-white shadow-sm
+           dark:border-slate-800 dark:bg-slate-900"
+  >
     <!-- Header -->
-    <div class="rounded-t-2xl bg-gradient-to-r from-indigo-600 via-sky-500 to-cyan-500 px-4 py-3 text-white">
+    <div
+      class="rounded-t-2xl bg-gradient-to-r from-indigo-600 via-sky-500 to-cyan-500
+             px-4 py-3 text-white"
+    >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-[220px]">
           <div class="mt-0.5 flex items-center gap-2">
             <p class="text-sm font-semibold">My Leave Balance</p>
-            <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold">
+            <span
+              class="inline-flex items-center rounded-full border border-white/25 bg-white/10
+                     px-2 py-0.5 text-[10px] font-semibold"
+            >
               Read-only
             </span>
           </div>
@@ -147,7 +176,9 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10
+                   px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15
+                   disabled:opacity-60 disabled:cursor-not-allowed"
             :disabled="loading"
             @click="fetchMyProfile()"
           >
@@ -179,7 +210,7 @@ onBeforeUnmount(() => {
         <!-- Meta -->
         <div
           class="mb-2 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-3 text-[11px] text-slate-600
-                 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300 sm:grid-cols-3"
+                 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300 sm:grid-cols-4"
         >
           <div class="min-w-0">
             <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
@@ -211,7 +242,21 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-if="lastUpdatedAt" class="sm:col-span-3 mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+          <div class="min-w-0">
+            <div class="text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+              AL carry (debt)
+            </div>
+            <div
+              class="mt-1 font-semibold"
+              :class="num(profile?.alCarry) < 0
+                ? 'text-rose-600 dark:text-rose-400'
+                : 'text-slate-900 dark:text-slate-50'"
+            >
+              {{ num(profile?.alCarry) }}
+            </div>
+          </div>
+
+          <div v-if="lastUpdatedAt" class="sm:col-span-4 mt-1 text-[10px] text-slate-500 dark:text-slate-400">
             Last updated: {{ dayjs(lastUpdatedAt).format('YYYY-MM-DD HH:mm') }}
           </div>
         </div>
@@ -230,25 +275,35 @@ onBeforeUnmount(() => {
           >
             <div class="flex items-start justify-between gap-3">
               <div>
-                <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-800 border border-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700">
+                <span
+                  class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px]
+                         font-semibold text-slate-800 border border-slate-200
+                         dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700"
+                >
                   {{ b.leaveTypeCode }}
                 </span>
+
                 <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                   Entitlement:
-                  <span class="font-semibold text-slate-900 dark:text-slate-50 tabular-nums">{{ b.yearlyEntitlement }}</span>
+                  <span class="font-semibold text-slate-900 dark:text-slate-50 tabular-nums">
+                    {{ b.yearlyEntitlement }}
+                  </span>
                 </div>
               </div>
 
               <div class="text-right text-[11px]">
                 <div class="text-slate-500 dark:text-slate-400">
                   Used:
-                  <span class="font-semibold text-slate-900 dark:text-slate-50 tabular-nums">{{ b.used }}</span>
+                  <span class="font-semibold text-slate-900 dark:text-slate-50 tabular-nums">
+                    {{ b.used }}
+                  </span>
                 </div>
+
                 <div class="mt-0.5">
                   <span class="text-slate-500 dark:text-slate-400">Remaining:</span>
                   <span
                     class="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
-                    :class="b.remaining > 0
+                    :class="b.remaining >= 0
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
                       : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
                   >
@@ -260,12 +315,9 @@ onBeforeUnmount(() => {
           </article>
         </div>
 
-        <!-- ✅ Desktop table (FIXED layout so values stay under headers) -->
+        <!-- Desktop table -->
         <div v-else class="overflow-x-auto">
-          <table
-            class="min-w-[760px] w-full table-fixed text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100"
-          >
-            <!-- ✅ force column widths -->
+          <table class="min-w-[760px] w-full table-fixed text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
             <colgroup>
               <col style="width: 140px" />
               <col style="width: 200px" />
@@ -307,12 +359,11 @@ onBeforeUnmount(() => {
                 <td class="table-td text-right tabular-nums">{{ b.yearlyEntitlement }}</td>
                 <td class="table-td text-right tabular-nums">{{ b.used }}</td>
 
-                <!-- ✅ keep badge aligned to the right edge of the column -->
                 <td class="table-td text-right">
                   <div class="flex justify-end">
                     <span
                       class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tabular-nums"
-                      :class="b.remaining > 0
+                      :class="b.remaining >= 0
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
                         : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
                     >
@@ -342,6 +393,6 @@ onBeforeUnmount(() => {
 }
 .table-td {
   padding: 8px 10px;
-  vertical-align: middle; /* nicer alignment with chips/badges */
+  vertical-align: middle;
 }
 </style>

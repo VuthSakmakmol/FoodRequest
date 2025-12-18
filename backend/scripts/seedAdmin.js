@@ -98,7 +98,7 @@ const User = require('../models/User');
       { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '1893892841' },
       { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '635269035' },
       { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '5534785017' },
-      { loginId: '040', name: 'Test car', password: defaultPwd, telegramChatId: '7163451169' },
+      // { loginId: '040', name: 'Test car', password: defaultPwd, telegramChatId: '7163451169' },
     ]
 
     // bong nith  1055055243 

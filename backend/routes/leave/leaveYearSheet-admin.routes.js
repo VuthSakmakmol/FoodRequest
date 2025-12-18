@@ -1,14 +1,13 @@
 // backend/routes/leave/leaveYearSheet-admin.routes.js
 const express = require('express')
-const router  = express.Router()
+const router = express.Router()
 
 const { requireAuth, requireRole } = require('../../middlewares/auth')
-const yearSheetCtrl = require('../../controllers/leave/leaveYearSheet.controller')
+const ctrl = require('../../controllers/leave/leaveProfile.admin.controller')
 
-// allow admin + manager + GM to view
-router.use(requireAuth, requireRole('LEAVE_ADMIN', 'LEAVE_MANAGER', 'LEAVE_GM', 'ADMIN'))
+router.use(requireAuth)
+router.use(requireRole('LEAVE_ADMIN', 'ADMIN'))
 
-// GET /api/admin/leave/profiles/:employeeId/year-sheet
-router.get('/profiles/:employeeId/year-sheet', yearSheetCtrl.getEmployeeYearSheet)
+router.get('/profiles/:employeeId/year-sheet', ctrl.getYearSheet)
 
 module.exports = router

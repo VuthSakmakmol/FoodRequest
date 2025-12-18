@@ -1,4 +1,6 @@
 /* eslint-disable no-console */
+
+//backend/scripts/seedLeaveTypes.js
 require('dotenv').config()
 const mongoose  = require('mongoose')
 const LeaveType = require('../models/leave/LeaveType')

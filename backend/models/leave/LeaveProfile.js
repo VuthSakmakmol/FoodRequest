@@ -18,9 +18,13 @@ const LeaveProfileSchema = new mongoose.Schema(
     managerLoginId:   { type: String, required: true },
     gmLoginId:        { type: String, required: true },
 
-    // NEW (for admin page)
     joinDate:         { type: Date },
     contractDate:     { type: Date },
+
+    // Negative AL carry across contract renew
+    alCarry:          { type: Number, default: 0 },
+
+    // snapshot only (do not trust as source of truth)
     balances:         { type: [BalanceSchema], default: [] },
 
     isActive:         { type: Boolean, default: true },
