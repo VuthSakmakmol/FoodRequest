@@ -431,7 +431,7 @@ watch(
               class="text-[10px] font-semibold uppercase tracking-[0.24em]
                      text-slate-800/80 dark:text-slate-200/80"
             >
-              Car Booking
+              Vehicle Reservation
             </span>
           </div>
         </div>

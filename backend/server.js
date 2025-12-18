@@ -10,6 +10,7 @@ const helmet      = require('helmet');
 const compression = require('compression');
 const rateLimit   = require('express-rate-limit');
 const { Server }  = require('socket.io');
+const { startTelegramPolling } = require('./services/telegram.polling')
 
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime');
 const { startRecurringEngine } = require('./services/recurring.engine');
@@ -17,7 +18,7 @@ const { startRecurringEngine } = require('./services/recurring.engine');
 const { ensureSystemTypes } = require('./controllers/leave/leaveType.admin.controller');
 
 const app = express();
-
+startTelegramPolling()
 /* ───────────────── Env & toggles ───────────────── */
 const isProd     = String(process.env.NODE_ENV).toLowerCase() === 'production';
 const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true';

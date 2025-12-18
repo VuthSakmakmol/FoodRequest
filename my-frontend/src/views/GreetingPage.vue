@@ -140,7 +140,7 @@ const scrollToServices = () => {
                 <p class="text-[10px] text-emerald-200 mt-0.5">+12 today</p>
               </div>
               <div class="rounded-xl bg-slate-950/40 border border-emerald-100/15 px-3 py-2">
-                <p class="text-sky-100/70 mb-1">Car bookings</p>
+                <p class="text-sky-100/70 mb-1">Vehicle Reservation</p>
                 <p class="text-base font-bold text-white">36</p>
                 <p class="text-[10px] text-emerald-200 mt-0.5">3 in progress</p>
               </div>
@@ -176,7 +176,7 @@ const scrollToServices = () => {
               class="mt-1 text-xs sm:text-sm text-slate-500
                      dark:text-slate-400"
             >
-              Food booking, car booking, meeting rooms (soon), and expat leave.
+              Food booking, Vehicle Reservation, meeting rooms (soon), and expat leave.
             </p>
           </div>
 
@@ -261,7 +261,7 @@ const scrollToServices = () => {
                       class="text-sm sm:text-base font-semibold text-slate-900
                              dark:text-slate-50"
                     >
-                      Car Booking
+                      Vehicle Reservation
                     </span>
                     <span
                       class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600
