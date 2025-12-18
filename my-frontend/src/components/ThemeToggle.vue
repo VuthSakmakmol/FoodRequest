@@ -25,7 +25,7 @@ const { isDark, toggleTheme } = useTheme()
     </span>
 
     <span class="whitespace-nowrap">
-      {{ isDark ? 'Dark mode' : 'Light mode' }}
+      {{ isDark ? '' : '' }}
     </span>
   </button>
 </template>

@@ -376,27 +376,8 @@ function toggleAuth() {
           </div>
         </div>
 
-        <div class="flex items-center gap-2">
-          <div
-            v-if="auth.user"
-            class="hidden items-center gap-2 rounded-full border border-slate-300 bg-slate-100 px-2.5 py-1.5 text-[11px]
-                   dark:flex dark:border-slate-700 dark:bg-slate-900"
-          >
-            <div
-              class="flex h-7 w-7 items-center justify-center rounded-full
-                     bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
-            >
-              {{ initials }}
-            </div>
-            <div class="flex flex-col leading-tight">
-              <span class="font-semibold">
-                {{ auth.user.name || auth.user.loginId }}
-              </span>
-              <span class="text-[10px] text-slate-500 dark:text-slate-400">
-                {{ auth.user.role }}
-              </span>
-            </div>
-          </div>
+        <div class="flex h-9 items-center gap-2">
+
         </div>
       </header>
 

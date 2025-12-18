@@ -24,7 +24,6 @@ const CATEGORY = ['Car', 'Messenger']
 const AIRPORT_DESTINATION = 'Techo International Airport'
 const LOCATIONS = [
   'Techo International Airport',
-  'DAMCO',
   'KN (WH)',
   'CARGOPORT ( OFFICE )',
   'Khai Nam',
@@ -49,7 +48,6 @@ const LOCATIONS = [
   'SCAN GLOBAL',
   'Hong leong hour (WH)',
   'So Nguon (WH)',
-  'Khainam Bus',
   'Acleda Bank',
   'Kerry',
   'Olair dry port',
