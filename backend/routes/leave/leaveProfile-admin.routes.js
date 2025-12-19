@@ -1,15 +1,18 @@
-// backend/routes/leave/leaveProfile-admin.routes.js
-const express = require('express')
-const router = express.Router()
+// backend/routes/leave/leaveProfiles-admin.routes.js
+const router = require('express').Router()
+const ctrl = require('../../controllers/leave/leaveProfiles.admin.controller')
 
+// IMPORTANT: must have auth middleware that sets req.user
 const { requireAuth, requireRole } = require('../../middlewares/auth')
-const ctrl = require('../../controllers/leave/leaveProfile.admin.controller')
-
 router.use(requireAuth)
 router.use(requireRole('LEAVE_ADMIN', 'ADMIN'))
 
-router.get('/profiles', ctrl.listProfiles)
-router.get('/profiles/:employeeId', ctrl.adminGetProfile)
-router.put('/profiles/:employeeId', ctrl.adminUpsertProfile)
+router.get('/approvers', ctrl.getApprovers)
+router.get('/profiles/grouped', ctrl.getProfilesGrouped)
+router.get('/profiles/:employeeId', ctrl.getProfileOne)
+router.post('/profiles', ctrl.createProfileSingle)
+router.put('/profiles/:employeeId', ctrl.updateProfile)
+router.delete('/profiles/:employeeId', ctrl.deactivateProfile)
+router.post('/managers', ctrl.createManagerWithEmployees)
 
 module.exports = router

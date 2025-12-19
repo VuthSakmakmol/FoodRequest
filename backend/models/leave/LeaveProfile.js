@@ -3,7 +3,7 @@ const mongoose = require('mongoose')
 
 const BalanceSchema = new mongoose.Schema(
   {
-    leaveTypeCode: { type: String, required: true },
+    leaveTypeCode: { type: String, required: true }, // AL/SP/MC/MA/UL
     yearlyEntitlement: { type: Number, default: 0 },
     used: { type: Number, default: 0 },
     remaining: { type: Number, default: 0 },
@@ -13,21 +13,31 @@ const BalanceSchema = new mongoose.Schema(
 
 const LeaveProfileSchema = new mongoose.Schema(
   {
-    employeeId:       { type: String, required: true, index: true, unique: true },
-    employeeLoginId:  { type: String, required: true },
-    managerLoginId:   { type: String, required: true },
-    gmLoginId:        { type: String, required: true },
+    // identity
+    employeeId: { type: String, required: true, unique: true, index: true },
+    employeeLoginId: { type: String, default: '' }, // usually same as employeeId
 
-    joinDate:         { type: Date },
-    contractDate:     { type: Date },
+    // manager / gm (loginId format in your project = employeeId string)
+    managerLoginId: { type: String, default: '' },
+    gmLoginId: { type: String, default: '' },
 
-    // Negative AL carry across contract renew
-    alCarry:          { type: Number, default: 0 },
+    // directory snapshot (for grouped UI)
+    name: { type: String, default: '' },
+    department: { type: String, default: '' },
 
-    // snapshot only (do not trust as source of truth)
-    balances:         { type: [BalanceSchema], default: [] },
+    // dates
+    joinDate: { type: String, default: '' },     // YYYY-MM-DD
+    contractDate: { type: String, default: '' }, // YYYY-MM-DD (current contract start)
 
-    isActive:         { type: Boolean, default: true },
+    // AL carry (debt allowed)
+    alCarry: { type: Number, default: 0 },
+
+    // active
+    isActive: { type: Boolean, default: true },
+
+    // persisted computed balances (what frontend displays)
+    balances: { type: [BalanceSchema], default: [] },
+    balancesAsOf: { type: String, default: '' }, // YYYY-MM-DD
   },
   { timestamps: true }
 )
