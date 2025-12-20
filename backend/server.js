@@ -91,7 +91,7 @@ app.use((req, _res, next) => { req.io = app.get('io'); next() })
 /* ───────────────── Routes ───────────────── */
 
 //========================== ADMIN PANEL (Leave module) ===========================
-app.use('/api/leave/requests', require('./routes/leave/leave.routes'))
+app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
 app.use('/api/leave',          require('./routes/leave/leaveType-expat.routes'))
 app.use('/api/leave/profile',  require('./routes/leave/leaveProfile.routes'))
 app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))

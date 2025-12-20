@@ -74,11 +74,33 @@ function prettyStops(stops = []) {
     .join(' → ')
 }
 
+/* ✅ Assigned helper (same concept as admin) */
+const assigneeName = (it) => {
+  if (!it?.assignment) return ''
+  if (it?.category === 'Messenger') {
+    return it.assignment.messengerName || it.assignment.messengerId || ''
+  }
+  return it.assignment.driverName || it.assignment.driverId || ''
+}
+
+const assignedClass = (it) => {
+  const base = 'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold border'
+  if (!assigneeName(it)) {
+    return `${base} bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900/60 dark:text-slate-200 dark:border-slate-700`
+  }
+  // color by category
+  if (it?.category === 'Messenger') {
+    return `${base} bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/20 dark:text-amber-200 dark:border-amber-800/60`
+  }
+  return `${base} bg-indigo-50 text-indigo-800 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-200 dark:border-indigo-800/60`
+}
+
 const statusIconFA = s => ({
   PENDING:   'fa-solid fa-hourglass-half',
   ACCEPTED:  'fa-solid fa-circle-check',
   ON_ROAD:   'fa-solid fa-truck-fast',
   ARRIVING:  'fa-solid fa-flag-checkered',
+  COMEBACK:  'fa-solid fa-arrow-rotate-left',
   COMPLETED: 'fa-solid fa-circle-check',
   DELAYED:   'fa-solid fa-triangle-exclamation',
   CANCELLED: 'fa-solid fa-ban'
@@ -104,6 +126,8 @@ const statusClass = s => {
       return 'bg-amber-100 text-amber-800 border border-amber-200'
     case 'ARRIVING':
       return 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+    case 'COMEBACK':
+      return 'bg-indigo-100 text-indigo-800 border border-indigo-200'
     case 'COMPLETED':
       return 'bg-green-100 text-green-800 border border-green-200'
     case 'DELAYED':
@@ -130,6 +154,8 @@ async function loadSchedule() {
     const { data } = await api.get('/admin/car-bookings', { params })
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
+      stops: x.stops || [],
+      assignment: x.assignment || {},
       isMine: meId.value && String(x.employeeId) === String(meId.value),
     }))
   } catch (e) {
@@ -150,7 +176,11 @@ const filtered = computed(() => {
       if (!term) return true
       const hay = [
         r.employee?.name, r.employee?.department, r.employeeId,
-        r.purpose, r.notes, prettyStops(r.stops)
+        r.purpose, r.notes,
+        prettyStops(r.stops),
+        assigneeName(r),
+        r.assignment?.driverAck,
+        r.assignment?.messengerAck,
       ].join(' ').toLowerCase()
       return hay.includes(term)
     })
@@ -160,7 +190,7 @@ const filtered = computed(() => {
 /* ───────────────── Cancel rules ───────────────── */
 function canCancel(item) {
   const st = String(item.status || '').toUpperCase()
-  if (['ON_ROAD','ARRIVING','COMPLETED','CANCELLED'].includes(st)) return false
+  if (['ON_ROAD','ARRIVING','COMEBACK','COMPLETED','CANCELLED'].includes(st)) return false
 
   if (!item.tripDate) return true
   const tripDay = dayjs(item.tripDate).startOf('day')
@@ -201,14 +231,29 @@ function onCreated(doc) {
   if (!exists) {
     rows.value.push({
       ...doc,
+      stops: doc.stops || [],
+      assignment: doc.assignment || {},
       isMine: meId.value && String(doc.employeeId) === String(meId.value),
-      stops: doc.stops || []
     })
   }
 }
 function onStatus(p) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (it) it.status = p.status
+}
+function onAssigned(p) {
+  const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
+  if (!it) return
+  it.assignment = {
+    ...(it.assignment || {}),
+    driverId:       p.driverId       ?? it.assignment?.driverId,
+    driverName:     p.driverName     ?? it.assignment?.driverName,
+    messengerId:    p.messengerId    ?? it.assignment?.messengerId,
+    messengerName:  p.messengerName  ?? it.assignment?.messengerName,
+    driverAck:      p.driverAck      ?? it.assignment?.driverAck,
+    messengerAck:   p.messengerAck   ?? it.assignment?.messengerAck,
+  }
+  if (p?.status) it.status = p.status
 }
 
 /* ───────────────── Mounted / unmounted ───────────────── */
@@ -222,8 +267,10 @@ onMounted(() => {
   loadSchedule().then(() => {
     if (focusId.value) scrollToBooking(focusId.value)
   })
+
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
+  socket.on('carBooking:assigned', onAssigned)
 })
 
 onBeforeUnmount(() => {
@@ -232,6 +279,7 @@ onBeforeUnmount(() => {
   }
   socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
+  socket.off('carBooking:assigned', onAssigned)
 })
 
 watch([selectedDate, statusFilter], loadSchedule)
@@ -366,6 +414,7 @@ function goLast  () { page.value = pageCount.value }
                 <option value="ACCEPTED">Accepted</option>
                 <option value="ON_ROAD">On road</option>
                 <option value="ARRIVING">Arriving</option>
+                <option value="COMEBACK">Comeback</option>
                 <option value="COMPLETED">Completed</option>
                 <option value="DELAYED">Delayed</option>
                 <option value="CANCELLED">Cancelled</option>
@@ -388,7 +437,7 @@ function goLast  () { page.value = pageCount.value }
 
             <div class="flex flex-col gap-1">
               <label class="font-semibold text-slate-700 dark:text-slate-100">
-                Search requester / purpose / destination
+                Search requester / purpose / destination / assigned
               </label>
               <div class="relative">
                 <span class="pointer-events-none absolute inset-y-0 left-2 flex items-center text-slate-400">
@@ -431,13 +480,15 @@ function goLast  () { page.value = pageCount.value }
                     <th class="px-3 py-2 text-left">Requester</th>
                     <th class="px-3 py-2 text-left">Itinerary</th>
                     <th class="px-3 py-2 text-center">Pax</th>
+                    <!-- ✅ NEW -->
+                    <th class="px-3 py-2 text-left">Assigned</th>
                     <th class="px-3 py-2 text-left">Status</th>
                     <th class="px-3 py-2 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-if="loading">
-                    <td colspan="7" class="px-3 py-4 text-center text-[11px] text-slate-500">
+                    <td colspan="8" class="px-3 py-4 text-center text-[11px] text-slate-500">
                       <i class="fa-solid fa-spinner animate-spin"></i>
                       <span class="ml-2">Loading schedule…</span>
                     </td>
@@ -509,6 +560,14 @@ function goLast  () { page.value = pageCount.value }
                     <td class="px-3 py-2 text-center text-[11px]">
                       {{ item.passengers ?? 1 }}
                     </td>
+
+                    <!-- ✅ NEW Assigned column -->
+                    <td class="px-3 py-2">
+                      <span :class="assignedClass(item)">
+                        {{ assigneeName(item) || 'Unassigned' }}
+                      </span>
+                    </td>
+
                     <td class="px-3 py-2">
                       <span
                         :class="[
@@ -543,7 +602,7 @@ function goLast  () { page.value = pageCount.value }
 
                         <button
                           type="button"
-                          class="inline-flex items-center gap-1 rounded-full bg-slate-900 px-3 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+                          class="inline-flex items-center gap-1 rounded-full bg-slate-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-slate-600"
                           @click.stop="showDetails(item)"
                         >
                           <i class="fa-solid fa-circle-info text-[10px]"></i>
@@ -554,7 +613,7 @@ function goLast  () { page.value = pageCount.value }
                   </tr>
 
                   <tr v-if="!loading && !filtered.length">
-                    <td colspan="7" class="px-3 py-4 text-center text-[11px] text-slate-500">
+                    <td colspan="8" class="px-3 py-4 text-center text-[11px] text-slate-500">
                       No bookings found.
                     </td>
                   </tr>
@@ -586,39 +645,19 @@ function goLast  () { page.value = pageCount.value }
               </div>
 
               <div class="flex items-center gap-1">
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === 1"
-                  @click="goFirst"
-                >
+                <button type="button" class="nav-btn" :disabled="page === 1" @click="goFirst">
                   <i class="fa-solid fa-angles-left text-[10px]"></i>
                 </button>
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === 1"
-                  @click="goPrev"
-                >
+                <button type="button" class="nav-btn" :disabled="page === 1" @click="goPrev">
                   <i class="fa-solid fa-angle-left text-[10px]"></i>
                 </button>
                 <span class="px-1 text-[11px]">
                   Page {{ page }} / {{ pageCount }}
                 </span>
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === pageCount"
-                  @click="goNext"
-                >
+                <button type="button" class="nav-btn" :disabled="page === pageCount" @click="goNext">
                   <i class="fa-solid fa-angle-right text-[10px]"></i>
                 </button>
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === pageCount"
-                  @click="goLast"
-                >
+                <button type="button" class="nav-btn" :disabled="page === pageCount" @click="goLast">
                   <i class="fa-solid fa-angles-right text-[10px]"></i>
                 </button>
               </div>
@@ -718,6 +757,14 @@ function goLast  () { page.value = pageCount.value }
                     • <span class="font-semibold">Notes:</span> {{ item.notes }}
                   </span>
                 </div>
+
+                <!-- ✅ NEW Assigned display -->
+                <div class="mt-1 text-[10px] text-slate-500">
+                  <span class="font-semibold">Assigned:</span>
+                  <span class="ml-1" :class="assignedClass(item)">
+                    {{ assigneeName(item) || 'Unassigned' }}
+                  </span>
+                </div>
               </div>
 
               <!-- bottom -->
@@ -774,36 +821,16 @@ function goLast  () { page.value = pageCount.value }
                 {{ page }} / {{ pageCount }} ({{ totalItems }} items)
               </div>
               <div class="flex items-center gap-1">
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === 1"
-                  @click="goFirst"
-                >
+                <button type="button" class="nav-btn" :disabled="page === 1" @click="goFirst">
                   <i class="fa-solid fa-angles-left text-[10px]"></i>
                 </button>
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === 1"
-                  @click="goPrev"
-                >
+                <button type="button" class="nav-btn" :disabled="page === 1" @click="goPrev">
                   <i class="fa-solid fa-angle-left text-[10px]"></i>
                 </button>
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === pageCount"
-                  @click="goNext"
-                >
+                <button type="button" class="nav-btn" :disabled="page === pageCount" @click="goNext">
                   <i class="fa-solid fa-angle-right text-[10px]"></i>
                 </button>
-                <button
-                  type="button"
-                  class="nav-btn"
-                  :disabled="page === pageCount"
-                  @click="goLast"
-                >
+                <button type="button" class="nav-btn" :disabled="page === pageCount" @click="goLast">
                   <i class="fa-solid fa-angles-right text-[10px]"></i>
                 </button>
               </div>
@@ -868,6 +895,16 @@ function goLast  () { page.value = pageCount.value }
               <div class="text-[11px] text-slate-500">
                 {{ detailItem.employee?.department || '—' }} • ID {{ detailItem.employeeId }}
               </div>
+            </div>
+          </div>
+
+          <!-- ✅ NEW Assigned in details -->
+          <div>
+            <div class="lbl">Assigned</div>
+            <div class="val">
+              <span :class="assignedClass(detailItem)">
+                {{ assigneeName(detailItem) || 'Unassigned' }}
+              </span>
             </div>
           </div>
 

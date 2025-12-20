@@ -138,9 +138,14 @@ const STATUS_KH = {
  * Purpose mapping EN -> KH (for assignee only)
  * ────────────────────────────── */
 const PURPOSE_KH = {
+  'Pick Up K Joe (GM)' : 'ទៅយកឃុនជោ',
+  'Bring K Joe (GM)' : 'ជូនឃុនជោ',
   'Bring & Pick up': 'នាំទៅ និង ចាំទទួល',
-  'Bring Customer': 'ទៅយកភ្ញៀវមកក្រុមហ៊ុន',
-  'Pick up Customer': 'ទៅទទួលភ្ញៀវ',
+  'Bring Guest': 'ជូនភ្ញៀវមក',
+  'Bring Foreigner': 'ជូនបុគ្គលិកជនជាតិបរទេស',
+  'Pick up Foreigner' : 'ទៅទទួលបុគ្គលិកជនជាតិ',
+  'Pick up Guest': 'ទៅទទួលភ្ញៀវ',
+  'Pick up FM': 'ទៅយក​ អេសអឹម​(FM)',
   Meeting: 'ទៅប្រជុំការងារ',
   'Check quality in subcon': 'ទៅពិនិត្យគុណភាពនៅរោងចក្រ Subcon',
   'Release Document': 'យកឯកសារចេញ / បញ្ចេញឯកសារ',

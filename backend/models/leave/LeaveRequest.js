@@ -9,33 +9,63 @@ const STATUS = Object.freeze([
   'CANCELLED',
 ])
 
-const LeaveRequestSchema = new mongoose.Schema({
-  employeeId: { type: String, required: true, trim: true },
-  requesterLoginId: { type: String, required: true, trim: true },
+const DAY_PART = Object.freeze(['AM', 'PM'])
 
-  leaveTypeCode: { type: String, required: true, trim: true, uppercase: true },
+const LeaveRequestSchema = new mongoose.Schema(
+  {
+    employeeId: { type: String, required: true, trim: true },
+    requesterLoginId: { type: String, required: true, trim: true },
 
-  startDate: { type: String, required: true }, // YYYY-MM-DD
-  endDate: { type: String, required: true },   // YYYY-MM-DD
+    leaveTypeCode: { type: String, required: true, trim: true, uppercase: true },
 
-  totalDays: { type: Number, required: true, min: 0.5 },
+    startDate: { type: String, required: true }, // YYYY-MM-DD
+    endDate: { type: String, required: true },   // YYYY-MM-DD
 
-  reason: { type: String, default: '', trim: true },
+    // ✅ Half-day
+    isHalfDay: { type: Boolean, default: false },
+    dayPart: { type: String, enum: DAY_PART, default: null }, // null | AM | PM
 
-  status: { type: String, enum: STATUS, default: 'PENDING_MANAGER' },
+    totalDays: { type: Number, required: true, min: 0.5 },
 
-  managerLoginId: { type: String, default: '', trim: true },
-  gmLoginId: { type: String, default: '', trim: true },
+    reason: { type: String, default: '', trim: true },
 
-  managerComment: { type: String, default: '' },
-  managerDecisionAt: { type: Date },
+    status: { type: String, enum: STATUS, default: 'PENDING_MANAGER' },
 
-  gmComment: { type: String, default: '' },
-  gmDecisionAt: { type: Date },
+    managerLoginId: { type: String, default: '', trim: true },
+    gmLoginId: { type: String, default: '', trim: true },
 
-  cancelledAt: { type: Date, default: null },
-  cancelledBy: { type: String, default: '' },
-}, { timestamps: true })
+    managerComment: { type: String, default: '' },
+    managerDecisionAt: { type: Date },
+
+    gmComment: { type: String, default: '' },
+    gmDecisionAt: { type: Date },
+
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: String, default: '' },
+  },
+  { timestamps: true }
+)
+
+// ✅ Prevent enum error when frontend sends dayPart: ""
+LeaveRequestSchema.pre('validate', function (next) {
+  try {
+    // normalize empty string -> null
+    if (this.dayPart === '') this.dayPart = null
+
+    if (!this.isHalfDay) {
+      // full-day: dayPart must be null
+      this.dayPart = null
+    } else {
+      // half-day: same day, 0.5, require dayPart
+      this.endDate = this.startDate
+      this.totalDays = 0.5
+      if (!this.dayPart) this.invalidate('dayPart', 'dayPart is required for half-day')
+    }
+    next()
+  } catch (e) {
+    next(e)
+  }
+})
 
 LeaveRequestSchema.index({ employeeId: 1, startDate: 1 })
 LeaveRequestSchema.index({ requesterLoginId: 1, createdAt: -1 })

@@ -121,7 +121,6 @@ onBeforeUnmount(() => {
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-col gap-1 min-w-[220px]">
-            <p class="text-[10px] uppercase tracking-[0.25em] text-indigo-100/80">Expat Holiday</p>
             <div class="flex items-center gap-2">
               <p class="text-sm font-semibold">Leave Types</p>
               <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold">

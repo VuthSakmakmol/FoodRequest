@@ -273,15 +273,20 @@ watch(currentMonth, () => loadMonth())
                dark:border-slate-700 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900"
       >
         <div class="flex items-center gap-2">
+          <!-- Prev -->
           <button
             type="button"
             class="inline-flex h-8 w-8 items-center justify-center rounded-full
-                   border border-slate-900/70 bg-white text-slate-900 text-base
-                   shadow-sm hover:bg-slate-100"
+                  border border-slate-900/70 bg-white text-slate-900 text-base
+                  shadow-sm hover:bg-slate-100"
             @click="prevMonth"
+            aria-label="Previous month"
+            title="Previous month"
           >
             ‹
           </button>
+
+          <!-- Month label -->
           <div class="flex flex-col">
             <span class="text-sm sm:text-base font-semibold">
               {{ monthLabel }}
@@ -290,7 +295,21 @@ watch(currentMonth, () => loadMonth())
               Tap a day to review car bookings
             </span>
           </div>
+
+          <!-- Next -->
+          <button
+            type="button"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-full
+                  border border-slate-900/70 bg-white text-slate-900 text-base
+                  shadow-sm hover:bg-slate-100"
+            @click="nextMonth"
+            aria-label="Next month"
+            title="Next month"
+          >
+            ›
+          </button>
         </div>
+
 
         <div class="flex items-center gap-2">
           <button
