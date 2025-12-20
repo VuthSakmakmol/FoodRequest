@@ -2,7 +2,6 @@
 const express = require('express')
 const router = express.Router()
 
-// ✅ use the controller you pasted (leaveProfiles.admin.controller.js)
 const ctrl = require('../../controllers/leave/leaveProfiles.admin.controller')
 
 // --- Auth / Role guard (keep your pattern) ---
@@ -39,7 +38,11 @@ function requireLeaveAdmin(req, res, next) {
 router.use(requireAuth)
 router.use(requireLeaveAdmin)
 
-// ✅ match the exported function names in leaveProfiles.admin.controller.js
+// ─────────────────────────────────────────────
+// Admin leave endpoints
+// Mounted at: /api/admin/leave   (from server.js)
+// ─────────────────────────────────────────────
+
 router.get('/approvers', ctrl.getApprovers)
 router.get('/profiles/grouped', ctrl.getProfilesGrouped)
 
@@ -48,7 +51,10 @@ router.post('/profiles', ctrl.createProfileSingle)
 router.put('/profiles/:employeeId', ctrl.updateProfile)
 router.delete('/profiles/:employeeId', ctrl.deactivateProfile)
 
-// bulk
+// bulk manager + employees
 router.post('/managers', ctrl.createManagerWithEmployees)
+
+// ✅ RENEW CONTRACT (THIS WAS MISSING)
+router.post('/profiles/:employeeId/contracts/renew', ctrl.renewContract)
 
 module.exports = router

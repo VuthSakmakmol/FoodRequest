@@ -33,9 +33,9 @@ const rows = ref([])
 const search = ref('')
 const statusTab = ref('PENDING_MANAGER') // 'PENDING_MANAGER' | 'PENDING_GM'
 
-/* Filters */
-const fromDate = ref(dayjs().format('YYYY-MM-DD'))
-const toDate = ref(dayjs().format('YYYY-MM-DD'))
+/* ✅ Filters (default ALL) */
+const fromDate = ref('') // Requested at (createdAt)
+const toDate = ref('')   // Requested at (createdAt)
 const employeeFilter = ref('')
 
 /* Pagination */
@@ -43,9 +43,10 @@ const page = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
+/* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
 function formatRange(row) {
-  const s = row.startDate || ''
-  const e = row.endDate || ''
+  const s = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
+  const e = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
   if (!s && !e) return '—'
   if (s === e) return s
   return `${s} → ${e}`
@@ -110,9 +111,6 @@ const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
 
-  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
-  const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
-
   let list = [...rows.value]
 
   if (empQ) {
@@ -130,16 +128,22 @@ const filteredRows = computed(() => {
 
   // Tab filter
   if (statusTab.value === 'PENDING_GM') {
-    list = list.filter(r => ['PENDING_GM', 'APPROVED', 'REJECTED'].includes(r.status))
+    list = list.filter(r => ['PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(r.status))
+  } else {
+    // PENDING_MANAGER tab shows all, but manager action only applies for PENDING_MANAGER
+    // (keep as is)
   }
 
-  // Date filter by startDate
+  // ✅ Date filter by REQUEST DATE (createdAt)
+  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
+  const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
+
   if (fromVal !== null || toVal !== null) {
     list = list.filter(r => {
-      if (!r.startDate) return false
-      const start = dayjs(r.startDate).startOf('day').valueOf()
-      if (fromVal !== null && start < fromVal) return false
-      if (toVal !== null && start > toVal) return false
+      if (!r.createdAt) return false
+      const t = dayjs(r.createdAt).valueOf()
+      if (fromVal !== null && t < fromVal) return false
+      if (toVal !== null && t > toVal) return false
       return true
     })
   }
@@ -168,7 +172,7 @@ const pageCount = computed(() => {
 })
 
 watch(
-  () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value],
+  () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
   () => { page.value = 1 }
 )
 
@@ -356,9 +360,9 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- Date range -->
+            <!-- ✅ Requested at range filter (default empty = show all) -->
             <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-sky-50/80">Start</span>
+              <span class="text-sky-50/80">Requested</span>
               <input v-model="fromDate" type="date"
                      class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
               <span>to</span>
@@ -414,8 +418,9 @@ onBeforeUnmount(() => {
                      class="w-24 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
 
+            <!-- ✅ Requested at range filter (mobile) -->
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              <span class="text-sky-50/80">Start</span>
+              <span class="text-sky-50/80">Requested</span>
               <input v-model="fromDate" type="date"
                      class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
               <span>to</span>
@@ -453,7 +458,6 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
 
-                <!-- ✅ ID + Name -->
                 <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
                   {{ row.employeeId || '—' }}
                 </div>
@@ -550,7 +554,6 @@ onBeforeUnmount(() => {
                   {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                 </td>
 
-                <!-- ✅ Employee: ID + Name -->
                 <td class="table-td align-top">
                   <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
                     {{ row.employeeId || '—' }}
@@ -674,7 +677,6 @@ onBeforeUnmount(() => {
 
           <!-- Body -->
           <div class="px-4 py-3">
-            <!-- ✅ Show ID + Name -->
             <div v-if="confirmDialog.row" class="mb-2 text-[11px] text-slate-700 dark:text-slate-100">
               <span class="font-semibold">
                 {{ confirmDialog.row.employeeId || '—' }} — {{ confirmDialog.row.employeeName || '—' }}

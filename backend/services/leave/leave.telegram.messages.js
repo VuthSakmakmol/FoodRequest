@@ -6,32 +6,60 @@ const esc = (s = '') =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 
+const LINKS = {
+  managerInbox: 'http://178.128.48.101:4333/leave/manager/inbox',
+  gmInbox: 'http://178.128.48.101:4333/leave/gm/inbox',
+  adminInbox: 'http://178.128.48.101:4333/leave/admin/manager-inbox',
+}
+
 function formatDateRange(doc) {
   const s = doc.startDate ? String(doc.startDate).slice(0, 10) : '?'
   const e = doc.endDate ? String(doc.endDate).slice(0, 10) : '?'
-  const days = Number(doc.totalDays || 0) || '?'
-  const suffix = Number(days) === 1 ? 'day' : 'days'
-  return `${s} → ${e} (${days} ${suffix})`
+  const days = Number(doc.totalDays || 0)
+  const suffix = days === 1 ? 'day' : 'days'
+  return `${s} → ${e} (${Number.isFinite(days) ? days : '?'} ${suffix})`
+}
+
+
+
+function reasonLine(doc) {
+  return doc?.reason ? `📝 Reason: ${esc(doc.reason)}` : ''
+}
+
+function managerCommentLine(doc) {
+  return doc?.managerComment ? `💬 Manager comment: ${esc(doc.managerComment)}` : ''
+}
+
+function gmCommentLine(doc) {
+  return doc?.gmComment ? `💬 GM comment: ${esc(doc.gmComment)}` : ''
+}
+
+function employeeLabel(doc, employeeName) {
+  const label = employeeName || doc.employeeId || doc.requesterLoginId || '—'
+  return `👤 Employee: <b>${esc(label)}</b>`
+}
+
+function actionLinkLine(url, label) {
+  if (!url) return ''
+  // Telegram will auto-link plain URL, keep it simple
+  return `🔗 ${esc(label)}: ${esc(url)}`
 }
 
 /* ─────────────────────────────
  * Manager: new request DM
- * Called when employee submits a request
  * ───────────────────────────── */
 function managerNewRequest(doc, employeeName) {
   const range = formatDateRange(doc)
-  const reason = doc.reason ? `\n📝 Reason: ${esc(doc.reason)}` : ''
-  const idLine = doc._id ? `\n🆔 ID: <code>${esc(String(doc._id))}</code>` : ''
-
   return [
     '📝 <b>New leave request</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
-    `👤 Employee: <b>${esc(employeeName || doc.employeeId)}</b>`,
-    `📄 Type: ${esc(doc.leaveTypeCode)}`,
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
     `📅 Period: ${esc(range)}`,
     '📌 Status: Waiting for Manager approval',
-    reason,
-    idLine,
+    reasonLine(doc),
+    '',
+    actionLinkLine(LINKS.managerInbox, 'Open Manager Inbox'),
   ]
     .filter(Boolean)
     .join('\n')
@@ -39,60 +67,114 @@ function managerNewRequest(doc, employeeName) {
 
 /* ─────────────────────────────
  * GM: new request DM
- * Called after Manager APPROVE (status = PENDING_GM)
  * ───────────────────────────── */
 function gmNewRequest(doc, employeeName) {
   const range = formatDateRange(doc)
-  const reason = doc.reason ? `\n📝 Reason: ${esc(doc.reason)}` : ''
-  const mgrComment = doc.managerComment
-    ? `\n💬 Manager comment: ${esc(doc.managerComment)}`
-    : ''
-  const idLine = doc._id ? `\n🆔 ID: <code>${esc(String(doc._id))}</code>` : ''
-
   return [
     '📝 <b>New leave request (GM approval)</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
-    `👤 Employee: <b>${esc(employeeName || doc.employeeId)}</b>`,
-    `📄 Type: ${esc(doc.leaveTypeCode)}`,
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
     `📅 Period: ${esc(range)}`,
     '📌 Status: Waiting for GM approval',
-    mgrComment,
-    reason,
-    idLine,
+    managerCommentLine(doc),
+    reasonLine(doc),
+    '',
+    actionLinkLine(LINKS.gmInbox, 'Open GM Inbox'),
   ]
     .filter(Boolean)
     .join('\n')
 }
 
 /* ─────────────────────────────
- * Employee: decision DM
- * Used for both Manager + GM decisions
- * roleLabel = "Manager" | "GM"
+ * Employee: submit success confirmation
+ * ───────────────────────────── */
+function employeeSubmitted(doc) {
+  const range = formatDateRange(doc)
+  return [
+    '✅ <b>Leave request submitted</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
+    `📅 Period: ${esc(range)}`,
+    '📌 Status: Waiting for Manager approval',
+    reasonLine(doc),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/* ─────────────────────────────
+ * Employee: decision DM (Manager/GM)
  * ───────────────────────────── */
 function employeeDecision(doc, roleLabel) {
   const range = formatDateRange(doc)
   const status = String(doc.status || '').toUpperCase()
-  const emoji =
-    status === 'APPROVED'
-      ? '✅'
-      : status === 'REJECTED'
-        ? '❌'
-        : 'ℹ️'
+  const emoji = status === 'APPROVED' ? '✅' : status === 'REJECTED' ? '❌' : 'ℹ️'
 
   let comment = ''
-  if (roleLabel === 'Manager' && doc.managerComment) {
-    comment = `\n💬 Manager comment: ${esc(doc.managerComment)}`
-  }
-  if (roleLabel === 'GM' && doc.gmComment) {
-    comment = `\n💬 GM comment: ${esc(doc.gmComment)}`
-  }
+  if (roleLabel === 'Manager' && doc.managerComment) comment = `\n${managerCommentLine(doc)}`
+  if (roleLabel === 'GM' && doc.gmComment) comment = `\n${gmCommentLine(doc)}`
 
   return [
     `${emoji} <b>Leave ${esc(status)} by ${esc(roleLabel)}</b>`,
     '━━━━━━━━━━━━━━━━━━━━━━',
-    `📄 Type: ${esc(doc.leaveTypeCode)}`,
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
     `📅 Period: ${esc(range)}`,
     comment,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/* ─────────────────────────────
+ * LEAVE_ADMIN: activity logs (ONLY LEAVE_ADMIN, NOT ADMIN)
+ * ───────────────────────────── */
+function leaveAdminNewRequest(doc, employeeName) {
+  const range = formatDateRange(doc)
+  return [
+    '📣 <b>Leave request submitted</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
+    `📅 Period: ${esc(range)}`,
+    `📌 Status: ${esc(String(doc.status || 'PENDING_MGR'))}`,
+    reasonLine(doc),
+    '',
+    actionLinkLine(LINKS.adminInbox, 'Open Leave Admin Inbox'),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function leaveAdminManagerDecision(doc, employeeName) {
+  const range = formatDateRange(doc)
+  return [
+    '📣 <b>Manager decision</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
+    `📅 Period: ${esc(range)}`,
+    `📌 Status: ${esc(String(doc.status || '—'))}`,
+    managerCommentLine(doc),
+    '',
+    actionLinkLine(LINKS.adminInbox, 'Open Leave Admin Inbox'),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+function leaveAdminGmDecision(doc, employeeName) {
+  const range = formatDateRange(doc)
+  return [
+    '📣 <b>GM decision</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
+    `📅 Period: ${esc(range)}`,
+    `📌 Status: ${esc(String(doc.status || '—'))}`,
+    gmCommentLine(doc),
+    '',
+    actionLinkLine(LINKS.adminInbox, 'Open Leave Admin Inbox'),
   ]
     .filter(Boolean)
     .join('\n')
@@ -101,5 +183,11 @@ function employeeDecision(doc, roleLabel) {
 module.exports = {
   managerNewRequest,
   gmNewRequest,
+  employeeSubmitted,
   employeeDecision,
+
+  // leave_admin only
+  leaveAdminNewRequest,
+  leaveAdminManagerDecision,
+  leaveAdminGmDecision,
 }

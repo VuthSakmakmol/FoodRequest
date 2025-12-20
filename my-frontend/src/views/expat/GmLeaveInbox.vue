@@ -34,9 +34,9 @@ const rows = ref([])
 const search = ref('')
 const statusTab = ref('PENDING_GM') // 'PENDING_GM' | 'FINISHED'
 
-/* Filters */
-const fromDate = ref(dayjs().format('YYYY-MM-DD'))
-const toDate = ref(dayjs().format('YYYY-MM-DD'))
+/* ✅ Filters (default ALL) */
+const fromDate = ref('') // Requested at (createdAt)
+const toDate = ref('')   // Requested at (createdAt)
 const employeeFilter = ref('')
 
 /* Pagination */
@@ -44,9 +44,10 @@ const page = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
+/* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
 function formatRange(row) {
-  const s = row.startDate || ''
-  const e = row.endDate || ''
+  const s = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
+  const e = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
   if (!s && !e) return '—'
   if (s === e) return s
   return `${s} → ${e}`
@@ -128,9 +129,6 @@ const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
 
-  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
-  const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
-
   let list = [...rows.value]
 
   if (empQ) {
@@ -153,12 +151,16 @@ const filteredRows = computed(() => {
     list = list.filter(r => ['APPROVED', 'REJECTED', 'CANCELLED'].includes(r.status))
   }
 
+  // ✅ Date filter by REQUEST DATE (createdAt)
+  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
+  const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
+
   if (fromVal !== null || toVal !== null) {
     list = list.filter(r => {
-      if (!r.startDate) return false
-      const start = dayjs(r.startDate).startOf('day').valueOf()
-      if (fromVal !== null && start < fromVal) return false
-      if (toVal !== null && start > toVal) return false
+      if (!r.createdAt) return false
+      const t = dayjs(r.createdAt).valueOf()
+      if (fromVal !== null && t < fromVal) return false
+      if (toVal !== null && t > toVal) return false
       return true
     })
   }
@@ -232,7 +234,6 @@ const confirmPrimaryClasses = computed(() =>
     : 'bg-rose-600 hover:bg-rose-700 text-white'
 )
 
-/* ✅ Approve: no comment sent. Reject: comment required. */
 async function submitDecision() {
   const { row, action } = confirmDialog.value
   const comment = String(confirmDialog.value.comment || '').trim()
@@ -364,12 +365,14 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- Date range -->
+            <!-- ✅ Requested at range filter (default empty = show all) -->
             <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-sky-50/80">Start</span>
-              <input v-model="fromDate" type="date" class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <span class="text-sky-50/80">Requested</span>
+              <input v-model="fromDate" type="date"
+                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
               <span>to</span>
-              <input v-model="toDate" type="date" class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input v-model="toDate" type="date"
+                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
 
             <!-- Expat ID filter -->
@@ -438,11 +441,14 @@ onBeforeUnmount(() => {
               />
             </div>
 
+            <!-- ✅ Requested at range filter (mobile) -->
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              <span class="text-sky-50/80">Start</span>
-              <input v-model="fromDate" type="date" class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <span class="text-sky-50/80">Requested</span>
+              <input v-model="fromDate" type="date"
+                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
               <span>to</span>
-              <input v-model="toDate" type="date" class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input v-model="toDate" type="date"
+                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
             </div>
           </div>
         </div>
@@ -509,7 +515,6 @@ onBeforeUnmount(() => {
               <span class="text-truncate-2 inline-block align-top">{{ row.reason || '—' }}</span>
             </div>
 
-            <!-- ✅ Reject reason (GM or Manager) -->
             <div
               v-if="row.status === 'REJECTED'"
               class="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
@@ -519,7 +524,6 @@ onBeforeUnmount(() => {
               <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
             </div>
 
-            <!-- Actions -->
             <div class="mt-3 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
@@ -550,8 +554,6 @@ onBeforeUnmount(() => {
                   Reject
                 </button>
               </template>
-
-              <!-- ✅ Removed "Rejected by ..." chip in Actions to avoid duplication -->
 
               <template v-else>
                 <span class="text-[11px] text-slate-400 dark:text-slate-500">No action available</span>
@@ -662,8 +664,6 @@ onBeforeUnmount(() => {
                         Reject
                       </button>
                     </template>
-
-                    <!-- ✅ Removed rejected chip in Actions -->
 
                     <template v-else>
                       <span class="text-[11px] text-slate-400 dark:text-slate-500">No action</span>

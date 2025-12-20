@@ -58,7 +58,7 @@ const AdminExpatProfiles  = () => import('@/views/expat/AdminExpatProfile.vue')
 const ManagerLeaveInbox   = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox        = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminExpatYearSheet = () => import('@/views/expat/AdminExpatYearSheet.vue')
-
+const AdminLeaveProfileEdit =  () => import('@/views/expat/admin/AdminLeaveProfileEdit.vue')
 // Replace Day (User)
 const UserReplaceDay      = () => import('@/views/expat/user/UserReplaceDay.vue')
 const UserReplaceDayList  = () => import('@/views/expat/user/UserReplaceDayList.vue')
@@ -343,6 +343,15 @@ const router = createRouter({
           component: AdminExpatYearSheet,
           meta: {
             requiresRole: ['LEAVE_ADMIN', 'LEAVE_MANAGER', 'LEAVE_GM', 'ADMIN']
+          }
+        },
+        {
+          path: 'profiles/:employeeId/edit',
+          name: 'leave-admin-profile-edit',
+          component: AdminLeaveProfileEdit,
+          meta: {
+            requiresRole: ['LEAVE_ADMIN', 'LEAVE_GM', 'LEAVE_MANAGER', 'ADMIN'],
+            title: 'Admin Leave Profile Edit',
           }
         },
       ]

@@ -37,16 +37,16 @@ const GM_CONFIG = {
   telegramChatId: '7163451169', 
 }
 
-const MANAGERS = [
-  {
-    loginId: 'leave_mgr_hr',
-    name: 'HR Manager',
-    password: DEFAULT_MANAGER_PWD,
-    telegramChatId: '7163451169', 
-    employees: ['51821047','52520351', '51510016', '51710019'],
-  },
-  // add more managers here...
-]
+// const MANAGERS = [
+//   {
+//     loginId: 'leave_mgr_hr',
+//     name: 'HR Manager',
+//     password: DEFAULT_MANAGER_PWD,
+//     telegramChatId: '7163451169', 
+//     employees: ['51821047','52520351', '51510016', '51710019'],
+//   },
+//   // add more managers here...
+// ]
 
 /* ────────────────────────────── */
 

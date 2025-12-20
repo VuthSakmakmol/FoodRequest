@@ -1,10 +1,12 @@
-<!-- src/views/expat/AdminExpatProfiles.vue -->
+<!-- src/views/expat/AdminExpatProfile.vue  (or AdminExpatProfiles.vue) -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
+
+defineOptions({ name: 'AdminExpatProfiles' })
 
 const router = useRouter()
 const { showToast } = useToast()
@@ -41,9 +43,10 @@ const gms = computed(() => (approvers.value || []).filter(a => a.role === 'LEAVE
 async function fetchApprovers() {
   try {
     const res = await api.get('/admin/leave/approvers')
+    const arr = Array.isArray(res.data)
+      ? res.data
+      : (Array.isArray(res.data?.gms) ? res.data.gms : [])
 
-    // backend returns array [{loginId,name,role}]
-    const arr = Array.isArray(res.data) ? res.data : (Array.isArray(res.data?.gms) ? res.data.gms : [])
     approvers.value = arr.map(x => ({
       loginId: String(x.loginId || ''),
       name: x.name || '',
@@ -152,14 +155,13 @@ const createMode = ref('manager') // 'manager' | 'employee'
 const createSaving = ref(false)
 const createError = ref('')
 
-/* GM selection */
 const gmLoginId = ref('')
 
 watch(gms, () => {
   if (!gmLoginId.value && gms.value.length) gmLoginId.value = gms.value[0].loginId
 })
 
-/* Manager creation (pick manager + add many employees) */
+/* Manager creation */
 const mgrQuery = ref('')
 const mgrLoading = ref(false)
 const mgrResults = ref([])
@@ -184,16 +186,13 @@ watch(mgrQuery, (v) => {
     }
   }, 250)
 })
+function pickManager(emp) { pickedMgr.value = emp }
 
-function pickManager(emp) {
-  pickedMgr.value = emp
-}
-
-/* Add employees to manager */
+/* Add employees */
 const empQuery = ref('')
 const empLoading = ref(false)
 const empResults = ref([])
-const selectedEmployees = ref([]) // [{ employeeId,name,department, joinDate, contractDate, alCarry, isActive }]
+const selectedEmployees = ref([])
 
 let empTimer = null
 watch(empQuery, (v) => {
@@ -217,7 +216,6 @@ watch(empQuery, (v) => {
 function hasEmployee(id) {
   return selectedEmployees.value.some(x => String(x.employeeId) === String(id))
 }
-
 function addEmployee(emp) {
   if (!emp?.employeeId) return
   if (hasEmployee(emp.employeeId)) return
@@ -231,12 +229,11 @@ function addEmployee(emp) {
     isActive: true,
   })
 }
-
 function removeEmployee(id) {
   selectedEmployees.value = selectedEmployees.value.filter(x => String(x.employeeId) !== String(id))
 }
 
-/* Employee-only creation (pick employee + pick manager) */
+/* Employee-only creation */
 const oneEmpQuery = ref('')
 const oneEmpLoading = ref(false)
 const oneEmpResults = ref([])
@@ -261,10 +258,7 @@ watch(oneEmpQuery, (v) => {
     }
   }, 250)
 })
-
-function pickEmployee(emp) {
-  pickedEmployee.value = emp
-}
+function pickEmployee(emp) { pickedEmployee.value = emp }
 
 /* pick manager for employee-only */
 const oneMgrQuery = ref('')
@@ -291,10 +285,7 @@ watch(oneMgrQuery, (v) => {
     }
   }, 250)
 })
-
-function pickOneManager(emp) {
-  pickedOneMgr.value = emp
-}
+function pickOneManager(emp) { pickedOneMgr.value = emp }
 
 const oneForm = ref({
   joinDate: '',
@@ -371,7 +362,6 @@ async function submitCreate() {
         message: `Created ${res?.data?.createdCount || 0} employee profile(s). Skipped ${res?.data?.skippedCount || 0}.`,
       })
     } else {
-      // employee-only
       if (!pickedEmployee.value?.employeeId) {
         createError.value = 'Please select an employee from EmployeeDirectory.'
         createSaving.value = false
@@ -383,9 +373,10 @@ async function submitCreate() {
         return
       }
 
+      // ✅ IMPORTANT: send managerEmployeeId (not managerLoginId)
       const payload = {
         employeeId: String(pickedEmployee.value.employeeId),
-        managerLoginId: String(pickedOneMgr.value.employeeId),
+        managerEmployeeId: String(pickedOneMgr.value.employeeId),
         gmLoginId: String(gmLoginId.value),
         joinDate: oneForm.value.joinDate || null,
         contractDate: oneForm.value.contractDate || null,
@@ -408,117 +399,16 @@ async function submitCreate() {
   }
 }
 
-/* ───────── Edit modal ───────── */
-const editOpen = ref(false)
-const editSaving = ref(false)
-const editError = ref('')
-const selected = ref(null)
-
-const editForm = ref({
-  joinDate: '',
-  contractDate: '',
-  managerLoginId: '',
-  gmLoginId: '',
-  isActive: true,
-  alCarry: 0,
-})
-
-const editMgrQuery = ref('')
-const editMgrLoading = ref(false)
-const editMgrResults = ref([])
-let editMgrTimer = null
-
-watch(editMgrQuery, (v) => {
-  editMgrResults.value = []
-  if (editMgrTimer) clearTimeout(editMgrTimer)
-  const q = String(v || '').trim()
-  if (!q) return
-  editMgrTimer = setTimeout(async () => {
-    try {
-      editMgrLoading.value = true
-      editMgrResults.value = await searchDirectory(q)
-    } catch (e) {
-      console.error(e)
-      editMgrResults.value = []
-    } finally {
-      editMgrLoading.value = false
-    }
-  }, 250)
-})
-
-function pickEditManager(emp) {
-  editForm.value.managerLoginId = String(emp.employeeId || '')
+/* ───────── Edit page link (AdminLeaveProfileEdit.vue) ───────── */
+function openEditPage(emp) {
+  router.push({ name: 'leave-admin-profile-edit', params: { employeeId: emp.employeeId } })
 }
 
-async function openEditProfile(emp) {
-  editError.value = ''
-  selected.value = emp
-  editOpen.value = true
-  editMgrQuery.value = ''
-  editMgrResults.value = []
-
-  try {
-    const res = await api.get(`/admin/leave/profiles/${emp.employeeId}`)
-    const prof = res?.data?.profile || {}
-
-    editForm.value = {
-      joinDate: prof.joinDate ? dayjs(prof.joinDate).format('YYYY-MM-DD') : '',
-      contractDate: prof.contractDate ? dayjs(prof.contractDate).format('YYYY-MM-DD') : '',
-      managerLoginId: String(prof.managerLoginId || ''),
-      gmLoginId: String(prof.gmLoginId || ''),
-      isActive: prof.isActive !== false,
-      alCarry: num(prof.alCarry),
-    }
-  } catch {
-    editForm.value = {
-      joinDate: emp.joinDate ? dayjs(emp.joinDate).format('YYYY-MM-DD') : '',
-      contractDate: emp.contractDate ? dayjs(emp.contractDate).format('YYYY-MM-DD') : '',
-      managerLoginId: String(emp.managerLoginId || ''),
-      gmLoginId: String(emp.gmLoginId || ''),
-      isActive: emp.isActive !== false,
-      alCarry: num(emp.alCarry),
-    }
-  }
+function openYearSheet(emp) {
+  router.push({ name: 'expat-leave-year-sheet', params: { employeeId: emp.employeeId } })
 }
 
-async function saveEdit() {
-  if (!selected.value?.employeeId) return
-  editError.value = ''
-
-  const payload = {
-    joinDate: editForm.value.joinDate || null,
-    contractDate: editForm.value.contractDate || null,
-    managerLoginId: String(editForm.value.managerLoginId || '').trim(),
-    gmLoginId: String(editForm.value.gmLoginId || '').trim(),
-    isActive: editForm.value.isActive !== false,
-    alCarry: num(editForm.value.alCarry),
-  }
-
-  if (!payload.managerLoginId) {
-    editError.value = 'Manager is required.'
-    return
-  }
-  if (!payload.gmLoginId) {
-    editError.value = 'GM is required.'
-    return
-  }
-
-  editSaving.value = true
-  try {
-    await api.put(`/admin/leave/profiles/${selected.value.employeeId}`, payload)
-    showToast({ type: 'success', title: 'Saved', message: 'Updated successfully.' })
-    editOpen.value = false
-    await fetchGrouped()
-  } catch (e) {
-    console.error(e)
-    editError.value = e?.response?.data?.message || 'Failed to save.'
-    showToast({ type: 'error', title: 'Save failed', message: editError.value })
-  } finally {
-    editSaving.value = false
-  }
-}
-
-/* ───────── Deactivate / hard delete ───────── */
+/* ───────── Deactivate ───────── */
 async function deactivate(emp) {
   try {
     await api.delete(`/admin/leave/profiles/${emp.employeeId}`)
@@ -529,8 +419,107 @@ async function deactivate(emp) {
   }
 }
 
-function openYearSheet(emp) {
-  router.push({ name: 'expat-leave-year-sheet', params: { employeeId: emp.employeeId } })
+/* ───────── Contracts Log modal ───────── */
+const contractsOpen = ref(false)
+const contractsLoading = ref(false)
+const contractsError = ref('')
+const contractsEmp = ref(null)
+const contractsProfile = ref(null)
+
+function normalizeContractHistory(list) {
+  const arr = Array.isArray(list) ? list : []
+  // newest first if createdAt exists
+  return arr.slice().sort((a, b) => {
+    const ta = a?.createdAt ? new Date(a.createdAt).getTime() : 0
+    const tb = b?.createdAt ? new Date(b.createdAt).getTime() : 0
+    return tb - ta
+  })
+}
+
+function getContractLogs(profile) {
+  // support either profile.contractHistory or profile.contracts (if backend uses a different field)
+  if (!profile) return []
+  if (Array.isArray(profile.contractHistory)) return normalizeContractHistory(profile.contractHistory)
+  if (Array.isArray(profile.contracts)) return normalizeContractHistory(profile.contracts)
+  return []
+}
+
+async function openContracts(emp) {
+  contractsEmp.value = emp
+  contractsProfile.value = null
+  contractsError.value = ''
+  contractsOpen.value = true
+  contractsLoading.value = true
+
+  try {
+    const res = await api.get(`/admin/leave/profiles/${emp.employeeId}`)
+    contractsProfile.value = res?.data?.profile || null
+  } catch (e) {
+    console.error(e)
+    contractsError.value = e?.response?.data?.message || 'Failed to load profile.'
+  } finally {
+    contractsLoading.value = false
+  }
+}
+
+/* ───────── Renew Contract (quick from list) ───────── */
+const renewOpen = ref(false)
+const renewSaving = ref(false)
+const renewError = ref('')
+const renewEmp = ref(null)
+const renewForm = ref({ newContractDate: '', clearUnusedAL: false, note: '' })
+
+function openRenew(emp) {
+  renewEmp.value = emp
+  renewError.value = ''
+  renewForm.value = {
+    newContractDate: dayjs().format('YYYY-MM-DD'),
+    clearUnusedAL: false,
+    note: '',
+  }
+  renewOpen.value = true
+}
+
+async function submitRenew() {
+  if (!renewEmp.value?.employeeId) return
+  renewError.value = ''
+
+  const payload = {
+    newContractDate: String(renewForm.value.newContractDate || '').trim(),
+    clearUnusedAL: !!renewForm.value.clearUnusedAL,
+    note: String(renewForm.value.note || '').trim() || null,
+  }
+
+  if (!payload.newContractDate) {
+    renewError.value = 'New contract start date is required.'
+    return
+  }
+
+  renewSaving.value = true
+  try {
+    await api.post(`/admin/leave/profiles/${renewEmp.value.employeeId}/contracts/renew`, payload)
+    showToast({ type: 'success', title: 'Contract renewed', message: `${renewEmp.value.employeeId} renewed.` })
+    renewOpen.value = false
+    await fetchGrouped()
+  } catch (e) {
+    console.error(e)
+    renewError.value = e?.response?.data?.message || 'Renew failed.'
+    showToast({ type: 'error', title: 'Renew failed', message: renewError.value })
+  } finally {
+    renewSaving.value = false
+  }
+}
+
+/* ───────── small helpers ───────── */
+function fmtYMD(v) {
+  if (!v) return '—'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD') : String(v)
+}
+function gmLabel(gm) {
+  const id = String(gm?.loginId || '')
+  const nm = String(gm?.name || '')
+  return nm ? `${id} — ${nm}` : id
 }
 
 /* ───────── lifecycle ───────── */
@@ -548,7 +537,6 @@ onBeforeUnmount(() => {
   if (empTimer) clearTimeout(empTimer)
   if (oneEmpTimer) clearTimeout(oneEmpTimer)
   if (oneMgrTimer) clearTimeout(oneMgrTimer)
-  if (editMgrTimer) clearTimeout(editMgrTimer)
 })
 </script>
 
@@ -562,7 +550,7 @@ onBeforeUnmount(() => {
             <p class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/80">Expat Leave</p>
             <p class="text-sm font-semibold">Profiles grouped by Manager</p>
             <p class="text-[11px] text-emerald-50/90">
-              Create Manager + assign employees (multi) or create single employee. GM must exist.
+              View balances + open contract logs per employee. Use Renew to start a new contract period.
             </p>
           </div>
 
@@ -656,9 +644,7 @@ onBeforeUnmount(() => {
                         ({{ g.employees.length }} employees)
                       </span>
                     </td>
-                    <td class="px-3 py-2 text-right whitespace-nowrap">
-                      <!-- spacer -->
-                    </td>
+                    <td class="px-3 py-2 text-right whitespace-nowrap"></td>
                   </tr>
 
                   <!-- employee rows -->
@@ -694,12 +680,32 @@ onBeforeUnmount(() => {
 
                         <button
                           type="button"
+                          class="inline-flex items-center gap-1 rounded-full border border-indigo-500 px-2.5 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50
+                                 dark:border-indigo-500 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                          @click="openContracts(p)"
+                        >
+                          <i class="fa-regular fa-folder-open text-[11px]" />
+                          Contracts
+                        </button>
+
+                        <button
+                          type="button"
                           class="inline-flex items-center gap-1 rounded-full border border-emerald-500 px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50
                                  dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
-                          @click="openEditProfile(p)"
+                          @click="openEditPage(p)"
                         >
                           <i class="fa-solid fa-pen text-[11px]" />
                           Edit
+                        </button>
+
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-full border border-indigo-500 px-2.5 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50
+                                 dark:border-indigo-500 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                          @click="openRenew(p)"
+                        >
+                          <i class="fa-solid fa-arrows-rotate text-[11px]" />
+                          Renew
                         </button>
 
                         <button
@@ -753,7 +759,7 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <div class="mt-2 flex justify-end gap-2">
+                  <div class="mt-2 flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-slate-300 px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50
@@ -762,14 +768,34 @@ onBeforeUnmount(() => {
                     >
                       <i class="fa-regular fa-file-lines text-[11px]" /> Sheet
                     </button>
+
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-indigo-500 px-3 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50
+                             dark:border-indigo-500 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                      @click="openContracts(p)"
+                    >
+                      <i class="fa-regular fa-folder-open text-[11px]" /> Contracts
+                    </button>
+
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-emerald-500 px-3 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50
                              dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
-                      @click="openEditProfile(p)"
+                      @click="openEditPage(p)"
                     >
                       <i class="fa-solid fa-pen text-[11px]" /> Edit
                     </button>
+
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-indigo-500 px-3 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-50
+                             dark:border-indigo-500 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                      @click="openRenew(p)"
+                    >
+                      <i class="fa-solid fa-arrows-rotate text-[11px]" /> Renew
+                    </button>
+
                     <button
                       type="button"
                       class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50
@@ -787,15 +813,15 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Create modal -->
+    <!-- Create modal (FULL) -->
     <transition name="modal-fade">
       <div v-if="createDialog" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
-        <div class="w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+        <div class="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
           <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
             <div class="flex items-start justify-between gap-2">
               <div>
                 <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Create</div>
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">Pick from EmployeeDirectory. No defaults.</div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">Pick from EmployeeDirectory. Then create profiles.</div>
               </div>
               <button
                 type="button"
@@ -808,271 +834,403 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="px-4 py-3 space-y-3">
-            <!-- mode switch -->
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="rounded-full px-3 py-1.5 text-[11px] font-semibold border"
-                :class="createMode === 'manager'
-                  ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
-                  : 'border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'"
-                @click="createMode = 'manager'"
-              >
-                Create Manager + Assign Employees
-              </button>
+          <div class="px-4 py-3 overflow-auto space-y-4 max-h-[72vh]">
+            <!-- mode + GM -->
+            <div class="grid gap-3 lg:grid-cols-3">
+              <div class="lg:col-span-2">
+                <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1">Create mode</div>
+                <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
+                  <button
+                    class="rounded-lg px-3 py-1.5 text-[11px] font-semibold"
+                    :class="createMode === 'manager'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'"
+                    @click="createMode = 'manager'"
+                    type="button"
+                  >
+                    Manager + multiple employees
+                  </button>
+                  <button
+                    class="rounded-lg px-3 py-1.5 text-[11px] font-semibold"
+                    :class="createMode === 'employee'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'"
+                    @click="createMode = 'employee'"
+                    type="button"
+                  >
+                    Single employee
+                  </button>
+                </div>
+              </div>
 
-              <button
-                type="button"
-                class="rounded-full px-3 py-1.5 text-[11px] font-semibold border"
-                :class="createMode === 'employee'
-                  ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200'
-                  : 'border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'"
-                @click="createMode = 'employee'"
-              >
-                Create Single Employee
-              </button>
-            </div>
-
-            <!-- GM select -->
-            <div class="grid gap-3 sm:grid-cols-2">
-              <div class="space-y-1">
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">GM</label>
+              <div>
+                <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-200 mb-1">GM approver</div>
                 <select
                   v-model="gmLoginId"
-                  class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] text-slate-800 outline-none
-                         focus:border-emerald-500 focus:ring-1 focus:ring-emerald-400
-                         dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                 >
-                  <option value="" disabled>Select GM...</option>
-                  <option v-for="g in gms" :key="g.loginId" :value="g.loginId">{{ g.loginId }} — {{ g.name }}</option>
+                  <option value="" disabled>Select GM</option>
+                  <option v-for="gm in gms" :key="gm.loginId" :value="gm.loginId">
+                    {{ gmLabel(gm) }}
+                  </option>
                 </select>
-                <p v-if="!gms.length" class="text-[10px] text-rose-500">
-                  No GM found. Please seed LEAVE_GM first.
+                <p v-if="!gms.length" class="mt-1 text-[11px] text-rose-600 dark:text-rose-300">
+                  No GM found. Please seed user role LEAVE_GM.
                 </p>
               </div>
             </div>
 
-            <!-- Manager mode -->
-            <div v-if="createMode === 'manager'" class="space-y-3">
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search manager</label>
-                  <div class="flex items-center rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
-                    <i class="fa-solid fa-user-tie mr-2 text-slate-500 dark:text-slate-300" />
-                    <input v-model="mgrQuery" type="text" placeholder="Type manager ID or name..."
-                      class="flex-1 bg-transparent outline-none text-slate-800 placeholder:text-slate-400 dark:text-slate-100" />
-                    <span v-if="mgrLoading" class="text-[11px] text-slate-500">Searching…</span>
-                  </div>
+            <!-- MANAGER MODE -->
+            <div v-if="createMode === 'manager'" class="grid gap-4 lg:grid-cols-2">
+              <!-- pick manager -->
+              <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">1) Select manager</div>
+                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Search manager by ID / name / dept.</p>
 
-                  <div v-if="mgrResults.length" class="max-h-40 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                    <button
-                      v-for="m in mgrResults"
-                      :key="'mgr-' + m.employeeId"
-                      type="button"
-                      class="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 dark:hover:bg-slate-900 border-b border-slate-200 dark:border-slate-700 last:border-b-0"
-                      @click="pickManager(m)"
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div>
-                          <div class="font-semibold text-slate-900 dark:text-slate-50">{{ m.name || '—' }}</div>
-                          <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ m.employeeId }} <span v-if="m.department">• {{ m.department }}</span></div>
-                        </div>
-                        <span
-                          v-if="String(pickedMgr?.employeeId) === String(m.employeeId)"
-                          class="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200"
-                        >Selected</span>
-                      </div>
-                    </button>
-                  </div>
-
-                  <p v-if="pickedMgr" class="text-[11px] text-slate-600 dark:text-slate-300">
-                    Selected manager: <span class="font-mono">{{ pickedMgr.employeeId }}</span> — {{ pickedMgr.name }}
-                  </p>
+                <div class="mt-2 flex items-center rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs dark:border-slate-700 dark:bg-slate-950">
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-[11px] text-slate-500 dark:text-slate-400" />
+                  <input
+                    v-model="mgrQuery"
+                    class="flex-1 bg-transparent text-[12px] outline-none"
+                    placeholder="Search manager..."
+                  />
+                  <i v-if="mgrLoading" class="fa-solid fa-circle-notch fa-spin text-[12px] text-slate-500" />
                 </div>
 
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Add employees under manager</label>
-                  <div class="flex items-center rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
-                    <i class="fa-solid fa-user-plus mr-2 text-slate-500 dark:text-slate-300" />
-                    <input v-model="empQuery" type="text" placeholder="Type employee ID or name..."
-                      class="flex-1 bg-transparent outline-none text-slate-800 placeholder:text-slate-400 dark:text-slate-100" />
-                    <span v-if="empLoading" class="text-[11px] text-slate-500">Searching…</span>
-                  </div>
+                <div class="mt-2 max-h-56 overflow-auto">
+                  <p v-if="!mgrQuery" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    Type to search.
+                  </p>
 
-                  <div v-if="empResults.length" class="max-h-40 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                    <button
-                      v-for="e in empResults"
-                      :key="'emp-' + e.employeeId"
-                      type="button"
-                      class="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 dark:hover:bg-slate-900 border-b border-slate-200 dark:border-slate-700 last:border-b-0"
-                      @click="addEmployee(e)"
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div>
-                          <div class="font-semibold text-slate-900 dark:text-slate-50">{{ e.name || '—' }}</div>
-                          <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ e.employeeId }} <span v-if="e.department">• {{ e.department }}</span></div>
-                        </div>
-                        <span
-                          v-if="hasEmployee(e.employeeId)"
-                          class="inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200"
-                        >Added</span>
-                      </div>
-                    </button>
-                  </div>
+                  <button
+                    v-for="m in mgrResults"
+                    :key="'mgr-' + m.employeeId"
+                    type="button"
+                    class="w-full rounded-xl border px-3 py-2 text-left text-[12px] mb-2
+                           hover:bg-slate-50 dark:hover:bg-slate-800"
+                    :class="pickedMgr?.employeeId === m.employeeId
+                      ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-900/25'
+                      : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'"
+                    @click="pickManager(m)"
+                  >
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">
+                      {{ m.employeeId }} — {{ m.name || '—' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                      {{ m.department || '—' }}
+                    </div>
+                  </button>
+
+                  <p v-if="mgrQuery && !mgrLoading && !mgrResults.length" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    No results.
+                  </p>
                 </div>
               </div>
 
-              <!-- selected employees list -->
-              <div class="rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-900/60">
-                <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Employees to create ({{ selectedEmployees.length }})</div>
+              <!-- add employees -->
+              <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">2) Add employees under manager</div>
+                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">Search employees and add many.</p>
 
-                <p v-if="!selectedEmployees.length" class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  Add employees from search. Then click Create.
-                </p>
+                <div class="mt-2 flex items-center rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs dark:border-slate-700 dark:bg-slate-950">
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-[11px] text-slate-500 dark:text-slate-400" />
+                  <input
+                    v-model="empQuery"
+                    class="flex-1 bg-transparent text-[12px] outline-none"
+                    placeholder="Search employees..."
+                  />
+                  <i v-if="empLoading" class="fa-solid fa-circle-notch fa-spin text-[12px] text-slate-500" />
+                </div>
 
-                <div v-else class="mt-2 space-y-2">
+                <div class="mt-2 max-h-56 overflow-auto">
+                  <p v-if="!empQuery" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    Type to search.
+                  </p>
+
                   <div
-                    v-for="e in selectedEmployees"
-                    :key="'sel-' + e.employeeId"
-                    class="rounded-xl border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-950"
+                    v-for="e in empResults"
+                    :key="'emp-res-' + e.employeeId"
+                    class="mb-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900"
                   >
                     <div class="flex items-start justify-between gap-2">
                       <div>
-                        <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                        <div class="font-semibold text-[12px] text-slate-900 dark:text-slate-50">
                           {{ e.employeeId }} — {{ e.name || '—' }}
                         </div>
-                        <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ e.department || '—' }}</div>
+                        <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                          {{ e.department || '—' }}
+                        </div>
                       </div>
-
                       <button
                         type="button"
-                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50
-                               dark:text-rose-200 dark:hover:bg-rose-950/50"
-                        @click="removeEmployee(e.employeeId)"
+                        class="inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold
+                               border border-emerald-500 text-emerald-700 hover:bg-emerald-50
+                               dark:text-emerald-300 dark:hover:bg-emerald-900/30"
+                        :disabled="hasEmployee(e.employeeId)"
+                        @click="addEmployee(e)"
                       >
-                        <i class="fa-solid fa-xmark text-[11px]" />
-                        Remove
+                        <i class="fa-solid" :class="hasEmployee(e.employeeId) ? 'fa-check' : 'fa-plus'" />
+                        {{ hasEmployee(e.employeeId) ? 'Added' : 'Add' }}
                       </button>
                     </div>
+                  </div>
 
-                    <div class="mt-2 grid gap-2 sm:grid-cols-4">
-                      <div class="space-y-1">
-                        <label class="block text-[10px] font-medium text-slate-600 dark:text-slate-300">Join Date</label>
-                        <input v-model="e.joinDate" type="date"
-                          class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                      </div>
-                      <div class="space-y-1">
-                        <label class="block text-[10px] font-medium text-slate-600 dark:text-slate-300">Contract Date</label>
-                        <input v-model="e.contractDate" type="date"
-                          class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                      </div>
-                      <div class="space-y-1">
-                        <label class="block text-[10px] font-medium text-slate-600 dark:text-slate-300">AL Carry</label>
-                        <input v-model.number="e.alCarry" type="number" step="0.5"
-                          class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                      </div>
-                      <div class="flex items-center gap-2 pt-5">
-                        <input v-model="e.isActive" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
-                        <span class="text-[11px] text-slate-700 dark:text-slate-200">Active</span>
-                      </div>
+                  <p v-if="empQuery && !empLoading && !empResults.length" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    No results.
+                  </p>
+                </div>
+              </div>
+
+              <!-- selected employees editor -->
+              <div class="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="flex items-center justify-between gap-2">
+                  <div>
+                    <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Selected employees</div>
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400">Fill join/contract date if needed, AL carry, active.</p>
+                  </div>
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    {{ selectedEmployees.length }} selected
+                  </div>
+                </div>
+
+                <p v-if="!selectedEmployees.length" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                  No employees added yet.
+                </p>
+
+                <div v-else class="mt-3 overflow-x-auto">
+                  <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
+                    <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
+                                  dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+                      <tr>
+                        <th class="table-th">Employee</th>
+                        <th class="table-th">Join Date</th>
+                        <th class="table-th">Contract Date</th>
+                        <th class="table-th text-right">AL Carry</th>
+                        <th class="table-th text-center">Active</th>
+                        <th class="table-th text-right">Remove</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="s in selectedEmployees"
+                        :key="'sel-' + s.employeeId"
+                        class="border-b border-slate-200 dark:border-slate-700"
+                      >
+                        <td class="table-td">
+                          <div class="font-semibold text-slate-900 dark:text-slate-50">
+                            {{ s.employeeId }} — {{ s.name || '—' }}
+                          </div>
+                          <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ s.department || '—' }}</div>
+                        </td>
+
+                        <td class="table-td">
+                          <input
+                            v-model="s.joinDate"
+                            type="date"
+                            class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[12px]
+                                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                          />
+                        </td>
+
+                        <td class="table-td">
+                          <input
+                            v-model="s.contractDate"
+                            type="date"
+                            class="w-full rounded-lg border border-slate-300 bg-white px-2 py-1 text-[12px]
+                                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                          />
+                        </td>
+
+                        <td class="table-td text-right">
+                          <input
+                            v-model.number="s.alCarry"
+                            type="number"
+                            step="0.5"
+                            class="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1 text-right text-[12px]
+                                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                          />
+                        </td>
+
+                        <td class="table-td text-center">
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold"
+                            :class="s.isActive
+                              ? 'border-emerald-500 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/30'
+                              : 'border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800'"
+                            @click="s.isActive = !s.isActive"
+                          >
+                            <i class="fa-solid" :class="s.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
+                            {{ s.isActive ? 'Yes' : 'No' }}
+                          </button>
+                        </td>
+
+                        <td class="table-td text-right">
+                          <button
+                            type="button"
+                            class="inline-flex items-center justify-center rounded-full border border-rose-500 px-3 py-1 text-[11px] font-semibold
+                                   text-rose-700 hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-950/40"
+                            @click="removeEmployee(s.employeeId)"
+                          >
+                            <i class="fa-solid fa-trash" />
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div v-if="pickedMgr" class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                  Manager selected: <span class="font-mono font-semibold">{{ pickedMgr.employeeId }}</span> — {{ pickedMgr.name || '—' }}
+                </div>
+              </div>
+            </div>
+
+            <!-- EMPLOYEE MODE -->
+            <div v-else class="grid gap-4 lg:grid-cols-2">
+              <!-- pick employee -->
+              <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">1) Select employee</div>
+                <div class="mt-2 flex items-center rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs dark:border-slate-700 dark:bg-slate-950">
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-[11px] text-slate-500 dark:text-slate-400" />
+                  <input v-model="oneEmpQuery" class="flex-1 bg-transparent text-[12px] outline-none" placeholder="Search employee..." />
+                  <i v-if="oneEmpLoading" class="fa-solid fa-circle-notch fa-spin text-[12px] text-slate-500" />
+                </div>
+
+                <div class="mt-2 max-h-56 overflow-auto">
+                  <p v-if="!oneEmpQuery" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">Type to search.</p>
+
+                  <button
+                    v-for="e in oneEmpResults"
+                    :key="'one-emp-' + e.employeeId"
+                    type="button"
+                    class="w-full rounded-xl border px-3 py-2 text-left text-[12px] mb-2
+                           hover:bg-slate-50 dark:hover:bg-slate-800"
+                    :class="pickedEmployee?.employeeId === e.employeeId
+                      ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-900/25'
+                      : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'"
+                    @click="pickEmployee(e)"
+                  >
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">
+                      {{ e.employeeId }} — {{ e.name || '—' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                      {{ e.department || '—' }}
+                    </div>
+                  </button>
+
+                  <p v-if="oneEmpQuery && !oneEmpLoading && !oneEmpResults.length" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    No results.
+                  </p>
+                </div>
+              </div>
+
+              <!-- pick manager -->
+              <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">2) Select manager</div>
+                <div class="mt-2 flex items-center rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs dark:border-slate-700 dark:bg-slate-950">
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-[11px] text-slate-500 dark:text-slate-400" />
+                  <input v-model="oneMgrQuery" class="flex-1 bg-transparent text-[12px] outline-none" placeholder="Search manager..." />
+                  <i v-if="oneMgrLoading" class="fa-solid fa-circle-notch fa-spin text-[12px] text-slate-500" />
+                </div>
+
+                <div class="mt-2 max-h-56 overflow-auto">
+                  <p v-if="!oneMgrQuery" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">Type to search.</p>
+
+                  <button
+                    v-for="m in oneMgrResults"
+                    :key="'one-mgr-' + m.employeeId"
+                    type="button"
+                    class="w-full rounded-xl border px-3 py-2 text-left text-[12px] mb-2
+                           hover:bg-slate-50 dark:hover:bg-slate-800"
+                    :class="pickedOneMgr?.employeeId === m.employeeId
+                      ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-900/25'
+                      : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'"
+                    @click="pickOneManager(m)"
+                  >
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">
+                      {{ m.employeeId }} — {{ m.name || '—' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                      {{ m.department || '—' }}
+                    </div>
+                  </button>
+
+                  <p v-if="oneMgrQuery && !oneMgrLoading && !oneMgrResults.length" class="py-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                    No results.
+                  </p>
+                </div>
+              </div>
+
+              <!-- extra fields -->
+              <div class="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">3) Profile fields</div>
+                <div class="mt-3 grid gap-3 sm:grid-cols-4">
+                  <div class="space-y-1 sm:col-span-1">
+                    <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join Date</label>
+                    <input
+                      v-model="oneForm.joinDate"
+                      type="date"
+                      class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div class="space-y-1 sm:col-span-1">
+                    <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract Date</label>
+                    <input
+                      v-model="oneForm.contractDate"
+                      type="date"
+                      class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div class="space-y-1 sm:col-span-1">
+                    <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL Carry</label>
+                    <input
+                      v-model.number="oneForm.alCarry"
+                      type="number"
+                      step="0.5"
+                      class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    />
+                  </div>
+
+                  <div class="space-y-1 sm:col-span-1">
+                    <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Active</label>
+                    <button
+                      type="button"
+                      class="w-full inline-flex items-center justify-center gap-2 rounded-lg border px-2.5 py-1.5 text-[12px] font-semibold"
+                      :class="oneForm.isActive
+                        ? 'border-emerald-500 text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/30'
+                        : 'border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800'"
+                      @click="oneForm.isActive = !oneForm.isActive"
+                    >
+                      <i class="fa-solid" :class="oneForm.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
+                      {{ oneForm.isActive ? 'Yes' : 'No' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                    <div class="font-semibold">Employee</div>
+                    <div class="mt-1">
+                      <span class="font-mono">{{ pickedEmployee?.employeeId || '—' }}</span>
+                      <span class="ml-2">{{ pickedEmployee?.name || '' }}</span>
+                    </div>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                    <div class="font-semibold">Manager</div>
+                    <div class="mt-1">
+                      <span class="font-mono">{{ pickedOneMgr?.employeeId || '—' }}</span>
+                      <span class="ml-2">{{ pickedOneMgr?.name || '' }}</span>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
 
-            <!-- Employee mode -->
-            <div v-else class="space-y-3">
-              <div class="grid gap-3 sm:grid-cols-2">
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search employee</label>
-                  <div class="flex items-center rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
-                    <i class="fa-solid fa-id-badge mr-2 text-slate-500 dark:text-slate-300" />
-                    <input v-model="oneEmpQuery" type="text" placeholder="Type employee ID or name..."
-                      class="flex-1 bg-transparent outline-none text-slate-800 placeholder:text-slate-400 dark:text-slate-100" />
-                    <span v-if="oneEmpLoading" class="text-[11px] text-slate-500">Searching…</span>
-                  </div>
-
-                  <div v-if="oneEmpResults.length" class="max-h-40 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                    <button
-                      v-for="e in oneEmpResults"
-                      :key="'one-e-' + e.employeeId"
-                      type="button"
-                      class="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 dark:hover:bg-slate-900 border-b border-slate-200 dark:border-slate-700 last:border-b-0"
-                      @click="pickEmployee(e)"
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div>
-                          <div class="font-semibold text-slate-900 dark:text-slate-50">{{ e.name || '—' }}</div>
-                          <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ e.employeeId }} <span v-if="e.department">• {{ e.department }}</span></div>
-                        </div>
-                        <span
-                          v-if="String(pickedEmployee?.employeeId) === String(e.employeeId)"
-                          class="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200"
-                        >Selected</span>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search manager</label>
-                  <div class="flex items-center rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
-                    <i class="fa-solid fa-user-tie mr-2 text-slate-500 dark:text-slate-300" />
-                    <input v-model="oneMgrQuery" type="text" placeholder="Type manager ID or name..."
-                      class="flex-1 bg-transparent outline-none text-slate-800 placeholder:text-slate-400 dark:text-slate-100" />
-                    <span v-if="oneMgrLoading" class="text-[11px] text-slate-500">Searching…</span>
-                  </div>
-
-                  <div v-if="oneMgrResults.length" class="max-h-40 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                    <button
-                      v-for="m in oneMgrResults"
-                      :key="'one-m-' + m.employeeId"
-                      type="button"
-                      class="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 dark:hover:bg-slate-900 border-b border-slate-200 dark:border-slate-700 last:border-b-0"
-                      @click="pickOneManager(m)"
-                    >
-                      <div class="flex items-start justify-between gap-2">
-                        <div>
-                          <div class="font-semibold text-slate-900 dark:text-slate-50">{{ m.name || '—' }}</div>
-                          <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ m.employeeId }} <span v-if="m.department">• {{ m.department }}</span></div>
-                        </div>
-                        <span
-                          v-if="String(pickedOneMgr?.employeeId) === String(m.employeeId)"
-                          class="inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200"
-                        >Selected</span>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div class="grid gap-3 sm:grid-cols-3">
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join Date</label>
-                  <input v-model="oneForm.joinDate" type="date"
-                    class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                </div>
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract Date</label>
-                  <input v-model="oneForm.contractDate" type="date"
-                    class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                </div>
-                <div class="space-y-1">
-                  <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL Carry</label>
-                  <input v-model.number="oneForm.alCarry" type="number" step="0.5"
-                    class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-                </div>
-              </div>
-
-              <div class="flex items-center gap-2">
-                <input v-model="oneForm.isActive" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
-                <span class="text-[12px] text-slate-700 dark:text-slate-200">Active</span>
-              </div>
-            </div>
-
-            <div v-if="createError" class="text-[11px] text-rose-600 dark:text-rose-400">
+            <!-- error -->
+            <div v-if="createError" class="rounded-xl border border-rose-400 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-500/70 dark:bg-rose-950/40 dark:text-rose-100">
               {{ createError }}
             </div>
           </div>
@@ -1081,42 +1239,183 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              :disabled="createSaving"
               @click="createDialog = false"
             >
               Cancel
             </button>
             <button
               type="button"
-              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm
+              class="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm
                      hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
               :disabled="createSaving"
               @click="submitCreate"
             >
-              <i class="fa-solid fa-floppy-disk text-[11px]" />
-              <span>Create</span>
+              <i class="fa-solid" :class="createSaving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
+              <span>{{ createSaving ? 'Saving...' : 'Create' }}</span>
             </button>
           </div>
         </div>
       </div>
     </transition>
 
-    <!-- Edit modal -->
+    <!-- Contracts modal -->
     <transition name="modal-fade">
-      <div v-if="editOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
-        <div class="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+      <div v-if="contractsOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
+        <div class="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
           <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
             <div class="flex items-start justify-between gap-2">
               <div>
-                <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Edit Profile</div>
+                <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Contract Logs</div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                  {{ selected?.employeeId }} · {{ selected?.name }}
+                  {{ contractsEmp?.employeeId }} · {{ contractsEmp?.name || '—' }}
                 </div>
               </div>
               <button
                 type="button"
                 class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60
                        dark:text-slate-300 dark:hover:bg-slate-800/80"
-                @click="editOpen = false"
+                @click="contractsOpen = false"
+              >
+                <i class="fa-solid fa-xmark text-xs" />
+              </button>
+            </div>
+          </div>
+
+          <div class="px-4 py-3 space-y-3 overflow-auto">
+            <div v-if="contractsLoading" class="space-y-2">
+              <div class="h-10 w-full animate-pulse rounded-xl bg-slate-200/90 dark:bg-slate-800/70" />
+              <div class="h-16 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
+              <div class="h-16 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
+            </div>
+
+            <div v-else-if="contractsError" class="rounded-xl border border-rose-400 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-500/70 dark:bg-rose-950/40 dark:text-rose-100">
+              {{ contractsError }}
+            </div>
+
+            <template v-else>
+              <div class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                    Current contract start:
+                    <span class="font-mono">{{ contractsProfile?.contractDate || '—' }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-2 rounded-full border border-emerald-500 px-3 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-50
+                           dark:border-emerald-500 dark:text-emerald-300 dark:hover:bg-emerald-900/60"
+                    @click="openEditPage(contractsEmp)"
+                  >
+                    <i class="fa-solid fa-pen" />
+                    Open Edit Page
+                  </button>
+                </div>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-slate-50/60 p-3 dark:border-slate-700 dark:bg-slate-900/60">
+                <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                  Contract history
+                </div>
+                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                  Each row is a contract snapshot log.
+                </p>
+
+                <p v-if="!getContractLogs(contractsProfile).length"
+                   class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+                  No contract logs yet.
+                </p>
+
+                <div v-else class="mt-3 overflow-x-auto">
+                  <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
+                    <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
+                                  dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+                      <tr>
+                        <th class="table-th">#</th>
+                        <th class="table-th">Start</th>
+                        <th class="table-th">End</th>
+                        <th class="table-th text-right">AL Carry</th>
+                        <th class="table-th">Snapshot</th>
+                        <th class="table-th">Note</th>
+                        <th class="table-th">By</th>
+                        <th class="table-th">At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr
+                        v-for="(c, idx) in getContractLogs(contractsProfile)"
+                        :key="idx"
+                        class="border-b border-slate-200 dark:border-slate-700"
+                      >
+                        <td class="table-td font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
+                        <td class="table-td font-mono">{{ c.startDate || '—' }}</td>
+                        <td class="table-td font-mono">{{ c.endDate || '—' }}</td>
+                        <td class="table-td text-right font-mono">{{ num(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
+
+                        <td class="table-td">
+                          <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                            <div v-if="Array.isArray(c.balancesSnapshot)">
+                              <span
+                                v-for="b in c.balancesSnapshot"
+                                :key="String(b.leaveTypeCode) + idx"
+                                class="mr-2 mb-1 inline-flex rounded-full border border-slate-300 px-2 py-0.5 text-[10px] dark:border-slate-600"
+                              >
+                                {{ String(b.leaveTypeCode).toUpperCase() }}:
+                                U{{ num(b.used) }} / R{{ num(b.remaining) }}
+                              </span>
+                            </div>
+                            <div v-else class="text-slate-400">—</div>
+                          </div>
+                        </td>
+
+                        <td class="table-td">
+                          <div class="max-w-[260px] truncate text-[11px] text-slate-600 dark:text-slate-300">
+                            {{ c.note || '—' }}
+                          </div>
+                        </td>
+
+                        <td class="table-td font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
+                        <td class="table-td font-mono text-[11px]">
+                          {{ c.createdAt ? dayjs(c.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+              </div>
+            </template>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
+            <button
+              type="button"
+              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              @click="contractsOpen = false"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- Renew modal -->
+    <transition name="modal-fade">
+      <div v-if="renewOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
+        <div class="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+          <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Renew Contract</div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                  {{ renewEmp?.employeeId }} · {{ renewEmp?.name || '—' }}
+                </div>
+              </div>
+              <button
+                type="button"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60
+                       dark:text-slate-300 dark:hover:bg-slate-800/80"
+                @click="renewOpen = false"
               >
                 <i class="fa-solid fa-xmark text-xs" />
               </button>
@@ -1124,96 +1423,77 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="px-4 py-3 space-y-3">
-            <div class="space-y-1">
-              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search new manager</label>
-              <div class="flex items-center rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900">
-                <i class="fa-solid fa-user-tie mr-2 text-slate-500 dark:text-slate-300" />
-                <input v-model="editMgrQuery" type="text" placeholder="Type manager ID or name..."
-                  class="flex-1 bg-transparent outline-none text-slate-800 placeholder:text-slate-400 dark:text-slate-100" />
-                <span v-if="editMgrLoading" class="text-[11px] text-slate-500">Searching…</span>
-              </div>
-              <p class="text-[10px] text-slate-400">
-                Current manager ID: <span class="font-mono">{{ editForm.managerLoginId || '—' }}</span>
-              </p>
-            </div>
-
-            <div v-if="editMgrResults.length" class="max-h-40 overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
-              <button
-                v-for="m in editMgrResults"
-                :key="'ed-m-' + m.employeeId"
-                type="button"
-                class="w-full text-left px-3 py-2 text-[12px] hover:bg-slate-50 dark:hover:bg-slate-900 border-b border-slate-200 dark:border-slate-700 last:border-b-0"
-                @click="pickEditManager(m)"
-              >
-                <div class="flex items-start justify-between gap-2">
-                  <div>
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ m.name || '—' }}</div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ m.employeeId }} <span v-if="m.department">• {{ m.department }}</span></div>
-                  </div>
-                  <span
-                    v-if="String(editForm.managerLoginId) === String(m.employeeId)"
-                    class="inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-900/60 dark:text-sky-200"
-                  >Selected</span>
-                </div>
-              </button>
-            </div>
-
             <div class="grid gap-3 sm:grid-cols-2">
               <div class="space-y-1">
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join Date</label>
-                <input v-model="editForm.joinDate" type="date"
-                  class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-              </div>
-              <div class="space-y-1">
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract Date</label>
-                <input v-model="editForm.contractDate" type="date"
-                  class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-              </div>
-
-              <div class="space-y-1">
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">GM</label>
-                <select
-                  v-model="editForm.gmLoginId"
+                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">New Contract Start Date</label>
+                <input
+                  v-model="renewForm.newContractDate"
+                  type="date"
                   class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                >
-                  <option value="" disabled>Select GM...</option>
-                  <option v-for="g in gms" :key="g.loginId" :value="g.loginId">{{ g.loginId }} — {{ g.name }}</option>
-                </select>
+                />
               </div>
 
               <div class="space-y-1">
-                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL Carry</label>
-                <input v-model.number="editForm.alCarry" type="number" step="0.5"
-                  class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" />
-              </div>
+                <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Clear unused AL?</label>
+                <div class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                        {{ renewForm.clearUnusedAL ? 'Yes (clear AL to 0)' : 'No (carry AL forward)' }}
+                      </div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                        {{ renewForm.clearUnusedAL
+                          ? 'Old remaining AL is cleared. New contract starts fresh.'
+                          : 'Carries remaining AL (positive/negative) into new contract.' }}
+                      </div>
+                    </div>
 
-              <div class="flex items-center gap-2 pt-5">
-                <input v-model="editForm.isActive" type="checkbox" class="h-4 w-4 rounded border-slate-300" />
-                <span class="text-[12px] text-slate-700 dark:text-slate-200">Active</span>
+                    <button
+                      type="button"
+                      class="inline-flex items-center rounded-full border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700
+                             dark:border-slate-600 dark:text-slate-200"
+                      @click="renewForm.clearUnusedAL = !renewForm.clearUnusedAL"
+                    >
+                      <i class="fa-solid" :class="renewForm.clearUnusedAL ? 'fa-toggle-on' : 'fa-toggle-off'" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div v-if="editError" class="text-[11px] text-rose-600 dark:text-rose-400">
-              {{ editError }}
+            <div class="space-y-1">
+              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Note (optional)</label>
+              <textarea
+                v-model="renewForm.note"
+                rows="3"
+                class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                placeholder="Example: Renewed contract for next period"
+              />
+            </div>
+
+            <div v-if="renewError" class="text-[11px] text-rose-600 dark:text-rose-400">
+              {{ renewError }}
             </div>
           </div>
 
           <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button type="button"
+            <button
+              type="button"
               class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="editOpen = false"
+              @click="renewOpen = false"
             >
               Cancel
             </button>
 
-            <button type="button"
-              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm
-                     hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="editSaving"
-              @click="saveEdit"
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm
+                     hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+              :disabled="renewSaving"
+              @click="submitRenew"
             >
-              <i class="fa-solid fa-floppy-disk text-[11px]" />
-              Save
+              <i class="fa-solid fa-arrows-rotate text-[11px]" :class="renewSaving ? 'fa-spin' : ''" />
+              Renew
             </button>
           </div>
         </div>

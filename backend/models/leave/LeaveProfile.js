@@ -1,4 +1,3 @@
-// backend/models/leave/LeaveProfile.js
 const mongoose = require('mongoose')
 
 const BalanceSchema = new mongoose.Schema(
@@ -7,6 +6,34 @@ const BalanceSchema = new mongoose.Schema(
     yearlyEntitlement: { type: Number, default: 0 },
     used: { type: Number, default: 0 },
     remaining: { type: Number, default: 0 },
+  },
+  { _id: false }
+)
+
+const ContractSnapshotSchema = new mongoose.Schema(
+  {
+    asOf: { type: String, default: '' }, // YYYY-MM-DD
+    balances: { type: [BalanceSchema], default: [] },
+    alCarry: { type: Number, default: 0 },
+    contractDate: { type: String, default: '' }, // contract start at that time
+  },
+  { _id: false }
+)
+
+const ContractHistorySchema = new mongoose.Schema(
+  {
+    contractNo: { type: Number, required: true }, // 1,2,3...
+    startDate: { type: String, default: '' },     // YYYY-MM-DD
+    endDate: { type: String, default: '' },       // YYYY-MM-DD (set when closed)
+    openedAt: { type: Date, default: Date.now },
+    closedAt: { type: Date, default: null },
+
+    openedBy: { type: String, default: '' }, // req.user.loginId (optional)
+    closedBy: { type: String, default: '' },
+
+    note: { type: String, default: '' },
+
+    closeSnapshot: { type: ContractSnapshotSchema, default: null },
   },
   { _id: false }
 )
@@ -38,6 +65,9 @@ const LeaveProfileSchema = new mongoose.Schema(
     // persisted computed balances (what frontend displays)
     balances: { type: [BalanceSchema], default: [] },
     balancesAsOf: { type: String, default: '' }, // YYYY-MM-DD
+
+    // ✅ per-contract history/progress
+    contracts: { type: [ContractHistorySchema], default: [] },
   },
   { timestamps: true }
 )

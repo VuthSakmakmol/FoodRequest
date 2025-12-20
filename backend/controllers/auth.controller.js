@@ -2,6 +2,7 @@
 const jwt  = require('jsonwebtoken')
 const bcrypt = require('bcryptjs')
 const User = require('../models/User')
+const EmployeeDirectory = require('../models/EmployeeDirectory') // ✅ add this
 
 const signToken = (user) =>
   jwt.sign(
@@ -81,14 +82,44 @@ exports.login = async (req, res, next) => {
 
 exports.createUser = async (req, res, next) => {
   try {
-    const { loginId, name, password, role = 'CHEF' } = req.body || {}
-    if (!loginId || !name || !password) return res.status(400).json({ message: 'loginId, name, password required' })
-    const exists = await User.findOne({ loginId })
+    const { loginId, name, password, role = 'CHEF', telegramChatId: bodyChatId } = req.body || {}
+
+    if (!loginId || !name || !password) {
+      return res.status(400).json({ message: 'loginId, name, password required' })
+    }
+
+    const exists = await User.findOne({ loginId: String(loginId).trim() })
     if (exists) return res.status(409).json({ message: 'loginId already exists' })
-    const passwordHash = await bcrypt.hash(password, 10)
-    const doc = await User.create({ loginId, name, passwordHash, role })
-    res.status(201).json({ id: doc.loginId, name: doc.name, role: doc.role })
-  } catch (e) { next(e) }
+
+    // ✅ auto fetch from EmployeeDirectory if not provided
+    let telegramChatId = String(bodyChatId || '').trim()
+    if (!telegramChatId) {
+      const emp = await EmployeeDirectory.findOne({ employeeId: String(loginId).trim() })
+        .select('telegramChatId')
+        .lean()
+      telegramChatId = String(emp?.telegramChatId || '').trim()
+    }
+
+    const passwordHash = await bcrypt.hash(String(password), 10)
+
+    const doc = await User.create({
+      loginId: String(loginId).trim(),
+      name: String(name).trim(),
+      passwordHash,
+      role,
+      isActive: true,
+      ...(telegramChatId ? { telegramChatId } : {}),
+    })
+
+    res.status(201).json({
+      id: doc.loginId,
+      name: doc.name,
+      role: doc.role,
+      telegramChatId: doc.telegramChatId || '',
+    })
+  } catch (e) {
+    next(e)
+  }
 }
 
 exports.me = async (req, res, next) => {
