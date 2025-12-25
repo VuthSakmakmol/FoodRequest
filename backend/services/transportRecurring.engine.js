@@ -1,73 +1,89 @@
-//services/transportRecurring.engine.js
 const CarBooking = require('../models/transportation/CarBooking')
 const Series = require('../models/transportation/TransportationRecurringSeries')
-const { enumerateLocalDates, padTimeHHMM } = require('../utils/datetime')
-const { getHolidaySet } = require('../utils/holidays')
+const { enumerateLocalDates } = require('../utils/datetime')
+const { getHolidaySet, isSunday } = require('../utils/holidays')
+const { makeIdempotencyKey, naturalKeyFilter } = require('../utils/transportRecurringKey')
 
-function makeIdemKey(series, ymd) {
-  const stopsSig = (series.stops || [])
-    .map(s => `${s.destination}|${s.destinationOther||''}`).join('>')
-  return [
-    String(series._id), ymd, padTimeHHMM(series.timeStart),
-    series.category, String(series.passengers), stopsSig
-  ].join('||')
-}
+const ZONE = 'Asia/Phnom_Penh'
 
 async function expandSeries(seriesId, employeeSnapshot) {
   const series = await Series.findById(seriesId)
   if (!series || series.status !== 'ACTIVE') return { created: 0, skipped: [] }
 
-  const holidays = series.skipHolidays ? await getHolidaySet() : new Set()
-  const days = enumerateLocalDates(series.startDate, series.endDate, 'Asia/Phnom_Penh')
-  const keep = days.filter(d => !holidays.has(d))
+  const days = enumerateLocalDates(series.startDate, series.endDate, ZONE)
 
-  let created = 0, skipped = []
+  // ✅ Same skip logic as controller
+  const holidays = new Set(await getHolidaySet())
+  if (series.skipHolidays) {
+    for (const d of days) if (isSunday(d)) holidays.add(d)
+  }
+
+  const keep = days.filter((d) => !holidays.has(d))
+  const empId = employeeSnapshot?.employeeId || ''
+
+  let created = 0
+  const skipped = []
+
   for (const d of keep) {
-    const idk = makeIdemKey(series, d)
+    const idk = makeIdempotencyKey(series, d)
+
     const doc = {
       seriesId: series._id,
       idempotencyKey: idk,
 
-      employeeId: employeeSnapshot?.employeeId || '',
+      employeeId: empId,
       employee: {
-        employeeId: employeeSnapshot?.employeeId || '',
+        employeeId: empId,
         name: employeeSnapshot?.name || '',
         department: employeeSnapshot?.department || '',
-        contactNumber: employeeSnapshot?.contactNumber || ''
+        contactNumber: employeeSnapshot?.contactNumber || '',
       },
 
       category: series.category,
       tripDate: d,
-      timeStart: padTimeHHMM(series.timeStart),
-      timeEnd:   padTimeHHMM(series.timeEnd),
+      timeStart: series.timeStart,
+      timeEnd: series.timeEnd,
 
       passengers: series.passengers,
       customerContact: series.customerContact || '',
       stops: series.stops || [],
       purpose: series.purpose || '',
       notes: series.notes || '',
-      status: 'PENDING'
+      status: 'PENDING',
     }
 
     try {
+      // ✅ Best protection: matches BOTH new + old docs
+      const filter = {
+        $or: [
+          { idempotencyKey: idk },
+          naturalKeyFilter(series, empId, d),
+        ],
+      }
+
       const res = await CarBooking.updateOne(
-        { idempotencyKey: idk },
+        filter,
         { $setOnInsert: doc },
         { upsert: true }
       )
+
       if (res.upsertedCount) created += 1
       else skipped.push(d)
-    } catch {
+    } catch (e) {
       skipped.push(d)
     }
   }
+
   return { created, skipped }
 }
 
 async function expandAllActive() {
   const list = await Series.find({ status: 'ACTIVE' })
   let total = 0
-  for (const s of list) total += (await expandSeries(s._id, s.createdByEmp)).created
+  for (const s of list) {
+    const r = await expandSeries(s._id, s.createdByEmp)
+    total += r.created
+  }
   return total
 }
 

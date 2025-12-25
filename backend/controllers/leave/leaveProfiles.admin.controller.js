@@ -1,31 +1,22 @@
 /* eslint-disable no-console */
-// backend/controllers/leave/leaveProfiles.admin.js
-//
-// Admin controllers for Expat Leave Profiles:
-// - grouped list (by manager)
-// - single profile
-// - create profile (single)
-// - create manager + multiple employees
-// - update profile (NO contract date changes here)
-// - deactivate profile
-// - renew contract (with snapshot + AL carry rules)
-//
-// ✅ IMPORTANT FIX (KaizenVersion1.0.0):
-// When creating/updating users (LEAVE_USER / LEAVE_MANAGER), we now also fetch & save telegramChatId
-// from EmployeeDirectory into User.telegramChatId.
-//
-// NOTE: This file assumes you already have:
-// - models/User
-// - models/EmployeeDirectory with field telegramChatId
-// - models/leave/LeaveProfile with contracts[] + balances[] + joinDate/contractDate etc.
+// backend/controllers/leave/leaveProfiles.admin.controller.js
 
 const bcrypt = require('bcryptjs')
 const LeaveProfile = require('../../models/leave/LeaveProfile')
+const LeaveRequest = require('../../models/leave/LeaveRequest')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const User = require('../../models/User')
 
+const { computeBalances } = require('../../utils/leave.rules')
+
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
-const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456' // e.g. '123456' or 'EMPLOYEE_ID'
+const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456'
+
+const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_AND_COO'])
+
+// ✅ Backend-seeded approvers (frontend does NOT pick persons)
+const SEED_GM_LOGINID = String(process.env.LEAVE_GM_LOGINID || 'leave_gm').trim()
+const SEED_COO_LOGINID = String(process.env.LEAVE_COO_LOGINID || 'leave_coo').trim()
 
 // ---------- helpers ----------
 function num(v) {
@@ -44,7 +35,6 @@ function assertYMD(s, label = 'date') {
 }
 
 function nowYMD(tz = DEFAULT_TZ) {
-  // timezone-safe YYYY-MM-DD without dayjs plugins
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
     year: 'numeric',
@@ -70,99 +60,21 @@ function addDaysYMD(ymd, deltaDays) {
   return `${y}-${m}-${day}`
 }
 
-function fullMonthsBetween(joinYmd, asOfYmd) {
-  const join = ymdToUTCDate(assertYMD(joinYmd, 'joinDate'))
-  const asOf = ymdToUTCDate(assertYMD(asOfYmd, 'asOfDate'))
-
-  let months =
-    (asOf.getUTCFullYear() - join.getUTCFullYear()) * 12 +
-    (asOf.getUTCMonth() - join.getUTCMonth())
-
-  if (asOf.getUTCDate() < join.getUTCDate()) months -= 1
-  return Math.max(0, months)
+function addYearsYMD(ymd, deltaYears) {
+  const d = ymdToUTCDate(assertYMD(ymd, 'date'))
+  d.setUTCFullYear(d.getUTCFullYear() + Number(deltaYears || 0))
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
-function fullYearsBetween(joinYmd, asOfYmd) {
-  const join = ymdToUTCDate(assertYMD(joinYmd, 'joinDate'))
-  const asOf = ymdToUTCDate(assertYMD(asOfYmd, 'asOfDate'))
-
-  let years = asOf.getUTCFullYear() - join.getUTCFullYear()
-
-  const annivThisYear = new Date(
-    Date.UTC(asOf.getUTCFullYear(), join.getUTCMonth(), join.getUTCDate())
-  )
-  if (asOf.getTime() < annivThisYear.getTime()) years -= 1
-
-  return Math.max(0, years)
+function computeContractEndYMD(startYMD) {
+  // end = start + 1 year - 1 day
+  return addDaysYMD(addYearsYMD(assertYMD(startYMD, 'contractStart'), 1), -1)
 }
 
-// AL yearly cap: base 18, +1 day per 3 years service (3y=19, 6y=20, ...)
-function alYearlyCap(joinYmd, asOfYmd) {
-  const years = fullYearsBetween(joinYmd, asOfYmd)
-  return 18 + Math.floor(years / 3)
-}
-
-/**
- * Recalculate balances and RETURN them (caller decides to save).
- * - Preserves existing "used" numbers from DB
- * - Recomputes remaining from joinDate/contractDate rules
- * - SP borrows from AL (SP_USED also reduces AL remaining)
- */
-function recalcBalances(profile, asOfYmd) {
-  const asOf = assertYMD(asOfYmd, 'asOfDate')
-  const joinDate = assertYMD(profile.joinDate, 'joinDate')
-
-  // contract baseline (AL resets each contract)
-  let contractStart = profile.contractDate ? String(profile.contractDate) : joinDate
-  if (!isValidYMD(contractStart)) contractStart = joinDate
-
-  // clamp: contractStart cannot be before joinDate
-  const joinDt = ymdToUTCDate(joinDate)
-  const cDt = ymdToUTCDate(contractStart)
-  if (cDt.getTime() < joinDt.getTime()) contractStart = joinDate
-
-  const usedMap = new Map()
-  for (const b of profile.balances || []) {
-    const code = String(b.leaveTypeCode || '').toUpperCase()
-    if (!code) continue
-    usedMap.set(code, num(b.used))
-  }
-
-  const AL_USED = usedMap.get('AL') || 0
-  const SP_USED = usedMap.get('SP') || 0
-  const MC_USED = usedMap.get('MC') || 0
-  const MA_USED = usedMap.get('MA') || 0
-  const UL_USED = usedMap.get('UL') || 0
-
-  const capAL = alYearlyCap(joinDate, asOf)
-
-  const monthsNow = fullMonthsBetween(joinDate, asOf)
-  const monthsAtContractStart = fullMonthsBetween(joinDate, contractStart)
-  const deltaMonths = Math.max(0, monthsNow - monthsAtContractStart)
-
-  // AL accrual within current contract window
-  const accruedAL = Math.min(capAL, deltaMonths * 1.5)
-
-  // carry (debt allowed)
-  const carry = num(profile.alCarry)
-
-  // Remaining AL = accrued + carry - usedAL - usedSP (SP borrows from AL)
-  const remainingAL = num(accruedAL + carry - AL_USED - SP_USED)
-
-  const remainingSP = Math.max(0, 7 - SP_USED)
-  const remainingMC = Math.max(0, 90 - MC_USED)
-  const remainingMA = Math.max(0, 90 - MA_USED)
-
-  return [
-    { leaveTypeCode: 'AL', yearlyEntitlement: capAL, used: num(AL_USED), remaining: remainingAL },
-    { leaveTypeCode: 'SP', yearlyEntitlement: 7, used: num(SP_USED), remaining: remainingSP },
-    { leaveTypeCode: 'MC', yearlyEntitlement: 90, used: num(MC_USED), remaining: remainingMC },
-    { leaveTypeCode: 'MA', yearlyEntitlement: 90, used: num(MA_USED), remaining: remainingMA },
-    { leaveTypeCode: 'UL', yearlyEntitlement: 0, used: num(UL_USED), remaining: 0 },
-  ]
-}
-
-// ---------- auth helpers (match your existing pattern) ----------
+// ---------- auth helpers ----------
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
   const base = req.user?.role ? [req.user.role] : []
@@ -180,17 +92,40 @@ function requireAnyRole(...allowed) {
   }
 }
 
+function actorId(req) {
+  return String(req.user?.loginId || req.user?.id || req.user?.sub || '')
+}
+
+// ---------- id extract helpers ----------
+function pickEmployeeId(obj) {
+  const a = obj?.employeeId
+  const b = obj?.employee?.employeeId
+  const c = obj?.selectedEmployee?.employeeId
+  return String(a || b || c || '').trim()
+}
+
+function pickManagerId(obj) {
+  const a = obj?.managerLoginId
+  const b = obj?.managerEmployeeId
+  const c = obj?.manager?.employeeId
+  return String(a || b || c || '').trim()
+}
+
+function pickApprovalMode(obj) {
+  const v = String(obj?.approvalMode || '').trim().toUpperCase()
+  return APPROVAL_MODE.includes(v) ? v : 'GM_ONLY'
+}
+
 // ---------- directory helpers ----------
 async function getDirectory(empId) {
   const eid = String(empId || '').trim()
   if (!eid) return null
-  // ✅ include telegramChatId
   return EmployeeDirectory.findOne({ employeeId: eid })
     .select('employeeId name department contactNumber telegramChatId isActive')
     .lean()
 }
 
-// ---------- user upsert (✅ includes telegramChatId) ----------
+// ---------- ensure user (safe: never override role if exists) ----------
 async function ensureUser({ loginId, name, role, isActive = true, telegramChatId = '' }) {
   const id = String(loginId || '').trim()
   if (!id) return null
@@ -201,48 +136,45 @@ async function ensureUser({ loginId, name, role, isActive = true, telegramChatId
   if (existing) {
     const updates = {}
     if (name && existing.name !== name) updates.name = name
-    if (role && existing.role !== role) updates.role = role
     if (typeof isActive === 'boolean' && existing.isActive !== isActive) updates.isActive = isActive
+    if (cleanChatId && String(existing.telegramChatId || '') !== cleanChatId) updates.telegramChatId = cleanChatId
 
-    // ✅ only set if provided
-    if (cleanChatId && String(existing.telegramChatId || '') !== cleanChatId) {
-      updates.telegramChatId = cleanChatId
-    }
+    // only set role if existing.role empty
+    if (role && !existing.role) updates.role = role
 
-    if (Object.keys(updates).length) {
-      await User.updateOne({ _id: existing._id }, { $set: updates })
-    }
+    if (Object.keys(updates).length) await User.updateOne({ _id: existing._id }, { $set: updates })
     return existing
   }
 
   const plainPwd = DEFAULT_PWD_POLICY === 'EMPLOYEE_ID' ? id : DEFAULT_PWD_POLICY
   const passwordHash = await bcrypt.hash(String(plainPwd), 10)
 
-  const created = await User.create({
+  return User.create({
     loginId: id,
     name: name || id,
-    role,
+    role: role || 'LEAVE_USER',
     passwordHash,
     isActive: !!isActive,
     ...(cleanChatId ? { telegramChatId: cleanChatId } : {}),
   })
-  return created
 }
 
-// ---------- contract helpers ----------
-function pickBalance(balances, code) {
-  const c = String(code || '').toUpperCase()
-  return (balances || []).find(x => String(x.leaveTypeCode || '').toUpperCase() === c) || null
+// ---------- balances sync ----------
+async function syncBalancesForProfile(doc, asOfYMD) {
+  if (!doc) return
+  const asOf = isValidYMD(asOfYMD) ? asOfYMD : nowYMD()
+
+  const approved = await LeaveRequest.find({
+    employeeId: String(doc.employeeId || '').trim(),
+    status: 'APPROVED',
+  }).sort({ startDate: 1 }).lean()
+
+  const snap = computeBalances(doc, approved, new Date(asOf + 'T00:00:00Z'))
+  doc.balances = Array.isArray(snap?.balances) ? snap.balances : []
+  doc.balancesAsOf = asOf
 }
 
-function setBalanceUsed(balances, code, usedValue) {
-  const c = String(code || '').toUpperCase()
-  const arr = Array.isArray(balances) ? balances : []
-  const idx = arr.findIndex(x => String(x.leaveTypeCode || '').toUpperCase() === c)
-  if (idx >= 0) arr[idx].used = num(usedValue)
-  return arr
-}
-
+// ---------- contract history helpers ----------
 function ensureContractsInitialized(doc, openedBy = '') {
   if (!Array.isArray(doc.contracts) || doc.contracts.length === 0) {
     const start =
@@ -252,11 +184,13 @@ function ensureContractsInitialized(doc, openedBy = '') {
           ? doc.joinDate
           : ''
 
+    const end = start ? computeContractEndYMD(start) : ''
+
     doc.contracts = [
       {
         contractNo: 1,
         startDate: start,
-        endDate: '',
+        endDate: end,
         openedAt: new Date(),
         closedAt: null,
         openedBy: openedBy || '',
@@ -274,16 +208,29 @@ function getCurrentContract(doc) {
   return arr[arr.length - 1]
 }
 
-function actorId(req) {
-  return String(req.user?.loginId || req.user?.id || req.user?.sub || '')
+// ---------- seeded approvers validation ----------
+function resolveSeededApprovers(approvalMode) {
+  const gmLoginId = SEED_GM_LOGINID
+  const cooLoginId = SEED_COO_LOGINID
+
+  if (!gmLoginId) throw new Error('Seed GM missing. Set LEAVE_GM_LOGINID.')
+  if (approvalMode === 'GM_AND_COO' && !cooLoginId) {
+    throw new Error('Seed COO missing. Set LEAVE_COO_LOGINID for GM_AND_COO mode.')
+  }
+
+  return {
+    gmLoginId,
+    cooLoginId: cooLoginId || '',
+  }
 }
 
 // ---------- controllers ----------
 
 async function getApprovers(req, res) {
+  // not needed by your new UI, but keep for admin reference
   try {
     const docs = await User.find({
-      role: { $in: ['LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'] },
+      role: { $in: ['LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'] },
       isActive: true,
     })
       .select('loginId name role telegramChatId')
@@ -308,22 +255,16 @@ async function getProfilesGrouped(req, res) {
     const includeInactive = String(req.query.includeInactive || '') === '1'
     const query = includeInactive ? {} : { isActive: { $ne: false } }
 
-    const profiles = await LeaveProfile.find(query).lean()
+    const profiles = await LeaveProfile.find(query)
 
-    // ✅ compute & persist balances as-of today for ACTIVE only
     const asOf = nowYMD()
-    const activeIds = (profiles || [])
-      .filter(p => p?.isActive !== false)
-      .map(p => String(p.employeeId))
-
-    if (activeIds.length) {
-      const docsToSave = await LeaveProfile.find({ employeeId: { $in: activeIds } })
-      for (const doc of docsToSave) {
-        if (!doc.joinDate || !isValidYMD(doc.joinDate)) continue
-        doc.balances = recalcBalances(doc, asOf)
-        doc.balancesAsOf = asOf
-        await doc.save()
-      }
+    for (const doc of profiles || []) {
+      if (doc?.isActive === false) continue
+      if (!doc.joinDate || !isValidYMD(doc.joinDate)) continue
+      if (!doc.contractDate || !isValidYMD(doc.contractDate)) doc.contractDate = doc.joinDate
+      ensureContractsInitialized(doc, actorId(req))
+      await syncBalancesForProfile(doc, asOf)
+      await doc.save()
     }
 
     const fresh = await LeaveProfile.find(query).lean()
@@ -358,9 +299,13 @@ async function getProfilesGrouped(req, res) {
           department: x.department || '',
           joinDate: x.joinDate || null,
           contractDate: x.contractDate || null,
+          contractEndDate: x.contractEndDate || null,
+
           managerLoginId: x.managerLoginId || '',
           gmLoginId: x.gmLoginId || '',
-          alCarry: num(x.alCarry),
+          cooLoginId: x.cooLoginId || '',
+          approvalMode: x.approvalMode || 'GM_ONLY',
+
           isActive: x.isActive !== false,
           balances: Array.isArray(x.balances) ? x.balances : [],
           contracts: Array.isArray(x.contracts) ? x.contracts : [],
@@ -383,12 +328,13 @@ async function getProfileOne(req, res) {
     const doc = await LeaveProfile.findOne({ employeeId })
     if (!doc) return res.status(404).json({ message: 'Profile not found.' })
 
-    const asOf = nowYMD()
-    if (doc.joinDate && isValidYMD(doc.joinDate)) {
-      doc.balances = recalcBalances(doc, asOf)
-      doc.balancesAsOf = asOf
-      await doc.save()
+    if (doc.joinDate && isValidYMD(doc.joinDate) && (!doc.contractDate || !isValidYMD(doc.contractDate))) {
+      doc.contractDate = doc.joinDate
     }
+
+    ensureContractsInitialized(doc, actorId(req))
+    await syncBalancesForProfile(doc, nowYMD())
+    await doc.save()
 
     res.json({ profile: doc })
   } catch (e) {
@@ -397,25 +343,25 @@ async function getProfileOne(req, res) {
   }
 }
 
+// ✅ single create (manager optional, gm/coo seeded)
 async function createProfileSingle(req, res) {
   try {
-    const employeeId = String(req.body.employeeId || '').trim()
+    const approvalMode = pickApprovalMode(req.body)
+    const { gmLoginId, cooLoginId } = resolveSeededApprovers(approvalMode)
 
-    // ✅ accept both managerLoginId and managerEmployeeId (frontend sometimes sends managerEmployeeId)
-    const managerLoginId = String(req.body.managerLoginId || req.body.managerEmployeeId || '').trim()
-    const gmLoginId = String(req.body.gmLoginId || '').trim()
+    const employeeId = pickEmployeeId(req.body)
+    const managerLoginId = pickManagerId(req.body) // optional
 
     if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-    if (!managerLoginId) return res.status(400).json({ message: 'managerLoginId is required.' })
-    if (!gmLoginId) return res.status(400).json({ message: 'gmLoginId is required.' })
 
     const joinDate = req.body.joinDate ? assertYMD(req.body.joinDate, 'joinDate') : ''
-    const contractDate = req.body.contractDate ? assertYMD(req.body.contractDate, 'contractDate') : ''
-    const alCarry = num(req.body.alCarry)
+    let contractDate = req.body.contractDate ? assertYMD(req.body.contractDate, 'contractDate') : ''
+    if (joinDate && !contractDate) contractDate = joinDate
+
     const isActive = req.body.isActive !== false
 
     const empDir = await getDirectory(employeeId)
-    const mgrDir = await getDirectory(managerLoginId)
+    const mgrDir = managerLoginId ? await getDirectory(managerLoginId) : null
 
     await ensureUser({
       loginId: employeeId,
@@ -425,39 +371,39 @@ async function createProfileSingle(req, res) {
       telegramChatId: empDir?.telegramChatId || '',
     })
 
-    await ensureUser({
-      loginId: managerLoginId,
-      name: mgrDir?.name || managerLoginId,
-      role: 'LEAVE_MANAGER',
-      isActive: true,
-      telegramChatId: mgrDir?.telegramChatId || '',
-    })
-
-    let prof = await LeaveProfile.findOne({ employeeId })
-    if (!prof) {
-      prof = new LeaveProfile({ employeeId, employeeLoginId: employeeId })
+    if (managerLoginId) {
+      await ensureUser({
+        loginId: managerLoginId,
+        name: mgrDir?.name || managerLoginId,
+        role: 'LEAVE_MANAGER',
+        isActive: true,
+        telegramChatId: mgrDir?.telegramChatId || '',
+      })
     }
 
-    prof.managerLoginId = managerLoginId
+    // ensure seeded gm/coo exist (do not override role)
+    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: '', isActive: true })
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: '', isActive: true })
+
+    let prof = await LeaveProfile.findOne({ employeeId })
+    if (!prof) prof = new LeaveProfile({ employeeId, employeeLoginId: employeeId })
+
+    prof.approvalMode = approvalMode
+    prof.managerLoginId = managerLoginId || ''
     prof.gmLoginId = gmLoginId
+    prof.cooLoginId = cooLoginId || ''
+
     prof.joinDate = joinDate || prof.joinDate || ''
     prof.contractDate = contractDate || prof.contractDate || ''
-    prof.alCarry = alCarry
     prof.isActive = isActive
 
     prof.name = empDir?.name || prof.name || ''
     prof.department = empDir?.department || prof.department || ''
 
-    // ✅ init contract history immediately for new/edited profile
     ensureContractsInitialized(prof, actorId(req))
-
-    if (prof.joinDate && isValidYMD(prof.joinDate)) {
-      const asOf = nowYMD()
-      prof.balances = recalcBalances(prof, asOf)
-      prof.balancesAsOf = asOf
-    }
-
+    await syncBalancesForProfile(prof, nowYMD())
     await prof.save()
+
     res.json({ ok: true, profile: prof })
   } catch (e) {
     console.error('createProfileSingle error', e)
@@ -465,41 +411,52 @@ async function createProfileSingle(req, res) {
   }
 }
 
+// ✅ bulk create (manager OPTIONAL now, gm/coo seeded)
 async function createManagerWithEmployees(req, res) {
   try {
-    const managerEmployeeId = String(req.body.managerEmployeeId || req.body.managerLoginId || '').trim()
-    const gmLoginId = String(req.body.gmLoginId || '').trim()
-    const employees = Array.isArray(req.body.employees) ? req.body.employees : []
+    const approvalMode = pickApprovalMode(req.body)
+    const { gmLoginId, cooLoginId } = resolveSeededApprovers(approvalMode)
 
-    if (!managerEmployeeId) return res.status(400).json({ message: 'managerEmployeeId is required.' })
-    if (!gmLoginId) return res.status(400).json({ message: 'gmLoginId is required.' })
+    const managerEmployeeId = pickManagerId(req.body) // optional
+    const employees = Array.isArray(req.body.employees) ? req.body.employees : []
     if (!employees.length) return res.status(400).json({ message: 'employees[] is required.' })
 
-    const mgrDir = await getDirectory(managerEmployeeId)
-    await ensureUser({
-      loginId: managerEmployeeId,
-      name: mgrDir?.name || managerEmployeeId,
-      role: 'LEAVE_MANAGER',
-      isActive: true,
-      telegramChatId: mgrDir?.telegramChatId || '',
-    })
+    // optional manager
+    if (managerEmployeeId) {
+      const mgrDir = await getDirectory(managerEmployeeId)
+      await ensureUser({
+        loginId: managerEmployeeId,
+        name: mgrDir?.name || managerEmployeeId,
+        role: 'LEAVE_MANAGER',
+        isActive: true,
+        telegramChatId: mgrDir?.telegramChatId || '',
+      })
+    }
+
+    // ensure seeded gm/coo exist (do not override role)
+    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: '', isActive: true })
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: '', isActive: true })
+    else if (SEED_COO_LOGINID) {
+      // GM_ONLY: COO read-only still can exist
+      await ensureUser({ loginId: SEED_COO_LOGINID, name: SEED_COO_LOGINID, role: '', isActive: true })
+    }
 
     let createdCount = 0
     let updatedCount = 0
     let skippedCount = 0
 
     for (const row of employees) {
-      const employeeId = String(row?.employeeId || '').trim()
+      const employeeId = pickEmployeeId(row)
       if (!employeeId) {
         skippedCount += 1
         continue
       }
 
       const joinDate = row.joinDate ? assertYMD(row.joinDate, 'joinDate') : ''
-      const contractDate = row.contractDate ? assertYMD(row.contractDate, 'contractDate') : ''
-      const alCarry = num(row.alCarry)
-      const isActive = row.isActive !== false
+      let contractDate = row.contractDate ? assertYMD(row.contractDate, 'contractDate') : ''
+      if (joinDate && !contractDate) contractDate = joinDate
 
+      const isActive = row.isActive !== false
       const empDir = await getDirectory(employeeId)
 
       await ensureUser({
@@ -514,25 +471,22 @@ async function createManagerWithEmployees(req, res) {
       const existed = !!prof
       if (!prof) prof = new LeaveProfile({ employeeId, employeeLoginId: employeeId })
 
-      prof.managerLoginId = managerEmployeeId
+      prof.approvalMode = approvalMode
+      prof.managerLoginId = managerEmployeeId || ''
       prof.gmLoginId = gmLoginId
+      prof.cooLoginId = cooLoginId || (SEED_COO_LOGINID || '')
+
       prof.joinDate = joinDate || prof.joinDate || ''
       prof.contractDate = contractDate || prof.contractDate || ''
-      prof.alCarry = alCarry
       prof.isActive = isActive
 
       prof.name = empDir?.name || prof.name || ''
       prof.department = empDir?.department || prof.department || ''
 
       ensureContractsInitialized(prof, actorId(req))
-
-      if (prof.joinDate && isValidYMD(prof.joinDate)) {
-        const asOf = nowYMD()
-        prof.balances = recalcBalances(prof, asOf)
-        prof.balancesAsOf = asOf
-      }
-
+      await syncBalancesForProfile(prof, nowYMD())
       await prof.save()
+
       if (existed) updatedCount += 1
       else createdCount += 1
     }
@@ -550,31 +504,29 @@ async function updateProfile(req, res) {
     const doc = await LeaveProfile.findOne({ employeeId })
     if (!doc) return res.status(404).json({ message: 'Profile not found.' })
 
+    const approvalMode = pickApprovalMode(req.body)
+    const { gmLoginId, cooLoginId } = resolveSeededApprovers(approvalMode)
+
     const joinDate = req.body.joinDate ? assertYMD(req.body.joinDate, 'joinDate') : ''
 
-    // ✅ never change contractDate here (must go through renew endpoint)
-    if (
-      req.body.contractDate &&
-      String(req.body.contractDate).trim() !== String(doc.contractDate || '').trim()
-    ) {
+    if (req.body.contractDate && String(req.body.contractDate).trim() !== String(doc.contractDate || '').trim()) {
       return res.status(400).json({
-        message:
-          'To change/renew contract date, use Renew Contract endpoint so history + carry rules are applied.',
+        message: 'To change/renew contract date, use Renew Contract endpoint so history is applied.',
       })
     }
 
-    // ✅ accept managerLoginId OR managerEmployeeId
-    const managerLoginId = String(req.body.managerLoginId || req.body.managerEmployeeId || doc.managerLoginId || '').trim()
-    const gmLoginId = String(req.body.gmLoginId || doc.gmLoginId || '').trim()
+    const managerLoginId = pickManagerId(req.body) || '' // optional
 
-    if (!managerLoginId) return res.status(400).json({ message: 'managerLoginId is required.' })
-    if (!gmLoginId) return res.status(400).json({ message: 'gmLoginId is required.' })
-
-    doc.joinDate = joinDate || doc.joinDate || ''
+    doc.approvalMode = approvalMode
     doc.managerLoginId = managerLoginId
     doc.gmLoginId = gmLoginId
-    doc.alCarry = num(req.body.alCarry)
+    doc.cooLoginId = cooLoginId || (SEED_COO_LOGINID || '')
+    doc.joinDate = joinDate || doc.joinDate || ''
     doc.isActive = req.body.isActive !== false
+
+    if (doc.joinDate && isValidYMD(doc.joinDate) && (!doc.contractDate || !isValidYMD(doc.contractDate))) {
+      doc.contractDate = doc.joinDate
+    }
 
     const empDir = await getDirectory(employeeId)
     if (empDir) {
@@ -582,33 +534,10 @@ async function updateProfile(req, res) {
       doc.department = empDir.department || doc.department
     }
 
-    await ensureUser({
-      loginId: employeeId,
-      name: doc.name || employeeId,
-      role: 'LEAVE_USER',
-      isActive: doc.isActive,
-      telegramChatId: empDir?.telegramChatId || '',
-    })
-
-    const mgrDir = await getDirectory(managerLoginId)
-    await ensureUser({
-      loginId: managerLoginId,
-      name: mgrDir?.name || managerLoginId,
-      role: 'LEAVE_MANAGER',
-      isActive: true,
-      telegramChatId: mgrDir?.telegramChatId || '',
-    })
-
     ensureContractsInitialized(doc, actorId(req))
-
-    // ✅ if joinDate changed, balances will update immediately
-    if (doc.joinDate && isValidYMD(doc.joinDate)) {
-      const asOf = nowYMD()
-      doc.balances = recalcBalances(doc, asOf)
-      doc.balancesAsOf = asOf
-    }
-
+    await syncBalancesForProfile(doc, nowYMD())
     await doc.save()
+
     res.json({ ok: true, profile: doc })
   } catch (e) {
     console.error('updateProfile error', e)
@@ -634,17 +563,7 @@ async function deactivateProfile(req, res) {
 }
 
 /**
- * ✅ Renew Contract with decision:
- * - close current contract and store snapshot
- * - start a new contract
- * - clearOldLeave=true:
- *      keep only negative AL (debt) as carry, drop positive
- *   else:
- *      carry full AL remaining forward
- * - reset AL used to 0 for new contract tracking
- *
- * POST /profiles/:employeeId/contracts/renew
- * body: { newContractDate: 'YYYY-MM-DD', clearOldLeave: true|false, note?: string }
+ * Renew Contract (keep same)
  */
 async function renewContract(req, res) {
   try {
@@ -653,7 +572,6 @@ async function renewContract(req, res) {
     if (!doc) return res.status(404).json({ message: 'Profile not found.' })
 
     const newContractDate = assertYMD(req.body.newContractDate, 'newContractDate')
-    const clearOldLeave = !!req.body.clearOldLeave
     const note = String(req.body.note || '').trim()
 
     if (!doc.joinDate || !isValidYMD(doc.joinDate)) {
@@ -680,12 +598,6 @@ async function renewContract(req, res) {
 
     const closeYmd = addDaysYMD(newContractDate, -1)
 
-    // snapshot as-of close date (before we modify contractDate/alCarry)
-    const snapshotBalances = recalcBalances(doc, closeYmd)
-    const balAL = pickBalance(snapshotBalances, 'AL')
-    const remainingAL = num(balAL?.remaining)
-
-    // close current contract record
     if (current) {
       current.endDate = closeYmd
       current.closedAt = new Date()
@@ -693,18 +605,19 @@ async function renewContract(req, res) {
       if (note) current.note = note
       current.closeSnapshot = {
         asOf: closeYmd,
-        balances: snapshotBalances,
-        alCarry: num(doc.alCarry),
+        balances: Array.isArray(doc.balances) ? doc.balances : [],
+        alCarry: 0,
         contractDate: String(doc.contractDate || curStart || ''),
       }
     }
 
-    // open new contract record
     const nextNo = Number(current?.contractNo || doc.contracts.length) + 1
+    const newEnd = computeContractEndYMD(newContractDate)
+
     doc.contracts.push({
       contractNo: nextNo,
       startDate: newContractDate,
-      endDate: '',
+      endDate: newEnd,
       openedAt: new Date(),
       closedAt: null,
       openedBy: actorId(req),
@@ -713,21 +626,9 @@ async function renewContract(req, res) {
       closeSnapshot: null,
     })
 
-    // set new contract
     doc.contractDate = newContractDate
 
-    // carry logic
-    doc.alCarry = clearOldLeave ? Math.min(0, remainingAL) : remainingAL
-
-    // reset AL used for new contract tracking
-    doc.balances = setBalanceUsed(doc.balances || [], 'AL', 0)
-
-    // recompute balances for UI
-    const today = nowYMD()
-    const asOf = today >= newContractDate ? today : newContractDate
-    doc.balances = recalcBalances(doc, asOf)
-    doc.balancesAsOf = asOf
-
+    await syncBalancesForProfile(doc, nowYMD())
     await doc.save()
 
     return res.json({
@@ -735,11 +636,10 @@ async function renewContract(req, res) {
       employeeId,
       renewed: {
         newContractDate,
-        clearOldLeave,
+        newContractEndDate: newEnd,
         closedContractNo: current?.contractNo || null,
         openedContractNo: nextNo,
         closeAsOf: closeYmd,
-        carriedAL: doc.alCarry,
       },
       profile: doc,
     })

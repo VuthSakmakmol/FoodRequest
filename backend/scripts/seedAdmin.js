@@ -98,21 +98,26 @@ const User = require('../models/User');
       { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '1893892841' },
       { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '871865728' },
       { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '5534785017' },
-      { loginId: '040', name: 'Test car', password: defaultPwd, telegramChatId: '7163451169' },
+      { loginId: '090', name: 'Test Car', password: defaultPwd, telegramChatId: '' },
+
+      // { loginId: '040', name: 'Test car', password: defaultPwd, telegramChatId: '7163451169' },
     ]
 
     // bong nith  1055055243 
     // bong rida  661186113
     // Ah Mab 1102968377
     // Bro Ant 7163451169
-    // Bong Cheat 5534785017
+    // Bong Cheat 5534785017 new van
     // Kakvey 899957340
     // Bong Hong 1893892841
     // bong Por 635269035
+    // bong roth 537250678
+    // bong new 871865728
 
     // If that same ID is for messenger01 instead, move it here (and remove from driver01):
     const messengers = [
-      { loginId: '111', name: 'Messenger One',   password: defaultPwd  , telegramChatId: '7163451169' },
+      { loginId: '111', name: 'Messenger',   password: defaultPwd  , telegramChatId: '537250678' },
+      { loginId: '222', name: 'Messenger test',   password: defaultPwd  , telegramChatId: '7163451169' },
     ]
 
     /* ---------- run ---------- */

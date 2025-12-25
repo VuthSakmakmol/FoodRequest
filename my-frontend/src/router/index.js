@@ -16,6 +16,7 @@ const MGRLeaveExpat   = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
 const UserLeaveExpat  = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
 const ManagerProfile  = () => import('@/views/expat/manager/Profile.vue')
 const getMyProfile    = () => import('@/views/expat/generalManager/Profile.vue')
+const AdminLeaveReport = () => import('@/views/expat/admin/AdminLeaveReport.vue')
 
 // Public
 const GreetingPage    = () => import('@/views/GreetingPage.vue')
@@ -57,7 +58,6 @@ const AdminLeaveTypes     = () => import('@/views/expat/AdminLeaveTypes.vue')
 const AdminExpatProfiles  = () => import('@/views/expat/AdminExpatProfile.vue')
 const ManagerLeaveInbox   = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox        = () => import('@/views/expat/GmLeaveInbox.vue')
-const AdminExpatYearSheet = () => import('@/views/expat/AdminExpatYearSheet.vue')
 const AdminLeaveProfileEdit =  () => import('@/views/expat/admin/AdminLeaveProfileEdit.vue')
 // Replace Day (User)
 const UserReplaceDay      = () => import('@/views/expat/user/UserReplaceDay.vue')
@@ -338,14 +338,6 @@ const router = createRouter({
           component: ExpatMyRequests
         },
         {
-          path: 'profiles/:employeeId/year-sheet',
-          name: 'expat-leave-year-sheet',
-          component: AdminExpatYearSheet,
-          meta: {
-            requiresRole: ['LEAVE_ADMIN', 'LEAVE_MANAGER', 'LEAVE_GM', 'ADMIN']
-          }
-        },
-        {
           path: 'profiles/:employeeId/edit',
           name: 'leave-admin-profile-edit',
           component: AdminLeaveProfileEdit,
@@ -353,7 +345,16 @@ const router = createRouter({
             requiresRole: ['LEAVE_ADMIN', 'LEAVE_GM', 'LEAVE_MANAGER', 'ADMIN'],
             title: 'Admin Leave Profile Edit',
           }
+        },{
+          path: 'report',
+          name: 'leave-admin-report',
+          component: AdminLeaveReport,
+          meta: {
+            requiresRole: ['LEAVE_ADMIN', 'ADMIN'],
+            title: 'Leave Report Summary',
+          },
         },
+
       ]
     },
 

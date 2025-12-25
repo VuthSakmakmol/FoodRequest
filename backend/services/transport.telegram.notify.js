@@ -4,6 +4,7 @@ const CarBooking = require('../models/transportation/CarBooking')
 const { sendToTransportGroup, sendDM } = require('./transport.telegram.service')
 const {
   resolveAssignedDriverChatId,
+  resolveAssignedAssigneeChatIds,
   resolveEmployeeChatId,
 } = require('./transport.telegram.recipients')
 const msg = require('./transport.telegram.messages')
@@ -89,22 +90,32 @@ async function notify(event, payload) {
       const bk = await getBk()
       if (!bk) return
 
-      // Group alert
       await sendToTransportGroup(msg.acceptedAssignedMsg(bk))
 
-      // ✅ DM driver/messenger ONLY ON ASSIGNMENT (1 message)
       if (ENABLE_DRIVER_ASSIGN_DM) {
-        const drvChat = await resolveAssignedDriverChatId(bk)
-        if (drvChat) await sendDM(drvChat, msg.driverAssignmentDM(bk))
+        const assigneeChats = await resolveAssignedAssigneeChatIds(bk)
+
+        if (!assigneeChats.length) {
+          console.warn('[notify] no assigneeChats resolved', {
+            bookingId: String(bk._id),
+            driverId: bk.assignment?.driverId,
+            messengerId: bk.assignment?.messengerId,
+          })
+        }
+
+        for (const chatId of assigneeChats) {
+          await sendDM(chatId, msg.driverAssignmentDM(bk))
+        }
       }
 
-      // DM employee
+      // employee DM stays
       if (ENABLE_EMP_DM) {
         const empChat = await resolveEmployeeChatId(bk)
         if (empChat) await sendDM(empChat, msg.employeeAcceptedDM(bk))
       }
       return
     }
+
 
     // ───────────────────────────────
     // 🔄 STATUS CHANGED

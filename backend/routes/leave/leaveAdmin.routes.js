@@ -21,6 +21,8 @@ function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ message: 'Unauthorized' })
 
   try {
+    // NOTE: this uses simple verify (no issuer/audience check).
+    // If you want stricter, use your shared middlewares/auth.js instead.
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret')
     req.user = decoded
     return next()
@@ -43,18 +45,34 @@ router.use(requireLeaveAdmin)
 // Mounted at: /api/admin/leave   (from server.js)
 // ─────────────────────────────────────────────
 
+// approvers
 router.get('/approvers', ctrl.getApprovers)
+
+// ✅ IMPORTANT: make frontend-friendly endpoints
+// Your UI calls GET /profiles, so provide it:
+router.get('/profiles', ctrl.getProfilesGrouped)
+
+// keep your old endpoint too (backward compatible)
 router.get('/profiles/grouped', ctrl.getProfilesGrouped)
 
+// profile CRUD
 router.get('/profiles/:employeeId', ctrl.getProfileOne)
 router.post('/profiles', ctrl.createProfileSingle)
+
+// your UI likely uses PATCH; allow both PATCH + PUT
+router.patch('/profiles/:employeeId', ctrl.updateProfile)
 router.put('/profiles/:employeeId', ctrl.updateProfile)
+
 router.delete('/profiles/:employeeId', ctrl.deactivateProfile)
 
 // bulk manager + employees
+// ✅ your UI likely calls POST /profiles/manager
+router.post('/profiles/manager', ctrl.createManagerWithEmployees)
+
+// keep your old endpoint too
 router.post('/managers', ctrl.createManagerWithEmployees)
 
-// ✅ RENEW CONTRACT (THIS WAS MISSING)
+// renew contract
 router.post('/profiles/:employeeId/contracts/renew', ctrl.renewContract)
 
 module.exports = router

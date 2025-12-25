@@ -4,7 +4,6 @@ const axios = require('axios')
 const BOT_TOKEN     = process.env.TELEGRAM_BOT_TOKEN || ''
 const DM_BOT_TOKEN  = process.env.TELEGRAM_BOT_TOKEN_DM || BOT_TOKEN
 const GROUP_ID      = process.env.TELEGRAM_GROUP_ID_TRANSPORT || ''
-const SILENT_DM     = String(process.env.TELEGRAM_SILENT_DM || 'false').toLowerCase() === 'true'
 const DEBUG         = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
 
 const base = (t) => `https://api.telegram.org/bot${t}`
@@ -21,6 +20,8 @@ async function sendToTransportGroup(text, opts = {}) {
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
+      // ✅ group should also not be silent (default)
+      disable_notification: false,
       ...(opts || {}),
     })
     if (DEBUG) console.log('[TG group ✓]', { ok: data?.ok, message_id: data?.result?.message_id })
@@ -35,13 +36,15 @@ async function sendDM(chatId, text, opts = {}) {
     return
   }
   try {
-    if (DEBUG) console.log('[TG DM →] sending', { chatId, silent: SILENT_DM, snippet: String(text).slice(0, 60) })
+    if (DEBUG) console.log('[TG DM →] sending', { chatId, snippet: String(text).slice(0, 60) })
     const { data } = await axios.post(`${base(DM_BOT_TOKEN)}/sendMessage`, {
       chat_id: chatId,
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      disable_notification: SILENT_DM,
+
+      disable_notification: false,
+
       ...(opts || {}),
     })
     if (DEBUG) console.log('[TG DM ✓]', { ok: data?.ok, message_id: data?.result?.message_id, chatId })

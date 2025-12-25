@@ -1,4 +1,5 @@
 /* eslint-disable no-console */
+//backend/scripts/migrateLeaveContracts.js
 require('dotenv').config()
 const mongoose = require('mongoose')
 const LeaveProfile = require('../models/leave/LeaveProfile')

@@ -128,13 +128,15 @@ async function hasOverlappingActiveRequest(employeeId, startYMD, endYMD) {
 
 /**
  * Reserve pending usage so user cannot spam requests beyond remaining.
- * SP/MC/MA are join-year based -> count pending inside join-year window.
+ * ✅ Uses contract-year window (snapshot.meta.contractYear)
+ * - SP/MC/MA are contract-year based
+ * - SP also reserves AL because SP borrows from AL
  */
-function computePendingUsage(pendingDocs = [], joinYearMeta) {
-  const start = String(joinYearMeta?.startDate || '')
-  const end = String(joinYearMeta?.endDate || '')
+function computePendingUsage(pendingDocs = [], contractYearMeta) {
+  const start = String(contractYearMeta?.startDate || '')
+  const end   = String(contractYearMeta?.endDate || '')
 
-  const inJoinYear = (d) => {
+  const inContractYear = (d) => {
     const s = String(d?.startDate || '')
     return start && end ? (s >= start && s <= end) : false
   }
@@ -144,14 +146,13 @@ function computePendingUsage(pendingDocs = [], joinYearMeta) {
       .filter(r => String(r.leaveTypeCode || '').toUpperCase() === code)
       .reduce((acc, r) => acc + Number(r.totalDays || 0), 0)
 
-  const pendingAL_all = sum('AL', pendingDocs)
+  // pending AL in contract year
+  const pendingAL = sum('AL', pendingDocs.filter(inContractYear))
+  const pendingSP = sum('SP', pendingDocs.filter(inContractYear))
+  const pendingMC = sum('MC', pendingDocs.filter(inContractYear))
+  const pendingMA = sum('MA', pendingDocs.filter(inContractYear))
 
-  const pendingInJoinYear = pendingDocs.filter(inJoinYear)
-  const pendingSP = sum('SP', pendingInJoinYear)
-  const pendingMC = sum('MC', pendingInJoinYear)
-  const pendingMA = sum('MA', pendingInJoinYear)
-
-  return { pendingAL_all, pendingSP, pendingMC, pendingMA }
+  return { pendingAL, pendingSP, pendingMC, pendingMA }
 }
 
 /* normalize half-day inputs -> AM/PM (only set when valid) */
@@ -238,40 +239,52 @@ exports.createMyRequest = async (req, res, next) => {
     // ✅ reserve pending so cannot spam beyond remaining
     const active = await getActiveRequests(employeeId)
     const pending = active.filter(r => r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM')
-    const pend = computePendingUsage(pending, snapshot?.meta?.joinYear)
+    const pend = computePendingUsage(pending, snapshot?.meta?.contractYear)
 
     const remaining = (code) => Number(findBalanceRow(snapshot, code)?.remaining ?? 0)
 
     const code = String(lt.code || '').toUpperCase()
 
-    // Strict remaining (including pending reservations)
-    if (code === 'SP') {
-      const strict = remaining('SP') - pend.pendingSP
-      if (strict <= 0) {
+    // ✅ Strict remaining rules (including pending reservations)
+    if (code === 'AL') {
+      // AL is reduced by pending AL + pending SP because SP borrows from AL
+      const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
+
+      if (strictAL <= 0) {
         return res.status(400).json({
-          message: 'SP remaining is already reserved by your pending requests. Wait for decision or cancel pending request.',
+          message: 'AL remaining is already reserved by your pending requests (including SP). Wait for decision or cancel pending request.',
         })
       }
-      if (requestedDays > strict) {
+      if (requestedDays > strictAL) {
         return res.status(400).json({
-          message: `SP exceeds remaining (including pending). Remaining ${strict}, requested ${requestedDays}.`,
+          message: `Insufficient AL (including pending SP). Remaining ${strictAL}, requested ${requestedDays}.`,
         })
       }
     }
 
-    if (code === 'AL') {
-      // AL also impacted by SP borrowing
-      const strict = remaining('AL') - (pend.pendingAL_all + pend.pendingSP)
-      if (strict <= 0) {
+    if (code === 'SP') {
+      const strictSP = remaining('SP') - pend.pendingSP
+
+      if (strictSP <= 0) {
         return res.status(400).json({
-          message: 'AL remaining is already reserved by your pending requests. Wait for decision or cancel pending request.',
+          message: 'SP remaining is already reserved by your pending requests. Wait for decision or cancel pending request.',
         })
       }
-      if (requestedDays > strict) {
+      if (requestedDays > strictSP) {
         return res.status(400).json({
-          message: `Insufficient AL (including pending). Remaining ${strict}, requested ${requestedDays}.`,
+          message: `SP exceeds remaining (including pending). Remaining ${strictSP}, requested ${requestedDays}.`,
         })
       }
+
+      // ✅ SP ONLY for borrowing when AL is insufficient
+      const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
+      if (strictAL >= requestedDays) {
+        return res.status(400).json({
+          message: `You still have enough AL (${strictAL}) for ${requestedDays} days. Please use AL. SP is only for borrowing when AL is insufficient.`,
+        })
+      }
+
+      // ✅ allow AL to go negative after approval (this is the borrowing behavior)
     }
 
     if (code === 'MC') {
@@ -549,7 +562,7 @@ exports.gmDecision = async (req, res, next) => {
         (r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM') &&
         String(r._id) !== String(doc._id)
       )
-      const pend = computePendingUsage(pendingOthers, snapshot?.meta?.joinYear)
+      const pend = computePendingUsage(pendingOthers, snapshot?.meta?.contractYear)
 
       const remaining = (c) => Number(findBalanceRow(snapshot, c)?.remaining ?? 0)
 
@@ -557,22 +570,38 @@ exports.gmDecision = async (req, res, next) => {
       const days = Number(doc.totalDays || 0)
 
       if (code === 'SP') {
-        const strict = remaining('SP') - pend.pendingSP
-        if (days > strict) return res.status(400).json({ message: 'SP remaining changed (including pending). Please refresh.' })
+        const strictSP = remaining('SP') - pend.pendingSP
+        if (days > strictSP) {
+          return res.status(400).json({ message: 'SP remaining changed (including pending). Please refresh.' })
+        }
+
+        // ✅ enforce SP only when AL insufficient
+        const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
+        if (strictAL >= days) {
+          return res.status(400).json({
+            message: 'SP is only allowed when AL is insufficient. AL is now sufficient—please refresh.',
+          })
+        }
       }
+
       if (code === 'AL') {
-        const strict = remaining('AL') - (pend.pendingAL_all + pend.pendingSP)
-        if (days > strict) return res.status(400).json({ message: 'AL remaining changed (including pending). Please refresh.' })
+        const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
+        if (days > strictAL) {
+          return res.status(400).json({ message: 'AL remaining changed (including pending SP). Please refresh.' })
+        }
       }
+
       if (code === 'MC') {
         const strict = remaining('MC') - pend.pendingMC
         if (days > strict) return res.status(400).json({ message: 'MC remaining changed (including pending). Please refresh.' })
       }
+
       if (code === 'MA') {
         const strict = remaining('MA') - pend.pendingMA
         if (days > strict) return res.status(400).json({ message: 'MA remaining changed (including pending). Please refresh.' })
       }
 
+      // ✅ allow AL to be negative after approval (SP borrowing behavior)
       doc.status = 'APPROVED'
     } else if (act === 'REJECT') {
       doc.status = 'REJECTED'
