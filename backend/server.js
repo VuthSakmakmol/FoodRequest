@@ -17,6 +17,7 @@ const { startRecurringEngine } = require('./services/recurring.engine')
 
 const app = express()
 
+/* ───────────────── Telegram polling toggle ───────────────── */
 const POLLING_ENABLED =
   String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
 
@@ -27,9 +28,8 @@ if (POLLING_ENABLED) {
   console.log('ℹ️ Telegram polling disabled')
 }
 
-
 /* ───────────────── Env & toggles ───────────────── */
-const isProd     = String(process.env.NODE_ENV).toLowerCase() === 'production'
+const isProd     = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
 const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true'
 if (isProd) app.set('trust proxy', 1)
 
@@ -63,7 +63,10 @@ app.use(helmet({
 }))
 
 if (!forceHTTPS) {
-  app.use((_, res, next) => { res.removeHeader('Strict-Transport-Security'); next() })
+  app.use((_, res, next) => {
+    res.removeHeader('Strict-Transport-Security')
+    next()
+  })
 }
 
 app.use(cors(apiCorsOptions))
@@ -85,8 +88,37 @@ app.use('/api', rateLimit({
   legacyHeaders: false,
 }))
 
-/* ───────────────── Attach io onto req (for controllers) ───────────────── */
-app.use((req, _res, next) => { req.io = app.get('io'); next() })
+/* ───────────────── HTTP + Socket.IO (CREATE EARLY) ───────────────── */
+const server = http.createServer(app)
+
+const ioCors = hasWildcard
+  ? { origin: true, methods: ['GET', 'POST'] }
+  : { origin: rawOrigins, methods: ['GET', 'POST'], credentials: true }
+
+const io = new Server(server, {
+  cors: ioCors,
+  transports: ['websocket'],
+  perMessageDeflate: { threshold: 1024 },
+  maxHttpBufferSize: 1 * 1024 * 1024,
+  pingInterval: 25_000,
+  pingTimeout: 60_000,
+  connectionStateRecovery: {
+    maxDisconnectionDuration: 120_000,
+    skipMiddlewares: false,
+  },
+})
+
+registerSocket(io)
+app.set('io', io)
+
+/* ✅ IMPORTANT: attach io onto req AFTER io exists, and BEFORE routes */
+app.use((req, _res, next) => {
+  req.io = io
+  next()
+})
+
+/* optional debug endpoints (must be before /api 404) */
+attachDebugEndpoints(app)
 
 /* ───────────────── Routes ───────────────── */
 
@@ -98,11 +130,13 @@ app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
 
 // ✅ admin leave routes grouped
 app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
-app.use('/api/admin/leave/types',       require('./routes/leave/leaveType-admin.routes'))
+app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
+
+// ✅ COO inbox (kept same prefix as you had)
 app.use('/api/leave/requests', require('./routes/leave/leaveRequests.coo.routes'))
+
 // leave report
 app.use('/api', require('./routes/leave/leaveReport-admin.routes'))
-
 
 // Auth
 app.use('/api/auth', require('./routes/auth.routes'))
@@ -156,30 +190,6 @@ if (frontendDir) {
     res.sendFile(path.join(distPath, 'index.html'))
   )
 }
-
-/* ───────────────── HTTP + Socket.IO ───────────────── */
-const server = http.createServer(app)
-
-const ioCors = hasWildcard
-  ? { origin: true, methods: ['GET', 'POST'] }
-  : { origin: rawOrigins, methods: ['GET', 'POST'], credentials: true }
-
-const io = new Server(server, {
-  cors: ioCors,
-  transports: ['websocket'],
-  perMessageDeflate: { threshold: 1024 },
-  maxHttpBufferSize: 1 * 1024 * 1024,
-  pingInterval: 25_000,
-  pingTimeout: 60_000,
-  connectionStateRecovery: {
-    maxDisconnectionDuration: 120_000,
-    skipMiddlewares: false,
-  },
-})
-
-registerSocket(io)
-app.set('io', io)
-attachDebugEndpoints(app)
 
 /* ───────────────── Boot ───────────────── */
 const PORT = Number(process.env.PORT || 4333)

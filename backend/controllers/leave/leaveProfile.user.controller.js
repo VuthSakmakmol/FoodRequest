@@ -14,6 +14,7 @@ function getRoles(req) {
 }
 
 function actorLoginId(req) {
+  // ✅ support old + new JWT payload shapes
   return String(req.user?.loginId || req.user?.id || req.user?.sub || '').trim()
 }
 
@@ -35,37 +36,49 @@ async function getApprovedRequests(employeeId) {
     .lean()
 }
 
+/**
+ * ✅ 핵심: multi-role user MUST be able to view own profile.
+ * - If asking for self: always allowed.
+ * - If asking for others (?employeeId=): apply manager/gm/coo/admin restrictions.
+ */
 function canViewProfile({ roles, me, profile, targetEmployeeId }) {
+  // ✅ always allow self
+  if (String(targetEmployeeId) === String(me)) return true
+
   // admin can view anything
   if (roles.includes('ADMIN') || roles.includes('LEAVE_ADMIN')) return true
 
-  // normal user can only view self
-  if (roles.includes('LEAVE_USER') && !roles.includes('LEAVE_MANAGER') && !roles.includes('LEAVE_GM') && !roles.includes('LEAVE_COO')) {
-    return String(targetEmployeeId) === String(me)
+  // manager / gm / coo restrictions for "other employee"
+  if (roles.includes('LEAVE_MANAGER')) {
+    return String(profile.managerLoginId || '') === String(me)
+  }
+  if (roles.includes('LEAVE_GM')) {
+    return String(profile.gmLoginId || '') === String(me)
+  }
+  if (roles.includes('LEAVE_COO')) {
+    return String(profile.cooLoginId || '') === String(me)
   }
 
-  // manager / gm / coo restrictions
-  if (roles.includes('LEAVE_MANAGER')) return String(profile.managerLoginId || '') === String(me)
-  if (roles.includes('LEAVE_GM')) return String(profile.gmLoginId || '') === String(me)
-  if (roles.includes('LEAVE_COO')) return String(profile.cooLoginId || '') === String(me)
+  // normal leave user cannot view others
+  if (roles.includes('LEAVE_USER')) return false
 
   return false
 }
 
 /**
  * GET /api/leave/profile/my
- * - LEAVE_USER: view own profile only
- * - MANAGER/GM/COO/ADMIN: can pass ?employeeId=xxxx to view that employee (restricted by ownership)
- * - Always returns balances computed from APPROVED requests (read-only refresh)
+ * - If no ?employeeId= -> returns my profile (always allowed)
+ * - If ?employeeId=XXXX -> only allowed based on role ownership rules
+ * - Returns balances computed from APPROVED requests (no DB write here)
  */
 exports.getMyProfile = async (req, res) => {
   try {
     const roles = getRoles(req)
     const me = actorLoginId(req)
-    const targetEmployeeId = String(req.query.employeeId || '').trim()
+    if (!me) return res.status(401).json({ message: 'Unauthorized' })
 
+    const targetEmployeeId = String(req.query.employeeId || '').trim()
     const employeeId = targetEmployeeId || me
-    if (!employeeId) return res.status(401).json({ message: 'Unauthorized' })
 
     const doc = await LeaveProfile.findOne({ employeeId }).lean()
     if (!doc) return res.status(404).json({ message: 'Profile not found.' })
@@ -74,15 +87,17 @@ exports.getMyProfile = async (req, res) => {
       return res.status(403).json({ message: 'Forbidden' })
     }
 
-    // ✅ compute balances on the fly (no DB write here)
     const approved = await getApprovedRequests(employeeId)
     const asOf = nowYMD()
     const snap = computeBalances(doc, approved, new Date(asOf + 'T00:00:00Z'))
 
     return res.json({
       ...doc,
-      balances: Array.isArray(snap?.balances) ? snap.balances : (Array.isArray(doc.balances) ? doc.balances : []),
+      balances: Array.isArray(snap?.balances)
+        ? snap.balances
+        : (Array.isArray(doc.balances) ? doc.balances : []),
       balancesAsOf: asOf,
+      meta: snap?.meta || null,
     })
   } catch (e) {
     console.error('getMyProfile error', e)
@@ -92,17 +107,18 @@ exports.getMyProfile = async (req, res) => {
 
 /**
  * GET /api/leave/profile/managed
- * - MANAGER: list employees where managerLoginId=me
- * - GM: list employees where gmLoginId=me
- * - COO: list employees where cooLoginId=me
- * - ADMIN: list all active
+ * - MANAGER: employees where managerLoginId = me
+ * - GM: employees where gmLoginId = me
+ * - COO: employees where cooLoginId = me
+ * - ADMIN/LEAVE_ADMIN: all active
  */
 exports.listManagedProfiles = async (req, res) => {
   try {
     const roles = getRoles(req)
     const me = actorLoginId(req)
+    if (!me) return res.status(401).json({ message: 'Unauthorized' })
 
-    let query = { isActive: { $ne: false } }
+    const query = { isActive: { $ne: false } }
 
     if (roles.includes('ADMIN') || roles.includes('LEAVE_ADMIN')) {
       // all active

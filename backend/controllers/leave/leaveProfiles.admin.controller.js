@@ -8,6 +8,7 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const User = require('../../models/User')
 
 const { computeBalances } = require('../../utils/leave.rules')
+const { broadcastLeaveProfile } = require('../../utils/realtime') // ✅ REALTIME
 
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
 const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456'
@@ -18,10 +19,22 @@ const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_AND_COO'])
 const SEED_GM_LOGINID = String(process.env.LEAVE_GM_LOGINID || 'leave_gm').trim()
 const SEED_COO_LOGINID = String(process.env.LEAVE_COO_LOGINID || 'leave_coo').trim()
 
-// ---------- helpers ----------
-function num(v) {
-  const n = Number(v ?? 0)
-  return Number.isFinite(n) ? n : 0
+/* ───────────────── helpers ───────────────── */
+
+function getIo(req) {
+  return req.io || req.app?.get('io') || null
+}
+
+function emitProfile(req, docOrPlain, event) {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    const body =
+      typeof docOrPlain?.toObject === 'function' ? docOrPlain.toObject() : docOrPlain
+    broadcastLeaveProfile(io, body, event, body)
+  } catch (e) {
+    console.warn('⚠️ realtime emitProfile failed:', e?.message)
+  }
 }
 
 function isValidYMD(s) {
@@ -74,7 +87,8 @@ function computeContractEndYMD(startYMD) {
   return addDaysYMD(addYearsYMD(assertYMD(startYMD, 'contractStart'), 1), -1)
 }
 
-// ---------- auth helpers ----------
+/* ───────── auth helpers ───────── */
+
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
   const base = req.user?.role ? [req.user.role] : []
@@ -96,7 +110,8 @@ function actorId(req) {
   return String(req.user?.loginId || req.user?.id || req.user?.sub || '')
 }
 
-// ---------- id extract helpers ----------
+/* ───────── id extract helpers ───────── */
+
 function pickEmployeeId(obj) {
   const a = obj?.employeeId
   const b = obj?.employee?.employeeId
@@ -116,7 +131,8 @@ function pickApprovalMode(obj) {
   return APPROVAL_MODE.includes(v) ? v : 'GM_ONLY'
 }
 
-// ---------- directory helpers ----------
+/* ───────── directory helpers ───────── */
+
 async function getDirectory(empId) {
   const eid = String(empId || '').trim()
   if (!eid) return null
@@ -125,41 +141,78 @@ async function getDirectory(empId) {
     .lean()
 }
 
-// ---------- ensure user (safe: never override role if exists) ----------
-async function ensureUser({ loginId, name, role, isActive = true, telegramChatId = '' }) {
+/* ───────── ensure user (safe + multi-role) ───────── */
+
+async function ensureUser({
+  loginId,
+  name,
+  role,
+  roles,
+  isActive = true,
+  telegramChatId = '',
+}) {
   const id = String(loginId || '').trim()
   if (!id) return null
 
   const cleanChatId = String(telegramChatId || '').trim()
 
+  const addRoles = [
+    ...(Array.isArray(roles) ? roles : roles ? [roles] : []),
+    ...(role ? [role] : []),
+  ]
+    .map(r => String(r || '').trim().toUpperCase())
+    .filter(Boolean)
+
   const existing = await User.findOne({ loginId: id })
+
   if (existing) {
-    const updates = {}
-    if (name && existing.name !== name) updates.name = name
-    if (typeof isActive === 'boolean' && existing.isActive !== isActive) updates.isActive = isActive
-    if (cleanChatId && String(existing.telegramChatId || '') !== cleanChatId) updates.telegramChatId = cleanChatId
+    const $set = {}
+    const $addToSet = {}
 
-    // only set role if existing.role empty
-    if (role && !existing.role) updates.role = role
+    if (name && existing.name !== name) $set.name = name
+    if (typeof isActive === 'boolean' && existing.isActive !== isActive) $set.isActive = isActive
+    if (cleanChatId && String(existing.telegramChatId || '') !== cleanChatId) {
+      $set.telegramChatId = cleanChatId
+    }
 
-    if (Object.keys(updates).length) await User.updateOne({ _id: existing._id }, { $set: updates })
+    if (addRoles.length) {
+      $addToSet.roles = { $each: addRoles }
+    }
+
+    const curRole = String(existing.role || '').trim()
+    if (!curRole && addRoles.length) {
+      $set.role = addRoles[0]
+    }
+
+    const update = {}
+    if (Object.keys($set).length) update.$set = $set
+    if (Object.keys($addToSet).length) update.$addToSet = $addToSet
+
+    if (Object.keys(update).length) {
+      return User.findOneAndUpdate({ _id: existing._id }, update, { new: true })
+    }
+
     return existing
   }
 
   const plainPwd = DEFAULT_PWD_POLICY === 'EMPLOYEE_ID' ? id : DEFAULT_PWD_POLICY
   const passwordHash = await bcrypt.hash(String(plainPwd), 10)
 
+  const mainRole = (addRoles[0] || 'LEAVE_USER').toUpperCase()
+
   return User.create({
     loginId: id,
     name: name || id,
-    role: role || 'LEAVE_USER',
+    role: mainRole,
+    roles: addRoles.length ? addRoles : [mainRole],
     passwordHash,
     isActive: !!isActive,
     ...(cleanChatId ? { telegramChatId: cleanChatId } : {}),
   })
 }
 
-// ---------- balances sync ----------
+/* ───────── balances sync ───────── */
+
 async function syncBalancesForProfile(doc, asOfYMD) {
   if (!doc) return
   const asOf = isValidYMD(asOfYMD) ? asOfYMD : nowYMD()
@@ -167,14 +220,17 @@ async function syncBalancesForProfile(doc, asOfYMD) {
   const approved = await LeaveRequest.find({
     employeeId: String(doc.employeeId || '').trim(),
     status: 'APPROVED',
-  }).sort({ startDate: 1 }).lean()
+  })
+    .sort({ startDate: 1 })
+    .lean()
 
   const snap = computeBalances(doc, approved, new Date(asOf + 'T00:00:00Z'))
   doc.balances = Array.isArray(snap?.balances) ? snap.balances : []
   doc.balancesAsOf = asOf
 }
 
-// ---------- contract history helpers ----------
+/* ───────── contract history helpers ───────── */
+
 function ensureContractsInitialized(doc, openedBy = '') {
   if (!Array.isArray(doc.contracts) || doc.contracts.length === 0) {
     const start =
@@ -208,7 +264,8 @@ function getCurrentContract(doc) {
   return arr[arr.length - 1]
 }
 
-// ---------- seeded approvers validation ----------
+/* ───────── seeded approvers validation ───────── */
+
 function resolveSeededApprovers(approvalMode) {
   const gmLoginId = SEED_GM_LOGINID
   const cooLoginId = SEED_COO_LOGINID
@@ -218,22 +275,20 @@ function resolveSeededApprovers(approvalMode) {
     throw new Error('Seed COO missing. Set LEAVE_COO_LOGINID for GM_AND_COO mode.')
   }
 
-  return {
-    gmLoginId,
-    cooLoginId: cooLoginId || '',
-  }
+  return { gmLoginId, cooLoginId: cooLoginId || '' }
 }
 
-// ---------- controllers ----------
+/* ───────────────── controllers ───────────────── */
 
 async function getApprovers(req, res) {
-  // not needed by your new UI, but keep for admin reference
   try {
+    const wanted = ['LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN']
+
     const docs = await User.find({
-      role: { $in: ['LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'] },
       isActive: true,
+      $or: [{ role: { $in: wanted } }, { roles: { $in: wanted } }],
     })
-      .select('loginId name role telegramChatId')
+      .select('loginId name role roles telegramChatId')
       .lean()
 
     res.json(
@@ -241,6 +296,7 @@ async function getApprovers(req, res) {
         loginId: String(d.loginId || ''),
         name: d.name || '',
         role: d.role || '',
+        roles: Array.isArray(d.roles) ? d.roles : [],
         telegramChatId: String(d.telegramChatId || ''),
       }))
     )
@@ -350,7 +406,7 @@ async function createProfileSingle(req, res) {
     const { gmLoginId, cooLoginId } = resolveSeededApprovers(approvalMode)
 
     const employeeId = pickEmployeeId(req.body)
-    const managerLoginId = pickManagerId(req.body) // optional
+    const managerLoginId = pickManagerId(req.body)
 
     if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
 
@@ -381,9 +437,8 @@ async function createProfileSingle(req, res) {
       })
     }
 
-    // ensure seeded gm/coo exist (do not override role)
-    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: '', isActive: true })
-    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: '', isActive: true })
+    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
 
     let prof = await LeaveProfile.findOne({ employeeId })
     if (!prof) prof = new LeaveProfile({ employeeId, employeeLoginId: employeeId })
@@ -404,6 +459,10 @@ async function createProfileSingle(req, res) {
     await syncBalancesForProfile(prof, nowYMD())
     await prof.save()
 
+    // ✅ REALTIME
+    emitProfile(req, prof, 'leave:profile:created')
+    emitProfile(req, prof, 'leave:profile:updated')
+
     res.json({ ok: true, profile: prof })
   } catch (e) {
     console.error('createProfileSingle error', e)
@@ -417,11 +476,10 @@ async function createManagerWithEmployees(req, res) {
     const approvalMode = pickApprovalMode(req.body)
     const { gmLoginId, cooLoginId } = resolveSeededApprovers(approvalMode)
 
-    const managerEmployeeId = pickManagerId(req.body) // optional
+    const managerEmployeeId = pickManagerId(req.body)
     const employees = Array.isArray(req.body.employees) ? req.body.employees : []
     if (!employees.length) return res.status(400).json({ message: 'employees[] is required.' })
 
-    // optional manager
     if (managerEmployeeId) {
       const mgrDir = await getDirectory(managerEmployeeId)
       await ensureUser({
@@ -433,12 +491,10 @@ async function createManagerWithEmployees(req, res) {
       })
     }
 
-    // ensure seeded gm/coo exist (do not override role)
-    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: '', isActive: true })
-    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: '', isActive: true })
+    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
     else if (SEED_COO_LOGINID) {
-      // GM_ONLY: COO read-only still can exist
-      await ensureUser({ loginId: SEED_COO_LOGINID, name: SEED_COO_LOGINID, role: '', isActive: true })
+      await ensureUser({ loginId: SEED_COO_LOGINID, name: SEED_COO_LOGINID, role: 'LEAVE_COO', isActive: true })
     }
 
     let createdCount = 0
@@ -487,6 +543,9 @@ async function createManagerWithEmployees(req, res) {
       await syncBalancesForProfile(prof, nowYMD())
       await prof.save()
 
+      // ✅ REALTIME (emit per employee)
+      emitProfile(req, prof, existed ? 'leave:profile:updated' : 'leave:profile:created')
+
       if (existed) updatedCount += 1
       else createdCount += 1
     }
@@ -515,7 +574,7 @@ async function updateProfile(req, res) {
       })
     }
 
-    const managerLoginId = pickManagerId(req.body) || '' // optional
+    const managerLoginId = pickManagerId(req.body) || ''
 
     doc.approvalMode = approvalMode
     doc.managerLoginId = managerLoginId
@@ -538,6 +597,13 @@ async function updateProfile(req, res) {
     await syncBalancesForProfile(doc, nowYMD())
     await doc.save()
 
+    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
+    if (managerLoginId) await ensureUser({ loginId: managerLoginId, name: managerLoginId, role: 'LEAVE_MANAGER', isActive: true })
+
+    // ✅ REALTIME
+    emitProfile(req, doc, 'leave:profile:updated')
+
     res.json({ ok: true, profile: doc })
   } catch (e) {
     console.error('updateProfile error', e)
@@ -555,6 +621,11 @@ async function deactivateProfile(req, res) {
     await doc.save()
 
     await User.updateOne({ loginId: employeeId }, { $set: { isActive: false } })
+
+    // ✅ REALTIME
+    emitProfile(req, doc, 'leave:profile:deactivated')
+    emitProfile(req, doc, 'leave:profile:updated')
+
     res.json({ ok: true })
   } catch (e) {
     console.error('deactivateProfile error', e)
@@ -562,9 +633,6 @@ async function deactivateProfile(req, res) {
   }
 }
 
-/**
- * Renew Contract (keep same)
- */
 async function renewContract(req, res) {
   try {
     const employeeId = String(req.params.employeeId || '').trim()
@@ -630,6 +698,10 @@ async function renewContract(req, res) {
 
     await syncBalancesForProfile(doc, nowYMD())
     await doc.save()
+
+    // ✅ REALTIME
+    emitProfile(req, doc, 'leave:profile:renewed')
+    emitProfile(req, doc, 'leave:profile:updated')
 
     return res.json({
       ok: true,

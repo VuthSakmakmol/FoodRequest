@@ -29,6 +29,11 @@ function getIo(req) {
   return req.io || req.app?.get('io') || null
 }
 
+function actorLoginId(req) {
+  // JWT signToken uses { id: user.loginId }
+  return String(req.user?.id || req.user?.loginId || req.user?.sub || '').trim()
+}
+
 function getRoles(req) {
   const rawRoles = Array.isArray(req.user?.roles) ? req.user.roles : []
   const baseRole = req.user?.role ? [req.user.role] : []
@@ -37,7 +42,7 @@ function getRoles(req) {
 
 function isAdminViewer(req) {
   const roles = getRoles(req)
-  return roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')
+  return roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN') || roles.includes('ROOT_ADMIN')
 }
 
 async function attachEmployeeInfo(docs = []) {
@@ -146,7 +151,6 @@ function computePendingUsage(pendingDocs = [], contractYearMeta) {
       .filter(r => String(r.leaveTypeCode || '').toUpperCase() === code)
       .reduce((acc, r) => acc + Number(r.totalDays || 0), 0)
 
-  // pending AL in contract year
   const pendingAL = sum('AL', pendingDocs.filter(inContractYear))
   const pendingSP = sum('SP', pendingDocs.filter(inContractYear))
   const pendingMC = sum('MC', pendingDocs.filter(inContractYear))
@@ -177,7 +181,7 @@ exports.createMyRequest = async (req, res, next) => {
       dayPart = null,
     } = req.body || {}
 
-    const requesterLoginId = String(req.user?.id || '').trim()
+    const requesterLoginId = actorLoginId(req)
     const employeeId = String(req.user?.employeeId || requesterLoginId).trim()
 
     if (!requesterLoginId || !employeeId) {
@@ -196,9 +200,11 @@ exports.createMyRequest = async (req, res, next) => {
 
     const managerLoginId = String(profile.managerLoginId || '').trim()
     const gmLoginId = String(profile.gmLoginId || '').trim()
-    if (!managerLoginId || !gmLoginId) {
+
+    // ✅ GM must exist, manager can be optional (GM-only flow)
+    if (!gmLoginId) {
       return res.status(400).json({
-        message: 'Manager/GM mapping is incomplete for this employee. Please contact HR/admin.',
+        message: 'GM mapping is incomplete for this employee. Please contact HR/admin.',
       })
     }
 
@@ -247,9 +253,7 @@ exports.createMyRequest = async (req, res, next) => {
 
     // ✅ Strict remaining rules (including pending reservations)
     if (code === 'AL') {
-      // AL is reduced by pending AL + pending SP because SP borrows from AL
       const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
-
       if (strictAL <= 0) {
         return res.status(400).json({
           message: 'AL remaining is already reserved by your pending requests (including SP). Wait for decision or cancel pending request.',
@@ -264,7 +268,6 @@ exports.createMyRequest = async (req, res, next) => {
 
     if (code === 'SP') {
       const strictSP = remaining('SP') - pend.pendingSP
-
       if (strictSP <= 0) {
         return res.status(400).json({
           message: 'SP remaining is already reserved by your pending requests. Wait for decision or cancel pending request.',
@@ -276,15 +279,12 @@ exports.createMyRequest = async (req, res, next) => {
         })
       }
 
-      // ✅ SP ONLY for borrowing when AL is insufficient
       const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
       if (strictAL >= requestedDays) {
         return res.status(400).json({
           message: `You still have enough AL (${strictAL}) for ${requestedDays} days. Please use AL. SP is only for borrowing when AL is insufficient.`,
         })
       }
-
-      // ✅ allow AL to go negative after approval (this is the borrowing behavior)
     }
 
     if (code === 'MC') {
@@ -317,6 +317,9 @@ exports.createMyRequest = async (req, res, next) => {
 
     // UL unlimited -> no strict check
 
+    // ✅ if manager missing => go directly to GM
+    const initialStatus = managerLoginId ? 'PENDING_MANAGER' : 'PENDING_GM'
+
     const createPayload = {
       employeeId,
       requesterLoginId,
@@ -325,12 +328,11 @@ exports.createMyRequest = async (req, res, next) => {
       endDate: normalized.endDate,
       totalDays: requestedDays,
       reason: String(reason || ''),
-      status: 'PENDING_MANAGER',
-      managerLoginId,
+      status: initialStatus,
+      managerLoginId: managerLoginId || '',
       gmLoginId,
     }
 
-    // ✅ only set these if half-day is enabled (avoid enum error)
     if (normalized.isHalfDay) {
       createPayload.isHalfDay = true
       createPayload.dayPart = normalized.dayPart // 'AM' | 'PM'
@@ -343,14 +345,22 @@ exports.createMyRequest = async (req, res, next) => {
         employeeId,
         managerLoginId,
         gmLoginId,
+        status: initialStatus,
         id: doc._id.toString(),
       })
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
 
-    try { await notifyNewLeaveToManager(doc) } catch (e) {
-      console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message)
+    // notify correct approver
+    if (initialStatus === 'PENDING_MANAGER') {
+      try { await notifyNewLeaveToManager(doc) } catch (e) {
+        console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message)
+      }
+    } else {
+      try { await notifyNewLeaveToGm(doc) } catch (e) {
+        console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message)
+      }
     }
 
     try {
@@ -371,8 +381,8 @@ exports.createMyRequest = async (req, res, next) => {
 
 exports.listMyRequests = async (req, res, next) => {
   try {
-    const requesterLoginId = String(req.user?.id || '').trim()
-    const employeeId = String(req.user?.employeeId || requesterLoginId).trim()
+    const me = actorLoginId(req)
+    const employeeId = String(req.user?.employeeId || me).trim()
     if (!employeeId) return res.status(400).json({ message: 'Missing user identity' })
 
     const docs = await LeaveRequest.find({ employeeId })
@@ -387,7 +397,7 @@ exports.listMyRequests = async (req, res, next) => {
 
 exports.cancelMyRequest = async (req, res, next) => {
   try {
-    const loginId = String(req.user?.id || '').trim()
+    const loginId = actorLoginId(req)
     const { id } = req.params
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
@@ -422,14 +432,9 @@ exports.cancelMyRequest = async (req, res, next) => {
   }
 }
 
-/**
- * GET /leave/requests/manager/inbox
- * - Manager: only requests where managerLoginId == loginId
- * - Admin: all
- */
 exports.listManagerInbox = async (req, res, next) => {
   try {
-    const loginId = String(req.user?.id || '').trim()
+    const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
     const criteria = isAdminViewer(req) ? {} : { managerLoginId: loginId }
@@ -444,13 +449,9 @@ exports.listManagerInbox = async (req, res, next) => {
   }
 }
 
-/**
- * POST /leave/requests/:id/manager-decision
- * body: { action: 'APPROVE' | 'REJECT', comment?: string }
- */
 exports.managerDecision = async (req, res, next) => {
   try {
-    const loginId = String(req.user?.id || '').trim()
+    const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
     const { id } = req.params
@@ -504,12 +505,9 @@ exports.managerDecision = async (req, res, next) => {
   }
 }
 
-/**
- * GET /leave/requests/gm/inbox
- */
 exports.listGmInbox = async (req, res, next) => {
   try {
-    const loginId = String(req.user?.id || '').trim()
+    const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
     const criteria = isAdminViewer(req) ? {} : { gmLoginId: loginId }
@@ -524,13 +522,9 @@ exports.listGmInbox = async (req, res, next) => {
   }
 }
 
-/**
- * POST /leave/requests/:id/gm-decision
- * body: { action: 'APPROVE' | 'REJECT', comment?: string }
- */
 exports.gmDecision = async (req, res, next) => {
   try {
-    const loginId = String(req.user?.id || '').trim()
+    const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
     const { id } = req.params
@@ -575,7 +569,6 @@ exports.gmDecision = async (req, res, next) => {
           return res.status(400).json({ message: 'SP remaining changed (including pending). Please refresh.' })
         }
 
-        // ✅ enforce SP only when AL insufficient
         const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
         if (strictAL >= days) {
           return res.status(400).json({
@@ -601,7 +594,6 @@ exports.gmDecision = async (req, res, next) => {
         if (days > strict) return res.status(400).json({ message: 'MA remaining changed (including pending). Please refresh.' })
       }
 
-      // ✅ allow AL to be negative after approval (SP borrowing behavior)
       doc.status = 'APPROVED'
     } else if (act === 'REJECT') {
       doc.status = 'REJECTED'

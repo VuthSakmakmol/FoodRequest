@@ -5,29 +5,29 @@ const ctrl = require('../../controllers/leave/leaveRequest.controller')
 
 router.use(requireAuth)
 
-/* employee */
+/* employee (any leave role can request their own leave) */
 router.post(
   '/',
-  requireRole('LEAVE_USER', 'LEAVE_ADMIN', 'ADMIN'),
+  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.createMyRequest
 )
 
 router.get(
   '/my',
-  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
+  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.listMyRequests
 )
 
 router.post(
   '/:id/cancel',
-  requireRole('LEAVE_USER', 'LEAVE_ADMIN', 'ADMIN'),
+  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.cancelMyRequest
 )
 
 /* manager */
 router.get(
   '/manager/inbox',
-  requireRole('LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
+  requireRole('LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.listManagerInbox
 )
 

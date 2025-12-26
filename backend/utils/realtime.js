@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken')
  *  Room naming helpers
  * ─────────────────────────── */
 const ROOMS = {
+  // shared “admin-like” room (food + transport + leave)
   ADMINS: 'admins',
   CHEFS: 'chefs',
 
@@ -12,11 +13,12 @@ const ROOMS = {
   DRIVERS: 'drivers',
   MESSENGERS: 'messengers',
 
+  // scoped rooms
   EMPLOYEE: (id) => `employee:${String(id)}`,
   COMPANY: (id) => `company:${String(id)}`,
   BOOKING: (id) => `booking:${String(id)}`,
 
-  // per-loginId room, used by leave module etc.
+  // per-loginId room (leave inbox / user notifications)
   USER: (loginId) => `user:${String(loginId)}`,
 }
 
@@ -32,16 +34,17 @@ const str = (v) => (v == null ? '' : String(v))
 function rolesFromUser(user) {
   const raw = Array.isArray(user?.roles) ? user.roles : []
   const one = user?.role ? [user.role] : []
-  return [...new Set([...raw, ...one].map((r) => String(r || '').toUpperCase()))]
+  return [...new Set([...raw, ...one].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 }
 
 function hasAny(roles, ...allow) {
-  const set = new Set(roles || [])
+  const set = new Set((roles || []).map((r) => String(r || '').toUpperCase()))
   return allow.some((r) => set.has(String(r || '').toUpperCase()))
 }
 
 function isAdminLike(roles) {
-  // ✅ treat leave admin as admin-room listener (so leave broadcasts reach them)
+  // ✅ who can listen to ADMINS room
+  // Add more roles here if you have FOOD_ADMIN / TRANSPORT_ADMIN etc.
   return hasAny(roles, 'ADMIN', 'ROOT_ADMIN', 'LEAVE_ADMIN')
 }
 
@@ -98,7 +101,8 @@ function broadcastCarBooking(io, doc, event, payload) {
   ])
 
   for (const room of rooms) {
-    if (room) emitToRoom(io, room, event, payload || (doc.toObject ? doc.toObject() : doc))
+    if (!room) continue
+    emitToRoom(io, room, event, payload || (doc.toObject ? doc.toObject() : doc))
   }
 }
 
@@ -112,6 +116,7 @@ function broadcastLeaveRequest(io, doc, event, payload) {
   const requesterLogin = str(doc.requesterLoginId || '')
   const managerLoginId = str(doc.managerLoginId || '')
   const gmLoginId = str(doc.gmLoginId || '')
+  const cooLoginId = str(doc.cooLoginId || '')
 
   const body = payload || (doc.toObject ? doc.toObject() : doc)
 
@@ -121,18 +126,52 @@ function broadcastLeaveRequest(io, doc, event, payload) {
     requesterLogin,
     managerLoginId,
     gmLoginId,
+    cooLoginId,
   })
 
   const rooms = new Set([
-    ROOMS.ADMINS, // ✅ leave admins should be in here now
+    ROOMS.ADMINS, // leave admin-like users (ADMIN/ROOT_ADMIN/LEAVE_ADMIN)
     employeeId && ROOMS.EMPLOYEE(employeeId),
     requesterLogin && ROOMS.USER(requesterLogin),
     managerLoginId && ROOMS.USER(managerLoginId),
     gmLoginId && ROOMS.USER(gmLoginId),
+    cooLoginId && ROOMS.USER(cooLoginId),
   ])
 
   for (const room of rooms) {
-    if (room) emitToRoom(io, room, event, body)
+    if (!room) continue
+    emitToRoom(io, room, event, body)
+  }
+}
+
+/* ───────────────────────────
+ *  ✅ Central broadcast for LeaveProfile
+ * ─────────────────────────── */
+function broadcastLeaveProfile(io, doc, event, payload) {
+  if (!io || !doc || !event) return
+
+  const employeeId = str(doc.employeeId || payload?.employeeId || '')
+  const managerLoginId = str(doc.managerLoginId || payload?.managerLoginId || '')
+  const gmLoginId = str(doc.gmLoginId || payload?.gmLoginId || '')
+  const cooLoginId = str(doc.cooLoginId || payload?.cooLoginId || '')
+
+  const body = payload || (doc.toObject ? doc.toObject() : doc)
+
+  const rooms = new Set([
+    ROOMS.ADMINS,
+    employeeId && ROOMS.EMPLOYEE(employeeId),
+
+    // your system often uses employeeId == loginId
+    employeeId && ROOMS.USER(employeeId),
+
+    managerLoginId && ROOMS.USER(managerLoginId),
+    gmLoginId && ROOMS.USER(gmLoginId),
+    cooLoginId && ROOMS.USER(cooLoginId),
+  ])
+
+  for (const room of rooms) {
+    if (!room) continue
+    emitToRoom(io, room, event, body)
   }
 }
 
@@ -158,7 +197,7 @@ function registerSocket(io) {
       }
     } catch (e) {
       if (!isProd) log('auth fail:', e?.message)
-      // allow connection, but no user info
+      // allow connection without user info
     }
     next()
   })
@@ -170,20 +209,28 @@ function registerSocket(io) {
 
     const roles = rolesFromUser(socket.user)
 
-    // Basic identity from token / handshake
-    const employeeId = str(
-      socket.handshake.auth?.employeeId ||
-        socket.handshake.query?.employeeId ||
-        socket.user?.employeeId
+    // Identity (prefer token; fall back to handshake)
+    const loginId = str(
+      socket.user?.id ||
+        socket.user?.loginId ||
+        socket.handshake.auth?.loginId ||
+        socket.handshake.query?.loginId
     )
+
+    // For your system: employeeId usually == loginId for expat leave.
+    // Keep explicit employeeId if provided, otherwise fall back to loginId.
+    const employeeId = str(
+      socket.user?.employeeId ||
+        socket.handshake.auth?.employeeId ||
+        socket.handshake.query?.employeeId ||
+        loginId
+    )
+
     const companyId = str(
       socket.user?.companyId ||
         socket.handshake.auth?.companyId ||
         socket.handshake.query?.companyId
     )
-
-    // ✅ use id/loginId
-    const loginId = str(socket.user?.id || socket.user?.loginId || socket.handshake.auth?.loginId)
 
     log('SOCKET IDENTITY', {
       socketId: socket.id,
@@ -213,12 +260,13 @@ function registerSocket(io) {
       const denied = validateJoin(socket, p)
       if (denied) return safeAck(ack, { ok: false, error: denied })
 
-      // ✅ admin-like roles subscribe to admin room too
+      // Map roles to shared rooms
       if (['ADMIN', 'ROOT_ADMIN', 'LEAVE_ADMIN'].includes(p.role)) joinRoomSafe(socket, ROOMS.ADMINS)
       if (p.role === 'CHEF') joinRoomSafe(socket, ROOMS.CHEFS)
       if (p.role === 'DRIVER') joinRoomSafe(socket, ROOMS.DRIVERS)
       if (p.role === 'MESSENGER') joinRoomSafe(socket, ROOMS.MESSENGERS)
 
+      // Scoped rooms
       if (p.employeeId) joinRoomSafe(socket, ROOMS.EMPLOYEE(p.employeeId))
       if (p.companyId) joinRoomSafe(socket, ROOMS.COMPANY(p.companyId))
       if (p.bookingId) joinRoomSafe(socket, ROOMS.BOOKING(p.bookingId))
@@ -341,65 +389,55 @@ function safeAck(ack, payload) {
 
 function normalizeSubPayload(p = {}) {
   return {
-    role: str(p.role || '').toUpperCase(),
-    employeeId: str(p.employeeId || ''),
-    companyId: str(p.companyId || ''),
-    bookingId: str(p.bookingId || ''),
-    loginId: str(p.loginId || ''),
+    role: str(p.role || '').toUpperCase().trim(),
+    employeeId: str(p.employeeId || '').trim(),
+    companyId: str(p.companyId || '').trim(),
+    bookingId: str(p.bookingId || '').trim(),
+    loginId: str(p.loginId || '').trim(),
   }
 }
 
 /**
- * Enforce simple access rules when joining rooms via `subscribe`
+ * Enforce access rules when joining rooms via `subscribe`
  */
 function validateJoin(socket, p) {
   const roles = rolesFromUser(socket.user)
-
-  const userEmpId = str(socket.user?.employeeId)
-  const userCompany = str(socket.user?.companyId)
-  const userLoginId = str(socket.user?.id || socket.user?.loginId)
-
   const adminLike = isAdminLike(roles)
+
+  const userEmpId = str(socket.user?.employeeId) || str(socket.handshake.auth?.employeeId) || ''
+  const userCompany = str(socket.user?.companyId) || ''
+  const userLoginId = str(socket.user?.id || socket.user?.loginId) || str(socket.handshake.auth?.loginId) || ''
 
   // Admin room: only admin-like
   if (p.role && ['ADMIN', 'ROOT_ADMIN', 'LEAVE_ADMIN'].includes(p.role)) {
     if (!adminLike) return 'FORBIDDEN:ADMIN_ROOM'
   }
 
-  // Chef room: admin-like or chef
-  if (p.role === 'CHEF' && !(adminLike || hasAny(roles, 'CHEF'))) {
-    return 'FORBIDDEN:CHEF_ROOM'
-  }
+  // Chef room: admin-like or CHEF
+  if (p.role === 'CHEF' && !(adminLike || hasAny(roles, 'CHEF'))) return 'FORBIDDEN:CHEF_ROOM'
 
-  // Driver room: admin-like or driver
-  if (p.role === 'DRIVER' && !(adminLike || hasAny(roles, 'DRIVER'))) {
-    return 'FORBIDDEN:DRIVER_ROOM'
-  }
+  // Driver room: admin-like or DRIVER
+  if (p.role === 'DRIVER' && !(adminLike || hasAny(roles, 'DRIVER'))) return 'FORBIDDEN:DRIVER_ROOM'
 
-  // Messenger room: admin-like or messenger
-  if (p.role === 'MESSENGER' && !(adminLike || hasAny(roles, 'MESSENGER'))) {
-    return 'FORBIDDEN:MESSENGER_ROOM'
-  }
+  // Messenger room: admin-like or MESSENGER
+  if (p.role === 'MESSENGER' && !(adminLike || hasAny(roles, 'MESSENGER'))) return 'FORBIDDEN:MESSENGER_ROOM'
 
-  // Employee room: admin-like can see anyone, others only their own employeeId
+  // Employee room: admin-like can see anyone, others only self
   if (p.employeeId) {
-    if (!adminLike && p.employeeId !== userEmpId) {
+    if (!adminLike && p.employeeId !== userEmpId && p.employeeId !== userLoginId) {
+      // userLoginId fallback covers your “employeeId == loginId” pattern
       return 'FORBIDDEN:EMPLOYEE_ROOM'
     }
   }
 
   // Company room: admin-like can see any, others only their own company
   if (p.companyId) {
-    if (!adminLike && p.companyId !== userCompany) {
-      return 'FORBIDDEN:COMPANY_ROOM'
-    }
+    if (!adminLike && p.companyId !== userCompany) return 'FORBIDDEN:COMPANY_ROOM'
   }
 
-  // User room: admin-like can see anyone, others only themselves
+  // User room: admin-like can see anyone, others only self
   if (p.loginId) {
-    if (!adminLike && p.loginId !== userLoginId) {
-      return 'FORBIDDEN:USER_ROOM'
-    }
+    if (!adminLike && p.loginId !== userLoginId) return 'FORBIDDEN:USER_ROOM'
   }
 
   // Booking room: currently no extra checks
@@ -415,6 +453,7 @@ module.exports = {
   emitCounterpart,
   broadcastCarBooking,
   broadcastLeaveRequest,
+  broadcastLeaveProfile, // ✅ added
   registerSocket,
   attachDebugEndpoints,
 }
