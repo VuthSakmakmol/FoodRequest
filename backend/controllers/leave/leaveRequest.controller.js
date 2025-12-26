@@ -6,10 +6,7 @@ const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
 const { getLeaveType } = require('../../config/leaveSystemTypes')
-const {
-  validateAndNormalizeRequest,
-  computeBalances,
-} = require('../../utils/leave.rules')
+const { validateAndNormalizeRequest, computeBalances } = require('../../utils/leave.rules')
 
 const {
   notifyNewLeaveToManager,
@@ -18,10 +15,10 @@ const {
   notifyGmDecision,
 } = require('../../services/leave/leave.telegram.notify')
 
-const { broadcastLeaveRequest } = require('../../utils/realtime')
+// ✅ FIX: use leave realtime broadcaster (NOT utils/realtime.js)
+const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/leave.realtime')
 
-const DEBUG =
-  String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
+const DEBUG = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
 
 /* ───────────────── helpers ───────────────── */
 
@@ -30,14 +27,14 @@ function getIo(req) {
 }
 
 function actorLoginId(req) {
-  // JWT signToken uses { id: user.loginId }
+  // JWT signToken uses { id: user.loginId } sometimes
   return String(req.user?.id || req.user?.loginId || req.user?.sub || '').trim()
 }
 
 function getRoles(req) {
   const rawRoles = Array.isArray(req.user?.roles) ? req.user.roles : []
   const baseRole = req.user?.role ? [req.user.role] : []
-  return [...new Set([...rawRoles, ...baseRole].map(r => String(r || '').toUpperCase()))]
+  return [...new Set([...rawRoles, ...baseRole].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 }
 
 function isAdminViewer(req) {
@@ -45,12 +42,34 @@ function isAdminViewer(req) {
   return roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN') || roles.includes('ROOT_ADMIN')
 }
 
+function emitReq(req, docOrPlain, event = 'leave:req:updated') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastLeaveRequest(io, docOrPlain, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitReq(${event}) failed:`, e?.message)
+  }
+}
+
+function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastLeaveProfile(io, docOrPlain, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitProfile(${event}) failed:`, e?.message)
+  }
+}
+
 async function attachEmployeeInfo(docs = []) {
-  const ids = [...new Set(
-    (docs || [])
-      .map(d => String(d.employeeId || '').trim())
-      .filter(Boolean)
-  )]
+  const ids = [
+    ...new Set(
+      (docs || [])
+        .map((d) => String(d.employeeId || '').trim())
+        .filter(Boolean)
+    ),
+  ]
   if (!ids.length) return docs
 
   const emps = await EmployeeDirectory.find(
@@ -58,9 +77,9 @@ async function attachEmployeeInfo(docs = []) {
     { employeeId: 1, name: 1, department: 1 }
   ).lean()
 
-  const map = new Map(emps.map(e => [String(e.employeeId || '').trim(), e]))
+  const map = new Map((emps || []).map((e) => [String(e.employeeId || '').trim(), e]))
 
-  return (docs || []).map(d => {
+  return (docs || []).map((d) => {
     const emp = map.get(String(d.employeeId || '').trim())
     return {
       ...d,
@@ -89,15 +108,13 @@ async function attachEmployeeInfoToOne(doc) {
 }
 
 async function getApprovedRequests(employeeId) {
-  return LeaveRequest.find({ employeeId, status: 'APPROVED' })
-    .sort({ startDate: 1 })
-    .lean()
+  return LeaveRequest.find({ employeeId, status: 'APPROVED' }).sort({ startDate: 1 }).lean()
 }
 
 function findBalanceRow(snapshot, code) {
   return (
     (snapshot?.balances || []).find(
-      b => String(b.leaveTypeCode).toUpperCase() === String(code).toUpperCase()
+      (b) => String(b.leaveTypeCode).toUpperCase() === String(code).toUpperCase()
     ) || null
   )
 }
@@ -115,7 +132,7 @@ async function getActiveRequests(employeeId) {
     .lean()
 }
 
-// Overlap if startA <= endB && endA >= startB (YMD strings can compare)
+// Overlap if startA <= endB && endA >= startB
 async function hasOverlappingActiveRequest(employeeId, startYMD, endYMD) {
   const emp = String(employeeId || '').trim()
   const s = String(startYMD || '').trim()
@@ -134,32 +151,30 @@ async function hasOverlappingActiveRequest(employeeId, startYMD, endYMD) {
 /**
  * Reserve pending usage so user cannot spam requests beyond remaining.
  * ✅ Uses contract-year window (snapshot.meta.contractYear)
- * - SP/MC/MA are contract-year based
- * - SP also reserves AL because SP borrows from AL
  */
 function computePendingUsage(pendingDocs = [], contractYearMeta) {
   const start = String(contractYearMeta?.startDate || '')
-  const end   = String(contractYearMeta?.endDate || '')
+  const end = String(contractYearMeta?.endDate || '')
 
   const inContractYear = (d) => {
     const s = String(d?.startDate || '')
-    return start && end ? (s >= start && s <= end) : false
+    return start && end ? s >= start && s <= end : false
   }
 
   const sum = (code, docs) =>
     (docs || [])
-      .filter(r => String(r.leaveTypeCode || '').toUpperCase() === code)
+      .filter((r) => String(r.leaveTypeCode || '').toUpperCase() === code)
       .reduce((acc, r) => acc + Number(r.totalDays || 0), 0)
 
-  const pendingAL = sum('AL', pendingDocs.filter(inContractYear))
-  const pendingSP = sum('SP', pendingDocs.filter(inContractYear))
-  const pendingMC = sum('MC', pendingDocs.filter(inContractYear))
-  const pendingMA = sum('MA', pendingDocs.filter(inContractYear))
+  const pool = pendingDocs.filter(inContractYear)
+  const pendingAL = sum('AL', pool)
+  const pendingSP = sum('SP', pool)
+  const pendingMC = sum('MC', pool)
+  const pendingMA = sum('MA', pool)
 
   return { pendingAL, pendingSP, pendingMC, pendingMA }
 }
 
-/* normalize half-day inputs -> AM/PM (only set when valid) */
 function normalizeDayPart(v) {
   const s = String(v || '').trim().toUpperCase()
   if (!s) return null
@@ -168,18 +183,64 @@ function normalizeDayPart(v) {
   return null
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Recalculate balances in DB and broadcast profile update so UI refreshes.
+ * Called when request becomes APPROVED / CANCELLED / REJECTED.
+ */
+async function recalcAndEmitProfile(req, employeeId) {
+  try {
+    const empId = String(employeeId || '').trim()
+    if (!empId) return
+
+    const prof = await LeaveProfile.findOne({ employeeId: empId })
+    if (!prof) return
+
+    const approved = await LeaveRequest.find({ employeeId: empId, status: 'APPROVED' })
+      .sort({ startDate: 1 })
+      .lean()
+
+    const snap = computeBalances(prof.toObject ? prof.toObject() : prof, approved, new Date())
+
+    const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
+    const nextAsOf = String(snap?.meta?.asOfYMD || prof.balancesAsOf || '').trim()
+    const nextEnd = snap?.meta?.contractYear?.endDate ? String(snap.meta.contractYear.endDate) : String(prof.contractEndDate || '')
+
+    // ✅ avoid saving if nothing changed
+    const before = JSON.stringify(prof.balances || [])
+    const after = JSON.stringify(nextBalances)
+
+    let changed = false
+    if (before !== after) {
+      prof.balances = nextBalances
+      changed = true
+    }
+    if (nextAsOf && String(prof.balancesAsOf || '') !== nextAsOf) {
+      prof.balancesAsOf = nextAsOf
+      changed = true
+    }
+    if (nextEnd && String(prof.contractEndDate || '') !== nextEnd) {
+      prof.contractEndDate = nextEnd
+      changed = true
+    }
+
+    if (changed) {
+      await prof.save()
+      emitProfile(req, prof, 'leave:profile:updated')
+    } else {
+      // still broadcast once if UI relies on realtime refresh
+      emitProfile(req, prof, 'leave:profile:updated')
+    }
+  } catch (e) {
+    console.warn('⚠️ recalcAndEmitProfile failed:', e?.message)
+  }
+}
+
 /* ───────────────── controllers ───────────────── */
 
 exports.createMyRequest = async (req, res, next) => {
   try {
-    const {
-      leaveTypeCode,
-      startDate,
-      endDate,
-      reason = '',
-      isHalfDay = false,
-      dayPart = null,
-    } = req.body || {}
+    const { leaveTypeCode, startDate, endDate, reason = '', isHalfDay = false, dayPart = null } = req.body || {}
 
     const requesterLoginId = actorLoginId(req)
     const employeeId = String(req.user?.employeeId || requesterLoginId).trim()
@@ -201,7 +262,6 @@ exports.createMyRequest = async (req, res, next) => {
     const managerLoginId = String(profile.managerLoginId || '').trim()
     const gmLoginId = String(profile.gmLoginId || '').trim()
 
-    // ✅ GM must exist, manager can be optional (GM-only flow)
     if (!gmLoginId) {
       return res.status(400).json({
         message: 'GM mapping is incomplete for this employee. Please contact HR/admin.',
@@ -213,7 +273,6 @@ exports.createMyRequest = async (req, res, next) => {
       return res.status(400).json({ message: 'Half-day requires dayPart = AM/PM (Morning/Afternoon).' })
     }
 
-    // ✅ normalize dates + working days + MA fixed + half-day
     const vr = validateAndNormalizeRequest({
       leaveTypeCode: lt.code,
       startDate,
@@ -226,29 +285,21 @@ exports.createMyRequest = async (req, res, next) => {
     const normalized = vr.normalized
     const requestedDays = Number(normalized.totalDays || 0)
 
-    // ✅ block overlap (submitted/approved)
-    const overlap = await hasOverlappingActiveRequest(
-      employeeId,
-      normalized.startDate,
-      normalized.endDate
-    )
+    const overlap = await hasOverlappingActiveRequest(employeeId, normalized.startDate, normalized.endDate)
     if (overlap) {
       return res.status(400).json({
         message: 'You already have a leave request submitted/approved that overlaps these dates.',
       })
     }
 
-    // ✅ balances snapshot from APPROVED
     const approved = await getApprovedRequests(employeeId)
     const snapshot = computeBalances(profile, approved, new Date())
 
-    // ✅ reserve pending so cannot spam beyond remaining
     const active = await getActiveRequests(employeeId)
-    const pending = active.filter(r => r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM')
+    const pending = active.filter((r) => r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM')
     const pend = computePendingUsage(pending, snapshot?.meta?.contractYear)
 
     const remaining = (code) => Number(findBalanceRow(snapshot, code)?.remaining ?? 0)
-
     const code = String(lt.code || '').toUpperCase()
 
     // ✅ Strict remaining rules (including pending reservations)
@@ -256,7 +307,8 @@ exports.createMyRequest = async (req, res, next) => {
       const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
       if (strictAL <= 0) {
         return res.status(400).json({
-          message: 'AL remaining is already reserved by your pending requests (including SP). Wait for decision or cancel pending request.',
+          message:
+            'AL remaining is already reserved by your pending requests (including SP). Wait for decision or cancel pending request.',
         })
       }
       if (requestedDays > strictAL) {
@@ -315,9 +367,6 @@ exports.createMyRequest = async (req, res, next) => {
       }
     }
 
-    // UL unlimited -> no strict check
-
-    // ✅ if manager missing => go directly to GM
     const initialStatus = managerLoginId ? 'PENDING_MANAGER' : 'PENDING_GM'
 
     const createPayload = {
@@ -354,24 +403,13 @@ exports.createMyRequest = async (req, res, next) => {
 
     // notify correct approver
     if (initialStatus === 'PENDING_MANAGER') {
-      try { await notifyNewLeaveToManager(doc) } catch (e) {
-        console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message)
-      }
+      try { await notifyNewLeaveToManager(doc) } catch (e) { console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message) }
     } else {
-      try { await notifyNewLeaveToGm(doc) } catch (e) {
-        console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message)
-      }
+      try { await notifyNewLeaveToGm(doc) } catch (e) { console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message) }
     }
 
-    try {
-      const io = getIo(req)
-      if (io) {
-        broadcastLeaveRequest(io, payload, 'leave:req:created')
-        broadcastLeaveRequest(io, payload, 'leave:req:updated')
-      }
-    } catch (e) {
-      console.warn('⚠️ leave:req:created emit failed:', e?.message)
-    }
+    // ✅ REALTIME (one event is enough)
+    emitReq(req, payload, 'leave:req:created')
 
     return res.status(201).json(payload)
   } catch (err) {
@@ -385,10 +423,7 @@ exports.listMyRequests = async (req, res, next) => {
     const employeeId = String(req.user?.employeeId || me).trim()
     if (!employeeId) return res.status(400).json({ message: 'Missing user identity' })
 
-    const docs = await LeaveRequest.find({ employeeId })
-      .sort({ createdAt: -1 })
-      .lean()
-
+    const docs = await LeaveRequest.find({ employeeId }).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(docs))
   } catch (err) {
     next(err)
@@ -419,12 +454,12 @@ exports.cancelMyRequest = async (req, res, next) => {
     await doc.save()
 
     const payload = await attachEmployeeInfoToOne(doc)
-    try {
-      const io = getIo(req)
-      if (io) broadcastLeaveRequest(io, payload, 'leave:req:updated')
-    } catch (e) {
-      console.warn('⚠️ leave:req:cancel emit failed:', e?.message)
-    }
+
+    // ✅ REALTIME
+    emitReq(req, payload, 'leave:req:updated')
+
+    // ✅ update balances UI
+    await recalcAndEmitProfile(req, doc.employeeId)
 
     return res.json(payload)
   } catch (err) {
@@ -438,11 +473,7 @@ exports.listManagerInbox = async (req, res, next) => {
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
     const criteria = isAdminViewer(req) ? {} : { managerLoginId: loginId }
-
-    const docs = await LeaveRequest.find(criteria)
-      .sort({ createdAt: -1 })
-      .lean()
-
+    const docs = await LeaveRequest.find(criteria).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(docs))
   } catch (err) {
     next(err)
@@ -478,25 +509,20 @@ exports.managerDecision = async (req, res, next) => {
 
     await doc.save()
 
-    try { await notifyManagerDecision(doc) } catch (e) {
-      console.warn('⚠️ notifyManagerDecision failed:', e?.message)
-    }
+    try { await notifyManagerDecision(doc) } catch (e) { console.warn('⚠️ notifyManagerDecision failed:', e?.message) }
 
     if (doc.status === 'PENDING_GM') {
-      try { await notifyNewLeaveToGm(doc) } catch (e) {
-        console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message)
-      }
+      try { await notifyNewLeaveToGm(doc) } catch (e) { console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message) }
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
-    try {
-      const io = getIo(req)
-      if (io) {
-        broadcastLeaveRequest(io, payload, 'leave:req:manager-decision')
-        broadcastLeaveRequest(io, payload, 'leave:req:updated')
-      }
-    } catch (e) {
-      console.warn('⚠️ manager decision emit failed:', e?.message)
+
+    // ✅ REALTIME
+    emitReq(req, payload, 'leave:req:updated')
+
+    // If rejected here, balances reservation should free immediately on UI
+    if (doc.status === 'REJECTED') {
+      await recalcAndEmitProfile(req, doc.employeeId)
     }
 
     return res.json(payload)
@@ -511,11 +537,7 @@ exports.listGmInbox = async (req, res, next) => {
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
     const criteria = isAdminViewer(req) ? {} : { gmLoginId: loginId }
-
-    const docs = await LeaveRequest.find(criteria)
-      .sort({ createdAt: -1 })
-      .lean()
-
+    const docs = await LeaveRequest.find(criteria).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(docs))
   } catch (err) {
     next(err)
@@ -552,9 +574,10 @@ exports.gmDecision = async (req, res, next) => {
       const snapshot = computeBalances(profile, approved, new Date())
 
       const active = await getActiveRequests(doc.employeeId)
-      const pendingOthers = active.filter(r =>
-        (r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM') &&
-        String(r._id) !== String(doc._id)
+      const pendingOthers = active.filter(
+        (r) =>
+          (r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM') &&
+          String(r._id) !== String(doc._id)
       )
       const pend = computePendingUsage(pendingOthers, snapshot?.meta?.contractYear)
 
@@ -565,9 +588,7 @@ exports.gmDecision = async (req, res, next) => {
 
       if (code === 'SP') {
         const strictSP = remaining('SP') - pend.pendingSP
-        if (days > strictSP) {
-          return res.status(400).json({ message: 'SP remaining changed (including pending). Please refresh.' })
-        }
+        if (days > strictSP) return res.status(400).json({ message: 'SP remaining changed (including pending). Please refresh.' })
 
         const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
         if (strictAL >= days) {
@@ -579,9 +600,7 @@ exports.gmDecision = async (req, res, next) => {
 
       if (code === 'AL') {
         const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
-        if (days > strictAL) {
-          return res.status(400).json({ message: 'AL remaining changed (including pending SP). Please refresh.' })
-        }
+        if (days > strictAL) return res.status(400).json({ message: 'AL remaining changed (including pending SP). Please refresh.' })
       }
 
       if (code === 'MC') {
@@ -606,23 +625,22 @@ exports.gmDecision = async (req, res, next) => {
 
     await doc.save()
 
-    try { await notifyGmDecision(doc) } catch (e) {
-      console.warn('⚠️ notifyGmDecision failed:', e?.message)
-    }
+    try { await notifyGmDecision(doc) } catch (e) { console.warn('⚠️ notifyGmDecision failed:', e?.message) }
 
     const payload = await attachEmployeeInfoToOne(doc)
-    try {
-      const io = getIo(req)
-      if (io) {
-        broadcastLeaveRequest(io, payload, 'leave:req:gm-decision')
-        broadcastLeaveRequest(io, payload, 'leave:req:updated')
-      }
-    } catch (e) {
-      console.warn('⚠️ gm decision emit failed:', e?.message)
-    }
+
+    // ✅ REALTIME
+    emitReq(req, payload, 'leave:req:updated')
+
+    // ✅ balances changed (approve consumes; reject frees reservation)
+    await recalcAndEmitProfile(req, doc.employeeId)
 
     return res.json(payload)
   } catch (err) {
     next(err)
   }
 }
+
+/* Export helpers for routes/middleware if needed */
+exports.isAdminViewer = isAdminViewer
+exports.getRoles = getRoles

@@ -38,8 +38,12 @@ async function fetchManagedList(silent = false) {
   try {
     listLoading.value = true
     listError.value = ''
+
     const res = await api.get('/leave/profile/managed')
-    rows.value = Array.isArray(res?.data) ? res.data : []
+
+    // Accept either [] or { rows: [] }
+    const data = res?.data
+    rows.value = Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : []
   } catch (e) {
     console.error('fetchManagedList error', e)
     listError.value = e?.response?.data?.message || 'Unable to load employees.'
@@ -54,7 +58,7 @@ async function fetchManagedList(silent = false) {
 const filteredRows = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return rows.value
-  return rows.value.filter(r => {
+  return rows.value.filter((r) => {
     const a = String(r.employeeId || '').toLowerCase()
     const b = String(r.name || '').toLowerCase()
     const c = String(r.department || '').toLowerCase()
@@ -80,15 +84,24 @@ function num(v) {
   return Number.isFinite(n) ? n : 0
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Trust backend remaining (can be negative for AL debt / SP borrowing).
+ * DO NOT clamp to 0.
+ */
 const balances = computed(() => {
   const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
-  const arr = raw.map(b => ({
+
+  const arr = raw.map((b) => ({
     leaveTypeCode: String(b?.leaveTypeCode || '').toUpperCase(),
     yearlyEntitlement: num(b?.yearlyEntitlement),
     used: num(b?.used),
     remaining:
-      b?.remaining != null ? num(b.remaining) : Math.max(num(b?.yearlyEntitlement) - num(b?.used), 0)
+      b?.remaining != null
+        ? num(b.remaining) // ✅ backend truth (can be negative)
+        : num(b?.yearlyEntitlement) - num(b?.used), // fallback (no clamp)
   }))
+
   const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
   arr.sort((a, b) => {
     const ia = ORDER.indexOf(a.leaveTypeCode)
@@ -96,6 +109,7 @@ const balances = computed(() => {
     if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
     return a.leaveTypeCode.localeCompare(b.leaveTypeCode)
   })
+
   return arr
 })
 
@@ -110,12 +124,12 @@ async function fetchEmployeeProfile(silent = false) {
     loading.value = true
     loadError.value = ''
 
-    // ✅ SAME endpoint; manager passes employeeId
     const res = await api.get('/leave/profile/my', {
-      params: { employeeId: targetEmployeeId.value }
+      params: { employeeId: targetEmployeeId.value },
     })
 
-    profile.value = res?.data || null
+    // Accept either { profile: {...} } OR direct profile object
+    profile.value = res?.data?.profile || res?.data || null
     lastUpdatedAt.value = dayjs().toISOString()
   } catch (e) {
     console.error('fetchEmployeeProfile error', e)
@@ -146,14 +160,14 @@ function setupRealtime() {
   if (targetEmployeeId.value) subscribeEmployeeIfNeeded(targetEmployeeId.value)
 
   offHandlers.push(
-    onSocket('leave:req:created', p => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:manager-decision', p => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:gm-decision', p => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:updated', p => { if (isTargetDoc(p)) triggerRefresh() })
+    onSocket('leave:req:created', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:manager-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:gm-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:updated', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
   )
 }
 function teardownRealtime() {
-  offHandlers.forEach(off => { try { off && off() } catch {} })
+  offHandlers.forEach((off) => { try { off && off() } catch {} })
   offHandlers.length = 0
 }
 
@@ -163,9 +177,10 @@ onMounted(async () => {
   window.addEventListener('resize', updateIsMobile)
 
   await fetchManagedList(true)
-  await fetchEmployeeProfile(true)
-
-  if (isDetailMode.value) setupRealtime()
+  if (isDetailMode.value) {
+    await fetchEmployeeProfile(true)
+    setupRealtime()
+  }
 })
 
 watch(
@@ -183,6 +198,7 @@ onBeforeUnmount(() => {
   teardownRealtime()
 })
 </script>
+
 
 <template>
   <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">

@@ -5,59 +5,99 @@ let socket = null
 let isConnected = false
 let authToken = ''
 
-// ---- internal: create socket instance ----
-function createSocket() {
-  const wsOrigin =
+/* -------------------- Subscription state (persist across reconnect) -------------------- */
+const subscribedRoles  = new Set()
+const joinedBookings   = new Set()
+const joinedEmployees  = new Set()
+const joinedCompanies  = new Set()
+const joinedUsers      = new Set()
+
+let heartbeatId = null
+
+/* -------------------- internal helpers -------------------- */
+function wsOrigin() {
+  // ✅ default: same origin (works behind Nginx reverse proxy)
+  return (
     import.meta.env.VITE_WS_ORIGIN ||
     import.meta.env.VITE_API_BASE ||
-    `${location.protocol}//${location.hostname}:4333`
+    location.origin
+  )
+}
 
-  // initial token from localStorage (for page refresh)
-  authToken = authToken || localStorage.getItem('token') || ''
+function normRole(r) {
+  return String(r || '').toUpperCase().trim()
+}
 
-  const s = io(wsOrigin, {
+function startHeartbeat(sock) {
+  if (heartbeatId) return
+  heartbeatId = setInterval(() => {
+    try {
+      sock.emit('ping:client', Date.now())
+    } catch {}
+  }, 15000)
+}
+
+function stopHeartbeat() {
+  if (!heartbeatId) return
+  clearInterval(heartbeatId)
+  heartbeatId = null
+}
+
+/* ✅ emit with ACK so we know subscribe succeeded */
+function emitAck(sock, event, payload) {
+  return new Promise((resolve) => {
+    try {
+      sock.emit(event, payload, (res) => resolve(res || { ok: true }))
+    } catch {
+      resolve({ ok: false, error: 'EMIT_FAILED' })
+    }
+  })
+}
+
+function replaySubscriptions(sock) {
+  // Roles
+  for (const role of subscribedRoles) {
+    emitAck(sock, 'subscribe', { role })
+  }
+
+  // Rooms
+  for (const id of joinedBookings)  emitAck(sock, 'subscribe', { bookingId: id })
+  for (const id of joinedEmployees) emitAck(sock, 'subscribe', { employeeId: id })
+  for (const id of joinedCompanies) emitAck(sock, 'subscribe', { companyId: id })
+  for (const id of joinedUsers)     emitAck(sock, 'subscribe', { loginId: id })
+}
+
+function createSocket() {
+  const s = io(wsOrigin(), {
     transports: ['websocket'],
-    auth: authToken ? { token: authToken } : undefined,
+    autoConnect: false, // ✅ IMPORTANT (no connect until token set)
+    auth: authToken ? { token: authToken } : {},
     reconnectionAttempts: Infinity,
     reconnectionDelayMax: 8000,
   })
 
   s.on('connect', () => {
     isConnected = true
-    // console.debug('[ws] connected', s.id)
+    replaySubscriptions(s)
   })
 
   s.on('disconnect', () => {
     isConnected = false
-    // console.debug('[ws] disconnected')
   })
 
-  // light heartbeat
-  setInterval(() => {
-    try {
-      s.emit('ping:client', Date.now())
-    } catch {}
-  }, 15000)
-
+  startHeartbeat(s)
   return s
 }
 
-// ensure singleton
-if (!socket) {
-  socket = createSocket()
+function getSocket() {
+  if (!socket) socket = createSocket()
+  return socket
 }
 
-const s = socket
-export default s
+export default getSocket()
 
-/* ---------- connect-aware joins ---------- */
-const subscribedRoles = new Set()
-const joinedBookings  = new Set()
-const joinedEmployees = new Set()
-const joinedCompanies = new Set()
-const joinedUsers     = new Set()
-
-function waitConnected() {
+async function waitConnected() {
+  const s = getSocket()
   return new Promise((resolve) => {
     if (isConnected && s.connected) return resolve()
 
@@ -66,110 +106,184 @@ function waitConnected() {
       resolve()
     }
     s.on('connect', onConnect)
+
+    if (!s.connected) s.connect()
   })
 }
 
 /**
- * Update socket auth token and reconnect with the new JWT.
- * Call this from auth store after login/restore, and on logout with ''.
+ * ✅ HARD reset all in-memory subscriptions
+ * Use this on logout to prevent replaying stale rooms.
+ */
+export function resetSocketSubscriptions() {
+  subscribedRoles.clear()
+  joinedBookings.clear()
+  joinedEmployees.clear()
+  joinedCompanies.clear()
+  joinedUsers.clear()
+}
+
+/**
+ * Update socket auth token and reconnect with new JWT.
+ * Call after login/restore, and on logout with ''.
  */
 export function setSocketAuthToken(token) {
   authToken = token || ''
+  const s = getSocket()
 
-  if (!socket) {
-    socket = createSocket()
+  s.auth = authToken ? { ...(s.auth || {}), token: authToken } : {}
+
+  try {
+    if (s.connected) s.disconnect()
+    s.connect()
+  } catch {}
+}
+
+/* -------------------- ROLE rooms (ADMIN/CHEF/DRIVER/... + LEAVE_*) -------------------- */
+export async function subscribeRole(role) {
+  const r = normRole(role)
+  if (!r || subscribedRoles.has(r)) return
+
+  const s = getSocket()
+  await waitConnected()
+
+  const res = await emitAck(s, 'subscribe', { role: r })
+  if (!res?.ok) {
+    console.warn('[socket] subscribeRole denied:', r, res?.error)
     return
   }
 
-  socket.auth = authToken ? { ...(socket.auth || {}), token: authToken } : {}
-
-  if (socket.connected) {
-    socket.disconnect()
-  }
-  socket.connect()
-}
-
-/* ---------- ROLE rooms (ADMIN, CHEF, DRIVER, MESSENGER, LEAVE_MANAGER, LEAVE_GM, etc.) ---------- */
-export async function subscribeRole(role) {
-  role = String(role || '').toUpperCase()
-  if (!role || subscribedRoles.has(role)) return
-
-  await waitConnected()
-  s.emit('subscribe', { role }, () => {})
-  subscribedRoles.add(role)
+  subscribedRoles.add(r)
 }
 
 export async function unsubscribeRole(role) {
-  role = String(role || '').toUpperCase()
-  if (!role || !subscribedRoles.has(role)) return
+  const r = normRole(role)
+  if (!r || !subscribedRoles.has(r)) return
 
-  await waitConnected()
-  s.emit('unsubscribe', { role }, () => {})
-  subscribedRoles.delete(role)
-}
-
-/* Helper: accept either string or { role } */
-export function subscribeRoleIfNeeded(payload = {}) {
-  const role =
-    typeof payload === 'string'
-      ? String(payload || '').toUpperCase()
-      : String(payload.role || '').toUpperCase()
-
-  if (role) subscribeRole(role)
-}
-
-/* ---------- BOOKING rooms ---------- */
-export async function subscribeBookingRooms(ids = []) {
+  const s = getSocket()
   await waitConnected()
 
-  const uniq = Array.from(new Set(ids.map(String).filter(Boolean)))
+  await emitAck(s, 'unsubscribe', { role: r })
+  subscribedRoles.delete(r)
+}
 
-  uniq.forEach((id) => {
-    if (joinedBookings.has(id)) return
-    s.emit('subscribe', { bookingId: id }, () => {})
-    joinedBookings.add(id)
-  })
+export async function subscribeRoles(roles = []) {
+  const uniq = Array.from(
+    new Set((Array.isArray(roles) ? roles : [roles]).map(normRole))
+  ).filter(Boolean)
 
-  return async () => {
-    await waitConnected()
-    uniq.forEach((id) => {
-      if (!joinedBookings.has(id)) return
-      s.emit('unsubscribe', { bookingId: id }, () => {})
-      joinedBookings.delete(id)
-    })
+  for (const r of uniq) {
+    // eslint-disable-next-line no-await-in-loop
+    await subscribeRole(r)
   }
 }
 
-/* ---------- EMPLOYEE + COMPANY + USER rooms ---------- */
+export async function unsubscribeRoles(roles = []) {
+  const uniq = Array.from(
+    new Set((Array.isArray(roles) ? roles : [roles]).map(normRole))
+  ).filter(Boolean)
+
+  for (const r of uniq) {
+    // eslint-disable-next-line no-await-in-loop
+    await unsubscribeRole(r)
+  }
+}
+
+/**
+ * Backward compatible helper:
+ * - subscribeRoleIfNeeded("ADMIN")
+ * - subscribeRoleIfNeeded({ role:"ADMIN" })
+ * - subscribeRoleIfNeeded({ roles:["LEAVE_USER","LEAVE_MANAGER"] })
+ */
+export function subscribeRoleIfNeeded(payload = {}) {
+  if (typeof payload === 'string') {
+    const role = normRole(payload)
+    if (role) subscribeRole(role)
+    return
+  }
+
+  const role = normRole(payload.role)
+  const roles = Array.isArray(payload.roles) ? payload.roles : []
+
+  if (roles.length) subscribeRoles(roles)
+  else if (role) subscribeRole(role)
+}
+
+/* -------------------- BOOKING rooms -------------------- */
+export async function subscribeBookingRooms(ids = []) {
+  await waitConnected()
+  const s = getSocket()
+
+  const uniq = Array.from(new Set(ids.map(v => String(v || '').trim()).filter(Boolean)))
+
+  for (const id of uniq) {
+    if (joinedBookings.has(id)) continue
+    const res = await emitAck(s, 'subscribe', { bookingId: id })
+    if (res?.ok) joinedBookings.add(id)
+    else console.warn('[socket] subscribe booking denied:', id, res?.error)
+  }
+
+  return async () => {
+    await waitConnected()
+    for (const id of uniq) {
+      if (!joinedBookings.has(id)) continue
+      await emitAck(s, 'unsubscribe', { bookingId: id })
+      joinedBookings.delete(id)
+    }
+  }
+}
+
+/* -------------------- EMPLOYEE + COMPANY + USER rooms -------------------- */
 export async function subscribeEmployeeIfNeeded(employeeId) {
-  const id = String(employeeId || '')
+  const id = String(employeeId || '').trim()
   if (!id || joinedEmployees.has(id)) return
 
   await waitConnected()
-  s.emit('subscribe', { employeeId: id }, () => {})
-  joinedEmployees.add(id)
+  const s = getSocket()
+
+  const res = await emitAck(s, 'subscribe', { employeeId: id })
+  if (res?.ok) joinedEmployees.add(id)
+  else console.warn('[socket] subscribe employee denied:', id, res?.error)
 }
 
 export async function subscribeCompanyIfNeeded(companyId) {
-  const id = String(companyId || '')
+  const id = String(companyId || '').trim()
   if (!id || joinedCompanies.has(id)) return
 
   await waitConnected()
-  s.emit('subscribe', { companyId: id }, () => {})
-  joinedCompanies.add(id)
+  const s = getSocket()
+
+  const res = await emitAck(s, 'subscribe', { companyId: id })
+  if (res?.ok) joinedCompanies.add(id)
+  else console.warn('[socket] subscribe company denied:', id, res?.error)
 }
 
 export async function subscribeUserIfNeeded(loginId) {
-  const id = String(loginId || '')
+  const id = String(loginId || '').trim()
   if (!id || joinedUsers.has(id)) return
 
   await waitConnected()
-  s.emit('subscribe', { loginId: id }, () => {})
-  joinedUsers.add(id)
+  const s = getSocket()
+
+  const res = await emitAck(s, 'subscribe', { loginId: id })
+  if (res?.ok) joinedUsers.add(id)
+  else console.warn('[socket] subscribe user denied:', id, res?.error)
 }
 
-/* ---------- small helpers ---------- */
+/* -------------------- small helpers -------------------- */
 export function onSocket(event, handler) {
+  const s = getSocket()
   s.on(event, handler)
   return () => s.off(event, handler)
+}
+
+/* optional: if you ever want to fully dispose (rare) */
+export function destroySocket() {
+  try {
+    resetSocketSubscriptions()
+    stopHeartbeat()
+    const s = getSocket()
+    if (s?.connected) s.disconnect()
+    socket = null
+  } catch {}
 }

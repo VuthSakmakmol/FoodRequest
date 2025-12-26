@@ -15,7 +15,12 @@ const router = useRouter()
 
 /* ───────── Identity ───────── */
 const loginId = computed(() =>
-  String(auth.user?.id || localStorage.getItem('loginId') || '')
+  String(
+    auth.user?.id ||
+      auth.user?.loginId ||
+      localStorage.getItem('loginId') ||
+      ''
+  ).trim()
 )
 
 /* ───────── responsive ───────── */
@@ -39,16 +44,12 @@ async function fetchManagedList(silent = false) {
   try {
     listLoading.value = true
     listError.value = ''
-
-    // ✅ same endpoint; backend filters by role (COO) if needed
     const res = await api.get('/leave/profile/managed')
     rows.value = Array.isArray(res?.data) ? res.data : []
   } catch (e) {
     console.error('fetchManagedList error', e)
     listError.value = e?.response?.data?.message || 'Unable to load employees.'
-    if (!silent) {
-      showToast({ type: 'error', title: 'Failed to load', message: listError.value })
-    }
+    if (!silent) showToast({ type: 'error', title: 'Failed to load', message: listError.value })
   } finally {
     listLoading.value = false
   }
@@ -57,7 +58,7 @@ async function fetchManagedList(silent = false) {
 const filteredRows = computed(() => {
   const s = q.value.trim().toLowerCase()
   if (!s) return rows.value
-  return rows.value.filter(r => {
+  return rows.value.filter((r) => {
     const a = String(r.employeeId || '').toLowerCase()
     const b = String(r.name || '').toLowerCase()
     const c = String(r.department || '').toLowerCase()
@@ -83,14 +84,17 @@ function num(v) {
   return Number.isFinite(n) ? n : 0
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Trust backend remaining (AL can be negative due to SP borrowing / debt).
+ */
 const balances = computed(() => {
   const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
-  const arr = raw.map(b => ({
+  const arr = raw.map((b) => ({
     leaveTypeCode: String(b?.leaveTypeCode || '').toUpperCase(),
     yearlyEntitlement: num(b?.yearlyEntitlement),
     used: num(b?.used),
-    remaining:
-      b?.remaining != null ? num(b.remaining) : Math.max(num(b?.yearlyEntitlement) - num(b?.used), 0)
+    remaining: num(b?.remaining), // ✅ backend truth (can be negative)
   }))
 
   const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
@@ -114,9 +118,8 @@ async function fetchEmployeeProfile(silent = false) {
     loading.value = true
     loadError.value = ''
 
-    // ✅ SAME endpoint; COO passes employeeId as query
     const res = await api.get('/leave/profile/my', {
-      params: { employeeId: targetEmployeeId.value }
+      params: { employeeId: targetEmployeeId.value },
     })
 
     profile.value = res?.data || null
@@ -124,9 +127,7 @@ async function fetchEmployeeProfile(silent = false) {
   } catch (e) {
     console.error('fetchEmployeeProfile error', e)
     loadError.value = e?.response?.data?.message || 'Unable to load leave balance.'
-    if (!silent) {
-      showToast({ type: 'error', title: 'Failed to load', message: loadError.value })
-    }
+    if (!silent) showToast({ type: 'error', title: 'Failed to load', message: loadError.value })
   } finally {
     loading.value = false
   }
@@ -134,7 +135,7 @@ async function fetchEmployeeProfile(silent = false) {
 
 /* ───────── realtime (detail only) ───────── */
 function isTargetDoc(payload = {}) {
-  const emp = String(payload.employeeId || '')
+  const emp = String(payload.employeeId || payload?.profile?.employeeId || '').trim()
   return targetEmployeeId.value && emp === targetEmployeeId.value
 }
 
@@ -149,15 +150,23 @@ function setupRealtime() {
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
   if (targetEmployeeId.value) subscribeEmployeeIfNeeded(targetEmployeeId.value)
 
+  // ✅ Refresh on request changes
   offHandlers.push(
-    onSocket('leave:req:created', p => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:manager-decision', p => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:gm-decision', p => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:updated', p => { if (isTargetDoc(p)) triggerRefresh() })
+    onSocket('leave:req:created', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:manager-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:gm-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:coo-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:updated', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+
+    // ✅ Refresh on profile changes (joinDate/contract renew/recalc balances)
+    onSocket('leave:profile:created', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:profile:updated', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:profile:recalculated', (p) => { if (isTargetDoc(p)) triggerRefresh() })
   )
 }
+
 function teardownRealtime() {
-  offHandlers.forEach(off => { try { off && off() } catch {} })
+  offHandlers.forEach((off) => { try { off && off() } catch {} })
   offHandlers.length = 0
 }
 
@@ -203,19 +212,14 @@ onBeforeUnmount(() => {
               {{ isDetailMode ? 'Employee Leave Balance' : 'Employee Profiles' }}
             </p>
             <span
-              class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5
-                     text-[10px] font-semibold"
+              class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold"
             >
               Read-only (review)
             </span>
           </div>
 
           <p class="mt-1 text-[11px] text-white/90">
-            {{
-              isDetailMode
-                ? 'Review remaining days before final decisions.'
-                : 'Select an employee to review leave balance.'
-            }}
+            {{ isDetailMode ? 'Review remaining days before final decisions.' : 'Select an employee to review leave balance.' }}
           </p>
         </div>
 
@@ -223,8 +227,7 @@ onBeforeUnmount(() => {
           <button
             v-if="isDetailMode"
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
-                   text-[11px] font-semibold text-white hover:bg-white/15"
+            class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15"
             @click="backToList()"
           >
             <i class="fa-solid fa-arrow-left text-[11px]" />
@@ -233,16 +236,11 @@ onBeforeUnmount(() => {
 
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
-                   text-[11px] font-semibold text-white hover:bg-white/15
-                   disabled:opacity-60 disabled:cursor-not-allowed"
+            class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed"
             :disabled="isDetailMode ? loading : listLoading"
             @click="isDetailMode ? fetchEmployeeProfile() : fetchManagedList()"
           >
-            <i
-              class="fa-solid fa-rotate text-[11px]"
-              :class="(isDetailMode ? loading : listLoading) ? 'fa-spin' : ''"
-            />
+            <i class="fa-solid fa-rotate text-[11px]" :class="(isDetailMode ? loading : listLoading) ? 'fa-spin' : ''" />
             Refresh
           </button>
         </div>
@@ -260,9 +258,8 @@ onBeforeUnmount(() => {
               v-model="q"
               type="text"
               placeholder="Search employeeId / name / department"
-              class="w-full rounded-xl border border-slate-200 bg-white px-9 py-2 text-xs text-slate-800 shadow-sm
-                     outline-none focus:ring-2 focus:ring-sky-300
-                     dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:focus:ring-sky-700"
+              class="w-full rounded-xl border border-slate-200 bg-white px-9 py-2 text-xs text-slate-800 shadow-sm outline-none
+                     focus:ring-2 focus:ring-sky-300 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:focus:ring-sky-700"
             />
           </div>
 
@@ -352,8 +349,7 @@ onBeforeUnmount(() => {
 
             <thead
               class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
-                     border-b border-slate-200 dark:bg-slate-800/80
-                     dark:border-slate-700 dark:text-slate-300"
+                     border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
             >
               <tr>
                 <th class="table-th">Employee ID</th>
@@ -476,7 +472,7 @@ onBeforeUnmount(() => {
                     <span class="text-slate-500 dark:text-slate-400">Remaining:</span>
                     <span
                       class="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
-                      :class="b.remaining > 0
+                      :class="b.remaining >= 0
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
                         : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
                     >
@@ -538,9 +534,8 @@ onBeforeUnmount(() => {
                   <td class="table-td !text-right align-middle">
                     <div class="flex justify-end">
                       <span
-                        class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px]
-                              font-semibold tabular-nums"
-                        :class="b.remaining > 0
+                        class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold tabular-nums"
+                        :class="b.remaining >= 0
                           ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
                           : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
                       >

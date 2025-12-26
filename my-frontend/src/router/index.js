@@ -2,25 +2,26 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
-// Layouts
+/* ─────────────────────────────────────────────
+ * Layouts
+ * ───────────────────────────────────────────── */
 const EmployeeLayout = () => import('@/layouts/EmployeeLayout.vue')
 const AdminLayout = () => import('@/layouts/AdminLayout.vue')
 const ChefLayout = () => import('@/layouts/ChefLayout.vue')
 const DriverLayout = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
 
+// ✅ NEW unified leave layout (User + Manager in one sidebar when multi-role)
+const LeaveExpatUnified = () => import('@/layouts/LeaveExpat/LeaveExpatUnified.vue')
+
 // Leave / Expat layouts
 const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
 const GMLeaveExpat = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
-const MGRLeaveExpat = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
-const UserLeaveExpat = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
 const COOLeaveExpat = () => import('@/layouts/LeaveExpat/COOLeaveExpat.vue')
 
-// Leave views
-const ManagerProfile = () => import('@/views/expat/manager/Profile.vue')
-const GMProfile = () => import('@/views/expat/generalManager/Profile.vue')
-const AdminLeaveReport = () => import('@/views/expat/admin/AdminLeaveReport.vue')
-
+/* ─────────────────────────────────────────────
+ * Views
+ * ───────────────────────────────────────────── */
 // Public
 const GreetingPage = () => import('@/views/GreetingPage.vue')
 
@@ -62,6 +63,7 @@ const AdminExpatProfiles = () => import('@/views/expat/AdminExpatProfile.vue')
 const ManagerLeaveInbox = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminLeaveProfileEdit = () => import('@/views/expat/admin/AdminLeaveProfileEdit.vue')
+const AdminLeaveReport = () => import('@/views/expat/admin/AdminLeaveReport.vue')
 
 // Replace Day (User)
 const UserReplaceDay = () => import('@/views/expat/user/UserReplaceDay.vue')
@@ -70,6 +72,10 @@ const UserReplaceDayList = () => import('@/views/expat/user/UserReplaceDayList.v
 // COO views
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
 const CooProfile = () => import('@/views/expat/coo/Profile.vue')
+
+// Manager/GM Profile views
+const ManagerProfile = () => import('@/views/expat/manager/Profile.vue')
+const GMProfile = () => import('@/views/expat/generalManager/Profile.vue')
 
 /* ─────────────────────────────────────────────
  * Roles helpers (supports user.role + user.roles[])
@@ -147,7 +153,9 @@ function homeByRole(role) {
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    // Public landing
+    /* ──────────────────────────────
+     * Public landing
+     * ────────────────────────────── */
     {
       path: '/',
       name: 'greeting',
@@ -160,7 +168,9 @@ const router = createRouter({
       meta: { public: true },
     },
 
-    // Public login (food/transport portal)
+    /* ──────────────────────────────
+     * Public login (food/transport portal)
+     * ────────────────────────────── */
     {
       name: 'admin-login',
       path: '/admin/login',
@@ -168,7 +178,9 @@ const router = createRouter({
       meta: { public: true, portal: 'admin' },
     },
 
-    // Public login for Expat Leave portal
+    /* ──────────────────────────────
+     * Public login (Expat Leave portal)
+     * ────────────────────────────── */
     {
       name: 'leave-login',
       path: '/leave/login',
@@ -176,7 +188,9 @@ const router = createRouter({
       meta: { public: true, portal: 'leave' },
     },
 
-    // Employee area
+    /* ──────────────────────────────
+     * Employee area
+     * ────────────────────────────── */
     {
       path: '/employee',
       component: EmployeeLayout,
@@ -191,7 +205,9 @@ const router = createRouter({
       ],
     },
 
-    // Admin area (Food/Transport)
+    /* ──────────────────────────────
+     * Admin area (Food/Transport)
+     * ────────────────────────────── */
     {
       path: '/admin',
       component: AdminLayout,
@@ -206,7 +222,9 @@ const router = createRouter({
       ],
     },
 
-    // Chef
+    /* ──────────────────────────────
+     * Chef
+     * ────────────────────────────── */
     {
       path: '/chef',
       component: ChefLayout,
@@ -218,7 +236,9 @@ const router = createRouter({
       ],
     },
 
-    // Driver
+    /* ──────────────────────────────
+     * Driver
+     * ────────────────────────────── */
     {
       path: '/driver',
       component: DriverLayout,
@@ -230,7 +250,9 @@ const router = createRouter({
       ],
     },
 
-    // Messenger
+    /* ──────────────────────────────
+     * Messenger
+     * ────────────────────────────── */
     {
       path: '/messenger',
       component: MessengerLayout,
@@ -242,10 +264,12 @@ const router = createRouter({
       ],
     },
 
-    // Leave / Expat – User
+    /* ──────────────────────────────
+     * Leave / Expat – User (✅ unified layout)
+     * ────────────────────────────── */
     {
       path: '/leave/user',
-      component: UserLeaveExpat,
+      component: LeaveExpatUnified,
       meta: {
         requiresRole: ['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'],
       },
@@ -258,10 +282,12 @@ const router = createRouter({
       ],
     },
 
-    // Leave / Expat – Manager
+    /* ──────────────────────────────
+     * Leave / Expat – Manager (✅ unified layout)
+     * ────────────────────────────── */
     {
       path: '/leave/manager',
-      component: MGRLeaveExpat,
+      component: LeaveExpatUnified,
       meta: { requiresRole: ['LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN'] },
       children: [
         { path: '', redirect: { name: 'leave-manager-inbox' } },
@@ -272,7 +298,9 @@ const router = createRouter({
       ],
     },
 
-    // Leave / Expat – GM
+    /* ──────────────────────────────
+     * Leave / Expat – GM
+     * ────────────────────────────── */
     {
       path: '/leave/gm',
       component: GMLeaveExpat,
@@ -286,7 +314,9 @@ const router = createRouter({
       ],
     },
 
-    // Leave / Expat – COO
+    /* ──────────────────────────────
+     * Leave / Expat – COO
+     * ────────────────────────────── */
     {
       path: '/leave/coo',
       component: COOLeaveExpat,
@@ -298,7 +328,9 @@ const router = createRouter({
       ],
     },
 
-    // Leave / Expat – Admin
+    /* ──────────────────────────────
+     * Leave / Expat – Admin
+     * ────────────────────────────── */
     {
       path: '/leave/admin',
       component: AdminLeaveExpat,
@@ -311,6 +343,7 @@ const router = createRouter({
         { path: 'gm-inbox', name: 'leave-admin-gm-inbox', component: GmLeaveInbox },
         { path: 'request', name: 'leave-admin-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-admin-my-requests', component: ExpatMyRequests },
+
         {
           path: 'profiles/:employeeId/edit',
           name: 'leave-admin-profile-edit',
@@ -320,6 +353,7 @@ const router = createRouter({
             title: 'Admin Leave Profile Edit',
           },
         },
+
         {
           path: 'report',
           name: 'leave-admin-report',
@@ -332,7 +366,9 @@ const router = createRouter({
       ],
     },
 
-    // 404 → greeting
+    /* ──────────────────────────────
+     * 404 → greeting
+     * ────────────────────────────── */
     {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'greeting' },
@@ -348,10 +384,12 @@ router.beforeEach((to) => {
   const auth = useAuth()
 
   const roles = normalizeRoles(auth.user)
-  const role = pickPrimaryRole(roles)
+  const primaryRole = pickPrimaryRole(roles)
 
   const isPublic = to.meta?.public === true
-  const requiredRoles = to.meta?.requiresRole || null
+  const requiredRoles = Array.isArray(to.meta?.requiresRole) ? to.meta.requiresRole : null
+  const requiredUpper = requiredRoles ? requiredRoles.map(r => String(r || '').toUpperCase()) : null
+
   const isEmployeeArea = to.path.startsWith('/employee')
 
   // 1) Logged in & visiting greeting or any login → send to homeByRole(primaryRole)
@@ -359,7 +397,7 @@ router.beforeEach((to) => {
     roles.length &&
     (to.name === 'greeting' || to.name === 'admin-login' || to.name === 'leave-login')
   ) {
-    const target = homeByRole(role)
+    const target = homeByRole(primaryRole)
     if (target.name !== to.name) return target
     return true
   }
@@ -373,7 +411,7 @@ router.beforeEach((to) => {
     if (roles.includes('EMPLOYEE')) return true
 
     // Other roles → back to their own home
-    const target = homeByRole(role)
+    const target = homeByRole(primaryRole)
     if (target.name !== to.name) return target
     return true
   }
@@ -388,8 +426,8 @@ router.beforeEach((to) => {
   }
 
   // 5) Role-specific restrictions: user must have ANY of required roles
-  if (requiredRoles && !roles.some(r => requiredRoles.includes(String(r).toUpperCase()))) {
-    const target = homeByRole(role)
+  if (requiredUpper && !roles.some(r => requiredUpper.includes(String(r).toUpperCase()))) {
+    const target = homeByRole(primaryRole)
     if (target.name !== to.name) return target
   }
 

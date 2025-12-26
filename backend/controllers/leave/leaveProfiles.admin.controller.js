@@ -8,7 +8,9 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const User = require('../../models/User')
 
 const { computeBalances } = require('../../utils/leave.rules')
-const { broadcastLeaveProfile } = require('../../utils/realtime') // ✅ REALTIME
+
+// ✅ FIX: use leave realtime broadcaster (admins + employee:<id> + user:<loginId>)
+const { broadcastLeaveProfile } = require('../../utils/leave.realtime')
 
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
 const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456'
@@ -25,13 +27,15 @@ function getIo(req) {
   return req.io || req.app?.get('io') || null
 }
 
-function emitProfile(req, docOrPlain, event) {
+/**
+ * ✅ Real-time emitter for LeaveProfile changes.
+ * Uses broadcastLeaveProfile(io, docOrPlain, event)
+ */
+function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
   try {
     const io = getIo(req)
     if (!io) return
-    const body =
-      typeof docOrPlain?.toObject === 'function' ? docOrPlain.toObject() : docOrPlain
-    broadcastLeaveProfile(io, body, event, body)
+    broadcastLeaveProfile(io, docOrPlain, event)
   } catch (e) {
     console.warn('⚠️ realtime emitProfile failed:', e?.message)
   }
@@ -92,22 +96,22 @@ function computeContractEndYMD(startYMD) {
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
   const base = req.user?.role ? [req.user.role] : []
-  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase()))]
+  return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 }
 
 function requireAnyRole(...allowed) {
-  const allow = allowed.map(x => String(x).toUpperCase())
+  const allow = allowed.map((x) => String(x).toUpperCase())
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ message: 'Unauthorized' })
     const roles = getRoles(req)
-    const ok = roles.some(r => allow.includes(r))
+    const ok = roles.some((r) => allow.includes(r))
     if (!ok) return res.status(403).json({ message: 'Forbidden' })
     next()
   }
 }
 
 function actorId(req) {
-  return String(req.user?.loginId || req.user?.id || req.user?.sub || '')
+  return String(req.user?.loginId || req.user?.id || req.user?.sub || '').trim()
 }
 
 /* ───────── id extract helpers ───────── */
@@ -143,14 +147,7 @@ async function getDirectory(empId) {
 
 /* ───────── ensure user (safe + multi-role) ───────── */
 
-async function ensureUser({
-  loginId,
-  name,
-  role,
-  roles,
-  isActive = true,
-  telegramChatId = '',
-}) {
+async function ensureUser({ loginId, name, role, roles, isActive = true, telegramChatId = '' }) {
   const id = String(loginId || '').trim()
   if (!id) return null
 
@@ -160,7 +157,7 @@ async function ensureUser({
     ...(Array.isArray(roles) ? roles : roles ? [roles] : []),
     ...(role ? [role] : []),
   ]
-    .map(r => String(r || '').trim().toUpperCase())
+    .map((r) => String(r || '').trim().toUpperCase())
     .filter(Boolean)
 
   const existing = await User.findOne({ loginId: id })
@@ -171,18 +168,12 @@ async function ensureUser({
 
     if (name && existing.name !== name) $set.name = name
     if (typeof isActive === 'boolean' && existing.isActive !== isActive) $set.isActive = isActive
-    if (cleanChatId && String(existing.telegramChatId || '') !== cleanChatId) {
-      $set.telegramChatId = cleanChatId
-    }
+    if (cleanChatId && String(existing.telegramChatId || '') !== cleanChatId) $set.telegramChatId = cleanChatId
 
-    if (addRoles.length) {
-      $addToSet.roles = { $each: addRoles }
-    }
+    if (addRoles.length) $addToSet.roles = { $each: addRoles }
 
     const curRole = String(existing.role || '').trim()
-    if (!curRole && addRoles.length) {
-      $set.role = addRoles[0]
-    }
+    if (!curRole && addRoles.length) $set.role = addRoles[0]
 
     const update = {}
     if (Object.keys($set).length) update.$set = $set
@@ -191,7 +182,6 @@ async function ensureUser({
     if (Object.keys(update).length) {
       return User.findOneAndUpdate({ _id: existing._id }, update, { new: true })
     }
-
     return existing
   }
 
@@ -211,10 +201,20 @@ async function ensureUser({
   })
 }
 
+/* ───────── tiny deep compare (for balances arrays) ───────── */
+function sameJSON(a, b) {
+  try {
+    return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+  } catch (_) {
+    return false
+  }
+}
+
 /* ───────── balances sync ───────── */
 
 async function syncBalancesForProfile(doc, asOfYMD) {
   if (!doc) return
+
   const asOf = isValidYMD(asOfYMD) ? asOfYMD : nowYMD()
 
   const approved = await LeaveRequest.find({
@@ -224,9 +224,16 @@ async function syncBalancesForProfile(doc, asOfYMD) {
     .sort({ startDate: 1 })
     .lean()
 
+  // computeBalances can accept mongoose doc (your implementation)
   const snap = computeBalances(doc, approved, new Date(asOf + 'T00:00:00Z'))
-  doc.balances = Array.isArray(snap?.balances) ? snap.balances : []
-  doc.balancesAsOf = asOf
+
+  const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
+  const nextEnd = snap?.meta?.contractYear?.endDate || doc.contractEndDate || ''
+
+  // ✅ only set fields if changed (prevents save + socket spam)
+  if (!sameJSON(doc.balances, nextBalances)) doc.balances = nextBalances
+  if (String(doc.balancesAsOf || '') !== String(asOf)) doc.balancesAsOf = asOf
+  if (String(doc.contractEndDate || '') !== String(nextEnd)) doc.contractEndDate = nextEnd
 }
 
 /* ───────── contract history helpers ───────── */
@@ -292,7 +299,7 @@ async function getApprovers(req, res) {
       .lean()
 
     res.json(
-      (docs || []).map(d => ({
+      (docs || []).map((d) => ({
         loginId: String(d.loginId || ''),
         name: d.name || '',
         role: d.role || '',
@@ -306,6 +313,10 @@ async function getApprovers(req, res) {
   }
 }
 
+/**
+ * GET grouped profiles
+ * ✅ Only save + emit when something actually changed.
+ */
 async function getProfilesGrouped(req, res) {
   try {
     const includeInactive = String(req.query.includeInactive || '') === '1'
@@ -317,10 +328,16 @@ async function getProfilesGrouped(req, res) {
     for (const doc of profiles || []) {
       if (doc?.isActive === false) continue
       if (!doc.joinDate || !isValidYMD(doc.joinDate)) continue
+
       if (!doc.contractDate || !isValidYMD(doc.contractDate)) doc.contractDate = doc.joinDate
       ensureContractsInitialized(doc, actorId(req))
+
       await syncBalancesForProfile(doc, asOf)
-      await doc.save()
+
+      if (doc.isModified()) {
+        await doc.save()
+        emitProfile(req, doc, 'leave:profile:updated')
+      }
     }
 
     const fresh = await LeaveProfile.find(query).lean()
@@ -332,16 +349,14 @@ async function getProfilesGrouped(req, res) {
       byMgr.get(mgrId).push(p)
     }
 
-    const managerIds = Array.from(byMgr.keys()).filter(x => x && x !== '—')
+    const managerIds = Array.from(byMgr.keys()).filter((x) => x && x !== '—')
     const mgrDirs = await EmployeeDirectory.find({ employeeId: { $in: managerIds } }).lean()
-    const mgrMap = new Map((mgrDirs || []).map(d => [String(d.employeeId), d]))
+    const mgrMap = new Map((mgrDirs || []).map((d) => [String(d.employeeId), d]))
 
     const out = []
     for (const [managerLoginId, emps] of byMgr.entries()) {
       const md = mgrMap.get(String(managerLoginId)) || null
-      const employees = (emps || [])
-        .slice()
-        .sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId)))
+      const employees = (emps || []).slice().sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId)))
 
       out.push({
         manager: {
@@ -349,7 +364,7 @@ async function getProfilesGrouped(req, res) {
           name: md?.name || '',
           department: md?.department || '',
         },
-        employees: employees.map(x => ({
+        employees: employees.map((x) => ({
           employeeId: x.employeeId,
           name: x.name || '',
           department: x.department || '',
@@ -390,7 +405,11 @@ async function getProfileOne(req, res) {
 
     ensureContractsInitialized(doc, actorId(req))
     await syncBalancesForProfile(doc, nowYMD())
-    await doc.save()
+
+    if (doc.isModified()) {
+      await doc.save()
+      emitProfile(req, doc, 'leave:profile:updated')
+    }
 
     res.json({ profile: doc })
   } catch (e) {
@@ -441,6 +460,7 @@ async function createProfileSingle(req, res) {
     if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
 
     let prof = await LeaveProfile.findOne({ employeeId })
+    const existed = !!prof
     if (!prof) prof = new LeaveProfile({ employeeId, employeeLoginId: employeeId })
 
     prof.approvalMode = approvalMode
@@ -459,9 +479,7 @@ async function createProfileSingle(req, res) {
     await syncBalancesForProfile(prof, nowYMD())
     await prof.save()
 
-    // ✅ REALTIME
-    emitProfile(req, prof, 'leave:profile:created')
-    emitProfile(req, prof, 'leave:profile:updated')
+    emitProfile(req, prof, existed ? 'leave:profile:updated' : 'leave:profile:created')
 
     res.json({ ok: true, profile: prof })
   } catch (e) {
@@ -503,10 +521,7 @@ async function createManagerWithEmployees(req, res) {
 
     for (const row of employees) {
       const employeeId = pickEmployeeId(row)
-      if (!employeeId) {
-        skippedCount += 1
-        continue
-      }
+      if (!employeeId) { skippedCount += 1; continue }
 
       const joinDate = row.joinDate ? assertYMD(row.joinDate, 'joinDate') : ''
       let contractDate = row.contractDate ? assertYMD(row.contractDate, 'contractDate') : ''
@@ -543,7 +558,6 @@ async function createManagerWithEmployees(req, res) {
       await syncBalancesForProfile(prof, nowYMD())
       await prof.save()
 
-      // ✅ REALTIME (emit per employee)
       emitProfile(req, prof, existed ? 'leave:profile:updated' : 'leave:profile:created')
 
       if (existed) updatedCount += 1
@@ -595,13 +609,13 @@ async function updateProfile(req, res) {
 
     ensureContractsInitialized(doc, actorId(req))
     await syncBalancesForProfile(doc, nowYMD())
+
     await doc.save()
 
     await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
     if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
     if (managerLoginId) await ensureUser({ loginId: managerLoginId, name: managerLoginId, role: 'LEAVE_MANAGER', isActive: true })
 
-    // ✅ REALTIME
     emitProfile(req, doc, 'leave:profile:updated')
 
     res.json({ ok: true, profile: doc })
@@ -622,8 +636,7 @@ async function deactivateProfile(req, res) {
 
     await User.updateOne({ loginId: employeeId }, { $set: { isActive: false } })
 
-    // ✅ REALTIME
-    emitProfile(req, doc, 'leave:profile:deactivated')
+    // ✅ REALTIME (single event is enough)
     emitProfile(req, doc, 'leave:profile:updated')
 
     res.json({ ok: true })
@@ -699,8 +712,7 @@ async function renewContract(req, res) {
     await syncBalancesForProfile(doc, nowYMD())
     await doc.save()
 
-    // ✅ REALTIME
-    emitProfile(req, doc, 'leave:profile:renewed')
+    // ✅ REALTIME (single event is enough)
     emitProfile(req, doc, 'leave:profile:updated')
 
     return res.json({

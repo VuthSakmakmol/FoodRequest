@@ -2,10 +2,41 @@
 import { defineStore } from 'pinia'
 import api from '@/utils/api'
 import {
-  subscribeRole,
-  unsubscribeRole,
+  subscribeRoles,
+  unsubscribeRoles,
   setSocketAuthToken,
+  resetSocketSubscriptions, // ✅ add this
 } from '@/utils/socket'
+
+function normalizeRoles(user) {
+  const raw = Array.isArray(user?.roles) ? user.roles : []
+  const base = user?.role ? [user.role] : []
+  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase().trim()))].filter(Boolean)
+}
+
+function pickPrimaryRole(roles = []) {
+  const PRIORITY = [
+    // Leave portal
+    'LEAVE_ADMIN',
+    'LEAVE_COO',
+    'LEAVE_GM',
+    'LEAVE_MANAGER',
+    'LEAVE_USER',
+
+    // Other portals
+    'ROOT_ADMIN',
+    'ADMIN',
+    'CHEF',
+    'DRIVER',
+    'MESSENGER',
+    'EMPLOYEE',
+  ]
+
+  for (const p of PRIORITY) {
+    if (roles.includes(p)) return p
+  }
+  return roles[0] || ''
+}
 
 export const useAuth = defineStore('auth', {
   state: () => ({
@@ -16,11 +47,32 @@ export const useAuth = defineStore('auth', {
 
   actions: {
     _applyTokenHeader(token) {
-      if (token) {
-        api.defaults.headers.common.Authorization = `Bearer ${token}`
-      } else {
-        delete api.defaults.headers.common.Authorization
-      }
+      if (token) api.defaults.headers.common.Authorization = `Bearer ${token}`
+      else delete api.defaults.headers.common.Authorization
+    },
+
+    _persistSession() {
+      localStorage.setItem('token', this.token || '')
+      localStorage.setItem('user', JSON.stringify(this.user || null))
+
+      const roles = normalizeRoles(this.user)
+      const primaryRole = pickPrimaryRole(roles)
+
+      // ✅ store roles strongly
+      localStorage.setItem('roles', JSON.stringify(roles))
+      localStorage.setItem('primaryRole', primaryRole)
+
+      // legacy key for old code paths
+      if (primaryRole) localStorage.setItem('role', primaryRole)
+
+      const loginKey = this.user?.id || this.user?.loginId || ''
+      if (loginKey) localStorage.setItem('loginId', loginKey)
+    },
+
+    async _applyRealtimeSubscriptions() {
+      const roles = normalizeRoles(this.user)
+      if (!roles.length) return
+      await subscribeRoles(roles)
     },
 
     async login(loginId, password) {
@@ -29,29 +81,17 @@ export const useAuth = defineStore('auth', {
       this.user = data.user
       this.token = data.token
 
-      // persist full user + token
-      localStorage.setItem('token', this.token)
-      localStorage.setItem('user', JSON.stringify(this.user))
-
-      // convenience: store loginId / employeeId / role separately
-      const loginKey = this.user?.id || this.user?.loginId || loginId
-      const empId    = this.user?.employeeId || ''
-      const role     = this.user?.role || ''
-
-      if (loginKey) localStorage.setItem('loginId', loginKey)
-      if (empId)    localStorage.setItem('employeeId', empId)
-      if (role)     localStorage.setItem('role', role)
-
-      // attach token for HTTP
+      // HTTP token
       this._applyTokenHeader(this.token)
 
-      // attach token for WebSocket
+      // WS token
       setSocketAuthToken(this.token)
 
-      // join a role room for realtime updates
-      if (role) {
-        subscribeRole(role)
-      }
+      // persist
+      this._persistSession()
+
+      // ✅ subscribe ALL roles (not only 1)
+      await this._applyRealtimeSubscriptions()
 
       return this.user
     },
@@ -65,71 +105,77 @@ export const useAuth = defineStore('auth', {
 
       try {
         this._applyTokenHeader(this.token)
-        // in case of page refresh: make sure WS also has token
         setSocketAuthToken(this.token)
 
         const { data } = await api.get('/auth/me')
         this.user = data
-        localStorage.setItem('user', JSON.stringify(this.user))
 
-        const loginKey = this.user?.id || this.user?.loginId || ''
-        const empId    = this.user?.employeeId || ''
-        const role     = this.user?.role || ''
-
-        if (loginKey) localStorage.setItem('loginId', loginKey)
-        if (empId)    localStorage.setItem('employeeId', empId)
-        if (role)     localStorage.setItem('role', role)
-
-        if (role) subscribeRole(role)
+        this._persistSession()
+        await this._applyRealtimeSubscriptions()
 
         return data
       } catch (e) {
-        this.logout()
+        await this.logout()
         throw e
       } finally {
         this.ready = true
       }
     },
 
-    restore() {
-      const storedUser  = localStorage.getItem('user')
-      const storedToken = localStorage.getItem('token')
+    async restore() {
+      const storedToken = localStorage.getItem('token') || ''
+      const storedUser = localStorage.getItem('user')
 
       if (storedToken) {
         this.token = storedToken
         this._applyTokenHeader(this.token)
-        setSocketAuthToken(this.token) // make sure WS has token too
+        setSocketAuthToken(this.token)
       }
 
       if (storedUser) {
-        this.user = JSON.parse(storedUser)
-        const role = this.user?.role || localStorage.getItem('role') || ''
-        if (role) subscribeRole(role)
-      }
-    },
-
-    logout() {
-      const role = this.user?.role || localStorage.getItem('role')
-
-      // leave role room if any
-      if (role) {
         try {
-          unsubscribeRole(role)
+          this.user = JSON.parse(storedUser)
         } catch {
-          // ignore socket errors on logout
+          this.user = null
         }
       }
 
-      // reset store state
-      this.user  = null
+      // ✅ re-sync storage keys in case old format existed
+      this._persistSession()
+
+      // ✅ subscribe ALL roles after refresh
+      await this._applyRealtimeSubscriptions()
+
+      this.ready = true
+    },
+
+    async logout() {
+      const roles = normalizeRoles(this.user)
+
+      // ✅ unsubscribe ALL roles
+      if (roles.length) {
+        try {
+          await unsubscribeRoles(roles)
+        } catch {
+          // ignore socket errors
+        }
+      }
+
+      // ✅ IMPORTANT: clear in-memory room sets so reconnect won't replay old rooms
+      try {
+        resetSocketSubscriptions()
+      } catch {}
+
+      // reset store
+      this.user = null
       this.token = ''
       this.ready = false
 
-      // clear HTTP + socket auth
+      // clear auth headers + ws token
       this._applyTokenHeader('')
       setSocketAuthToken('')
 
-      // ---- CLEAR STORAGE KEYS ----
+      // clear storage
       try {
         const toRemove = [
           'token',
@@ -138,25 +184,21 @@ export const useAuth = defineStore('auth', {
           'employeeId',
           'lastLoginId',
           'role',
+          'roles',
+          'primaryRole',
           'theme',
         ]
         toRemove.forEach(k => localStorage.removeItem(k))
-
-        // if you also store anything in sessionStorage, wipe it
         sessionStorage.clear()
-      } catch {
-        // ignore storage errors
-      }
+      } catch {}
 
-      // ---- CLEAR COOKIES (loginId / role / theme) ----
+      // clear cookies
       try {
         const cookieNames = ['loginId', 'role', 'theme']
         cookieNames.forEach(name => {
           document.cookie = `${name}=; Max-Age=0; path=/`
         })
-      } catch {
-        // ignore cookie errors
-      }
+      } catch {}
     },
   },
 })

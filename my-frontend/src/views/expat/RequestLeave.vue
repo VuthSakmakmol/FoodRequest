@@ -10,20 +10,25 @@ import UserLeaveProfile from '@/views/expat/user/UserLeaveProfile.vue'
 const emit = defineEmits(['submitted'])
 const { showToast } = useToast()
 
-/* ───────── Employee identity for realtime ───────── */
-const employeeId = ref((localStorage.getItem('employeeId') || '').toString())
+/* ───────── Employee identity for realtime ─────────
+ * Prefer localStorage employeeId (your system uses employeeId rooms).
+ */
+const employeeId = ref(String(localStorage.getItem('employeeId') || '').trim())
+
+/* ───────── Force refresh for profile component on realtime ───────── */
+const profileTick = ref(0)
 
 /* ───────── LEAVE TYPES (Expat only) ───────── */
 const loadingTypes = ref(false)
 const leaveTypes = ref([])
 const typesError = ref('')
 
-function typeLabel(t){
+function typeLabel(t) {
   const name = String(t?.name || '').trim()
-  const code = String(t?.code || '').trim().toUpperCase
+  const code = String(t?.code || '').trim().toUpperCase()
   if (!code) return name
 
-  const endWithCode = new RegExp(`\\(\\s*${code}\\s*\\)$`, `i`).test(name)
+  const endsWithCode = new RegExp(`\\(\\s*${code}\\s*\\)$`, 'i').test(name)
   if (endsWithCode) return name
 
   return `${name} (${code})`
@@ -38,7 +43,7 @@ async function fetchLeaveTypes() {
     let data = Array.isArray(res.data) ? res.data : []
 
     // Optional: only show active types if backend sends isActive
-    data = data.filter(t => t.isActive !== false)
+    data = data.filter((t) => t.isActive !== false)
 
     leaveTypes.value = data
 
@@ -72,7 +77,7 @@ const formSuccess = ref('')
 
 const selectedType = computed(() => {
   const code = String(form.value.leaveTypeCode || '').toUpperCase()
-  return leaveTypes.value.find(t => String(t.code || '').toUpperCase() === code) || null
+  return leaveTypes.value.find((t) => String(t.code || '').toUpperCase() === code) || null
 })
 
 const isMA = computed(() => String(form.value.leaveTypeCode || '').toUpperCase() === 'MA')
@@ -81,11 +86,9 @@ const hasBasicFields = computed(() => {
   if (!form.value.leaveTypeCode) return false
   if (!form.value.startDate) return false
 
-  // if half day, endDate is auto
   if (form.value.isHalfDay) {
     return !!form.value.dayPart
   }
-
   return !!form.value.endDate
 })
 
@@ -110,9 +113,7 @@ watch(
   () => {
     if (form.value.isHalfDay) {
       form.value.endDate = form.value.startDate || ''
-    }
-    if (!form.value.isHalfDay) {
-      // if user turns off half-day and endDate empty, set it = startDate for convenience
+    } else {
       if (form.value.startDate && !form.value.endDate) {
         form.value.endDate = form.value.startDate
       }
@@ -120,11 +121,10 @@ watch(
   }
 )
 
-/* If leave type changes, reset half-day fields safely */
+/* If leave type changes, keep safe */
 watch(
   () => form.value.leaveTypeCode,
   () => {
-    // keep user choice but clear dayPart if not half-day
     if (!form.value.isHalfDay) form.value.dayPart = ''
   }
 )
@@ -146,7 +146,6 @@ async function submitRequest() {
       return
     }
   } else {
-    // half day
     if (!form.value.dayPart) {
       formError.value = 'Please select Morning or Afternoon.'
       return
@@ -165,8 +164,6 @@ async function submitRequest() {
       startDate: form.value.startDate,
       endDate: form.value.isHalfDay ? form.value.startDate : form.value.endDate,
       reason: form.value.reason || '',
-
-      // ✅ half-day fields to match backend model/controller
       isHalfDay: !!form.value.isHalfDay,
       dayPart: form.value.isHalfDay ? String(form.value.dayPart || '').toUpperCase() : '',
     }
@@ -198,63 +195,119 @@ async function submitRequest() {
 
 /* ───────── Realtime: subscribe + listeners ───────── */
 const offHandlers = []
+const isRealtimeReady = ref(false)
 
-function setupRealtime() {
-  if (!employeeId.value) return
+function ensureRealtimeSub() {
+  const empId = String(employeeId.value || '').trim()
+  if (!empId) return
 
-  subscribeEmployeeIfNeeded(employeeId.value)
+  subscribeEmployeeIfNeeded(empId)
+  isRealtimeReady.value = true
+}
 
+function setupRealtimeListeners() {
+  // Manager decision
   const offManager = onSocket('leave:req:manager-decision', (payload = {}) => {
-    const emp = String(payload.employeeId || '')
-    if (emp !== employeeId.value) return
+    const emp = String(payload.employeeId || '').trim()
+    if (!emp || emp !== String(employeeId.value || '').trim()) return
 
-    const status = String(payload.status || '')
+    const status = String(payload.status || '').trim().toUpperCase()
     if (status === 'PENDING_GM') {
       showToast({
         type: 'success',
         title: 'Manager approved',
-        message: 'Your leave request has been approved by your manager and sent to GM.',
+        message: 'Your leave request was approved by manager and sent to GM.',
       })
     } else if (status === 'REJECTED') {
       showToast({
         type: 'error',
         title: 'Manager rejected',
-        message: 'Your leave request has been rejected by your manager.',
+        message: 'Your leave request was rejected by your manager.',
       })
     }
+
+    // balance reservation changes (reject frees)
+    profileTick.value += 1
   })
 
+  // GM decision
   const offGm = onSocket('leave:req:gm-decision', (payload = {}) => {
-    const emp = String(payload.employeeId || '')
-    if (emp !== employeeId.value) return
+    const emp = String(payload.employeeId || '').trim()
+    if (!emp || emp !== String(employeeId.value || '').trim()) return
 
-    const status = String(payload.status || '')
+    const status = String(payload.status || '').trim().toUpperCase()
     if (status === 'APPROVED') {
       showToast({
         type: 'success',
         title: 'GM approved',
-        message: 'Your leave request has been approved by GM.',
+        message: 'Your leave request was approved by GM.',
       })
     } else if (status === 'REJECTED') {
       showToast({
         type: 'error',
         title: 'GM rejected',
-        message: 'Your leave request has been rejected by GM.',
+        message: 'Your leave request was rejected by GM.',
       })
+    }
+
+    // balances definitely change here
+    profileTick.value += 1
+  })
+
+  // Generic updates (cancel / admin edits / etc.)
+  const offUpdated = onSocket('leave:req:updated', (payload = {}) => {
+    const emp = String(payload.employeeId || '').trim()
+    if (!emp || emp !== String(employeeId.value || '').trim()) return
+
+    const status = String(payload.status || '').trim().toUpperCase()
+    if (status === 'CANCELLED') {
+      showToast({
+        type: 'info',
+        title: 'Cancelled',
+        message: 'Your leave request was cancelled.',
+      })
+      profileTick.value += 1
     }
   })
 
-  offHandlers.push(offManager, offGm)
+  // Profile updated (balances refresh)
+  const offProfile = onSocket('leave:profile:updated', (payload = {}) => {
+    const emp = String(payload.employeeId || '').trim()
+    if (!emp || emp !== String(employeeId.value || '').trim()) return
+    profileTick.value += 1
+  })
+
+  offHandlers.push(offManager, offGm, offUpdated, offProfile)
 }
+
+/* EmployeeId may appear after login -> keep subscribing */
+watch(
+  () => String(localStorage.getItem('employeeId') || '').trim(),
+  (v) => {
+    if (v && v !== employeeId.value) employeeId.value = v
+  }
+)
+
+watch(
+  () => employeeId.value,
+  (v) => {
+    if (!v) return
+    ensureRealtimeSub()
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   await fetchLeaveTypes()
-  setupRealtime()
+  ensureRealtimeSub()
+  setupRealtimeListeners()
 })
 
 onBeforeUnmount(() => {
-  offHandlers.forEach(off => {
-    try { off && off() } catch {}
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
   })
 })
 </script>
@@ -262,7 +315,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="px-1 py-1 sm:px-3 space-y-3">
     <!-- My remaining leave panel -->
-    <UserLeaveProfile />
+    <UserLeaveProfile :key="profileTick" />
 
     <!-- Request form -->
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -319,7 +372,7 @@ onBeforeUnmount(() => {
                 {{ loadingTypes ? 'Loading leave types…' : 'Select leave type' }}
               </option>
               <option v-for="t in leaveTypes" :key="t.code" :value="t.code">
-                {{ t.name }} 
+                {{ typeLabel(t) }}
               </option>
             </select>
 
@@ -361,8 +414,7 @@ onBeforeUnmount(() => {
             <div v-if="form.isHalfDay" class="mt-2 grid gap-2 sm:grid-cols-2">
               <button
                 type="button"
-                class="rounded-xl border px-3 py-2 text-left text-[12px] font-semibold shadow-sm transition
-                       dark:shadow-none"
+                class="rounded-xl border px-3 py-2 text-left text-[12px] font-semibold shadow-sm transition dark:shadow-none"
                 :class="form.dayPart === 'AM'
                   ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200'
                   : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-900/70'"
@@ -379,8 +431,7 @@ onBeforeUnmount(() => {
 
               <button
                 type="button"
-                class="rounded-xl border px-3 py-2 text-left text-[12px] font-semibold shadow-sm transition
-                       dark:shadow-none"
+                class="rounded-xl border px-3 py-2 text-left text-[12px] font-semibold shadow-sm transition dark:shadow-none"
                 :class="form.dayPart === 'PM'
                   ? 'border-indigo-300 bg-indigo-50 text-indigo-800 dark:border-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200'
                   : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-900/70'"
@@ -499,7 +550,11 @@ onBeforeUnmount(() => {
         </form>
 
         <!-- Small helper -->
-        <div v-if="selectedType" class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300">
+        <div
+          v-if="selectedType"
+          class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600
+                 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300"
+        >
           <span class="font-semibold text-slate-800 dark:text-slate-100">{{ selectedType.name }}</span>
           <span class="opacity-80"> — {{ selectedType.description || 'Follow company policy and approval flow.' }}</span>
         </div>
