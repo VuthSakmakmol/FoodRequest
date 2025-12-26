@@ -10,19 +10,48 @@ function userRoles(user) {
   return [...new Set([...arr, ...one].map(r => String(r || '').toUpperCase()))]
 }
 
+/** ✅ Choose a stable “primary role” for legacy UI + routing */
+function pickPrimaryRole(roles = []) {
+  const PRIORITY = [
+    // Leave portal
+    'LEAVE_ADMIN',
+    'LEAVE_COO',
+    'LEAVE_GM',
+    'LEAVE_MANAGER',
+    'LEAVE_USER',
+
+    // Other portals
+    'ROOT_ADMIN',
+    'ADMIN',
+    'CHEF',
+    'DRIVER',
+    'MESSENGER',
+    'EMPLOYEE',
+  ]
+
+  for (const p of PRIORITY) {
+    if (roles.includes(p)) return p
+  }
+  return roles[0] || ''
+}
+
 const signToken = (user) => {
   const roles = userRoles(user)
+  const primary = pickPrimaryRole(roles) || String(user?.role || '').toUpperCase()
+
   return jwt.sign(
     {
       sub: String(user._id),
-      id: user.loginId,
-      name: user.name,
 
-      // ✅ keep legacy + add roles
-      role: roles[0] || user.role || '',
-      roles,
+      // ✅ keep your legacy fields
+      id: String(user.loginId),        // legacy usage
+      loginId: String(user.loginId),   // ✅ consistent usage everywhere
+      name: user.name || '',
+
+      role: primary,  // ✅ primary role (legacy)
+      roles,          // ✅ multi-role
     },
-    process.env.JWT_SECRET,
+    process.env.JWT_SECRET || 'dev_secret',
     { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
   )
 }
@@ -67,14 +96,16 @@ exports.login = async (req, res, next) => {
     }
 
     const token = signToken(user)
+    const primary = pickPrimaryRole(roles) || (roles[0] || user.role || '')
 
     return res.json({
       token,
       user: {
-        id: user.loginId,
+        id: String(user.loginId),
+        loginId: String(user.loginId),   // ✅ add for frontend consistency
         name: user.name,
-        role: roles[0] || user.role,  // legacy
-        roles,                        // ✅ new
+        role: primary,                   // ✅ primary (legacy)
+        roles,                           // ✅ multi
       },
       portal: portal || null,
     })
@@ -110,7 +141,8 @@ exports.createUser = async (req, res, next) => {
       .map(r => String(r || '').toUpperCase().trim())
       .filter(Boolean)
 
-    const mainRole = rolesArr[0] || 'LEAVE_USER'
+    const merged = [...new Set(rolesArr)]
+    const mainRole = pickPrimaryRole(merged) || merged[0] || 'LEAVE_USER'
 
     // ✅ auto fetch telegramChatId from EmployeeDirectory if not provided
     let telegramChatId = String(bodyChatId || '').trim()
@@ -127,14 +159,15 @@ exports.createUser = async (req, res, next) => {
       loginId: cleanId,
       name: String(name).trim(),
       passwordHash,
-      role: mainRole,     // legacy
-      roles: rolesArr,    // ✅ new
+      role: mainRole,   // legacy
+      roles: merged,    // ✅ multi roles
       isActive: true,
       ...(telegramChatId ? { telegramChatId } : {}),
     })
 
     res.status(201).json({
       id: doc.loginId,
+      loginId: doc.loginId,
       name: doc.name,
       role: doc.role,
       roles: userRoles(doc),
@@ -152,8 +185,9 @@ exports.me = async (req, res, next) => {
 
     res.json({
       id: user.loginId,
+      loginId: user.loginId,
       name: user.name,
-      role: user.role,
+      role: pickPrimaryRole(userRoles(user)) || user.role,
       roles: userRoles(user),
     })
   } catch (e) {
