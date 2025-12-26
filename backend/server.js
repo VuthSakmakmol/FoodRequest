@@ -99,7 +99,7 @@ app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
 // ✅ admin leave routes grouped
 app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
 app.use('/api/admin/leave/types',       require('./routes/leave/leaveType-admin.routes'))
-
+app.use('/api/leave/requests', require('./routes/leave/leaveRequests.coo.routes'))
 // leave report
 app.use('/api', require('./routes/leave/leaveReport-admin.routes'))
 

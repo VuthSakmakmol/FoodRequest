@@ -9,13 +9,13 @@ router.use(requireAuth)
 
 router.get(
   '/my',
-  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN'),
+  requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.getMyProfile
 )
 
 router.get(
   '/managed',
-  requireRole('LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN'),
+  requireRole('LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.listManagedProfiles
 )
 

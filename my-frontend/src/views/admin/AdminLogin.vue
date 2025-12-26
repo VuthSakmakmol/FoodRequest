@@ -35,6 +35,7 @@ async function submit() {
   try {
     const id = loginId.value.trim()
     localStorage.setItem('lastLoginId', id)
+
     await auth.login(id, password.value)
 
     showToast({
@@ -47,6 +48,7 @@ async function submit() {
     const role   = auth.user?.role
     const portal = route.meta?.portal || 'admin' // 'admin' or 'leave'
 
+    // ✅ LEAVE PORTAL ROUTING (updated for LEAVE_COO)
     if (portal === 'leave') {
       if (role === 'LEAVE_ADMIN' || role === 'ADMIN') {
         router.push({ name: 'leave-admin-types' })
@@ -54,21 +56,25 @@ async function submit() {
         router.push({ name: 'leave-manager-inbox' })
       } else if (role === 'LEAVE_GM') {
         router.push({ name: 'leave-gm-inbox' })
+      } else if (role === 'LEAVE_COO') {
+        router.push({ name: 'leave-coo-inbox' })
       } else if (role === 'LEAVE_USER') {
         router.push({ name: 'leave-user-request' })
       } else {
         router.push({ name: 'employee-request' })
       }
+      return
+    }
+
+    // ✅ ADMIN PORTAL ROUTING
+    if (role === 'CHEF') {
+      router.push({ name: 'chef-requests' })
+    } else if (role === 'DRIVER') {
+      router.push({ name: 'driver-car-booking' })
+    } else if (role === 'MESSENGER') {
+      router.push({ name: 'messenger-assignment' })
     } else {
-      if (role === 'CHEF') {
-        router.push({ name: 'chef-requests' })
-      } else if (role === 'DRIVER') {
-        router.push({ name: 'driver-car-booking' })
-      } else if (role === 'MESSENGER') {
-        router.push({ name: 'messenger-assignment' })
-      } else {
-        router.push({ name: 'admin-requests' })
-      }
+      router.push({ name: 'admin-requests' })
     }
   } catch (e) {
     const msg = e?.response?.data?.message || e.message || 'Login failed.'

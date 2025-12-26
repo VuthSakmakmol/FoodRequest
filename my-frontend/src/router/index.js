@@ -3,70 +3,113 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
 // Layouts
-const EmployeeLayout  = () => import('@/layouts/EmployeeLayout.vue')
-const AdminLayout     = () => import('@/layouts/AdminLayout.vue')
-const ChefLayout      = () => import('@/layouts/ChefLayout.vue')
-const DriverLayout    = () => import('@/layouts/DriverLayout.vue')
+const EmployeeLayout = () => import('@/layouts/EmployeeLayout.vue')
+const AdminLayout = () => import('@/layouts/AdminLayout.vue')
+const ChefLayout = () => import('@/layouts/ChefLayout.vue')
+const DriverLayout = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
 
 // Leave / Expat layouts
 const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
-const GMLeaveExpat    = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
-const MGRLeaveExpat   = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
-const UserLeaveExpat  = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
-const ManagerProfile  = () => import('@/views/expat/manager/Profile.vue')
-const getMyProfile    = () => import('@/views/expat/generalManager/Profile.vue')
+const GMLeaveExpat = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
+const MGRLeaveExpat = () => import('@/layouts/LeaveExpat/MGRLeaveExpat.vue')
+const UserLeaveExpat = () => import('@/layouts/LeaveExpat/UserLeaveExpat.vue')
+const COOLeaveExpat = () => import('@/layouts/LeaveExpat/COOLeaveExpat.vue')
+
+// Leave views
+const ManagerProfile = () => import('@/views/expat/manager/Profile.vue')
+const GMProfile = () => import('@/views/expat/generalManager/Profile.vue')
 const AdminLeaveReport = () => import('@/views/expat/admin/AdminLeaveReport.vue')
 
 // Public
-const GreetingPage    = () => import('@/views/GreetingPage.vue')
+const GreetingPage = () => import('@/views/GreetingPage.vue')
 
 // Employee
-const EmployeeHome         = () => import('@/views/employee/EmployeeHome.vue')
-const EmployeeRequestHist  = () => import('@/views/employee/foodBooking/EmployeeFoodBooking.vue')
+const EmployeeHome = () => import('@/views/employee/EmployeeHome.vue')
+const EmployeeRequestHist = () => import('@/views/employee/foodBooking/EmployeeFoodBooking.vue')
 const EmployeeFoodCalendar = () => import('@/views/employee/foodBooking/EmployeeFoodCalendar.vue')
-const EmployeeCarBooking   = () => import('@/views/employee/carBooking/EmployeeCarBooking.vue')
-const EmployeeCarHistory   = () => import('@/views/employee/carBooking/EmployeeCarHistory.vue')
-const CarBookingSchedule   = () => import('@/views/employee/carBooking/EmployeeCarCalendar.vue')
+const EmployeeCarBooking = () => import('@/views/employee/carBooking/EmployeeCarBooking.vue')
+const EmployeeCarHistory = () => import('@/views/employee/carBooking/EmployeeCarHistory.vue')
+const CarBookingSchedule = () => import('@/views/employee/carBooking/EmployeeCarCalendar.vue')
 
 // Admin (Food)
-const AdminLogin        = () => import('@/views/admin/AdminLogin.vue')
+const AdminLogin = () => import('@/views/admin/AdminLogin.vue')
 const AdminFoodRequests = () => import('@/views/admin/foodBooking/AdminFoodBooking.vue')
 const AdminFoodCalendar = () => import('@/views/admin/foodBooking/AdminFoodCalendar.vue')
-const AdminDashboard    = () => import('@/views/admin/AdminDashboard.vue')
+const AdminDashboard = () => import('@/views/admin/AdminDashboard.vue')
 
 // Admin (Transportation)
-const AdminCarBooking   = () => import('@/views/admin/carbooking/AdminCarBooking.vue')
-const AdminCarCalendar  = () => import('@/views/admin/carbooking/TransportAdminCalendar.vue')
+const AdminCarBooking = () => import('@/views/admin/carbooking/AdminCarBooking.vue')
+const AdminCarCalendar = () => import('@/views/admin/carbooking/TransportAdminCalendar.vue')
 
 // Chef
-const ChefFoodRequests  = () => import('@/views/chef/ChefFoodBooking.vue')
-const ChefFoodCalendar  = () => import('@/views/chef/ChefFoodCalendar.vue')
+const ChefFoodRequests = () => import('@/views/chef/ChefFoodBooking.vue')
+const ChefFoodCalendar = () => import('@/views/chef/ChefFoodCalendar.vue')
 
 // Driver
-const DriverCarBooking  = () => import('@/views/driver/DriverCarBooking.vue')
+const DriverCarBooking = () => import('@/views/driver/DriverCarBooking.vue')
 const DriverCarCalendar = () => import('@/views/driver/DriverCarCalendar.vue')
 
 // Messenger
-const MessengerAssignment  = () => import('@/views/messenger/MessengerCarBooking.vue')
+const MessengerAssignment = () => import('@/views/messenger/MessengerCarBooking.vue')
 const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
-// Expat Leave (views)
-const ExpatRequestLeave   = () => import('@/views/expat/RequestLeave.vue')
-const ExpatMyRequests     = () => import('@/views/expat/MyRequest.vue')
-const AdminLeaveTypes     = () => import('@/views/expat/AdminLeaveTypes.vue')
-const AdminExpatProfiles  = () => import('@/views/expat/AdminExpatProfile.vue')
-const ManagerLeaveInbox   = () => import('@/views/expat/ManagerLeaveInbox.vue')
-const GmLeaveInbox        = () => import('@/views/expat/GmLeaveInbox.vue')
-const AdminLeaveProfileEdit =  () => import('@/views/expat/admin/AdminLeaveProfileEdit.vue')
+// Expat Leave (shared views)
+const ExpatRequestLeave = () => import('@/views/expat/RequestLeave.vue')
+const ExpatMyRequests = () => import('@/views/expat/MyRequest.vue')
+const AdminLeaveTypes = () => import('@/views/expat/AdminLeaveTypes.vue')
+const AdminExpatProfiles = () => import('@/views/expat/AdminExpatProfile.vue')
+const ManagerLeaveInbox = () => import('@/views/expat/ManagerLeaveInbox.vue')
+const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
+const AdminLeaveProfileEdit = () => import('@/views/expat/admin/AdminLeaveProfileEdit.vue')
+
 // Replace Day (User)
-const UserReplaceDay      = () => import('@/views/expat/user/UserReplaceDay.vue')
-const UserReplaceDayList  = () => import('@/views/expat/user/UserReplaceDayList.vue')
+const UserReplaceDay = () => import('@/views/expat/user/UserReplaceDay.vue')
+const UserReplaceDayList = () => import('@/views/expat/user/UserReplaceDayList.vue')
 
+// COO views
+const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
+const CooProfile = () => import('@/views/expat/coo/Profile.vue')
 
-// Decide "home" route by role
+/* ─────────────────────────────────────────────
+ * Roles helpers (supports user.role + user.roles[])
+ * ───────────────────────────────────────────── */
+function normalizeRoles(user) {
+  const raw = Array.isArray(user?.roles) ? user.roles : []
+  const base = user?.role ? [user.role] : []
+  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase()))]
+}
+
+function pickPrimaryRole(roles = []) {
+  // Highest priority wins
+  const PRIORITY = [
+    // Leave portal
+    'LEAVE_ADMIN',
+    'LEAVE_COO',
+    'LEAVE_GM',
+    'LEAVE_MANAGER',
+    'LEAVE_USER',
+
+    // Other portals
+    'ROOT_ADMIN',
+    'ADMIN',
+    'CHEF',
+    'DRIVER',
+    'MESSENGER',
+    'EMPLOYEE',
+  ]
+
+  for (const p of PRIORITY) {
+    if (roles.includes(p)) return p
+  }
+  return roles[0] || ''
+}
+
+/* ─────────────────────────────────────────────
+ * Decide "home" route by role (primary)
+ * ───────────────────────────────────────────── */
 function homeByRole(role) {
-  switch (role) {
+  switch (String(role || '').toUpperCase()) {
     case 'ADMIN':
     case 'ROOT_ADMIN':
       return { name: 'admin-requests' }
@@ -80,7 +123,7 @@ function homeByRole(role) {
     case 'MESSENGER':
       return { name: 'messenger-assignment' }
 
-    // Leave roles → go to their dedicated leave layouts
+    // Leave roles
     case 'LEAVE_USER':
       return { name: 'leave-user-request' }
 
@@ -89,6 +132,9 @@ function homeByRole(role) {
 
     case 'LEAVE_GM':
       return { name: 'leave-gm-inbox' }
+
+    case 'LEAVE_COO':
+      return { name: 'leave-coo-inbox' }
 
     case 'LEAVE_ADMIN':
       return { name: 'leave-admin-types' }
@@ -99,7 +145,6 @@ function homeByRole(role) {
 }
 
 const router = createRouter({
-  // Vite-style history (uses base from vite.config if set)
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     // Public landing
@@ -107,12 +152,12 @@ const router = createRouter({
       path: '/',
       name: 'greeting',
       component: GreetingPage,
-      meta: { public: true }
+      meta: { public: true },
     },
     {
       path: '/greeting',
       redirect: { name: 'greeting' },
-      meta: { public: true }
+      meta: { public: true },
     },
 
     // Public login (food/transport portal)
@@ -120,15 +165,15 @@ const router = createRouter({
       name: 'admin-login',
       path: '/admin/login',
       component: AdminLogin,
-      meta: { public: true, portal: 'admin' }
+      meta: { public: true, portal: 'admin' },
     },
 
     // Public login for Expat Leave portal
     {
       name: 'leave-login',
       path: '/leave/login',
-      component: AdminLogin, // reuse same UI
-      meta: { public: true, portal: 'leave' }
+      component: AdminLogin,
+      meta: { public: true, portal: 'leave' },
     },
 
     // Employee area
@@ -137,13 +182,13 @@ const router = createRouter({
       component: EmployeeLayout,
       children: [
         { path: '', redirect: { name: 'employee-request' } },
-        { name: 'employee-request',         path: 'request',       component: EmployeeHome },
-        { name: 'employee-request-history', path: 'history',       component: EmployeeRequestHist },
-        { name: 'employee-food-calendar',   path: 'food-calendar', component: EmployeeFoodCalendar },
-        { name: 'employee-car-booking',     path: 'car-booking',   component: EmployeeCarBooking },
-        { name: 'employee-car-history',     path: 'car-history',   component: EmployeeCarHistory },
-        { name: 'employee-car-schedule',    path: 'car-schedule',  component: CarBookingSchedule }
-      ]
+        { name: 'employee-request', path: 'request', component: EmployeeHome },
+        { name: 'employee-request-history', path: 'history', component: EmployeeRequestHist },
+        { name: 'employee-food-calendar', path: 'food-calendar', component: EmployeeFoodCalendar },
+        { name: 'employee-car-booking', path: 'car-booking', component: EmployeeCarBooking },
+        { name: 'employee-car-history', path: 'car-history', component: EmployeeCarHistory },
+        { name: 'employee-car-schedule', path: 'car-schedule', component: CarBookingSchedule },
+      ],
     },
 
     // Admin area (Food/Transport)
@@ -153,12 +198,12 @@ const router = createRouter({
       meta: { requiresRole: ['ADMIN', 'ROOT_ADMIN'] },
       children: [
         { path: '', redirect: { name: 'admin-requests' } },
-        { name: 'admin-dashboard',     path: 'dashboard',     component: AdminDashboard },
-        { name: 'admin-requests',      path: 'requests',      component: AdminFoodRequests },
+        { name: 'admin-dashboard', path: 'dashboard', component: AdminDashboard },
+        { name: 'admin-requests', path: 'requests', component: AdminFoodRequests },
         { name: 'admin-food-calendar', path: 'food-calendar', component: AdminFoodCalendar },
-        { name: 'admin-car-booking',   path: 'car-booking',   component: AdminCarBooking },
-        { name: 'admin-car-calendar',  path: 'car-calendar',  component: AdminCarCalendar }
-      ]
+        { name: 'admin-car-booking', path: 'car-booking', component: AdminCarBooking },
+        { name: 'admin-car-calendar', path: 'car-calendar', component: AdminCarCalendar },
+      ],
     },
 
     // Chef
@@ -168,9 +213,9 @@ const router = createRouter({
       meta: { requiresRole: ['CHEF'] },
       children: [
         { path: '', redirect: { name: 'chef-requests' } },
-        { name: 'chef-requests',      path: 'requests',      component: ChefFoodRequests },
-        { name: 'chef-food-calendar', path: 'food-calendar', component: ChefFoodCalendar }
-      ]
+        { name: 'chef-requests', path: 'requests', component: ChefFoodRequests },
+        { name: 'chef-food-calendar', path: 'food-calendar', component: ChefFoodCalendar },
+      ],
     },
 
     // Driver
@@ -181,8 +226,8 @@ const router = createRouter({
       children: [
         { path: '', redirect: { name: 'driver-car-booking' } },
         { name: 'driver-car-booking', path: 'car-booking', component: DriverCarBooking },
-        { name: 'driver-carlendar',   path: 'calendar',    component: DriverCarCalendar }
-      ]
+        { name: 'driver-carlendar', path: 'calendar', component: DriverCarCalendar },
+      ],
     },
 
     // Messenger
@@ -193,8 +238,8 @@ const router = createRouter({
       children: [
         { path: '', redirect: { name: 'messenger-assignment' } },
         { name: 'messenger-assignment', path: 'assignment', component: MessengerAssignment },
-        { name: 'messenger-calendar',   path: 'calendar',   component: MessengerCarCalendar }
-      ]
+        { name: 'messenger-calendar', path: 'calendar', component: MessengerCarCalendar },
+      ],
     },
 
     // Leave / Expat – User
@@ -202,39 +247,15 @@ const router = createRouter({
       path: '/leave/user',
       component: UserLeaveExpat,
       meta: {
-        requiresRole: [
-          'LEAVE_USER',
-          'LEAVE_MANAGER',
-          'LEAVE_GM',
-          'LEAVE_ADMIN',
-          'ADMIN',
-        ]
+        requiresRole: ['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'],
       },
       children: [
         { path: '', redirect: { name: 'leave-user-request' } },
-        {
-          path: 'request',
-          name: 'leave-user-request',
-          component: ExpatRequestLeave
-        },
-        {
-          path: 'my-requests',
-          name: 'leave-user-my-requests',
-          component: ExpatMyRequests
-        },
-        {
-          path: 'replace-day',
-          name: 'leave-user-replace-day',
-          component: UserReplaceDay,
-          meta: { title: 'Replace Day' }
-        },
-        {
-          path: 'replace-day/list',
-          name: 'leave-user-replace-list',
-          component: UserReplaceDayList,
-          meta: { title: 'My Replace Day Requests' }
-        }
-      ]
+        { path: 'request', name: 'leave-user-request', component: ExpatRequestLeave },
+        { path: 'my-requests', name: 'leave-user-my-requests', component: ExpatMyRequests },
+        { path: 'replace-day', name: 'leave-user-replace-day', component: UserReplaceDay, meta: { title: 'Replace Day' } },
+        { path: 'replace-day/list', name: 'leave-user-replace-list', component: UserReplaceDayList, meta: { title: 'My Replace Day Requests' } },
+      ],
     },
 
     // Leave / Expat – Manager
@@ -244,28 +265,11 @@ const router = createRouter({
       meta: { requiresRole: ['LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN'] },
       children: [
         { path: '', redirect: { name: 'leave-manager-inbox' } },
-        {
-          path: 'request',
-          name: 'leave-manager-request',
-          component: ExpatRequestLeave
-        },
-        {
-          path: 'my-requests',
-          name: 'leave-manager-my-requests',
-          component: ExpatMyRequests
-        },
-        {
-          path: 'inbox',
-          name: 'leave-manager-inbox',
-          component: ManagerLeaveInbox
-        },
-        {
-          path: 'profile/:employeeId?',
-          name: 'leave-manager-profile',
-          component: ManagerProfile,
-          meta: { title: 'Employee Leave Profile' }
-        }
-      ]
+        { path: 'request', name: 'leave-manager-request', component: ExpatRequestLeave },
+        { path: 'my-requests', name: 'leave-manager-my-requests', component: ExpatMyRequests },
+        { path: 'inbox', name: 'leave-manager-inbox', component: ManagerLeaveInbox },
+        { path: 'profile/:employeeId?', name: 'leave-manager-profile', component: ManagerProfile, meta: { title: 'Employee Leave Profile' } },
+      ],
     },
 
     // Leave / Expat – GM
@@ -275,28 +279,23 @@ const router = createRouter({
       meta: { requiresRole: ['LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'] },
       children: [
         { path: '', redirect: { name: 'leave-gm-inbox' } },
-        {
-          path: 'request',
-          name: 'leave-gm-request',
-          component: ExpatRequestLeave
-        },
-        {
-          path: 'my-requests',
-          name: 'leave-gm-my-requests',
-          component: ExpatMyRequests
-        },
-        {
-          path: 'inbox',
-          name: 'leave-gm-inbox',
-          component: GmLeaveInbox
-        },
-        {
-          path: 'profile/:employeeId?',
-          name: 'leave-gm-profile',
-          component: getMyProfile,
-          meta: { title: 'Employee leave profile'}
-        }
-      ]
+        { path: 'request', name: 'leave-gm-request', component: ExpatRequestLeave },
+        { path: 'my-requests', name: 'leave-gm-my-requests', component: ExpatMyRequests },
+        { path: 'inbox', name: 'leave-gm-inbox', component: GmLeaveInbox },
+        { path: 'profile/:employeeId?', name: 'leave-gm-profile', component: GMProfile, meta: { title: 'Employee leave profile' } },
+      ],
+    },
+
+    // Leave / Expat – COO
+    {
+      path: '/leave/coo',
+      component: COOLeaveExpat,
+      meta: { requiresRole: ['LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'] },
+      children: [
+        { path: '', redirect: { name: 'leave-coo-inbox' } },
+        { path: 'inbox', name: 'leave-coo-inbox', component: CooLeaveInbox },
+        { path: 'profile/:employeeId?', name: 'leave-coo-profile', component: CooProfile, meta: { title: 'Employee leave profile' } },
+      ],
     },
 
     // Leave / Expat – Admin
@@ -306,46 +305,22 @@ const router = createRouter({
       meta: { requiresRole: ['LEAVE_ADMIN', 'ADMIN'] },
       children: [
         { path: '', redirect: { name: 'leave-admin-types' } },
-
-        {
-          path: 'types',
-          name: 'leave-admin-types',
-          component: AdminLeaveTypes
-        },
-        {
-          path: 'profiles',
-          name: 'leave-admin-profiles',
-          component: AdminExpatProfiles
-        },
-        {
-          path: 'manager-inbox',
-          name: 'leave-admin-manager-inbox',
-          component: ManagerLeaveInbox
-        },
-        {
-          path: 'gm-inbox',
-          name: 'leave-admin-gm-inbox',
-          component: GmLeaveInbox
-        },
-        {
-          path: 'request',
-          name: 'leave-admin-request',
-          component: ExpatRequestLeave
-        },
-        {
-          path: 'my-requests',
-          name: 'leave-admin-my-requests',
-          component: ExpatMyRequests
-        },
+        { path: 'types', name: 'leave-admin-types', component: AdminLeaveTypes },
+        { path: 'profiles', name: 'leave-admin-profiles', component: AdminExpatProfiles },
+        { path: 'manager-inbox', name: 'leave-admin-manager-inbox', component: ManagerLeaveInbox },
+        { path: 'gm-inbox', name: 'leave-admin-gm-inbox', component: GmLeaveInbox },
+        { path: 'request', name: 'leave-admin-request', component: ExpatRequestLeave },
+        { path: 'my-requests', name: 'leave-admin-my-requests', component: ExpatMyRequests },
         {
           path: 'profiles/:employeeId/edit',
           name: 'leave-admin-profile-edit',
           component: AdminLeaveProfileEdit,
           meta: {
-            requiresRole: ['LEAVE_ADMIN', 'LEAVE_GM', 'LEAVE_MANAGER', 'ADMIN'],
+            requiresRole: ['LEAVE_ADMIN', 'LEAVE_GM', 'LEAVE_MANAGER', 'LEAVE_COO', 'ADMIN'],
             title: 'Admin Leave Profile Edit',
-          }
-        },{
+          },
+        },
+        {
           path: 'report',
           name: 'leave-admin-report',
           component: AdminLeaveReport,
@@ -354,46 +329,48 @@ const router = createRouter({
             title: 'Leave Report Summary',
           },
         },
-
-      ]
+      ],
     },
 
     // 404 → greeting
     {
       path: '/:pathMatch(.*)*',
       redirect: { name: 'greeting' },
-      meta: { public: true }
-    }
-  ]
+      meta: { public: true },
+    },
+  ],
 })
 
-// Global guard
+/* ─────────────────────────────────────────────
+ * Global guard (supports multi-role users)
+ * ───────────────────────────────────────────── */
 router.beforeEach((to) => {
   const auth = useAuth()
-  const role = auth.user?.role
+
+  const roles = normalizeRoles(auth.user)
+  const role = pickPrimaryRole(roles)
+
   const isPublic = to.meta?.public === true
   const requiredRoles = to.meta?.requiresRole || null
   const isEmployeeArea = to.path.startsWith('/employee')
 
-  // 1. Logged in & visiting greeting or any login → send to homeByRole
+  // 1) Logged in & visiting greeting or any login → send to homeByRole(primaryRole)
   if (
-    role &&
+    roles.length &&
     (to.name === 'greeting' || to.name === 'admin-login' || to.name === 'leave-login')
   ) {
     const target = homeByRole(role)
-    if (target.name !== to.name) {
-      return target
-    }
+    if (target.name !== to.name) return target
     return true
   }
 
-  // 2. Employee area special rules
+  // 2) Employee area special rules
   if (isEmployeeArea) {
     // Guests → allowed
-    if (!auth.token || !role) return true
+    if (!auth.token || !roles.length) return true
 
     // Real employees → allowed
-    if (role === 'EMPLOYEE') return true
+    if (roles.includes('EMPLOYEE')) return true
 
     // Other roles → back to their own home
     const target = homeByRole(role)
@@ -401,19 +378,17 @@ router.beforeEach((to) => {
     return true
   }
 
-  // 3. Public routes → always allowed
+  // 3) Public routes → always allowed
   if (isPublic) return true
 
-  // 4. Non-public routes require login
-  if (!auth.token || !role) {
-    if (to.name !== 'greeting') {
-      return { name: 'greeting' }
-    }
+  // 4) Non-public routes require login
+  if (!auth.token || !roles.length) {
+    if (to.name !== 'greeting') return { name: 'greeting' }
     return true
   }
 
-  // 5. Role-specific restrictions
-  if (requiredRoles && !requiredRoles.includes(role)) {
+  // 5) Role-specific restrictions: user must have ANY of required roles
+  if (requiredRoles && !roles.some(r => requiredRoles.includes(String(r).toUpperCase()))) {
     const target = homeByRole(role)
     if (target.name !== to.name) return target
   }
