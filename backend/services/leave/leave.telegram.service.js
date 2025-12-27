@@ -4,7 +4,9 @@ const axios = require('axios')
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
 const DEBUG = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
-const SILENT_DM = String(process.env.TELEGRAM_SILENT_DM || 'true').toLowerCase() === 'true'
+
+// ✅ default should be FALSE (not silent)
+const SILENT_DM = String(process.env.TELEGRAM_SILENT_DM || 'false').toLowerCase() === 'true'
 
 function dlog(...args) {
   if (DEBUG) console.log('[LeaveTG]', ...args)
@@ -36,15 +38,12 @@ async function sendLeaveDM(chatId, text, opts = {}) {
       text,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
+      // ✅ not silent unless TELEGRAM_SILENT_DM=true
       disable_notification: SILENT_DM,
       ...(opts || {}),
     }
 
-    dlog('DM → sending', {
-      chatId,
-      snippet: String(text).slice(0, 80),
-    })
-
+    dlog('DM → sending', { chatId, snippet: String(text).slice(0, 80) })
     const { data } = await axios.post(`${base()}/sendMessage`, payload)
 
     dlog('DM ✓', {
@@ -57,6 +56,4 @@ async function sendLeaveDM(chatId, text, opts = {}) {
   }
 }
 
-module.exports = {
-  sendLeaveDM,
-}
+module.exports = { sendLeaveDM }

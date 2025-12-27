@@ -6,10 +6,14 @@ const esc = (s = '') =>
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
 
+// ✅ Ideally use FRONTEND_URL in env
+const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://178.128.48.101:4333').replace(/\/$/, '')
+
 const LINKS = {
-  managerInbox: 'http://178.128.48.101:4333/leave/manager/inbox',
-  gmInbox: 'http://178.128.48.101:4333/leave/gm/inbox',
-  adminInbox: 'http://178.128.48.101:4333/leave/admin/manager-inbox',
+  managerInbox: `${FRONTEND_URL}/leave/manager/inbox`,
+  gmInbox: `${FRONTEND_URL}/leave/gm/inbox`,
+  cooInbox: `${FRONTEND_URL}/leave/coo/inbox`,
+  adminInbox: `${FRONTEND_URL}/leave/admin/manager-inbox`,
 }
 
 function formatDateRange(doc) {
@@ -20,18 +24,17 @@ function formatDateRange(doc) {
   return `${s} → ${e} (${Number.isFinite(days) ? days : '?'} ${suffix})`
 }
 
-
-
 function reasonLine(doc) {
   return doc?.reason ? `📝 Reason: ${esc(doc.reason)}` : ''
 }
-
 function managerCommentLine(doc) {
   return doc?.managerComment ? `💬 Manager comment: ${esc(doc.managerComment)}` : ''
 }
-
 function gmCommentLine(doc) {
   return doc?.gmComment ? `💬 GM comment: ${esc(doc.gmComment)}` : ''
+}
+function cooCommentLine(doc) {
+  return doc?.cooComment ? `💬 COO comment: ${esc(doc.cooComment)}` : ''
 }
 
 function employeeLabel(doc, employeeName) {
@@ -41,7 +44,6 @@ function employeeLabel(doc, employeeName) {
 
 function actionLinkLine(url, label) {
   if (!url) return ''
-  // Telegram will auto-link plain URL, keep it simple
   return `🔗 ${esc(label)}: ${esc(url)}`
 }
 
@@ -70,17 +72,45 @@ function managerNewRequest(doc, employeeName) {
  * ───────────────────────────── */
 function gmNewRequest(doc, employeeName) {
   const range = formatDateRange(doc)
+  const mode = String(doc.approvalMode || 'GM_ONLY').toUpperCase()
+
+  const statusLine =
+    mode === 'GM_AND_COO'
+      ? '📌 Status: Shared final approval (GM or COO)'
+      : '📌 Status: Waiting for GM approval'
+
   return [
     '📝 <b>New leave request (GM approval)</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
     `📅 Period: ${esc(range)}`,
-    '📌 Status: Waiting for GM approval',
+    statusLine,
     managerCommentLine(doc),
     reasonLine(doc),
     '',
     actionLinkLine(LINKS.gmInbox, 'Open GM Inbox'),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/* ─────────────────────────────
+ * COO: new request DM (NEW)
+ * ───────────────────────────── */
+function cooNewRequest(doc, employeeName) {
+  const range = formatDateRange(doc)
+  return [
+    '📝 <b>New leave request (COO approval)</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
+    `📅 Period: ${esc(range)}`,
+    '📌 Status: Shared final approval (GM or COO)',
+    managerCommentLine(doc),
+    reasonLine(doc),
+    '',
+    actionLinkLine(LINKS.cooInbox, 'Open COO Inbox'),
   ]
     .filter(Boolean)
     .join('\n')
@@ -96,7 +126,7 @@ function employeeSubmitted(doc) {
     '━━━━━━━━━━━━━━━━━━━━━━',
     `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
     `📅 Period: ${esc(range)}`,
-    '📌 Status: Waiting for Manager approval',
+    '📌 Status: Submitted',
     reasonLine(doc),
   ]
     .filter(Boolean)
@@ -104,7 +134,7 @@ function employeeSubmitted(doc) {
 }
 
 /* ─────────────────────────────
- * Employee: decision DM (Manager/GM)
+ * Employee: decision DM (Manager/GM/COO)
  * ───────────────────────────── */
 function employeeDecision(doc, roleLabel) {
   const range = formatDateRange(doc)
@@ -114,6 +144,7 @@ function employeeDecision(doc, roleLabel) {
   let comment = ''
   if (roleLabel === 'Manager' && doc.managerComment) comment = `\n${managerCommentLine(doc)}`
   if (roleLabel === 'GM' && doc.gmComment) comment = `\n${gmCommentLine(doc)}`
+  if (roleLabel === 'COO' && doc.cooComment) comment = `\n${cooCommentLine(doc)}`
 
   return [
     `${emoji} <b>Leave ${esc(status)} by ${esc(roleLabel)}</b>`,
@@ -127,7 +158,7 @@ function employeeDecision(doc, roleLabel) {
 }
 
 /* ─────────────────────────────
- * LEAVE_ADMIN: activity logs (ONLY LEAVE_ADMIN, NOT ADMIN)
+ * LEAVE_ADMIN: activity logs (ONLY LEAVE_ADMIN)
  * ───────────────────────────── */
 function leaveAdminNewRequest(doc, employeeName) {
   const range = formatDateRange(doc)
@@ -137,7 +168,7 @@ function leaveAdminNewRequest(doc, employeeName) {
     employeeLabel(doc, employeeName),
     `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
     `📅 Period: ${esc(range)}`,
-    `📌 Status: ${esc(String(doc.status || 'PENDING_MGR'))}`,
+    `📌 Status: ${esc(String(doc.status || '—'))}`,
     reasonLine(doc),
     '',
     actionLinkLine(LINKS.adminInbox, 'Open Leave Admin Inbox'),
@@ -180,9 +211,27 @@ function leaveAdminGmDecision(doc, employeeName) {
     .join('\n')
 }
 
+function leaveAdminCooDecision(doc, employeeName) {
+  const range = formatDateRange(doc)
+  return [
+    '📣 <b>COO decision</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━',
+    employeeLabel(doc, employeeName),
+    `📄 Type: ${esc(doc.leaveTypeCode || '—')}`,
+    `📅 Period: ${esc(range)}`,
+    `📌 Status: ${esc(String(doc.status || '—'))}`,
+    cooCommentLine(doc),
+    '',
+    actionLinkLine(LINKS.adminInbox, 'Open Leave Admin Inbox'),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 module.exports = {
   managerNewRequest,
   gmNewRequest,
+  cooNewRequest,
   employeeSubmitted,
   employeeDecision,
 
@@ -190,4 +239,5 @@ module.exports = {
   leaveAdminNewRequest,
   leaveAdminManagerDecision,
   leaveAdminGmDecision,
+  leaveAdminCooDecision,
 }

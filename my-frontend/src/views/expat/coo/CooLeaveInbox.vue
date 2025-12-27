@@ -16,7 +16,7 @@ const auth = useAuth()
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const base = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...base])]
+  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
 const canCooDecide = computed(() => roles.value.includes('LEAVE_COO'))
 
@@ -32,11 +32,11 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusTab = ref('PENDING_COO') // 'PENDING_COO' | 'FINISHED'
+const statusTab = ref('PENDING') // 'PENDING' | 'FINISHED'
 
-/* Filters */
-const fromDate = ref('')
-const toDate = ref('')
+/* ✅ Filters (default ALL) */
+const fromDate = ref('') // Requested at (createdAt)
+const toDate = ref('')   // Requested at (createdAt)
 const employeeFilter = ref('')
 
 /* Pagination */
@@ -44,7 +44,7 @@ const page = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
-/* Display leave date range */
+/* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
 function formatRange(row) {
   const s = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
   const e = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
@@ -54,7 +54,7 @@ function formatRange(row) {
 }
 
 function statusChipClasses(status) {
-  switch (status) {
+  switch (String(status || '').toUpperCase()) {
     case 'PENDING_MANAGER':
       return 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
     case 'PENDING_GM':
@@ -71,11 +71,43 @@ function statusChipClasses(status) {
   }
 }
 
-/* Sort order for COO queue */
+/**
+ * ✅ IMPORTANT (your new rule):
+ * COO sees the SAME final queue as GM.
+ * Final queue status is PENDING_GM, but approvalMode decides who can act.
+ *
+ * So: COO inbox = requests where:
+ * - approvalMode is GM_OR_COO (or legacy GM_AND_COO), AND
+ * - status is PENDING_GM (final stage), AND
+ * - cooLoginId matches current user (or is empty -> admin can assign later)
+ *
+ * If your backend already provides /leave/requests/coo/inbox endpoint, it should return those.
+ */
+async function fetchInbox() {
+  try {
+    loading.value = true
+    // ✅ Use your backend endpoint (recommended)
+    const res = await api.get('/leave/requests/coo/inbox')
+    rows.value = Array.isArray(res.data) ? res.data : []
+  } catch (e) {
+    console.error('fetchInbox COO error', e)
+    showToast({
+      type: 'error',
+      title: 'Failed to load',
+      message: e?.response?.data?.message || 'Unable to load COO inbox.'
+    })
+  } finally {
+    loading.value = false
+  }
+}
+
+/* Sort order */
 function statusWeight(s) {
-  switch (s) {
-    case 'PENDING_COO': return 0
-    case 'PENDING_GM': return 1
+  const st = String(s || '').toUpperCase()
+  switch (st) {
+    // ✅ show pending first
+    case 'PENDING_GM': return 0
+    case 'PENDING_COO': return 1
     case 'PENDING_MANAGER': return 2
     case 'APPROVED': return 3
     case 'REJECTED': return 4
@@ -84,7 +116,7 @@ function statusWeight(s) {
   }
 }
 
-/* Reject reason + who rejected */
+/* ✅ Reject reason + who rejected */
 function getRejectReason(row) {
   const coo = String(row?.cooComment || '').trim()
   const gm = String(row?.gmComment || '').trim()
@@ -101,31 +133,18 @@ function rejectedByLabel(row) {
   return 'Rejected'
 }
 
-/* Go to COO Profile page and auto-select that expat */
+/* ✅ Go to COO Profile page and auto-select that expat */
 function goProfile(row) {
   const empId = String(row?.employeeId || '').trim()
   if (!empId) return
   router.push({ name: 'leave-coo-profile', query: { employeeId: empId } })
 }
 
-/* ───────── Data ───────── */
-async function fetchInbox() {
-  try {
-    loading.value = true
-    const res = await api.get('/leave/requests/coo/inbox')
-    rows.value = Array.isArray(res.data) ? res.data : []
-  } catch (e) {
-    console.error('fetchInbox COO error', e)
-    showToast({
-      type: 'error',
-      title: 'Failed to load',
-      message: e?.response?.data?.message || 'Unable to load COO inbox.'
-    })
-  } finally {
-    loading.value = false
-  }
-}
-
+/**
+ * Tabs:
+ * - PENDING:  show pending queue rows
+ * - FINISHED: only APPROVED/REJECTED/CANCELLED
+ */
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
@@ -150,10 +169,13 @@ const filteredRows = computed(() => {
   }
 
   if (statusTab.value === 'FINISHED') {
-    list = list.filter(r => ['APPROVED', 'REJECTED', 'CANCELLED'].includes(r.status))
+    list = list.filter(r => ['APPROVED', 'REJECTED', 'CANCELLED'].includes(String(r.status || '').toUpperCase()))
+  } else {
+    // ✅ pending tab: show "pending" statuses (mostly PENDING_GM for your OR-final stage)
+    list = list.filter(r => ['PENDING_GM', 'PENDING_COO', 'PENDING_MANAGER'].includes(String(r.status || '').toUpperCase()))
   }
 
-  // Date filter by REQUEST DATE (createdAt)
+  // ✅ Date filter by REQUEST DATE (createdAt)
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
   const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
 
@@ -197,7 +219,7 @@ watch(
 /* ───────── Confirm dialog ───────── */
 const confirmDialog = ref({
   open: false,
-  action: 'APPROVE',
+  action: 'APPROVE', // 'APPROVE' | 'REJECT'
   row: null,
   comment: ''
 })
@@ -236,6 +258,12 @@ const confirmPrimaryClasses = computed(() =>
     : 'bg-rose-600 hover:bg-rose-700 text-white'
 )
 
+/**
+ * ✅ COO decision endpoint
+ * Must be atomic in backend:
+ * - only allow update when status is still pending (PENDING_GM for OR-final)
+ * - if already APPROVED/REJECTED, return 409
+ */
 async function submitDecision() {
   const { row, action } = confirmDialog.value
   const comment = String(confirmDialog.value.comment || '').trim()
@@ -294,6 +322,7 @@ function setupRealtime() {
     company: auth.user?.companyCode
   })
 
+  // ✅ same events as GM (because same final stage)
   offHandlers.push(
     onSocket('leave:req:created', () => triggerRealtimeRefresh()),
     onSocket('leave:req:updated', () => triggerRealtimeRefresh()),
@@ -327,7 +356,7 @@ onBeforeUnmount(() => {
           <div class="flex flex-col gap-1 min-w-[220px]">
             <p class="text-[10px] uppercase tracking-[0.25em] text-white/80">Expat Leave</p>
             <p class="text-sm font-semibold">COO Inbox</p>
-            <p class="text-[11px] text-white/90">Second approval queue for GM + COO mode.</p>
+            <p class="text-[11px] text-white/90">Shared final approval queue (GM or COO).</p>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -352,10 +381,10 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'PENDING_COO' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
-                  @click="statusTab = 'PENDING_COO'"
+                  :class="statusTab === 'PENDING' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
+                  @click="statusTab = 'PENDING'"
                 >
-                  Pending (COO)
+                  Pending
                 </button>
                 <button
                   type="button"
@@ -396,7 +425,7 @@ onBeforeUnmount(() => {
           <div>
             <p class="text-[10px] uppercase tracking-[0.25em] text-white/80">Expat Leave</p>
             <p class="text-sm font-semibold">COO Inbox</p>
-            <p class="text-[11px] text-white/90">Second approval queue for GM + COO mode.</p>
+            <p class="text-[11px] text-white/90">Shared final approval queue (GM or COO).</p>
           </div>
 
           <div class="space-y-2">
@@ -420,8 +449,8 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'PENDING_COO' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
-                    @click="statusTab = 'PENDING_COO'"
+                    :class="statusTab === 'PENDING' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
+                    @click="statusTab = 'PENDING'"
                   >
                     Pending
                   </button>
@@ -518,7 +547,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div
-              v-if="row.status === 'REJECTED'"
+              v-if="String(row.status || '').toUpperCase() === 'REJECTED'"
               class="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
                      dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
             >
@@ -537,7 +566,7 @@ onBeforeUnmount(() => {
                 Profile
               </button>
 
-              <template v-if="canCooDecide && row.status === 'PENDING_COO'">
+              <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_GM'">
                 <button
                   type="button"
                   class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
@@ -618,7 +647,7 @@ onBeforeUnmount(() => {
                   <p class="text-truncate-2 text-xs sm:text-[13px]">{{ row.reason || '—' }}</p>
 
                   <div
-                    v-if="row.status === 'REJECTED'"
+                    v-if="String(row.status || '').toUpperCase() === 'REJECTED'"
                     class="mt-2 inline-flex max-w-[520px] items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
                            dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
                   >
@@ -647,7 +676,7 @@ onBeforeUnmount(() => {
                       Profile
                     </button>
 
-                    <template v-if="canCooDecide && row.status === 'PENDING_COO'">
+                    <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_GM'">
                       <button
                         type="button"
                         class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"

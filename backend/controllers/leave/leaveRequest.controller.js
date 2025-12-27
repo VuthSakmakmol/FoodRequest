@@ -8,12 +8,7 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const { getLeaveType } = require('../../config/leaveSystemTypes')
 const { validateAndNormalizeRequest, computeBalances } = require('../../utils/leave.rules')
 
-const {
-  notifyNewLeaveToManager,
-  notifyManagerDecision,
-  notifyNewLeaveToGm,
-  notifyGmDecision,
-} = require('../../services/leave/leave.telegram.notify')
+const notify = require('../../services/leave/leave.telegram.notify')
 
 // ✅ FIX: use leave realtime broadcaster (NOT utils/realtime.js)
 const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/leave.realtime')
@@ -26,9 +21,12 @@ function getIo(req) {
   return req.io || req.app?.get('io') || null
 }
 
+/**
+ * ✅ IMPORTANT: prefer loginId first (your LeaveRequest stores loginId strings)
+ * (req.user.id might be Mongo _id and break matching)
+ */
 function actorLoginId(req) {
-  // JWT signToken uses { id: user.loginId } sometimes
-  return String(req.user?.id || req.user?.loginId || req.user?.sub || '').trim()
+  return String(req.user?.loginId || req.user?.employeeId || req.user?.sub || req.user?.id || '').trim()
 }
 
 function getRoles(req) {
@@ -59,6 +57,14 @@ function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
     broadcastLeaveProfile(io, docOrPlain, event)
   } catch (e) {
     console.warn(`⚠️ realtime emitProfile(${event}) failed:`, e?.message)
+  }
+}
+
+async function safeNotify(fn, ...args) {
+  try {
+    if (typeof fn === 'function') await fn(...args)
+  } catch (e) {
+    console.warn('⚠️ notify failed:', e?.message)
   }
 }
 
@@ -121,7 +127,11 @@ function findBalanceRow(snapshot, code) {
 
 /* ───────── strict reserve + overlap ───────── */
 
-const ACTIVE_STATUSES = ['PENDING_MANAGER', 'PENDING_GM', 'APPROVED']
+/**
+ * ✅ include PENDING_COO for backward compatibility
+ * but final stage should be shared in PENDING_GM.
+ */
+const ACTIVE_STATUSES = ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED']
 
 async function getActiveRequests(employeeId) {
   return LeaveRequest.find({
@@ -204,9 +214,10 @@ async function recalcAndEmitProfile(req, employeeId) {
 
     const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
     const nextAsOf = String(snap?.meta?.asOfYMD || prof.balancesAsOf || '').trim()
-    const nextEnd = snap?.meta?.contractYear?.endDate ? String(snap.meta.contractYear.endDate) : String(prof.contractEndDate || '')
+    const nextEnd = snap?.meta?.contractYear?.endDate
+      ? String(snap.meta.contractYear.endDate)
+      : String(prof.contractEndDate || '')
 
-    // ✅ avoid saving if nothing changed
     const before = JSON.stringify(prof.balances || [])
     const after = JSON.stringify(nextBalances)
 
@@ -224,13 +235,8 @@ async function recalcAndEmitProfile(req, employeeId) {
       changed = true
     }
 
-    if (changed) {
-      await prof.save()
-      emitProfile(req, prof, 'leave:profile:updated')
-    } else {
-      // still broadcast once if UI relies on realtime refresh
-      emitProfile(req, prof, 'leave:profile:updated')
-    }
+    if (changed) await prof.save()
+    emitProfile(req, prof, 'leave:profile:updated')
   } catch (e) {
     console.warn('⚠️ recalcAndEmitProfile failed:', e?.message)
   }
@@ -238,9 +244,20 @@ async function recalcAndEmitProfile(req, employeeId) {
 
 /* ───────────────── controllers ───────────────── */
 
+/**
+ * POST /leave/my/requests
+ * Employee creates request
+ */
 exports.createMyRequest = async (req, res, next) => {
   try {
-    const { leaveTypeCode, startDate, endDate, reason = '', isHalfDay = false, dayPart = null } = req.body || {}
+    const {
+      leaveTypeCode,
+      startDate,
+      endDate,
+      reason = '',
+      isHalfDay = false,
+      dayPart = null,
+    } = req.body || {}
 
     const requesterLoginId = actorLoginId(req)
     const employeeId = String(req.user?.employeeId || requesterLoginId).trim()
@@ -261,6 +278,7 @@ exports.createMyRequest = async (req, res, next) => {
 
     const managerLoginId = String(profile.managerLoginId || '').trim()
     const gmLoginId = String(profile.gmLoginId || '').trim()
+    const cooLoginId = String(profile.cooLoginId || '').trim() // ✅ optional
 
     if (!gmLoginId) {
       return res.status(400).json({
@@ -270,7 +288,9 @@ exports.createMyRequest = async (req, res, next) => {
 
     const normalizedDayPart = isHalfDay ? normalizeDayPart(dayPart) : null
     if (isHalfDay && !normalizedDayPart) {
-      return res.status(400).json({ message: 'Half-day requires dayPart = AM/PM (Morning/Afternoon).' })
+      return res.status(400).json({
+        message: 'Half-day requires dayPart = AM/PM (Morning/Afternoon).',
+      })
     }
 
     const vr = validateAndNormalizeRequest({
@@ -285,7 +305,11 @@ exports.createMyRequest = async (req, res, next) => {
     const normalized = vr.normalized
     const requestedDays = Number(normalized.totalDays || 0)
 
-    const overlap = await hasOverlappingActiveRequest(employeeId, normalized.startDate, normalized.endDate)
+    const overlap = await hasOverlappingActiveRequest(
+      employeeId,
+      normalized.startDate,
+      normalized.endDate
+    )
     if (overlap) {
       return res.status(400).json({
         message: 'You already have a leave request submitted/approved that overlaps these dates.',
@@ -296,7 +320,9 @@ exports.createMyRequest = async (req, res, next) => {
     const snapshot = computeBalances(profile, approved, new Date())
 
     const active = await getActiveRequests(employeeId)
-    const pending = active.filter((r) => r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM')
+    const pending = active.filter(
+      (r) => r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM' || r.status === 'PENDING_COO'
+    )
     const pend = computePendingUsage(pending, snapshot?.meta?.contractYear)
 
     const remaining = (code) => Number(findBalanceRow(snapshot, code)?.remaining ?? 0)
@@ -369,6 +395,16 @@ exports.createMyRequest = async (req, res, next) => {
 
     const initialStatus = managerLoginId ? 'PENDING_MANAGER' : 'PENDING_GM'
 
+    /**
+     * ✅ IMPORTANT:
+     * Use enum values your MODEL accepts:
+     * - 'GM_ONLY'
+     * - 'GM_OR_COO'
+     *
+     * This is the shared final queue mode.
+     */
+    const approvalMode = cooLoginId ? 'GM_OR_COO' : 'GM_ONLY'
+
     const createPayload = {
       employeeId,
       requesterLoginId,
@@ -378,8 +414,12 @@ exports.createMyRequest = async (req, res, next) => {
       totalDays: requestedDays,
       reason: String(reason || ''),
       status: initialStatus,
+
       managerLoginId: managerLoginId || '',
       gmLoginId,
+      cooLoginId,
+
+      approvalMode,
     }
 
     if (normalized.isHalfDay) {
@@ -394,6 +434,8 @@ exports.createMyRequest = async (req, res, next) => {
         employeeId,
         managerLoginId,
         gmLoginId,
+        cooLoginId,
+        approvalMode,
         status: initialStatus,
         id: doc._id.toString(),
       })
@@ -401,14 +443,18 @@ exports.createMyRequest = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
 
-    // notify correct approver
+    // ✅ Telegram: notify correct approver(s)
     if (initialStatus === 'PENDING_MANAGER') {
-      try { await notifyNewLeaveToManager(doc) } catch (e) { console.warn('⚠️ notifyNewLeaveToManager failed:', e?.message) }
+      await safeNotify(notify.notifyNewLeaveToManager || notify.notifyNewLeaveToManager, doc)
     } else {
-      try { await notifyNewLeaveToGm(doc) } catch (e) { console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message) }
+      // final stage starts here (no manager)
+      await safeNotify(notify.notifyNewLeaveToGm || notify.notifyNewLeaveToGm, doc)
+      if (approvalMode === 'GM_OR_COO') {
+        await safeNotify(notify.notifyNewLeaveToCoo || notify.notifyNewLeaveToCoo, doc)
+      }
     }
 
-    // ✅ REALTIME (one event is enough)
+    // ✅ REALTIME
     emitReq(req, payload, 'leave:req:created')
 
     return res.status(201).json(payload)
@@ -443,7 +489,7 @@ exports.cancelMyRequest = async (req, res, next) => {
       return res.status(403).json({ message: 'Not your request' })
     }
 
-    if (!['PENDING_MANAGER', 'PENDING_GM'].includes(doc.status)) {
+    if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(String(doc.status || ''))) {
       return res.status(400).json({ message: 'Cannot cancel at this stage' })
     }
 
@@ -455,10 +501,7 @@ exports.cancelMyRequest = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
 
-    // ✅ REALTIME
     emitReq(req, payload, 'leave:req:updated')
-
-    // ✅ update balances UI
     await recalcAndEmitProfile(req, doc.employeeId)
 
     return res.json(payload)
@@ -467,12 +510,25 @@ exports.cancelMyRequest = async (req, res, next) => {
   }
 }
 
+/**
+ * GET /leave/manager/inbox?tab=PENDING|FINISHED
+ */
 exports.listManagerInbox = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
-    const criteria = isAdminViewer(req) ? {} : { managerLoginId: loginId }
+    const tab = String(req.query?.tab || 'PENDING').toUpperCase()
+    const admin = isAdminViewer(req)
+
+    const criteria = admin ? {} : { managerLoginId: loginId }
+
+    if (tab === 'PENDING') {
+      criteria.status = 'PENDING_MANAGER'
+    } else if (tab === 'FINISHED') {
+      criteria.status = { $ne: 'PENDING_MANAGER' }
+    }
+
     const docs = await LeaveRequest.find(criteria).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(docs))
   } catch (err) {
@@ -480,6 +536,10 @@ exports.listManagerInbox = async (req, res, next) => {
   }
 }
 
+/**
+ * POST /leave/manager/decision/:id
+ * body { action: APPROVE|REJECT, comment? }
+ */
 exports.managerDecision = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
@@ -488,39 +548,59 @@ exports.managerDecision = async (req, res, next) => {
     const { id } = req.params
     const { action, comment = '' } = req.body || {}
 
-    const doc = await LeaveRequest.findById(id)
-    if (!doc) return res.status(404).json({ message: 'Request not found' })
+    const current = await LeaveRequest.findById(id)
+    if (!current) return res.status(404).json({ message: 'Request not found' })
 
     const admin = isAdminViewer(req)
-    if (!admin && String(doc.managerLoginId || '') !== loginId) {
+    if (!admin && String(current.managerLoginId || '') !== loginId) {
       return res.status(403).json({ message: 'Not your request' })
     }
-    if (doc.status !== 'PENDING_MANAGER') {
+    if (String(current.status || '') !== 'PENDING_MANAGER') {
       return res.status(400).json({ message: 'Request not in manager queue' })
     }
 
     const act = String(action || '').toUpperCase()
-    if (act === 'APPROVE') doc.status = 'PENDING_GM'
-    else if (act === 'REJECT') doc.status = 'REJECTED'
+    let nextStatus = ''
+    if (act === 'APPROVE') nextStatus = 'PENDING_GM'
+    else if (act === 'REJECT') nextStatus = 'REJECTED'
     else return res.status(400).json({ message: 'Invalid action' })
 
-    doc.managerComment = String(comment || '')
-    doc.managerDecisionAt = new Date()
+    // ✅ atomic lock: only update if still PENDING_MANAGER
+    const doc = await LeaveRequest.findOneAndUpdate(
+      { _id: id, status: 'PENDING_MANAGER' },
+      {
+        $set: {
+          status: nextStatus,
+          managerComment: String(comment || ''),
+          managerDecisionAt: new Date(),
+        },
+      },
+      { new: true }
+    )
 
-    await doc.save()
+    if (!doc) {
+      const latest = await LeaveRequest.findById(id).lean()
+      return res.status(409).json({
+        message: `Someone already handled this request (${latest?.status || 'UNKNOWN'}).`,
+      })
+    }
 
-    try { await notifyManagerDecision(doc) } catch (e) { console.warn('⚠️ notifyManagerDecision failed:', e?.message) }
+    await safeNotify(notify.notifyManagerDecision || notify.notifyManagerDecision, doc)
 
+    // After manager approve → final approver stage (GM + maybe COO)
     if (doc.status === 'PENDING_GM') {
-      try { await notifyNewLeaveToGm(doc) } catch (e) { console.warn('⚠️ notifyNewLeaveToGm failed:', e?.message) }
+      await safeNotify(notify.notifyNewLeaveToGm || notify.notifyNewLeaveToGm, doc)
+
+      const mode = String(doc.approvalMode || '').toUpperCase()
+      const isShared = mode === 'GM_OR_COO' || mode === 'GM_OR_COO' // tolerate old mode strings
+      if (isShared) {
+        await safeNotify(notify.notifyNewLeaveToCoo || notify.notifyNewLeaveToCoo, doc)
+      }
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
-
-    // ✅ REALTIME
     emitReq(req, payload, 'leave:req:updated')
 
-    // If rejected here, balances reservation should free immediately on UI
     if (doc.status === 'REJECTED') {
       await recalcAndEmitProfile(req, doc.employeeId)
     }
@@ -531,12 +611,20 @@ exports.managerDecision = async (req, res, next) => {
   }
 }
 
+/**
+ * GET /leave/gm/inbox?tab=PENDING|FINISHED
+ * ✅ GM inbox should show only final stage items by default
+ */
 exports.listGmInbox = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
-    const criteria = isAdminViewer(req) ? {} : { gmLoginId: loginId }
+    const admin = isAdminViewer(req)
+
+    // ✅ return ALL statuses for this GM (UI will filter Pending/Finished)
+    const criteria = admin ? {} : { gmLoginId: loginId }
+
     const docs = await LeaveRequest.find(criteria).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(docs))
   } catch (err) {
@@ -544,6 +632,15 @@ exports.listGmInbox = async (req, res, next) => {
   }
 }
 
+
+/**
+ * POST /leave/gm/decision/:id
+ * body { action: APPROVE|REJECT, comment? }
+ *
+ * ✅ GM + COO shared final:
+ * - only update if status is still pending
+ * - if COO already decided -> status is APPROVED/REJECTED -> GM cannot change
+ */
 exports.gmDecision = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
@@ -552,87 +649,52 @@ exports.gmDecision = async (req, res, next) => {
     const { id } = req.params
     const { action, comment = '' } = req.body || {}
 
-    const doc = await LeaveRequest.findById(id)
-    if (!doc) return res.status(404).json({ message: 'Request not found' })
+    const current = await LeaveRequest.findById(id)
+    if (!current) return res.status(404).json({ message: 'Request not found' })
 
     const admin = isAdminViewer(req)
-    if (!admin && String(doc.gmLoginId || '') !== loginId) {
+    if (!admin && String(current.gmLoginId || '') !== loginId) {
       return res.status(403).json({ message: 'Not your request' })
     }
-    if (doc.status !== 'PENDING_GM') {
-      return res.status(400).json({ message: 'Request not in GM queue' })
+
+    // ✅ if already decided by COO first (or anyone), GM cannot change
+    if (!['PENDING_GM', 'PENDING_COO'].includes(String(current.status || ''))) {
+      return res.status(400).json({
+        message: `Request already ${current.status}. You cannot change it.`,
+      })
     }
 
     const act = String(action || '').toUpperCase()
+    let newStatus = ''
+    if (act === 'APPROVE') newStatus = 'APPROVED'
+    else if (act === 'REJECT') newStatus = 'REJECTED'
+    else return res.status(400).json({ message: 'Invalid action' })
 
-    if (act === 'APPROVE') {
-      // ✅ race-safe strict re-check (including pending reservations)
-      const profile = await LeaveProfile.findOne({ employeeId: doc.employeeId, isActive: true }).lean()
-      if (!profile) return res.status(400).json({ message: 'Leave profile missing' })
+    // ✅ race-safe update: only update if still pending
+    const doc = await LeaveRequest.findOneAndUpdate(
+      { _id: id, status: { $in: ['PENDING_GM', 'PENDING_COO'] } },
+      {
+        $set: {
+          status: newStatus,
+          gmComment: String(comment || ''),
+          gmDecisionAt: new Date(),
+        },
+      },
+      { new: true }
+    )
 
-      const approved = await getApprovedRequests(doc.employeeId)
-      const snapshot = computeBalances(profile, approved, new Date())
-
-      const active = await getActiveRequests(doc.employeeId)
-      const pendingOthers = active.filter(
-        (r) =>
-          (r.status === 'PENDING_MANAGER' || r.status === 'PENDING_GM') &&
-          String(r._id) !== String(doc._id)
-      )
-      const pend = computePendingUsage(pendingOthers, snapshot?.meta?.contractYear)
-
-      const remaining = (c) => Number(findBalanceRow(snapshot, c)?.remaining ?? 0)
-
-      const code = String(doc.leaveTypeCode || '').toUpperCase()
-      const days = Number(doc.totalDays || 0)
-
-      if (code === 'SP') {
-        const strictSP = remaining('SP') - pend.pendingSP
-        if (days > strictSP) return res.status(400).json({ message: 'SP remaining changed (including pending). Please refresh.' })
-
-        const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
-        if (strictAL >= days) {
-          return res.status(400).json({
-            message: 'SP is only allowed when AL is insufficient. AL is now sufficient—please refresh.',
-          })
-        }
-      }
-
-      if (code === 'AL') {
-        const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
-        if (days > strictAL) return res.status(400).json({ message: 'AL remaining changed (including pending SP). Please refresh.' })
-      }
-
-      if (code === 'MC') {
-        const strict = remaining('MC') - pend.pendingMC
-        if (days > strict) return res.status(400).json({ message: 'MC remaining changed (including pending). Please refresh.' })
-      }
-
-      if (code === 'MA') {
-        const strict = remaining('MA') - pend.pendingMA
-        if (days > strict) return res.status(400).json({ message: 'MA remaining changed (including pending). Please refresh.' })
-      }
-
-      doc.status = 'APPROVED'
-    } else if (act === 'REJECT') {
-      doc.status = 'REJECTED'
-    } else {
-      return res.status(400).json({ message: 'Invalid action' })
+    if (!doc) {
+      const latest = await LeaveRequest.findById(id).lean()
+      return res.status(409).json({
+        message: `Someone already decided this request (${latest?.status || 'UNKNOWN'}).`,
+      })
     }
 
-    doc.gmComment = String(comment || '')
-    doc.gmDecisionAt = new Date()
-
-    await doc.save()
-
-    try { await notifyGmDecision(doc) } catch (e) { console.warn('⚠️ notifyGmDecision failed:', e?.message) }
+    await safeNotify(notify.notifyGmDecision || notify.notifyGmDecision, doc)
 
     const payload = await attachEmployeeInfoToOne(doc)
-
-    // ✅ REALTIME
     emitReq(req, payload, 'leave:req:updated')
 
-    // ✅ balances changed (approve consumes; reject frees reservation)
     await recalcAndEmitProfile(req, doc.employeeId)
 
     return res.json(payload)

@@ -4,16 +4,11 @@ const User = require('../../models/User')
 const { sendLeaveDM } = require('./leave.telegram.service')
 const msg = require('./leave.telegram.messages')
 
-const DEBUG =
-  String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
-
-function log(...args) {
-  if (DEBUG) console.log('[leave.notify]', ...args)
-}
+const DEBUG = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
+function log(...args) { if (DEBUG) console.log('[leave.notify]', ...args) }
 
 async function findUser(loginId) {
-  if (!loginId) return null
-  const clean = String(loginId).trim()
+  const clean = String(loginId || '').trim()
   if (!clean) return null
   return User.findOne({ loginId: clean }).lean()
 }
@@ -41,19 +36,12 @@ async function dmMany(users, text, label = '') {
 async function notifyEmployeeSubmitted(doc) {
   try {
     if (!doc) return
-
     const employeeLoginId = doc.employeeId || doc.requesterLoginId
     const empUser = await findUser(employeeLoginId)
     const chatId = empUser?.telegramChatId
+    if (!chatId) return log('skip employee submitted (no chatId)', employeeLoginId)
 
-    if (!chatId) {
-      log('Employee has no telegramChatId; skip notifyEmployeeSubmitted', employeeLoginId)
-      return
-    }
-
-    const text = msg.employeeSubmitted(doc)
-    log('DM → Employee (submitted)', { employeeLoginId, chatId })
-    await sendLeaveDM(chatId, text)
+    await sendLeaveDM(chatId, msg.employeeSubmitted(doc))
   } catch (err) {
     console.error('[leave.notify] notifyEmployeeSubmitted error:', err.message)
   }
@@ -65,12 +53,8 @@ async function notifyEmployeeSubmitted(doc) {
 async function notifyNewLeaveToManager(doc) {
   try {
     if (!doc) return
-
-    const managerLoginId = doc.managerLoginId
-    if (!managerLoginId) {
-      log('No managerLoginId on doc; skip notifyNewLeaveToManager')
-      return
-    }
+    const managerLoginId = String(doc.managerLoginId || '').trim()
+    if (!managerLoginId) return
 
     const [mgrUser, empUser] = await Promise.all([
       findUser(managerLoginId),
@@ -78,33 +62,23 @@ async function notifyNewLeaveToManager(doc) {
     ])
 
     const chatId = mgrUser?.telegramChatId
-    if (!chatId) {
-      log('Manager has no telegramChatId; skip', managerLoginId)
-      return
-    }
+    if (!chatId) return log('skip manager new request (no chatId)', managerLoginId)
 
     const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
-    const text = msg.managerNewRequest(doc, employeeName)
-
-    log('DM → Manager', { managerLoginId, chatId })
-    await sendLeaveDM(chatId, text)
+    await sendLeaveDM(chatId, msg.managerNewRequest(doc, employeeName))
   } catch (err) {
     console.error('[leave.notify] notifyNewLeaveToManager error:', err.message)
   }
 }
 
 /* ─────────────────────────────
- * Request forwarded to GM → DM GM
+ * Forwarded / pending final → DM GM
  * ───────────────────────────── */
 async function notifyNewLeaveToGm(doc) {
   try {
     if (!doc) return
-
-    const gmLoginId = doc.gmLoginId
-    if (!gmLoginId) {
-      log('No gmLoginId on doc; skip notifyNewLeaveToGm')
-      return
-    }
+    const gmLoginId = String(doc.gmLoginId || '').trim()
+    if (!gmLoginId) return
 
     const [gmUser, empUser] = await Promise.all([
       findUser(gmLoginId),
@@ -112,18 +86,39 @@ async function notifyNewLeaveToGm(doc) {
     ])
 
     const chatId = gmUser?.telegramChatId
-    if (!chatId) {
-      log('GM has no telegramChatId; skip', gmLoginId)
-      return
-    }
+    if (!chatId) return log('skip gm new request (no chatId)', gmLoginId)
 
     const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
-    const text = msg.gmNewRequest(doc, employeeName)
-
-    log('DM → GM', { gmLoginId, chatId })
-    await sendLeaveDM(chatId, text)
+    await sendLeaveDM(chatId, msg.gmNewRequest(doc, employeeName))
   } catch (err) {
     console.error('[leave.notify] notifyNewLeaveToGm error:', err.message)
+  }
+}
+
+/* ─────────────────────────────
+ * ✅ NEW: DM COO when approvalMode = GM_AND_COO
+ * ───────────────────────────── */
+async function notifyNewLeaveToCoo(doc) {
+  try {
+    if (!doc) return
+    const mode = String(doc.approvalMode || 'GM_ONLY').toUpperCase()
+    if (mode !== 'GM_AND_COO') return
+
+    const cooLoginId = String(doc.cooLoginId || '').trim()
+    if (!cooLoginId) return
+
+    const [cooUser, empUser] = await Promise.all([
+      findUser(cooLoginId),
+      findUser(doc.employeeId || doc.requesterLoginId),
+    ])
+
+    const chatId = cooUser?.telegramChatId
+    if (!chatId) return log('skip coo new request (no chatId)', cooLoginId)
+
+    const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
+    await sendLeaveDM(chatId, msg.cooNewRequest(doc, employeeName))
+  } catch (err) {
+    console.error('[leave.notify] notifyNewLeaveToCoo error:', err.message)
   }
 }
 
@@ -133,20 +128,12 @@ async function notifyNewLeaveToGm(doc) {
 async function notifyManagerDecisionToEmployee(doc) {
   try {
     if (!doc) return
-
     const employeeLoginId = doc.employeeId || doc.requesterLoginId
     const empUser = await findUser(employeeLoginId)
     const chatId = empUser?.telegramChatId
+    if (!chatId) return
 
-    if (!chatId) {
-      log('Employee has no telegramChatId; skip notifyManagerDecisionToEmployee', employeeLoginId)
-      return
-    }
-
-    const text = msg.employeeDecision(doc, 'Manager')
-
-    log('DM → Employee (manager decision)', { employeeLoginId, chatId })
-    await sendLeaveDM(chatId, text)
+    await sendLeaveDM(chatId, msg.employeeDecision(doc, 'Manager'))
   } catch (err) {
     console.error('[leave.notify] notifyManagerDecisionToEmployee error:', err.message)
   }
@@ -158,28 +145,36 @@ async function notifyManagerDecisionToEmployee(doc) {
 async function notifyGmDecisionToEmployee(doc) {
   try {
     if (!doc) return
-
     const employeeLoginId = doc.employeeId || doc.requesterLoginId
     const empUser = await findUser(employeeLoginId)
     const chatId = empUser?.telegramChatId
+    if (!chatId) return
 
-    if (!chatId) {
-      log('Employee has no telegramChatId; skip notifyGmDecisionToEmployee', employeeLoginId)
-      return
-    }
-
-    const text = msg.employeeDecision(doc, 'GM')
-
-    log('DM → Employee (gm decision)', { employeeLoginId, chatId })
-    await sendLeaveDM(chatId, text)
+    await sendLeaveDM(chatId, msg.employeeDecision(doc, 'GM'))
   } catch (err) {
     console.error('[leave.notify] notifyGmDecisionToEmployee error:', err.message)
   }
 }
 
 /* ─────────────────────────────
+ * ✅ NEW: COO decision → DM Employee
+ * ───────────────────────────── */
+async function notifyCooDecisionToEmployee(doc) {
+  try {
+    if (!doc) return
+    const employeeLoginId = doc.employeeId || doc.requesterLoginId
+    const empUser = await findUser(employeeLoginId)
+    const chatId = empUser?.telegramChatId
+    if (!chatId) return
+
+    await sendLeaveDM(chatId, msg.employeeDecision(doc, 'COO'))
+  } catch (err) {
+    console.error('[leave.notify] notifyCooDecisionToEmployee error:', err.message)
+  }
+}
+
+/* ─────────────────────────────
  * ✅ LEAVE_ADMIN notifications (ALL activity)
- *    ❌ DO NOT notify ADMIN role
  * ───────────────────────────── */
 async function notifyLeaveAdminNewRequest(doc) {
   try {
@@ -191,10 +186,7 @@ async function notifyLeaveAdminNewRequest(doc) {
     if (!admins?.length) return
 
     const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
-    const text = msg.leaveAdminNewRequest(doc, employeeName)
-
-    log('DM → LEAVE_ADMIN (new request)', { count: admins.length })
-    await dmMany(admins, text, 'leave_admin')
+    await dmMany(admins, msg.leaveAdminNewRequest(doc, employeeName), 'leave_admin')
   } catch (err) {
     console.error('[leave.notify] notifyLeaveAdminNewRequest error:', err.message)
   }
@@ -210,10 +202,7 @@ async function notifyLeaveAdminManagerDecision(doc) {
     if (!admins?.length) return
 
     const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
-    const text = msg.leaveAdminManagerDecision(doc, employeeName)
-
-    log('DM → LEAVE_ADMIN (manager decision)', { count: admins.length })
-    await dmMany(admins, text, 'leave_admin')
+    await dmMany(admins, msg.leaveAdminManagerDecision(doc, employeeName), 'leave_admin')
   } catch (err) {
     console.error('[leave.notify] notifyLeaveAdminManagerDecision error:', err.message)
   }
@@ -229,13 +218,45 @@ async function notifyLeaveAdminGmDecision(doc) {
     if (!admins?.length) return
 
     const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
-    const text = msg.leaveAdminGmDecision(doc, employeeName)
-
-    log('DM → LEAVE_ADMIN (gm decision)', { count: admins.length })
-    await dmMany(admins, text, 'leave_admin')
+    await dmMany(admins, msg.leaveAdminGmDecision(doc, employeeName), 'leave_admin')
   } catch (err) {
     console.error('[leave.notify] notifyLeaveAdminGmDecision error:', err.message)
   }
+}
+
+async function notifyLeaveAdminCooDecision(doc) {
+  try {
+    if (!doc) return
+    const [admins, empUser] = await Promise.all([
+      findLeaveAdmins(),
+      findUser(doc.employeeId || doc.requesterLoginId),
+    ])
+    if (!admins?.length) return
+
+    const employeeName = empUser?.name || doc.employeeId || doc.requesterLoginId
+    await dmMany(admins, msg.leaveAdminCooDecision(doc, employeeName), 'leave_admin')
+  } catch (err) {
+    console.error('[leave.notify] notifyLeaveAdminCooDecision error:', err.message)
+  }
+}
+
+/* ─────────────────────────────
+ * ✅ WRAPPERS (these match your controller imports)
+ *    This removes "is not a function" errors.
+ * ───────────────────────────── */
+async function notifyManagerDecision(doc) {
+  await notifyManagerDecisionToEmployee(doc)
+  await notifyLeaveAdminManagerDecision(doc)
+}
+
+async function notifyGmDecision(doc) {
+  await notifyGmDecisionToEmployee(doc)
+  await notifyLeaveAdminGmDecision(doc)
+}
+
+async function notifyCooDecision(doc) {
+  await notifyCooDecisionToEmployee(doc)
+  await notifyLeaveAdminCooDecision(doc)
 }
 
 module.exports = {
@@ -245,11 +266,23 @@ module.exports = {
   // manager/gm workflow
   notifyNewLeaveToManager,
   notifyNewLeaveToGm,
+
+  // ✅ COO workflow
+  notifyNewLeaveToCoo,
+
+  // decision wrappers (✅ match controller names)
+  notifyManagerDecision,
+  notifyGmDecision,
+  notifyCooDecision,
+
+  // (optional internal)
   notifyManagerDecisionToEmployee,
   notifyGmDecisionToEmployee,
+  notifyCooDecisionToEmployee,
 
-  // ✅ leave_admin only (NOT ADMIN)
+  // leave_admin only
   notifyLeaveAdminNewRequest,
   notifyLeaveAdminManagerDecision,
   notifyLeaveAdminGmDecision,
+  notifyLeaveAdminCooDecision,
 }

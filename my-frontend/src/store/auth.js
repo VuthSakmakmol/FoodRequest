@@ -5,7 +5,7 @@ import {
   subscribeRoles,
   unsubscribeRoles,
   setSocketAuthToken,
-  resetSocketSubscriptions, // ✅ add this
+  resetSocketSubscriptions,
 } from '@/utils/socket'
 
 function normalizeRoles(user) {
@@ -16,14 +16,11 @@ function normalizeRoles(user) {
 
 function pickPrimaryRole(roles = []) {
   const PRIORITY = [
-    // Leave portal
     'LEAVE_ADMIN',
     'LEAVE_COO',
     'LEAVE_GM',
     'LEAVE_MANAGER',
     'LEAVE_USER',
-
-    // Other portals
     'ROOT_ADMIN',
     'ADMIN',
     'CHEF',
@@ -31,10 +28,7 @@ function pickPrimaryRole(roles = []) {
     'MESSENGER',
     'EMPLOYEE',
   ]
-
-  for (const p of PRIORITY) {
-    if (roles.includes(p)) return p
-  }
+  for (const p of PRIORITY) if (roles.includes(p)) return p
   return roles[0] || ''
 }
 
@@ -43,6 +37,9 @@ export const useAuth = defineStore('auth', {
     user: JSON.parse(localStorage.getItem('user') || 'null'),
     token: localStorage.getItem('token') || '',
     ready: false,
+
+    // ✅ NEW: prevent double logout / spam click
+    isLoggingOut: false,
   }),
 
   actions: {
@@ -58,11 +55,9 @@ export const useAuth = defineStore('auth', {
       const roles = normalizeRoles(this.user)
       const primaryRole = pickPrimaryRole(roles)
 
-      // ✅ store roles strongly
       localStorage.setItem('roles', JSON.stringify(roles))
       localStorage.setItem('primaryRole', primaryRole)
 
-      // legacy key for old code paths
       if (primaryRole) localStorage.setItem('role', primaryRole)
 
       const loginKey = this.user?.id || this.user?.loginId || ''
@@ -81,16 +76,10 @@ export const useAuth = defineStore('auth', {
       this.user = data.user
       this.token = data.token
 
-      // HTTP token
       this._applyTokenHeader(this.token)
-
-      // WS token
       setSocketAuthToken(this.token)
 
-      // persist
       this._persistSession()
-
-      // ✅ subscribe ALL roles (not only 1)
       await this._applyRealtimeSubscriptions()
 
       return this.user
@@ -140,65 +129,43 @@ export const useAuth = defineStore('auth', {
         }
       }
 
-      // ✅ re-sync storage keys in case old format existed
       this._persistSession()
-
-      // ✅ subscribe ALL roles after refresh
       await this._applyRealtimeSubscriptions()
 
       this.ready = true
     },
 
+    // ✅ FIXED LOGOUT (one time, clears storage immediately, no bounce)
     async logout() {
+      if (this.isLoggingOut) return
+      this.isLoggingOut = true
+
       const roles = normalizeRoles(this.user)
 
-      // ✅ unsubscribe ALL roles
-      if (roles.length) {
-        try {
-          await unsubscribeRoles(roles)
-        } catch {
-          // ignore socket errors
-        }
-      }
+      // ✅ 1) Clear auth state FIRST (so router guard won't think you're still logged-in)
+      this.user = null
+      this.token = ''
+      this.ready = true
 
-      // ✅ IMPORTANT: clear in-memory room sets so reconnect won't replay old rooms
+      this._applyTokenHeader('')
+      setSocketAuthToken('')
+
+      // ✅ 2) Clear ALL storage (your request)
+      try {
+        localStorage.clear()
+        sessionStorage.clear()
+      } catch {}
+
+      // ✅ 3) Then clean sockets (best effort)
+      try {
+        if (roles.length) await unsubscribeRoles(roles)
+      } catch {}
+
       try {
         resetSocketSubscriptions()
       } catch {}
 
-      // reset store
-      this.user = null
-      this.token = ''
-      this.ready = false
-
-      // clear auth headers + ws token
-      this._applyTokenHeader('')
-      setSocketAuthToken('')
-
-      // clear storage
-      try {
-        const toRemove = [
-          'token',
-          'user',
-          'loginId',
-          'employeeId',
-          'lastLoginId',
-          'role',
-          'roles',
-          'primaryRole',
-          'theme',
-        ]
-        toRemove.forEach(k => localStorage.removeItem(k))
-        sessionStorage.clear()
-      } catch {}
-
-      // clear cookies
-      try {
-        const cookieNames = ['loginId', 'role', 'theme']
-        cookieNames.forEach(name => {
-          document.cookie = `${name}=; Max-Age=0; path=/`
-        })
-      } catch {}
+      this.isLoggingOut = false
     },
   },
 })

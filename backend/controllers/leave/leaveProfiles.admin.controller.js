@@ -15,7 +15,7 @@ const { broadcastLeaveProfile } = require('../../utils/leave.realtime')
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
 const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456'
 
-const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_AND_COO'])
+const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_OR_COO'])
 
 // ✅ Backend-seeded approvers (frontend does NOT pick persons)
 const SEED_GM_LOGINID = String(process.env.LEAVE_GM_LOGINID || 'leave_gm').trim()
@@ -278,8 +278,8 @@ function resolveSeededApprovers(approvalMode) {
   const cooLoginId = SEED_COO_LOGINID
 
   if (!gmLoginId) throw new Error('Seed GM missing. Set LEAVE_GM_LOGINID.')
-  if (approvalMode === 'GM_AND_COO' && !cooLoginId) {
-    throw new Error('Seed COO missing. Set LEAVE_COO_LOGINID for GM_AND_COO mode.')
+  if (approvalMode === 'GM_OR_COO' && !cooLoginId) {
+    throw new Error('Seed COO missing. Set LEAVE_COO_LOGINID for GM_OR_COO mode.')
   }
 
   return { gmLoginId, cooLoginId: cooLoginId || '' }

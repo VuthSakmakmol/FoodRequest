@@ -1,4 +1,4 @@
-<!-- src/layouts/LeaveExpat/LeaveExpatUnified.vue -->
+src/layouts/LeaveExpat/LeaveExpatUnified.vue
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -157,10 +157,12 @@ function handleNavClick(it) {
 }
 
 /* Logout -> Greeting */
-function toggleAuth() {
-  if (auth.user) auth.logout()
-  router.push({ name: 'greeting' })
+async function toggleAuth() {
+  if (auth.isLoggingOut) return
+  await auth.logout()
+  router.replace({ name: 'greeting' }) 
 }
+
 
 const roleLabel = computed(() => {
   // Show multiple roles nicely

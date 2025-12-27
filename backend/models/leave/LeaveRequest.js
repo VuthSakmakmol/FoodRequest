@@ -2,15 +2,17 @@ const mongoose = require('mongoose')
 
 const STATUS = Object.freeze([
   'PENDING_MANAGER',
-  'PENDING_GM',
-  'PENDING_COO',     // ✅ new
+  'PENDING_GM',       // ✅ final stage for GM or COO
+  // 'PENDING_COO',    // (optional) keep ONLY if you already have old data
   'APPROVED',
   'REJECTED',
   'CANCELLED',
 ])
 
 const DAY_PART = Object.freeze(['AM', 'PM'])
-const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_AND_COO'])
+
+// ✅ OR-mode (what you want)
+const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_OR_COO'])
 
 // (optional future-proof) approvals array
 const APPROVAL_LEVEL = Object.freeze(['MANAGER', 'GM', 'COO'])
@@ -45,16 +47,16 @@ const LeaveRequestSchema = new mongoose.Schema(
 
     reason: { type: String, default: '', trim: true },
 
-    // ✅ status supports COO step
+    // ✅ status: keep final stage as PENDING_GM
     status: { type: String, enum: STATUS, default: 'PENDING_MANAGER' },
 
-    // ✅ store flow config snapshot at request time (important if profile changes later)
+    // ✅ store flow config snapshot at request time
     approvalMode: { type: String, enum: APPROVAL_MODE, default: 'GM_ONLY' },
 
     // ✅ Approvers snapshot
     managerLoginId: { type: String, default: '', trim: true }, // optional
     gmLoginId: { type: String, default: '', trim: true },      // required for both modes
-    cooLoginId: { type: String, default: '', trim: true },     // required only for GM_AND_COO (or read-only if GM_ONLY)
+    cooLoginId: { type: String, default: '', trim: true },     // required only for GM_OR_COO
 
     // ✅ Manager decision
     managerComment: { type: String, default: '' },
@@ -64,11 +66,11 @@ const LeaveRequestSchema = new mongoose.Schema(
     gmComment: { type: String, default: '' },
     gmDecisionAt: { type: Date },
 
-    // ✅ COO decision (new)
+    // ✅ COO decision
     cooComment: { type: String, default: '' },
     cooDecisionAt: { type: Date },
 
-    // ✅ optional future-proof approvals array (recommended)
+    // ✅ optional future-proof approvals array
     approvals: { type: [ApprovalStepSchema], default: [] },
 
     cancelledAt: { type: Date, default: null },
@@ -90,18 +92,16 @@ LeaveRequestSchema.pre('validate', function (next) {
 
     // half-day logic
     if (!this.isHalfDay) {
-      // full-day: dayPart must be null
       this.dayPart = null
     } else {
-      // half-day: same day, 0.5, require dayPart
       this.endDate = this.startDate
       this.totalDays = 0.5
       if (!this.dayPart) this.invalidate('dayPart', 'dayPart is required for half-day')
     }
 
-    // basic safety: if mode says GM_AND_COO, cooLoginId should exist
-    if (this.approvalMode === 'GM_AND_COO' && !String(this.cooLoginId || '').trim()) {
-      this.invalidate('cooLoginId', 'cooLoginId is required when approvalMode = GM_AND_COO')
+    // ✅ OR-mode requires cooLoginId
+    if (this.approvalMode === 'GM_OR_COO' && !String(this.cooLoginId || '').trim()) {
+      this.invalidate('cooLoginId', 'cooLoginId is required when approvalMode = GM_OR_COO')
     }
 
     next()
@@ -114,7 +114,7 @@ LeaveRequestSchema.index({ employeeId: 1, startDate: 1 })
 LeaveRequestSchema.index({ requesterLoginId: 1, createdAt: -1 })
 LeaveRequestSchema.index({ managerLoginId: 1, status: 1 })
 LeaveRequestSchema.index({ gmLoginId: 1, status: 1 })
-LeaveRequestSchema.index({ cooLoginId: 1, status: 1 }) // ✅ new
+LeaveRequestSchema.index({ cooLoginId: 1, status: 1 })
 
 LeaveRequestSchema.statics.STATUS = STATUS
 LeaveRequestSchema.statics.APPROVAL_MODE = APPROVAL_MODE
