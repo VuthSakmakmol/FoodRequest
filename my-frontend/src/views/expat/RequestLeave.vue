@@ -7,6 +7,8 @@ import { subscribeEmployeeIfNeeded, onSocket } from '@/utils/socket'
 
 import UserLeaveProfile from '@/views/expat/user/UserLeaveProfile.vue'
 
+defineOptions({ name: 'RequestLeave' })
+
 const emit = defineEmits(['submitted'])
 const { showToast } = useToast()
 
@@ -77,10 +79,15 @@ const formSuccess = ref('')
 
 const selectedType = computed(() => {
   const code = String(form.value.leaveTypeCode || '').toUpperCase()
-  return leaveTypes.value.find((t) => String(t.code || '').toUpperCase() === code) || null
+  return (
+    leaveTypes.value.find((t) => String(t.code || '').toUpperCase() === code) ||
+    null
+  )
 })
 
-const isMA = computed(() => String(form.value.leaveTypeCode || '').toUpperCase() === 'MA')
+const isMA = computed(
+  () => String(form.value.leaveTypeCode || '').toUpperCase() === 'MA'
+)
 
 const hasBasicFields = computed(() => {
   if (!form.value.leaveTypeCode) return false
@@ -165,7 +172,9 @@ async function submitRequest() {
       endDate: form.value.isHalfDay ? form.value.startDate : form.value.endDate,
       reason: form.value.reason || '',
       isHalfDay: !!form.value.isHalfDay,
-      dayPart: form.value.isHalfDay ? String(form.value.dayPart || '').toUpperCase() : '',
+      dayPart: form.value.isHalfDay
+        ? String(form.value.dayPart || '').toUpperCase()
+        : '',
     }
 
     await api.post('/leave/requests', payload)
@@ -205,11 +214,15 @@ function ensureRealtimeSub() {
   isRealtimeReady.value = true
 }
 
+function isMyEmp(payload = {}) {
+  const emp = String(payload.employeeId || '').trim()
+  return emp && emp === String(employeeId.value || '').trim()
+}
+
 function setupRealtimeListeners() {
   // Manager decision
   const offManager = onSocket('leave:req:manager-decision', (payload = {}) => {
-    const emp = String(payload.employeeId || '').trim()
-    if (!emp || emp !== String(employeeId.value || '').trim()) return
+    if (!isMyEmp(payload)) return
 
     const status = String(payload.status || '').trim().toUpperCase()
     if (status === 'PENDING_GM') {
@@ -232,8 +245,7 @@ function setupRealtimeListeners() {
 
   // GM decision
   const offGm = onSocket('leave:req:gm-decision', (payload = {}) => {
-    const emp = String(payload.employeeId || '').trim()
-    if (!emp || emp !== String(employeeId.value || '').trim()) return
+    if (!isMyEmp(payload)) return
 
     const status = String(payload.status || '').trim().toUpperCase()
     if (status === 'APPROVED') {
@@ -256,8 +268,7 @@ function setupRealtimeListeners() {
 
   // Generic updates (cancel / admin edits / etc.)
   const offUpdated = onSocket('leave:req:updated', (payload = {}) => {
-    const emp = String(payload.employeeId || '').trim()
-    if (!emp || emp !== String(employeeId.value || '').trim()) return
+    if (!isMyEmp(payload)) return
 
     const status = String(payload.status || '').trim().toUpperCase()
     if (status === 'CANCELLED') {
@@ -272,8 +283,7 @@ function setupRealtimeListeners() {
 
   // Profile updated (balances refresh)
   const offProfile = onSocket('leave:profile:updated', (payload = {}) => {
-    const emp = String(payload.employeeId || '').trim()
-    if (!emp || emp !== String(employeeId.value || '').trim()) return
+    if (!isMyEmp(payload)) return
     profileTick.value += 1
   })
 
@@ -403,8 +413,7 @@ onBeforeUnmount(() => {
                 <input
                   v-model="form.isHalfDay"
                   type="checkbox"
-                  class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500
-                         dark:border-slate-700 dark:bg-slate-900"
+                  class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 dark:border-slate-700 dark:bg-slate-900"
                 />
                 <span>Enable half-day</span>
               </label>
@@ -542,14 +551,14 @@ onBeforeUnmount(() => {
               :disabled="!canSubmit || !leaveTypes.length"
             >
               <span v-if="submitting" class="mr-1.5">
-                <i class="fa-solid fa-spinner animate-spin text-[11px]"></i>
+                <i class="fa-solid fa-spinner animate-spin text-[11px]" />
               </span>
               <span>Submit Request</span>
             </button>
           </div>
         </form>
 
-        <!-- Small helper -->
+        <!-- Selected type info -->
         <div
           v-if="selectedType"
           class="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-600
@@ -557,6 +566,11 @@ onBeforeUnmount(() => {
         >
           <span class="font-semibold text-slate-800 dark:text-slate-100">{{ selectedType.name }}</span>
           <span class="opacity-80"> — {{ selectedType.description || 'Follow company policy and approval flow.' }}</span>
+        </div>
+
+        <!-- Realtime note (optional) -->
+        <div v-if="!isRealtimeReady" class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
+          Realtime is not connected yet (employeeId missing).
         </div>
       </div>
     </div>

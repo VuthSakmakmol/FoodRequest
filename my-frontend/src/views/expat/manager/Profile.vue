@@ -1,3 +1,4 @@
+<!-- src/views/expat/manager/Profile.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -7,15 +8,15 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'ManagerLeaveProfile' })
+
 const { showToast } = useToast()
 const auth = useAuth()
 const route = useRoute()
 const router = useRouter()
 
 /* ───────── Identity ───────── */
-const loginId = computed(() =>
-  String(auth.user?.id || localStorage.getItem('loginId') || '')
-)
+const loginId = computed(() => String(auth.user?.loginId || auth.user?.id || localStorage.getItem('loginId') || ''))
 
 /* ───────── responsive ───────── */
 const isMobile = ref(false)
@@ -47,9 +48,7 @@ async function fetchManagedList(silent = false) {
   } catch (e) {
     console.error('fetchManagedList error', e)
     listError.value = e?.response?.data?.message || 'Unable to load employees.'
-    if (!silent) {
-      showToast({ type: 'error', title: 'Failed to load', message: listError.value })
-    }
+    if (!silent) showToast({ type: 'error', title: 'Failed to load', message: listError.value })
   } finally {
     listLoading.value = false
   }
@@ -92,15 +91,17 @@ function num(v) {
 const balances = computed(() => {
   const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
 
-  const arr = raw.map((b) => ({
-    leaveTypeCode: String(b?.leaveTypeCode || '').toUpperCase(),
-    yearlyEntitlement: num(b?.yearlyEntitlement),
-    used: num(b?.used),
-    remaining:
-      b?.remaining != null
-        ? num(b.remaining) // ✅ backend truth (can be negative)
-        : num(b?.yearlyEntitlement) - num(b?.used), // fallback (no clamp)
-  }))
+  const arr = raw
+    .map((b) => ({
+      leaveTypeCode: String(b?.leaveTypeCode || '').toUpperCase(),
+      yearlyEntitlement: num(b?.yearlyEntitlement),
+      used: num(b?.used),
+      remaining:
+        b?.remaining != null
+          ? num(b.remaining) // ✅ backend truth (can be negative)
+          : num(b?.yearlyEntitlement) - num(b?.used), // fallback (no clamp)
+    }))
+    .filter((x) => x.leaveTypeCode)
 
   const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
   arr.sort((a, b) => {
@@ -134,9 +135,7 @@ async function fetchEmployeeProfile(silent = false) {
   } catch (e) {
     console.error('fetchEmployeeProfile error', e)
     loadError.value = e?.response?.data?.message || 'Unable to load leave balance.'
-    if (!silent) {
-      showToast({ type: 'error', title: 'Failed to load', message: loadError.value })
-    }
+    if (!silent) showToast({ type: 'error', title: 'Failed to load', message: loadError.value })
   } finally {
     loading.value = false
   }
@@ -156,27 +155,50 @@ function triggerRefresh() {
 
 const offHandlers = []
 function setupRealtime() {
+  // ✅ join personal room + employee room
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
   if (targetEmployeeId.value) subscribeEmployeeIfNeeded(targetEmployeeId.value)
 
   offHandlers.push(
-    onSocket('leave:req:created', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:manager-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:gm-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
-    onSocket('leave:req:updated', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:created', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:manager-decision', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:gm-decision', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:coo-decision', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:req:updated', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:profile:updated', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    }),
+    onSocket('leave:profile:recalculated', (p) => {
+      if (isTargetDoc(p)) triggerRefresh()
+    })
   )
 }
 function teardownRealtime() {
-  offHandlers.forEach((off) => { try { off && off() } catch {} })
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
   offHandlers.length = 0
 }
 
 /* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
-  window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
   await fetchManagedList(true)
+
   if (isDetailMode.value) {
     await fetchEmployeeProfile(true)
     setupRealtime()
@@ -193,12 +215,11 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
 })
 </script>
-
 
 <template>
   <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -220,9 +241,10 @@ onBeforeUnmount(() => {
           </div>
 
           <p class="mt-1 text-[11px] text-white/90">
-            {{ isDetailMode
-              ? 'Review remaining days before you approve or reject the request.'
-              : 'Select an employee to view leave balance before approving.'
+            {{
+              isDetailMode
+                ? 'Review remaining days before you approve or reject the request.'
+                : 'Select an employee to view leave balance before approving.'
             }}
           </p>
         </div>
@@ -286,10 +308,7 @@ onBeforeUnmount(() => {
           <div class="h-24 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
         </div>
 
-        <p
-          v-else-if="!filteredRows.length"
-          class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400"
-        >
+        <p v-else-if="!filteredRows.length" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
           No employees found.
         </p>
 
@@ -327,12 +346,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-2 grid grid-cols-2 gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-              <div>Join: <span class="text-slate-800 dark:text-slate-100 font-semibold">
-                {{ r.joinDate ? dayjs(r.joinDate).format('YYYY-MM-DD') : '—' }}
-              </span></div>
-              <div>Contract: <span class="text-slate-800 dark:text-slate-100 font-semibold">
-                {{ r.contractDate ? dayjs(r.contractDate).format('YYYY-MM-DD') : '—' }}
-              </span></div>
+              <div>
+                Join:
+                <span class="text-slate-800 dark:text-slate-100 font-semibold">
+                  {{ r.joinDate ? dayjs(r.joinDate).format('YYYY-MM-DD') : '—' }}
+                </span>
+              </div>
+              <div>
+                Contract:
+                <span class="text-slate-800 dark:text-slate-100 font-semibold">
+                  {{ r.contractDate ? dayjs(r.contractDate).format('YYYY-MM-DD') : '—' }}
+                </span>
+              </div>
             </div>
           </article>
         </div>
@@ -430,6 +455,7 @@ onBeforeUnmount(() => {
             No leave balance data found.
           </p>
 
+          <!-- Mobile -->
           <div v-else-if="isMobile" class="space-y-2">
             <article
               v-for="b in balances"
@@ -474,12 +500,9 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- DETAIL MODE: Desktop table (aligned) -->
+          <!-- Desktop -->
           <div v-else class="overflow-x-auto">
-            <table
-              class="min-w-[760px] w-full table-fixed text-left text-xs sm:text-[13px]
-                    text-slate-700 dark:text-slate-100"
-            >
+            <table class="min-w-[760px] w-full table-fixed text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
               <colgroup>
                 <col style="width: 140px" />
                 <col style="width: 200px" />
@@ -489,8 +512,7 @@ onBeforeUnmount(() => {
 
               <thead
                 class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
-                      border-b border-slate-200 dark:bg-slate-800/80
-                      dark:border-slate-700 dark:text-slate-300"
+                      border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
               >
                 <tr>
                   <th class="table-th">Type</th>
@@ -517,13 +539,8 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <td class="table-td text-right tabular-nums align-middle">
-                    {{ b.yearlyEntitlement }}
-                  </td>
-
-                  <td class="table-td text-right tabular-nums align-middle">
-                    {{ b.used }}
-                  </td>
+                  <td class="table-td text-right tabular-nums align-middle">{{ b.yearlyEntitlement }}</td>
+                  <td class="table-td text-right tabular-nums align-middle">{{ b.used }}</td>
 
                   <td class="table-td text-right align-middle">
                     <div class="flex justify-end">
@@ -542,7 +559,6 @@ onBeforeUnmount(() => {
               </tbody>
             </table>
           </div>
-
 
           <div class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
             Read-only. Use this to verify balance before approve/reject in the inbox.
@@ -564,5 +580,4 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
   vertical-align: middle;
 }
-
 </style>

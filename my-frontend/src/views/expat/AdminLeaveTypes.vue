@@ -94,7 +94,7 @@ async function fetchLeaveTypes() {
     showToast({
       type: 'error',
       title: 'Failed to load leave types',
-      message: loadError.value
+      message: loadError.value,
     })
   } finally {
     loadingTypes.value = false
@@ -114,134 +114,103 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="px-1 py-1 sm:px-3">
-    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Gradient header / filters -->
-      <div class="rounded-t-2xl bg-gradient-to-r from-indigo-600 via-violet-500 to-sky-500 px-4 py-3 text-white">
-        <!-- Desktop -->
-        <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex flex-col gap-1 min-w-[220px]">
-            <div class="flex items-center gap-2">
-              <p class="text-sm font-semibold">Leave Types</p>
-              <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold">
-                Read-only
-              </span>
-            </div>
-            <p class="text-[11px] text-indigo-50/90">
-              System-defined leave types (managed by backend rules).
-            </p>
-          </div>
-
-          <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-            <!-- Search -->
-            <div class="min-w-[220px] max-w-xs">
-              <label class="mb-1 block text-[11px] font-medium text-indigo-50">Search</label>
-              <div class="flex items-center rounded-xl border border-indigo-200/80 bg-indigo-900/25 px-2.5 py-1.5 text-xs">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-indigo-50/80" />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Code or name..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-indigo-100/80"
-                />
+  <!-- ✅ Natural colorful background (light + dark) -->
+  <section
+    class="w-full"
+  >
+    <div
+      class="rounded-3xl border border-slate-200/70 bg-white/70 shadow-[0_18px_45px_rgba(15,23,42,0.10)]
+             backdrop-blur
+             dark:border-slate-800/70 dark:bg-slate-950/55"
+    >
+      <!-- ✅ Gradient header (more life, still professional) -->
+      <header class="relative overflow-hidden rounded-t-3xl px-4 py-3 text-white">
+        <div
+          class="absolute inset-0"
+          style="background: linear-gradient(90deg, rgba(2,132,199,1), rgba(79,70,229,1), rgba(16,185,129,1));"
+        />
+        <div
+          class="absolute inset-0 opacity-60"
+          style="background:
+            radial-gradient(900px circle at 10% 0%, rgba(255,255,255,.22), transparent 45%),
+            radial-gradient(900px circle at 100% 20%, rgba(255,255,255,.18), transparent 45%);"
+        />
+        <div class="relative">
+          <!-- Desktop -->
+          <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
+            <div class="min-w-[220px]">
+              <div class="flex items-center gap-2">
+                <h1 class="text-[15px] font-extrabold tracking-tight">Leave Types</h1>
+                <span class="rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-bold">
+                  Read-only
+                </span>
               </div>
+              <p class="mt-0.5 text-[11px] text-white/85">
+                System-defined leave types (managed by backend rules).
+              </p>
             </div>
 
-            <!-- Active filter -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="mr-1 text-indigo-50/80">Status</span>
-              <div class="flex rounded-full bg-indigo-900/20 p-0.5">
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="activeFilter === 'ALL' ? 'bg-white/95 text-indigo-700 shadow-sm' : 'text-indigo-100 hover:bg-indigo-900/40'"
-                  @click="activeFilter = 'ALL'"
-                >All</button>
-
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="activeFilter === 'ACTIVE' ? 'bg-white/95 text-indigo-700 shadow-sm' : 'text-indigo-100 hover:bg-indigo-900/40'"
-                  @click="activeFilter = 'ACTIVE'"
-                >Active</button>
-
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="activeFilter === 'INACTIVE' ? 'bg-white/95 text-indigo-700 shadow-sm' : 'text-indigo-100 hover:bg-indigo-900/40'"
-                  @click="activeFilter = 'INACTIVE'"
-                >Inactive</button>
-              </div>
-            </div>
-
-            <!-- Refresh -->
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="loadingTypes"
-              @click="fetchLeaveTypes()"
-            >
-              <i class="fa-solid fa-rotate text-[11px]" :class="loadingTypes ? 'fa-spin' : ''" />
-              Refresh
-            </button>
-          </div>
-        </div>
-
-        <!-- Mobile -->
-        <div v-else class="space-y-2">
-          <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-indigo-100/80">Expat Holiday</p>
-            <div class="flex items-center gap-2">
-              <p class="text-sm font-semibold">Leave Types</p>
-              <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold">
-                Read-only
-              </span>
-            </div>
-            <p class="text-[11px] text-indigo-50/90">System-defined leave types (backend-managed).</p>
-          </div>
-
-          <div class="space-y-2">
-            <div class="space-y-1">
-              <label class="mb-1 block text-[11px] font-medium text-indigo-50">Search</label>
-              <div class="flex items-center rounded-xl border border-indigo-200/80 bg-indigo-900/25 px-2.5 py-1.5 text-[11px]">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-indigo-50/80" />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Code or name..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-indigo-100/80"
-                />
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <div class="flex items-center gap-1">
-                <span class="text-indigo-50/80">Status</span>
-                <div class="flex rounded-full bg-indigo-900/20 p-0.5">
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="activeFilter === 'ALL' ? 'bg-white/95 text-indigo-700 shadow-sm' : 'text-indigo-100 hover:bg-indigo-900/40'"
-                    @click="activeFilter = 'ALL'"
-                  >All</button>
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="activeFilter === 'ACTIVE' ? 'bg-white/95 text-indigo-700 shadow-sm' : 'text-indigo-100 hover:bg-indigo-900/40'"
-                    @click="activeFilter = 'ACTIVE'"
-                  >Active</button>
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="activeFilter === 'INACTIVE' ? 'bg-white/95 text-indigo-700 shadow-sm' : 'text-indigo-100 hover:bg-indigo-900/40'"
-                    @click="activeFilter = 'INACTIVE'"
-                  >Inactive</button>
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
+              <!-- Search -->
+              <div class="min-w-[260px] max-w-sm">
+                <label class="mb-1 block text-[11px] font-semibold text-white/90">Search</label>
+                <div class="flex items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-magnifying-glass text-[12px] text-white/85" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Code or name..."
+                    class="flex-1 bg-transparent text-[12px] outline-none placeholder:text-white/70"
+                  />
                 </div>
               </div>
 
+              <!-- Status segmented -->
+              <div class="flex items-center gap-2">
+                <span class="text-[11px] font-bold text-white/90">Status</span>
+
+                <div class="flex rounded-full border border-white/25 bg-white/10 p-1">
+                  <button
+                    type="button"
+                    class="rounded-full px-3 py-1 text-[11px] font-bold transition"
+                    :class="activeFilter === 'ALL'
+                      ? 'bg-white text-slate-900 shadow'
+                      : 'text-white/90 hover:bg-white/10'"
+                    @click="activeFilter = 'ALL'"
+                  >
+                    All
+                  </button>
+
+                  <button
+                    type="button"
+                    class="rounded-full px-3 py-1 text-[11px] font-bold transition"
+                    :class="activeFilter === 'ACTIVE'
+                      ? 'bg-white text-slate-900 shadow'
+                      : 'text-white/90 hover:bg-white/10'"
+                    @click="activeFilter = 'ACTIVE'"
+                  >
+                    Active
+                  </button>
+
+                  <button
+                    type="button"
+                    class="rounded-full px-3 py-1 text-[11px] font-bold transition"
+                    :class="activeFilter === 'INACTIVE'
+                      ? 'bg-white text-slate-900 shadow'
+                      : 'text-white/90 hover:bg-white/10'"
+                    @click="activeFilter = 'INACTIVE'"
+                  >
+                    Inactive
+                  </button>
+                </div>
+              </div>
+
+              <!-- Refresh -->
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2
+                       text-[11px] font-extrabold text-white transition hover:bg-white/15
+                       disabled:cursor-not-allowed disabled:opacity-60"
                 :disabled="loadingTypes"
                 @click="fetchLeaveTypes()"
               >
@@ -250,78 +219,166 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
+
+          <!-- Mobile -->
+          <div v-else class="space-y-2">
+            <div>
+              <p class="text-[10px] font-extrabold uppercase tracking-[0.25em] text-white/75">
+                Expat Holiday
+              </p>
+              <div class="mt-0.5 flex items-center gap-2">
+                <h1 class="text-[15px] font-extrabold tracking-tight">Leave Types</h1>
+                <span class="rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-bold">
+                  Read-only
+                </span>
+              </div>
+              <p class="text-[11px] text-white/85">System-defined leave types (backend-managed).</p>
+            </div>
+
+            <div class="space-y-2">
+              <div>
+                <label class="mb-1 block text-[11px] font-semibold text-white/90">Search</label>
+                <div class="flex items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-magnifying-glass text-[12px] text-white/85" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Code or name..."
+                    class="flex-1 bg-transparent text-[12px] outline-none placeholder:text-white/70"
+                  />
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-bold text-white/90">Status</span>
+                  <div class="flex rounded-full border border-white/25 bg-white/10 p-1">
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1 text-[11px] font-bold transition"
+                      :class="activeFilter === 'ALL'
+                        ? 'bg-white text-slate-900 shadow'
+                        : 'text-white/90 hover:bg-white/10'"
+                      @click="activeFilter = 'ALL'"
+                    >
+                      All
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1 text-[11px] font-bold transition"
+                      :class="activeFilter === 'ACTIVE'
+                        ? 'bg-white text-slate-900 shadow'
+                        : 'text-white/90 hover:bg-white/10'"
+                      @click="activeFilter = 'ACTIVE'"
+                    >
+                      Active
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded-full px-3 py-1 text-[11px] font-bold transition"
+                      :class="activeFilter === 'INACTIVE'
+                        ? 'bg-white text-slate-900 shadow'
+                        : 'text-white/90 hover:bg-white/10'"
+                      @click="activeFilter = 'INACTIVE'"
+                    >
+                      Inactive
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2
+                         text-[11px] font-extrabold text-white transition hover:bg-white/15
+                         disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="loadingTypes"
+                  @click="fetchLeaveTypes()"
+                >
+                  <i class="fa-solid fa-rotate text-[11px]" :class="loadingTypes ? 'fa-spin' : ''" />
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
       <!-- Body -->
-      <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
+      <div class="px-2 pb-3 pt-3 sm:px-4">
         <!-- Error banner -->
         <div
           v-if="loadError"
-          class="mb-2 rounded-md border border-rose-400 bg-rose-50 px-3 py-2 text-[11px]
-                 text-rose-700 dark:border-rose-500/70 dark:bg-rose-950/40 dark:text-rose-100"
+          class="mb-3 rounded-2xl border border-rose-400/60 bg-rose-50 px-3 py-2 text-[12px] text-rose-800
+                 dark:border-rose-500/60 dark:bg-rose-950/35 dark:text-rose-100"
         >
           {{ loadError }}
         </div>
 
         <!-- Loading skeleton -->
         <div v-if="loadingTypes" class="space-y-2">
-          <div class="h-9 w-full animate-pulse rounded-xl bg-slate-200/90 dark:bg-slate-800/70"></div>
-          <div v-for="i in 4" :key="'sk-' + i" class="h-14 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60"></div>
+          <div class="h-10 w-full animate-pulse rounded-2xl bg-slate-200/80 dark:bg-slate-800/60"></div>
+          <div v-for="i in 5" :key="'sk-' + i" class="h-14 w-full animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/50"></div>
         </div>
 
         <!-- Content -->
-        <div v-else>
-          <!-- MOBILE: cards -->
+        <div v-else class="space-y-3">
+          <!-- MOBILE cards -->
           <div v-if="isMobile" class="space-y-2">
-            <p v-if="!pagedTypes.length" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
+            <p v-if="!pagedTypes.length" class="py-8 text-center text-[12px] text-slate-500 dark:text-slate-400">
               No leave types found.
             </p>
 
             <article
               v-for="t in pagedTypes"
               :key="t._id || t.code"
-              class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
-                     shadow-[0_10px_24px_rgba(15,23,42,0.12)]
-                     dark:border-slate-700 dark:bg-slate-900/95"
+              class="rounded-3xl border border-slate-200/70 bg-white/85 p-3
+                     shadow-[0_14px_35px_rgba(15,23,42,0.10)]
+                     dark:border-slate-800/70 dark:bg-slate-950/55"
             >
               <div class="flex items-start justify-between gap-3">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-extrabold text-white dark:bg-white dark:text-slate-900">
                       {{ t.code }}
                     </span>
+
                     <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px]"
-                      :class="(t.isActive ?? true) ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
+                      class="rounded-full px-2 py-0.5 text-[10px] font-extrabold"
+                      :class="(t.isActive ?? true)
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
+                        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
                     >
                       {{ (t.isActive ?? true) ? 'Active' : 'Inactive' }}
                     </span>
                   </div>
 
-                  <div class="mt-1 text-[13px] font-semibold text-slate-900 dark:text-slate-50">
+                  <div class="mt-1 text-[14px] font-extrabold text-slate-900 dark:text-slate-50">
                     {{ t.name || '—' }}
                   </div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                  <div class="mt-0.5 text-[12px] text-slate-600 dark:text-slate-300">
                     {{ t.description || 'No description' }}
                   </div>
                 </div>
 
-                <div class="text-right text-[11px] text-slate-500 dark:text-slate-400">
+                <div class="text-right text-[12px] text-slate-600 dark:text-slate-300">
                   <div>
                     Entitlement:
-                    <span class="font-semibold text-slate-800 dark:text-slate-100">
+                    <span class="font-extrabold text-slate-900 dark:text-slate-50">
                       {{ Number(t.yearlyEntitlement || 0).toLocaleString() }} days
                     </span>
                   </div>
-                  <div>
+                  <div class="mt-0.5">
                     Order:
-                    <span class="font-semibold text-slate-800 dark:text-slate-100">{{ Number(t.order ?? 0) }}</span>
+                    <span class="font-extrabold text-slate-900 dark:text-slate-50">
+                      {{ Number(t.order ?? 0) }}
+                    </span>
                   </div>
                   <div class="mt-1">
                     <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px]"
-                      :class="t.requiresBalance ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
+                      class="rounded-full px-2 py-0.5 text-[10px] font-extrabold"
+                      :class="t.requiresBalance
+                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
+                        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
                     >
                       {{ t.requiresBalance ? 'Requires Balance' : 'No Balance Check' }}
                     </span>
@@ -331,78 +388,95 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- DESKTOP: table -->
-          <div v-else class="overflow-x-auto">
-            <table class="min-w-[980px] w-full table-fixed border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+          <!-- DESKTOP table -->
+          <div v-else class="overflow-x-auto rounded-3xl border border-slate-200/70 bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/55">
+            <!-- ✅ table header strip -->
+            <div class="border-b border-slate-200/70 px-3 py-2 dark:border-slate-800/70">
+              <div class="flex items-center gap-2 text-[12px] font-extrabold text-slate-700 dark:text-slate-200">
+                <span class="h-2 w-2 rounded-full bg-sky-500"></span>
+                <span class="h-2 w-2 rounded-full bg-indigo-500"></span>
+                <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
+                <span class="ml-2">Types List</span>
+              </div>
+            </div>
+
+            <table class="w-full min-w-[980px] table-fixed border-collapse text-[13px] text-slate-700 dark:text-slate-100">
               <colgroup>
-                <col style="width: 90px" />
+                <col style="width: 110px" />
                 <col style="width: 520px" />
-                <col style="width: 200px" />
-                <col style="width: 190px" />
-                <col style="width: 110px" />
-                <col style="width: 110px" />
+                <col style="width: 210px" />
+                <col style="width: 180px" />
+                <col style="width: 120px" />
               </colgroup>
 
-              <thead
-                class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
-                       border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
-              >
-                <tr>
-                  <th class="table-th border-l border-slate-200 first:border-l-0 dark:border-slate-700">Code</th>
-                  <th class="table-th border-l border-slate-200 dark:border-slate-700">Name</th>
-                  <th class="table-th border-l border-slate-200 dark:border-slate-700">Requires Balance</th>
-                  <th class="table-th border-l border-slate-200 dark:border-slate-700 !text-right">Yearly Entitlement</th>
-                  <th class="table-th border-l border-slate-200 dark:border-slate-700 !text-center">Active</th>
-                  <th class="table-th border-l border-slate-200 dark:border-slate-700 !text-right">Order</th>
+              <!-- ✅ colorful head + clear columns -->
+              <thead class="text-[11px] uppercase tracking-wide text-white">
+                <tr class="bg-gradient-to-r from-sky-600 via-indigo-600 to-emerald-600">
+                  <th class="px-3 py-3 text-left font-extrabold">Code</th>
+                  <th class="px-3 py-3 text-left font-extrabold">Name</th>
+                  <th class="px-3 py-3 text-left font-extrabold">Requires Balance</th>
+                  <th class="px-3 py-3 text-right font-extrabold">Yearly Entitlement</th>
+                  <th class="px-3 py-3 text-center font-extrabold">Active</th>
                 </tr>
               </thead>
 
-              <tbody>
+              <!-- ✅ zebra rows + row split (easy to look) -->
+              <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
                 <tr
-                  v-for="t in pagedTypes"
+                  v-for="(t, idx) in pagedTypes"
                   :key="t._id || t.code"
-                  class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70"
+                  class="transition"
+                  :class="[
+                    idx % 2 === 0
+                      ? 'bg-white/80 dark:bg-slate-950/25'
+                      : 'bg-sky-50/60 dark:bg-slate-900/40',
+                    'hover:bg-emerald-50/70 dark:hover:bg-emerald-900/20'
+                  ]"
                 >
-                  <td class="table-td">
-                    <span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                  <td class="px-3 py-3">
+                    <span class="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-extrabold text-white dark:bg-white dark:text-slate-900">
                       {{ t.code }}
                     </span>
                   </td>
 
-                  <td class="table-td">
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ t.name || '—' }}</div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ t.description || '—' }}</div>
+                  <td class="px-3 py-3">
+                    <div class="font-extrabold text-slate-900 dark:text-slate-50">
+                      {{ t.name || '—' }}
+                    </div>
+                    <div class="mt-0.5 text-[12px] text-slate-600 dark:text-slate-300">
+                      {{ t.description || '—' }}
+                    </div>
                   </td>
 
-                  <td class="table-td">
+                  <td class="px-3 py-3">
                     <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px]"
-                      :class="t.requiresBalance ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
+                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                      :class="t.requiresBalance
+                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
+                        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
                     >
                       {{ t.requiresBalance ? 'Yes' : 'No' }}
                     </span>
                   </td>
 
-                  <td class="table-td !text-right tabular-nums">
+                  <td class="px-3 py-3 text-right tabular-nums font-extrabold text-slate-900 dark:text-slate-50">
                     {{ Number(t.yearlyEntitlement || 0).toLocaleString() }}
                   </td>
 
-                  <td class="table-td !text-center">
+                  <td class="px-3 py-3 text-center">
                     <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px]"
-                      :class="(t.isActive ?? true) ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
+                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                      :class="(t.isActive ?? true)
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
+                        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
                     >
                       {{ (t.isActive ?? true) ? 'Yes' : 'No' }}
                     </span>
                   </td>
-
-                  <td class="table-td !text-right tabular-nums">
-                    {{ Number(t.order ?? 0) }}
-                  </td>
                 </tr>
 
                 <tr v-if="!pagedTypes.length">
-                  <td colspan="6" class="px-3 py-6 text-center text-[12px] text-slate-500 border-t border-slate-200 dark:border-slate-700 dark:text-slate-400">
+                  <td colspan="5" class="px-3 py-10 text-center text-[12px] text-slate-500 dark:text-slate-400">
                     No leave types found.
                   </td>
                 </tr>
@@ -411,66 +485,76 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Pagination -->
-          <div class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-2">
-              <span>Rows per page</span>
-              <select v-model="perPage" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900">
-                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-              </select>
+          <div class="mt-2 rounded-3xl border border-slate-200/70 bg-white/75 px-3 py-3 dark:border-slate-800/70 dark:bg-slate-950/55">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
+                <span class="font-extrabold">Rows per page</span>
+                <select
+                  v-model="perPage"
+                  class="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold
+                         dark:border-slate-700 dark:bg-slate-900"
+                >
+                  <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
+                </select>
+              </div>
+
+              <div class="flex items-center justify-end gap-1">
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                         hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
+                         dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                  :disabled="page <= 1"
+                  @click="page = 1"
+                >
+                  «
+                </button>
+
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                         hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
+                         dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                  :disabled="page <= 1"
+                  @click="page = Math.max(1, page - 1)"
+                >
+                  Prev
+                </button>
+
+                <span class="px-2 text-[12px] font-extrabold text-slate-600 dark:text-slate-300">
+                  Page {{ page }} / {{ pageCount }}
+                </span>
+
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                         hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
+                         dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                  :disabled="page >= pageCount"
+                  @click="page = Math.min(pageCount, page + 1)"
+                >
+                  Next
+                </button>
+
+                <button
+                  type="button"
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                         hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
+                         dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                  :disabled="page >= pageCount"
+                  @click="page = pageCount"
+                >
+                  »
+                </button>
+              </div>
             </div>
 
-            <div class="flex items-center justify-end gap-1">
-              <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = 1">«</button>
-              <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
-              <span class="px-2">Page {{ page }} / {{ pageCount }}</span>
-              <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
-              <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+              Leave types are managed by backend rules. Contact Admin/IT if anything looks incorrect.
             </div>
-          </div>
-
-          <div class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
-            Leave types are managed by backend rules. Contact Admin/IT if anything looks incorrect.
           </div>
         </div>
       </div>
     </div>
-  </div>
+  </section>
 </template>
-
-<style scoped>
-.table-th {
-  padding: 8px 10px;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.table-td {
-  padding: 8px 10px;
-  vertical-align: middle;
-}
-
-/* Pagination */
-.pagination-btn {
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(100, 116, 139, 0.95);
-  background: white;
-  font-size: 11px;
-  color: #0f172a;
-}
-.pagination-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-.pagination-btn:not(:disabled):hover {
-  background: #e5edff;
-}
-.dark .pagination-btn {
-  background: #020617;
-  border-color: rgba(148, 163, 184, 0.9);
-  color: #e5e7eb;
-}
-.dark .pagination-btn:not(:disabled):hover {
-  background: #1e293b;
-}
-</style>

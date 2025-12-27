@@ -8,6 +8,8 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'CooLeaveInbox' })
+
 const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
@@ -16,7 +18,7 @@ const auth = useAuth()
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const base = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase().trim()))].filter(Boolean)
+  return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
 const canCooDecide = computed(() => roles.value.includes('LEAVE_COO'))
 
@@ -36,7 +38,7 @@ const statusTab = ref('PENDING') // 'PENDING' | 'FINISHED'
 
 /* ✅ Filters (default ALL) */
 const fromDate = ref('') // Requested at (createdAt)
-const toDate = ref('')   // Requested at (createdAt)
+const toDate = ref('') // Requested at (createdAt)
 const employeeFilter = ref('')
 
 /* Pagination */
@@ -46,8 +48,8 @@ const perPageOptions = [20, 50, 100, 'All']
 
 /* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
 function formatRange(row) {
-  const s = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
-  const e = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
+  const s = row?.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
+  const e = row?.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
   if (!s && !e) return '—'
   if (s === e) return s
   return `${s} → ${e}`
@@ -76,26 +78,22 @@ function statusChipClasses(status) {
  * COO sees the SAME final queue as GM.
  * Final queue status is PENDING_GM, but approvalMode decides who can act.
  *
- * So: COO inbox = requests where:
- * - approvalMode is GM_OR_COO (or legacy GM_AND_COO), AND
- * - status is PENDING_GM (final stage), AND
- * - cooLoginId matches current user (or is empty -> admin can assign later)
- *
- * If your backend already provides /leave/requests/coo/inbox endpoint, it should return those.
+ * Recommended backend endpoint: GET /leave/requests/coo/inbox
  */
-async function fetchInbox() {
+async function fetchInbox(silent = false) {
   try {
     loading.value = true
-    // ✅ Use your backend endpoint (recommended)
     const res = await api.get('/leave/requests/coo/inbox')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('fetchInbox COO error', e)
-    showToast({
-      type: 'error',
-      title: 'Failed to load',
-      message: e?.response?.data?.message || 'Unable to load COO inbox.'
-    })
+    if (!silent) {
+      showToast({
+        type: 'error',
+        title: 'Failed to load',
+        message: e?.response?.data?.message || 'Unable to load COO inbox.',
+      })
+    }
   } finally {
     loading.value = false
   }
@@ -106,13 +104,20 @@ function statusWeight(s) {
   const st = String(s || '').toUpperCase()
   switch (st) {
     // ✅ show pending first
-    case 'PENDING_GM': return 0
-    case 'PENDING_COO': return 1
-    case 'PENDING_MANAGER': return 2
-    case 'APPROVED': return 3
-    case 'REJECTED': return 4
-    case 'CANCELLED': return 5
-    default: return 99
+    case 'PENDING_GM':
+      return 0
+    case 'PENDING_COO':
+      return 1
+    case 'PENDING_MANAGER':
+      return 2
+    case 'APPROVED':
+      return 3
+    case 'REJECTED':
+      return 4
+    case 'CANCELLED':
+      return 5
+    default:
+      return 99
   }
 }
 
@@ -152,35 +157,40 @@ const filteredRows = computed(() => {
   let list = [...rows.value]
 
   if (empQ) {
-    list = list.filter(r => String(r.employeeId || '').toLowerCase().includes(empQ))
+    list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
   }
 
   if (q) {
-    list = list.filter(r =>
-      String(r.employeeId || '').toLowerCase().includes(q) ||
-      String(r.employeeName || '').toLowerCase().includes(q) ||
-      String(r.department || '').toLowerCase().includes(q) ||
-      String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
-      String(r.reason || '').toLowerCase().includes(q) ||
-      String(r.cooComment || '').toLowerCase().includes(q) ||
-      String(r.gmComment || '').toLowerCase().includes(q) ||
-      String(r.managerComment || '').toLowerCase().includes(q)
+    list = list.filter(
+      (r) =>
+        String(r.employeeId || '').toLowerCase().includes(q) ||
+        String(r.employeeName || '').toLowerCase().includes(q) ||
+        String(r.department || '').toLowerCase().includes(q) ||
+        String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
+        String(r.reason || '').toLowerCase().includes(q) ||
+        String(r.cooComment || '').toLowerCase().includes(q) ||
+        String(r.gmComment || '').toLowerCase().includes(q) ||
+        String(r.managerComment || '').toLowerCase().includes(q)
     )
   }
 
   if (statusTab.value === 'FINISHED') {
-    list = list.filter(r => ['APPROVED', 'REJECTED', 'CANCELLED'].includes(String(r.status || '').toUpperCase()))
+    list = list.filter((r) =>
+      ['APPROVED', 'REJECTED', 'CANCELLED'].includes(String(r.status || '').toUpperCase())
+    )
   } else {
-    // ✅ pending tab: show "pending" statuses (mostly PENDING_GM for your OR-final stage)
-    list = list.filter(r => ['PENDING_GM', 'PENDING_COO', 'PENDING_MANAGER'].includes(String(r.status || '').toUpperCase()))
+    // ✅ pending tab
+    list = list.filter((r) =>
+      ['PENDING_GM', 'PENDING_COO', 'PENDING_MANAGER'].includes(String(r.status || '').toUpperCase())
+    )
   }
 
   // ✅ Date filter by REQUEST DATE (createdAt)
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
-  const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
+  const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
 
   if (fromVal !== null || toVal !== null) {
-    list = list.filter(r => {
+    list = list.filter((r) => {
       if (!r.createdAt) return false
       const t = dayjs(r.createdAt).valueOf()
       if (fromVal !== null && t < fromVal) return false
@@ -213,7 +223,9 @@ const pageCount = computed(() => {
 
 watch(
   () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
-  () => { page.value = 1 }
+  () => {
+    page.value = 1
+  }
 )
 
 /* ───────── Confirm dialog ───────── */
@@ -221,7 +233,7 @@ const confirmDialog = ref({
   open: false,
   action: 'APPROVE', // 'APPROVE' | 'REJECT'
   row: null,
-  comment: ''
+  comment: '',
 })
 const rejectError = ref('')
 
@@ -248,9 +260,7 @@ const confirmTitle = computed(() =>
   confirmDialog.value.action === 'APPROVE' ? 'Approve this leave request?' : 'Reject this leave request?'
 )
 
-const confirmPrimaryLabel = computed(() =>
-  confirmDialog.value.action === 'APPROVE' ? 'Approve' : 'Reject'
-)
+const confirmPrimaryLabel = computed(() => (confirmDialog.value.action === 'APPROVE' ? 'Approve' : 'Reject'))
 
 const confirmPrimaryClasses = computed(() =>
   confirmDialog.value.action === 'APPROVE'
@@ -282,23 +292,23 @@ async function submitDecision() {
     loading.value = true
     await api.post(`/leave/requests/${row._id}/coo-decision`, {
       action,
-      ...(action === 'REJECT' ? { comment } : {})
+      ...(action === 'REJECT' ? { comment } : {}),
     })
 
     showToast({
       type: 'success',
       title: action === 'APPROVE' ? 'Approved' : 'Rejected',
-      message: 'COO decision has been saved.'
+      message: 'COO decision has been saved.',
     })
 
     closeDecisionDialog()
-    await fetchInbox()
+    await fetchInbox(true)
   } catch (e) {
     console.error('cooDecision error', e)
     showToast({
       type: 'error',
       title: 'Update failed',
-      message: e?.response?.data?.message || 'Unable to update this leave request.'
+      message: e?.response?.data?.message || 'Unable to update this leave request.',
     })
   } finally {
     loading.value = false
@@ -311,16 +321,12 @@ let refreshTimer = null
 
 function triggerRealtimeRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(() => fetchInbox(), 150)
+  refreshTimer = setTimeout(() => fetchInbox(true), 180)
 }
 
 function setupRealtime() {
-  subscribeRoleIfNeeded({
-    role: auth.user?.role,
-    employeeId: auth.user?.employeeId,
-    loginId: auth.user?.id,
-    company: auth.user?.companyCode
-  })
+  // ✅ Use your shared helper (it should join admins/roles rooms automatically)
+  subscribeRoleIfNeeded()
 
   // ✅ same events as GM (because same final stage)
   offHandlers.push(
@@ -328,21 +334,33 @@ function setupRealtime() {
     onSocket('leave:req:updated', () => triggerRealtimeRefresh()),
     onSocket('leave:req:manager-decision', () => triggerRealtimeRefresh()),
     onSocket('leave:req:gm-decision', () => triggerRealtimeRefresh()),
-    onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh())
+    onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh()),
+    onSocket('leave:profile:updated', () => triggerRealtimeRefresh()),
+    onSocket('leave:profile:recalculated', () => triggerRealtimeRefresh())
   )
 }
 
+function teardownRealtime() {
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
+  offHandlers.length = 0
+}
+
+/* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
-  await fetchInbox()
+  await fetchInbox(true)
   setupRealtime()
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
-  offHandlers.forEach(off => { try { off && off() } catch {} })
+  teardownRealtime()
 })
 </script>
 
@@ -400,11 +418,17 @@ onBeforeUnmount(() => {
             <!-- Requested at range -->
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-white/80">Requested</span>
-              <input v-model="fromDate" type="date"
-                     class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60" />
+              <input
+                v-model="fromDate"
+                type="date"
+                class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
+              />
               <span>to</span>
-              <input v-model="toDate" type="date"
-                     class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60" />
+              <input
+                v-model="toDate"
+                type="date"
+                class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
+              />
             </div>
 
             <!-- Expat ID filter -->
@@ -475,11 +499,17 @@ onBeforeUnmount(() => {
 
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
               <span class="text-white/80">Requested</span>
-              <input v-model="fromDate" type="date"
-                     class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60" />
+              <input
+                v-model="fromDate"
+                type="date"
+                class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
+              />
               <span>to</span>
-              <input v-model="toDate" type="date"
-                     class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60" />
+              <input
+                v-model="toDate"
+                type="date"
+                class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
+              />
             </div>
           </div>
         </div>
@@ -707,10 +737,15 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Pagination -->
-        <div class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div class="flex items-center gap-2">
             <span>Rows per page</span>
-            <select v-model="perPage" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900">
+            <select
+              v-model="perPage"
+              class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900"
+            >
               <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
             </select>
           </div>
@@ -761,10 +796,13 @@ onBeforeUnmount(() => {
               <div v-if="confirmDialog.row" class="mb-2 text-[11px]">
                 <div class="font-semibold">
                   {{ confirmDialog.row.employeeId }} — {{ confirmDialog.row.employeeName || '—' }}
-                  <span v-if="confirmDialog.row.department" class="font-normal text-slate-500 dark:text-slate-400">· {{ confirmDialog.row.department }}</span>
+                  <span v-if="confirmDialog.row.department" class="font-normal text-slate-500 dark:text-slate-400">
+                    · {{ confirmDialog.row.department }}
+                  </span>
                 </div>
                 <div class="text-slate-500 dark:text-slate-400">
-                  {{ formatRange(confirmDialog.row) }} · {{ confirmDialog.row.leaveTypeCode }} · Days: {{ Number(confirmDialog.row.totalDays || 0).toLocaleString() }}
+                  {{ formatRange(confirmDialog.row) }} · {{ confirmDialog.row.leaveTypeCode }} · Days:
+                  {{ Number(confirmDialog.row.totalDays || 0).toLocaleString() }}
                 </div>
                 <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
                   <span class="font-semibold">Request reason:</span>
@@ -821,12 +859,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.text-truncate-2 {
+.text-truncate-2,
+.text-truncate-2-inline {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.text-truncate-2-inline { display: inline-block; }
+
 .table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; }
 .table-td { padding: 8px 10px; vertical-align: top; }
 

@@ -1,14 +1,24 @@
+<!-- src/views/expat/user/UserReplaceDay.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
-import { subscribeEmployeeIfNeeded, onSocket } from '@/utils/socket'
+import { useAuth } from '@/store/auth'
+import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
+
+defineOptions({ name: 'UserReplaceDay' })
 
 const { showToast } = useToast()
+const auth = useAuth()
 
 /* ───────── identity for realtime ───────── */
-const employeeId = ref(String(localStorage.getItem('employeeId') || ''))
+const employeeId = computed(() =>
+  String(auth.user?.employeeId || localStorage.getItem('employeeId') || '').trim()
+)
+const loginId = computed(() =>
+  String(auth.user?.id || localStorage.getItem('loginId') || '').trim()
+)
 
 /* ───────── holidays from backend (env-based) ───────── */
 const holidaySet = ref(new Set())
@@ -17,10 +27,13 @@ const loadingHolidays = ref(false)
 async function fetchHolidays() {
   try {
     loadingHolidays.value = true
-    const res = await api.get('/public/holidays') // expects array like ['2026-01-01', ...]
-    const list = Array.isArray(res.data) ? res.data : (res.data?.holidays || [])
-    holidaySet.value = new Set((list || []).map(s => String(s || '').trim()).filter(Boolean))
-  } catch (e) {
+    const res = await api.get('/public/holidays') // ['2026-01-01', ...] OR {holidays:[...]}
+    const list = Array.isArray(res.data) ? res.data : res.data?.holidays
+    const arr = Array.isArray(list) ? list : []
+    holidaySet.value = new Set(
+      arr.map((s) => String(s || '').trim()).filter(Boolean)
+    )
+  } catch {
     // don't block the page if holidays endpoint fails (backend still validates)
     holidaySet.value = new Set()
   } finally {
@@ -28,7 +41,7 @@ async function fetchHolidays() {
   }
 }
 
-/* Sunday check (Mon=1 .. Sun=0 in dayjs) */
+/* Sunday check */
 function isSunday(ymd) {
   if (!ymd) return false
   return dayjs(ymd).day() === 0
@@ -38,7 +51,7 @@ function isHoliday(ymd) {
   return isSunday(ymd) || holidaySet.value.has(ymd)
 }
 function isWorkingDay(ymd) {
-  // company working day = Mon–Sat (6 days), and NOT holiday set
+  // company working day = Mon–Sat (6 days), NOT holiday set
   if (!ymd) return false
   if (isSunday(ymd)) return false
   if (holidaySet.value.has(ymd)) return false
@@ -62,14 +75,21 @@ const MAX_MB = 10
 const acceptHint = 'PDF/JPG/PNG • up to 10 files • max 10MB each'
 
 const fileCountLabel = computed(() => `${files.value.length}/${MAX_FILES} files`)
-
 const requestDateHelp = computed(() => 'Allowed any day (working day / Sunday / holiday).')
 
 const compensatoryHelp = computed(() => {
-  if (!form.value.compensatoryDate) return 'Must be Mon–Sat and not a Cambodian National Holiday.'
-  if (!holidaySet.value.size && loadingHolidays.value) return 'Checking holidays...'
-  if (!holidaySet.value.size && !loadingHolidays.value) return 'Must be Mon–Sat and not a Cambodian National Holiday.'
-  return isWorkingDay(form.value.compensatoryDate)
+  const d = form.value.compensatoryDate
+  if (!d) return 'Must be Mon–Sat and not a Cambodian National Holiday.'
+
+  // Always block Sunday even if holidays endpoint fails
+  if (isSunday(d)) return 'Invalid: Sunday is not allowed as a compensatory day.'
+
+  if (loadingHolidays.value) return 'Checking holidays...'
+
+  // If holidays not available, still give the rule text (backend will validate real list)
+  if (!holidaySet.value.size) return 'Must be Mon–Sat and not a Cambodian National Holiday.'
+
+  return isWorkingDay(d)
     ? 'OK: working day (Mon–Sat) and not holiday.'
     : 'Invalid: must be Mon–Sat and not a holiday.'
 })
@@ -77,8 +97,13 @@ const compensatoryHelp = computed(() => {
 const canSubmit = computed(() => {
   if (submitting.value) return false
   if (!form.value.requestDate || !form.value.compensatoryDate) return false
-  // client-side check for compensatoryDate only (backend is final judge)
+
+  // Always prevent Sunday on client
+  if (isSunday(form.value.compensatoryDate)) return false
+
+  // If holidays are loaded, enforce full rule client-side too
   if (holidaySet.value.size && !isWorkingDay(form.value.compensatoryDate)) return false
+
   return true
 })
 
@@ -118,11 +143,14 @@ function onPickFiles(e) {
   if (errs.length) {
     formError.value = errs[0]
     showToast({ type: 'error', title: 'Upload error', message: errs[0] })
+    // allow re-pick same file
+    if (e?.target) e.target.value = ''
     return
   }
 
   files.value = combined
   formError.value = ''
+  if (e?.target) e.target.value = ''
 }
 
 function removeFile(idx) {
@@ -144,8 +172,8 @@ async function submit() {
     fd.append('compensatoryDate', form.value.compensatoryDate)
     fd.append('reason', form.value.reason || '')
 
-    // IMPORTANT: backend route uses evidenceUpload.array('evidence', 10)
-    files.value.forEach(f => fd.append('evidence', f))
+    // IMPORTANT: backend route should use evidenceUpload.array('evidence', 10)
+    files.value.forEach((f) => fd.append('evidence', f))
 
     await api.post('/leave/replace-days', fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -168,28 +196,67 @@ async function submit() {
   }
 }
 
-/* ───────── realtime (optional) ───────── */
+/* ───────── realtime ───────── */
 const offHandlers = []
 
 function setupRealtime() {
-  if (!employeeId.value) return
-  subscribeEmployeeIfNeeded(employeeId.value)
+  if (employeeId.value) subscribeEmployeeIfNeeded(employeeId.value)
+  if (loginId.value) subscribeUserIfNeeded(loginId.value)
 
-  // If you later broadcast replace-day events, hook them here.
-  // Example event names:
-  // - replace:manager-decision
-  // - replace:gm-decision
-  const off1 = onSocket('replace:req:manager-decision', (payload = {}) => {
-    if (String(payload.employeeId || '') !== employeeId.value) return
-    showToast({ type: 'warning', title: 'Update', message: 'Manager updated your Replace Day request.' })
-  })
-  const off2 = onSocket('replace:req:gm-decision', (payload = {}) => {
-    if (String(payload.employeeId || '') !== employeeId.value) return
-    showToast({ type: 'warning', title: 'Update', message: 'GM updated your Replace Day request.' })
+  // Match events used in UserReplaceList.vue
+  const off1 = onSocket('replace:manager-decision', (payload = {}) => {
+    const emp = String(payload.employeeId || '').trim()
+    const requester = String(payload.requesterLoginId || '').trim()
+    if (
+      (employeeId.value && emp === employeeId.value) ||
+      (loginId.value && requester === loginId.value)
+    ) {
+      showToast({
+        type: 'info',
+        title: 'Updated',
+        message: 'Manager updated your Replace Day request.',
+      })
+    }
   })
 
-  offHandlers.push(off1, off2)
+  const off2 = onSocket('replace:gm-decision', (payload = {}) => {
+    const emp = String(payload.employeeId || '').trim()
+    const requester = String(payload.requesterLoginId || '').trim()
+    if (
+      (employeeId.value && emp === employeeId.value) ||
+      (loginId.value && requester === loginId.value)
+    ) {
+      showToast({
+        type: 'info',
+        title: 'Updated',
+        message: 'GM updated your Replace Day request.',
+      })
+    }
+  })
+
+  const off3 = onSocket('replace:updated', (payload = {}) => {
+    const emp = String(payload.employeeId || '').trim()
+    const requester = String(payload.requesterLoginId || '').trim()
+    if (
+      (employeeId.value && emp === employeeId.value) ||
+      (loginId.value && requester === loginId.value)
+    ) {
+      // silent refresh UI if needed later
+    }
+  })
+
+  offHandlers.push(off1, off2, off3)
 }
+
+/* If auth loads late, resubscribe */
+watch(
+  () => employeeId.value,
+  (v) => {
+    if (!v) return
+    subscribeEmployeeIfNeeded(v)
+  },
+  { immediate: true }
+)
 
 onMounted(async () => {
   await fetchHolidays()
@@ -197,23 +264,19 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  offHandlers.forEach(off => {
-    try { off && off() } catch {}
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
   })
 })
 </script>
 
 <template>
   <div class="px-1 py-1 sm:px-3 space-y-3">
-    <div
-      class="rounded-2xl border border-slate-200 bg-white shadow-sm
-             dark:border-slate-800 dark:bg-slate-900"
-    >
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <!-- Header -->
-      <div
-        class="rounded-t-2xl bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500
-               px-4 py-3 text-white"
-      >
+      <div class="rounded-t-2xl bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500 px-4 py-3 text-white">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p class="text-[10px] uppercase tracking-[0.35em] font-semibold text-emerald-50/90">
@@ -232,12 +295,8 @@ onBeforeUnmount(() => {
               <i class="fa-solid fa-rotate text-sm" />
             </div>
             <div class="space-y-0.5">
-              <p class="font-medium text-emerald-50">
-                Upload evidence
-              </p>
-              <p class="text-[10px] text-emerald-50/80">
-                {{ acceptHint }}
-              </p>
+              <p class="font-medium text-emerald-50">Upload evidence</p>
+              <p class="text-[10px] text-emerald-50/80">{{ acceptHint }}</p>
             </div>
           </div>
         </div>
@@ -278,7 +337,7 @@ onBeforeUnmount(() => {
               />
               <p
                 class="text-[11px]"
-                :class="(holidaySet.size && !isWorkingDay(form.compensatoryDate))
+                :class="(!canSubmit && form.compensatoryDate)
                   ? 'text-rose-500'
                   : 'text-slate-500 dark:text-slate-400'"
               >
@@ -298,7 +357,7 @@ onBeforeUnmount(() => {
               class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs sm:text-sm
                      shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500
                      dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-              placeholder="Explain urgent work / midnight task..."
+              placeholder="Explain urgent work / overtime / special task..."
             />
           </div>
 
@@ -313,18 +372,16 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <div class="flex items-center gap-2">
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.jpg,.jpeg,.png"
-                class="block w-full text-xs text-slate-600 file:mr-3 file:rounded-full file:border-0
-                       file:bg-emerald-600 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-white
-                       hover:file:bg-emerald-700
-                       dark:text-slate-300"
-                @change="onPickFiles"
-              />
-            </div>
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.jpg,.jpeg,.png"
+              class="block w-full text-xs text-slate-600 file:mr-3 file:rounded-full file:border-0
+                     file:bg-emerald-600 file:px-4 file:py-2 file:text-xs file:font-semibold file:text-white
+                     hover:file:bg-emerald-700
+                     dark:text-slate-300"
+              @change="onPickFiles"
+            />
 
             <!-- File list -->
             <div v-if="files.length" class="space-y-2">
@@ -335,8 +392,7 @@ onBeforeUnmount(() => {
                        dark:border-slate-800 dark:bg-slate-950/40"
               >
                 <div class="min-w-0">
-                  <div class="truncate text-xs font-semibold text-slate- Toggle
-                  900 dark:text-slate-100">
+                  <div class="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
                     {{ f.name }}
                   </div>
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
@@ -396,6 +452,10 @@ onBeforeUnmount(() => {
               <span>Submit Replace Day</span>
             </button>
           </div>
+
+          <p class="pt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            Note: even if holidays list fails to load, the backend will still validate the compensatory day.
+          </p>
         </form>
       </div>
     </div>

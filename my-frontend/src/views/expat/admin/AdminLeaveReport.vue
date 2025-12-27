@@ -4,6 +4,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
+import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
 defineOptions({ name: 'AdminLeaveReport' })
 
@@ -39,27 +40,6 @@ const pageSize = ref(15)
 const dateRangeOk = computed(() => {
   if (!dateFrom.value || !dateTo.value) return true
   return dateFrom.value <= dateTo.value
-})
-
-/* ───────── Debounce search ───────── */
-let tmr = null
-watch(q, () => {
-  clearTimeout(tmr)
-  tmr = setTimeout(() => {
-    page.value = 1
-    fetchReport()
-  }, 300)
-})
-
-watch([includeInactive, department, managerLoginId, asOf], () => {
-  page.value = 1
-  fetchReport()
-})
-
-watch([dateFrom, dateTo], () => {
-  page.value = 1
-  if (!dateRangeOk.value) return
-  fetchReport()
 })
 
 /* ───────── Helpers ───────── */
@@ -101,12 +81,12 @@ function statusBadgeClass(s) {
   if (st === 'CANCELLED')
     return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800'
   if (st === 'PENDING_MANAGER' || st === 'PENDING_GM')
-    return 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/25 darkoslav-amber-200 dark:border-amber-900/40'
+    return 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/25 dark:text-amber-200 dark:border-amber-900/40'
   return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800'
 }
 
 /* ───────── API ───────── */
-async function fetchReport() {
+async function fetchReport(silent = false) {
   loading.value = true
   error.value = ''
   try {
@@ -121,24 +101,24 @@ async function fetchReport() {
       limit: 500,
     }
 
-    // if user clears range, backend should treat as "all"
+    // If user clears range, backend should treat as "all"
     if (!dateFrom.value || !dateTo.value) {
       delete params.dateFrom
       delete params.dateTo
     }
 
     const res = await api.get('/admin/leave/reports/summary', { params })
-    report.value = res.data || null
+    report.value = res?.data || null
   } catch (e) {
     console.error('fetchReport error', e)
     error.value = e?.response?.data?.message || 'Failed to load report.'
-    showToast({ type: 'error', title: 'Report load failed', message: error.value })
+    if (!silent) showToast({ type: 'error', title: 'Report load failed', message: error.value })
   } finally {
     loading.value = false
   }
 }
 
-/* ───────── Derived: KPIs ───────── */
+/* ───────── KPIs ───────── */
 const reqCountsByStatus = computed(() => report.value?.leaveRequests?.countsByStatus || {})
 const totalRequests = computed(() => num(report.value?.meta?.counts?.leaveRequests))
 const pendingRequests = computed(
@@ -148,7 +128,7 @@ const approvedRequests = computed(() => num(reqCountsByStatus.value.APPROVED))
 const rejectedRequests = computed(() => num(reqCountsByStatus.value.REJECTED))
 const cancelledRequests = computed(() => num(reqCountsByStatus.value.CANCELLED))
 
-/* ───────── Employees: pagination ───────── */
+/* ───────── Employees pagination ───────── */
 const employeesAll = computed(() => report.value?.employees || [])
 const pageCount = computed(() => Math.max(1, Math.ceil(employeesAll.value.length / pageSize.value)))
 const employeesPage = computed(() => {
@@ -243,6 +223,7 @@ async function exportEmployeesExcel() {
 
     const from = dateFrom.value && dateTo.value ? `${dateFrom.value}_to_${dateTo.value}` : 'all'
     XLSX.writeFile(wb, `leave_report_employees_${from}.xlsx`)
+
     showToast({ type: 'success', title: 'Exported', message: 'Employees exported to Excel.' })
   } catch (e) {
     console.error('exportEmployeesExcel error', e)
@@ -273,6 +254,7 @@ async function exportRequestsExcel() {
 
     const from = dateFrom.value && dateTo.value ? `${dateFrom.value}_to_${dateTo.value}` : 'all'
     XLSX.writeFile(wb, `leave_report_requests_${from}.xlsx`)
+
     showToast({ type: 'success', title: 'Exported', message: 'Requests exported to Excel.' })
   } catch (e) {
     console.error('exportRequestsExcel error', e)
@@ -280,15 +262,76 @@ async function exportRequestsExcel() {
   }
 }
 
+/* ───────── Debounce search ───────── */
+let tmr = null
+watch(q, () => {
+  if (tmr) clearTimeout(tmr)
+  tmr = setTimeout(() => {
+    page.value = 1
+    fetchReport(true)
+  }, 300)
+})
+
+watch([includeInactive, department, managerLoginId, asOf], () => {
+  page.value = 1
+  fetchReport(true)
+})
+
+watch([dateFrom, dateTo], () => {
+  page.value = 1
+  if (!dateRangeOk.value) return
+  fetchReport(true)
+})
+
+/* ───────── realtime refresh ───────── */
+const offHandlers = []
+let refreshTimer = null
+function triggerRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => fetchReport(true), 250)
+}
+
+function setupRealtime() {
+  // join admin rooms
+  subscribeRoleIfNeeded()
+
+  // refresh report when leave requests / profiles change
+  offHandlers.push(
+    onSocket('leave:req:created', triggerRefresh),
+    onSocket('leave:req:updated', triggerRefresh),
+    onSocket('leave:req:manager-decision', triggerRefresh),
+    onSocket('leave:req:gm-decision', triggerRefresh),
+    onSocket('leave:req:coo-decision', triggerRefresh),
+    onSocket('leave:req:cancelled', triggerRefresh),
+
+    onSocket('leave:profile:created', triggerRefresh),
+    onSocket('leave:profile:updated', triggerRefresh),
+    onSocket('leave:profile:recalculated', triggerRefresh)
+  )
+}
+
+function teardownRealtime() {
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
+  offHandlers.length = 0
+}
+
 /* ───────── lifecycle ───────── */
 onMounted(() => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
-  fetchReport()
+  fetchReport(true)
+  setupRealtime()
 })
+
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (tmr) clearTimeout(tmr)
+  if (refreshTimer) clearTimeout(refreshTimer)
+  teardownRealtime()
 })
 </script>
 
@@ -298,7 +341,7 @@ onBeforeUnmount(() => {
     <div class="w-full rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <!-- Header -->
       <div class="rounded-t-2xl bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500 px-4 py-3 text-white">
-        <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <p class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/80">Expat Leave</p>
             <p class="text-sm font-semibold">Admin Leave Report</p>
@@ -310,7 +353,9 @@ onBeforeUnmount(() => {
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
             <div class="min-w-[240px] w-full sm:w-[360px]">
               <label class="mb-1 block text-[11px] font-medium text-emerald-50">Search</label>
-              <div class="flex items-center rounded-xl border border-emerald-200/80 bg-emerald-900/20 px-2.5 py-1.5 text-xs">
+              <div
+                class="flex items-center rounded-xl border border-emerald-200/80 bg-emerald-900/20 px-2.5 py-1.5 text-xs"
+              >
                 <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-emerald-50/80" />
                 <input
                   v-model="q"
@@ -345,7 +390,7 @@ onBeforeUnmount(() => {
               type="button"
               class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15 disabled:opacity-60"
               :disabled="loading"
-              @click="fetchReport"
+              @click="fetchReport(false)"
             >
               <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
               Refresh
@@ -355,15 +400,15 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Body -->
-      <!-- ✅ edge spacing: tiny on mobile, bigger on desktop -->
-      <div class="px-2 pb-2 pt-3 sm:px-3 lg:px-4 xl:px-5 sm:pb-3 space-y-3">
-        <!-- filters bar -->
+      <div class="space-y-3 px-2 pb-2 pt-3 sm:px-3 sm:pb-3 lg:px-4 xl:px-5">
+        <!-- Filters bar -->
         <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
           <div class="grid grid-cols-1 gap-2 md:grid-cols-12">
             <div class="md:col-span-2">
               <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date From</label>
               <input v-model="dateFrom" type="date" class="input-mini" />
             </div>
+
             <div class="md:col-span-2">
               <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date To</label>
               <input v-model="dateTo" type="date" class="input-mini" />
@@ -371,14 +416,17 @@ onBeforeUnmount(() => {
                 Date From cannot be after Date To.
               </p>
             </div>
+
             <div class="md:col-span-2">
               <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
               <input v-model="asOf" type="date" class="input-mini" />
             </div>
+
             <div class="md:col-span-3">
               <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
               <input v-model="department" type="text" placeholder="HR, IT..." class="input-mini" />
             </div>
+
             <div class="md:col-span-3">
               <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Manager Login ID</label>
               <input v-model="managerLoginId" type="text" placeholder="Manager employeeId" class="input-mini" />
@@ -414,19 +462,23 @@ onBeforeUnmount(() => {
             <span class="kpi-title">Total</span>
             <span class="kpi-value">{{ totalRequests }}</span>
           </div>
+
           <div class="kpi-pill kpi-amber">
             <span class="kpi-title">Pending</span>
             <span class="kpi-value">{{ pendingRequests }}</span>
             <span class="kpi-sub">Mgr {{ reqCountsByStatus?.PENDING_MANAGER ?? 0 }} · GM {{ reqCountsByStatus?.PENDING_GM ?? 0 }}</span>
           </div>
+
           <div class="kpi-pill kpi-emerald">
             <span class="kpi-title">Approved</span>
             <span class="kpi-value">{{ approvedRequests }}</span>
           </div>
+
           <div class="kpi-pill kpi-rose">
             <span class="kpi-title">Rejected</span>
             <span class="kpi-value">{{ rejectedRequests }}</span>
           </div>
+
           <div class="kpi-pill">
             <span class="kpi-title">Cancelled</span>
             <span class="kpi-value">{{ cancelledRequests }}</span>
@@ -435,7 +487,8 @@ onBeforeUnmount(() => {
 
         <!-- Analytics -->
         <div class="grid gap-3 xl:grid-cols-12">
-          <div class="xl:col-span-6 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+          <!-- Usage -->
+          <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 xl:col-span-6">
             <div class="flex items-center justify-between gap-2">
               <div>
                 <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Most Used Leave Types</div>
@@ -470,7 +523,7 @@ onBeforeUnmount(() => {
               <div v-for="r in usageRows.slice(0, 8)" :key="r.code" class="flex items-center gap-3">
                 <div class="w-10 text-[11px] font-semibold text-slate-700 dark:text-slate-200">{{ r.code }}</div>
                 <div class="flex-1">
-                  <div class="h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div class="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                     <div class="h-2 rounded-full bg-emerald-600" :style="{ width: usagePct(r) + '%' }" />
                   </div>
                 </div>
@@ -486,7 +539,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="xl:col-span-6 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+          <!-- Monthly -->
+          <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 xl:col-span-6">
             <div>
               <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Monthly Trend</div>
               <div class="text-[11px] text-slate-500 dark:text-slate-400">Requests + total days per month.</div>
@@ -494,8 +548,10 @@ onBeforeUnmount(() => {
 
             <div class="mt-3 overflow-auto">
               <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
-                <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
-                              dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+                <thead
+                  class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
+                         dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+                >
                   <tr>
                     <th class="table-th">Month</th>
                     <th class="table-th text-right">Requests</th>
@@ -521,7 +577,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Employees balances -->
-        <div class="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div class="border-b border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950/40">
             <div class="flex items-center justify-between gap-2">
               <div>
@@ -537,7 +593,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Mobile cards -->
-          <div v-if="isMobile" class="p-3 space-y-2">
+          <div v-if="isMobile" class="space-y-2 p-3">
             <article
               v-for="emp in employeesPage"
               :key="emp.employeeId"
@@ -556,7 +612,7 @@ onBeforeUnmount(() => {
                 </div>
 
                 <span
-                  class="text-[10px] px-2 py-1 rounded-full border"
+                  class="rounded-full border px-2 py-1 text-[10px]"
                   :class="emp.isActive
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200'
                     : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'"
@@ -603,9 +659,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Desktop table (aligned, full width) -->
+          <!-- Desktop table -->
           <div v-else class="overflow-x-auto">
-            <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100 table-fixed">
+            <table class="table-fixed min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
               <colgroup>
                 <col style="width: 128px;" />
                 <col style="width: 220px;" />
@@ -616,8 +672,10 @@ onBeforeUnmount(() => {
                 <col style="width: 90px;" />
               </colgroup>
 
-              <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
-                            dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+              <thead
+                class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
+                       dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+              >
                 <tr>
                   <th class="table-th">Employee ID</th>
                   <th class="table-th">Name</th>
@@ -635,7 +693,7 @@ onBeforeUnmount(() => {
                   :key="emp.employeeId"
                   class="border-b border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70"
                 >
-                  <td class="table-td font-mono truncate">{{ emp.employeeId || '—' }}</td>
+                  <td class="table-td truncate font-mono">{{ emp.employeeId || '—' }}</td>
                   <td class="table-td truncate">
                     <span class="font-medium text-slate-900 dark:text-slate-50">{{ emp.name || '—' }}</span>
                   </td>
@@ -646,7 +704,7 @@ onBeforeUnmount(() => {
                   <td
                     v-for="code in TYPE_ORDER"
                     :key="emp.employeeId + '-' + code"
-                    class="table-td text-center align-middle"
+                    class="table-td align-middle text-center"
                   >
                     <div class="bal-box">
                       <div class="bal-top">U{{ num(balOf(emp, code)?.used) }}</div>
@@ -654,9 +712,9 @@ onBeforeUnmount(() => {
                     </div>
                   </td>
 
-                  <td class="table-td text-center align-middle">
+                  <td class="table-td align-middle text-center">
                     <span
-                      class="inline-flex justify-center text-[10px] px-2 py-1 rounded-full border"
+                      class="inline-flex justify-center rounded-full border px-2 py-1 text-[10px]"
                       :class="emp.isActive
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200'
                         : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'"
@@ -667,7 +725,10 @@ onBeforeUnmount(() => {
                 </tr>
 
                 <tr v-if="employeesPage.length === 0">
-                  <td :colspan="6 + TYPE_ORDER.length" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                  <td
+                    :colspan="6 + TYPE_ORDER.length"
+                    class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400"
+                  >
                     No employees found.
                   </td>
                 </tr>
@@ -684,7 +745,8 @@ onBeforeUnmount(() => {
               </button>
 
               <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                Showing {{ employeesAll.length ? (page - 1) * pageSize + 1 : 0 }}–{{ Math.min(page * pageSize, employeesAll.length) }} of {{ employeesAll.length }}
+                Showing {{ employeesAll.length ? (page - 1) * pageSize + 1 : 0 }}–{{ Math.min(page * pageSize, employeesAll.length) }}
+                of {{ employeesAll.length }}
               </div>
 
               <button
@@ -699,7 +761,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Recent Leave Requests -->
-        <div class="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div class="border-b border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950/40">
             <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Recent Leave Requests</div>
             <div class="text-[11px] text-slate-500 dark:text-slate-400">Latest activity in your selected date range.</div>
@@ -707,8 +769,10 @@ onBeforeUnmount(() => {
 
           <div class="overflow-x-auto">
             <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
-              <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
-                            dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+              <thead
+                class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
+                       dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+              >
                 <tr>
                   <th class="table-th">Employee</th>
                   <th class="table-th">Type</th>
@@ -730,13 +794,12 @@ onBeforeUnmount(() => {
                       {{ r.leaveTypeCode }}
                     </span>
                   </td>
-                  <td class="table-td font-mono whitespace-nowrap">
+                  <td class="table-td whitespace-nowrap font-mono">
                     {{ fmtYMD(r.startDate) }} → {{ fmtYMD(r.endDate) }}
                   </td>
                   <td class="table-td text-right font-semibold">{{ num(r.totalDays) }}</td>
                   <td class="table-td">
-                    <span class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold"
-                          :class="statusBadgeClass(r.status)">
+                    <span class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold" :class="statusBadgeClass(r.status)">
                       {{ statusLabel(r.status) }}
                     </span>
                   </td>

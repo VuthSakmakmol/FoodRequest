@@ -518,16 +518,10 @@ exports.listManagerInbox = async (req, res, next) => {
     const loginId = actorLoginId(req)
     if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
 
-    const tab = String(req.query?.tab || 'PENDING').toUpperCase()
     const admin = isAdminViewer(req)
 
+    // ✅ Return ALL statuses for this manager; UI tabs will filter
     const criteria = admin ? {} : { managerLoginId: loginId }
-
-    if (tab === 'PENDING') {
-      criteria.status = 'PENDING_MANAGER'
-    } else if (tab === 'FINISHED') {
-      criteria.status = { $ne: 'PENDING_MANAGER' }
-    }
 
     const docs = await LeaveRequest.find(criteria).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(docs))
@@ -535,6 +529,7 @@ exports.listManagerInbox = async (req, res, next) => {
     next(err)
   }
 }
+
 
 /**
  * POST /leave/manager/decision/:id

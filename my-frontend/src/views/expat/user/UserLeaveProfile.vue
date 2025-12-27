@@ -7,15 +7,27 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'UserLeaveProfile' })
+
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ───────── Identity ───────── */
+/* ───────── small helpers ───────── */
+const s = (v) => String(v ?? '').trim()
+
+/* ───────── Identity (✅ IMPORTANT: prefer loginId string, NOT Mongo _id) ───────── */
 const employeeId = computed(() =>
-  String(auth.user?.employeeId || localStorage.getItem('employeeId') || '')
+  s(auth.user?.employeeId || localStorage.getItem('employeeId') || '')
 )
+
+/**
+ * ✅ IMPORTANT:
+ * - use auth.user.loginId first (your realtime rooms + LeaveRequest store loginId string)
+ * - fallback to localStorage loginId
+ * - DO NOT prefer auth.user.id because that is often Mongo _id
+ */
 const loginId = computed(() =>
-  String(auth.user?.id || localStorage.getItem('loginId') || '')
+  s(auth.user?.loginId || localStorage.getItem('loginId') || auth.user?.employeeId || '')
 )
 
 /* ───────── responsive ───────── */
@@ -45,7 +57,7 @@ const balances = computed(() => {
   const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
 
   const arr = raw.map((b) => ({
-    leaveTypeCode: String(b?.leaveTypeCode || '').toUpperCase(),
+    leaveTypeCode: s(b?.leaveTypeCode || '').toUpperCase(),
     yearlyEntitlement: num(b?.yearlyEntitlement),
     used: num(b?.used),
     remaining: num(b?.remaining), // ✅ backend truth (can be negative)
@@ -89,13 +101,24 @@ async function fetchMyProfile(silent = false) {
 }
 
 /* ───────── realtime refresh ───────── */
+/**
+ * ✅ Match payload to current user safely.
+ * Different events may include different keys, so we check a few.
+ */
 function isMyDoc(payload = {}) {
-  const emp = String(payload.employeeId || '')
-  const requester = String(payload.requesterLoginId || '')
-  return (
-    (employeeId.value && emp === employeeId.value) ||
-    (loginId.value && requester === loginId.value)
+  const myEmp = s(employeeId.value)
+  const myLogin = s(loginId.value)
+
+  const pEmp = s(payload.employeeId || payload.profileEmployeeId || payload.empId || '')
+  const pLogin = s(
+    payload.requesterLoginId ||
+      payload.loginId ||
+      payload.actorLoginId ||
+      payload.userLoginId ||
+      ''
   )
+
+  return (myEmp && pEmp && pEmp === myEmp) || (myLogin && pLogin && pLogin === myLogin)
 }
 
 let refreshTimer = null
@@ -108,22 +131,17 @@ function triggerRefresh() {
 
 const offHandlers = []
 function setupRealtime() {
+  // ✅ Subscribe to BOTH employee + user rooms (if available)
   if (employeeId.value) subscribeEmployeeIfNeeded(employeeId.value)
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
 
   offHandlers.push(
-    onSocket('leave:req:created', (p) => {
-      if (isMyDoc(p)) triggerRefresh()
-    }),
-    onSocket('leave:req:manager-decision', (p) => {
-      if (isMyDoc(p)) triggerRefresh()
-    }),
-    onSocket('leave:req:gm-decision', (p) => {
-      if (isMyDoc(p)) triggerRefresh()
-    }),
-    onSocket('leave:req:updated', (p) => {
-      if (isMyDoc(p)) triggerRefresh()
-    })
+    onSocket('leave:req:created', (p) => { if (isMyDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:manager-decision', (p) => { if (isMyDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:gm-decision', (p) => { if (isMyDoc(p)) triggerRefresh() }),
+    onSocket('leave:req:updated', (p) => { if (isMyDoc(p)) triggerRefresh() }),
+    // ✅ If your backend broadcasts profile updates separately, this makes it instant.
+    onSocket('leave:profile:updated', (p) => { if (isMyDoc(p)) triggerRefresh() })
   )
 }
 
@@ -140,9 +158,7 @@ onBeforeUnmount(() => {
   if (refreshTimer) clearTimeout(refreshTimer)
 
   offHandlers.forEach((off) => {
-    try {
-      off && off()
-    } catch {}
+    try { off && off() } catch {}
   })
 })
 </script>

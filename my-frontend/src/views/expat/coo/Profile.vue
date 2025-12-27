@@ -8,19 +8,23 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'CooExpatProfile' })
+
 const { showToast } = useToast()
 const auth = useAuth()
 const route = useRoute()
 const router = useRouter()
 
-/* ───────── Identity ───────── */
+/* ───────── helpers ───────── */
+const s = (v) => String(v ?? '').trim()
+
+/**
+ * ✅ IMPORTANT:
+ * - Prefer loginId string, NOT Mongo _id
+ * - Rooms + LeaveRequest store loginId string
+ */
 const loginId = computed(() =>
-  String(
-    auth.user?.id ||
-      auth.user?.loginId ||
-      localStorage.getItem('loginId') ||
-      ''
-  ).trim()
+  s(auth.user?.loginId || localStorage.getItem('loginId') || auth.user?.employeeId || '')
 )
 
 /* ───────── responsive ───────── */
@@ -31,7 +35,7 @@ function updateIsMobile() {
 }
 
 /* ───────── mode (List vs Detail) ───────── */
-const targetEmployeeId = computed(() => String(route.query?.employeeId || '').trim())
+const targetEmployeeId = computed(() => s(route.query?.employeeId || ''))
 const isDetailMode = computed(() => !!targetEmployeeId.value)
 
 /* ───────── list state ───────── */
@@ -56,18 +60,20 @@ async function fetchManagedList(silent = false) {
 }
 
 const filteredRows = computed(() => {
-  const s = q.value.trim().toLowerCase()
-  if (!s) return rows.value
+  const kw = q.value.trim().toLowerCase()
+  if (!kw) return rows.value
   return rows.value.filter((r) => {
     const a = String(r.employeeId || '').toLowerCase()
     const b = String(r.name || '').toLowerCase()
     const c = String(r.department || '').toLowerCase()
-    return a.includes(s) || b.includes(s) || c.includes(s)
+    return a.includes(kw) || b.includes(kw) || c.includes(kw)
   })
 })
 
 function openDetail(employeeId) {
-  router.push({ path: route.path, query: { employeeId: String(employeeId) } })
+  const empId = s(employeeId)
+  if (!empId) return
+  router.push({ path: route.path, query: { employeeId: empId } })
 }
 function backToList() {
   router.push({ path: route.path, query: {} })
@@ -122,7 +128,8 @@ async function fetchEmployeeProfile(silent = false) {
       params: { employeeId: targetEmployeeId.value },
     })
 
-    profile.value = res?.data || null
+    // ✅ Accept either { profile: {...} } or { ...profile }
+    profile.value = res?.data?.profile || res?.data || null
     lastUpdatedAt.value = dayjs().toISOString()
   } catch (e) {
     console.error('fetchEmployeeProfile error', e)
@@ -135,8 +142,14 @@ async function fetchEmployeeProfile(silent = false) {
 
 /* ───────── realtime (detail only) ───────── */
 function isTargetDoc(payload = {}) {
-  const emp = String(payload.employeeId || payload?.profile?.employeeId || '').trim()
-  return targetEmployeeId.value && emp === targetEmployeeId.value
+  const pEmp = s(
+    payload.employeeId ||
+      payload.profileEmployeeId ||
+      payload?.profile?.employeeId ||
+      payload?.profile?.employee ||
+      ''
+  )
+  return targetEmployeeId.value && pEmp === targetEmployeeId.value
 }
 
 let refreshTimer = null
@@ -150,7 +163,6 @@ function setupRealtime() {
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
   if (targetEmployeeId.value) subscribeEmployeeIfNeeded(targetEmployeeId.value)
 
-  // ✅ Refresh on request changes
   offHandlers.push(
     onSocket('leave:req:created', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
     onSocket('leave:req:manager-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
@@ -158,7 +170,6 @@ function setupRealtime() {
     onSocket('leave:req:coo-decision', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
     onSocket('leave:req:updated', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
 
-    // ✅ Refresh on profile changes (joinDate/contract renew/recalc balances)
     onSocket('leave:profile:created', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
     onSocket('leave:profile:updated', (p) => { if (isTargetDoc(p)) triggerRefresh() }),
     onSocket('leave:profile:recalculated', (p) => { if (isTargetDoc(p)) triggerRefresh() })
@@ -173,7 +184,7 @@ function teardownRealtime() {
 /* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
-  window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
   await fetchManagedList(true)
   await fetchEmployeeProfile(true)
@@ -191,7 +202,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
 })
@@ -211,9 +222,7 @@ onBeforeUnmount(() => {
             <p class="text-sm font-semibold">
               {{ isDetailMode ? 'Employee Leave Balance' : 'Employee Profiles' }}
             </p>
-            <span
-              class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold"
-            >
+            <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold">
               Read-only (review)
             </span>
           </div>

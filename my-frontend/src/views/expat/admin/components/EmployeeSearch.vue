@@ -1,35 +1,51 @@
+<!-- src/components/EmployeeDirectorySearch.vue -->
 <template>
   <div class="relative">
     <div class="flex items-center gap-2">
       <div class="flex-1 relative">
         <input
           :placeholder="displayPlaceholder"
-          v-model="q"
+          :value="inputValue"
           @input="onInput"
           @focus="open = true"
+          @keydown.down.prevent="move(1)"
+          @keydown.up.prevent="move(-1)"
+          @keydown.enter.prevent="onEnter"
+          @keydown.esc.prevent="closeDropdown"
           @blur="onBlur"
           type="text"
-          class="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+          autocomplete="off"
+          class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none
+                 focus:ring-2 focus:ring-emerald-500/40
+                 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
         />
-        <div v-if="loading" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400">
-          <i class="fa-solid fa-spinner animate-spin"></i>
+
+        <!-- Spinner / Clear -->
+        <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+          <span v-if="loading" class="text-slate-400">
+            <i class="fa-solid fa-spinner animate-spin"></i>
+          </span>
+
+          <button
+            v-if="showClear"
+            type="button"
+            class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600
+                   hover:bg-slate-50
+                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+            @mousedown.prevent
+            @click="clear"
+            title="Clear"
+          >
+            <i class="fa-solid fa-xmark text-xs"></i>
+          </button>
         </div>
       </div>
-
-      <button
-        v-if="modelValue"
-        type="button"
-        class="shrink-0 px-3 py-2 rounded-xl text-xs border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-900"
-        @click="clear"
-        title="Clear"
-      >
-        <i class="fa-solid fa-xmark"></i>
-      </button>
     </div>
 
     <div
       v-if="open && (items.length || err)"
-      class="absolute z-30 mt-2 w-full rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 shadow-xl overflow-hidden"
+      class="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl
+             dark:border-slate-800 dark:bg-slate-950"
     >
       <div v-if="err" class="px-3 py-2 text-xs text-rose-700 dark:text-rose-200">
         <i class="fa-solid fa-triangle-exclamation mr-2"></i>{{ err }}
@@ -37,13 +53,18 @@
 
       <div v-else>
         <button
-          v-for="it in items"
+          v-for="(it, idx) in items"
           :key="it.employeeId"
           type="button"
-          class="w-full px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-900 border-b border-slate-100 dark:border-slate-900 last:border-b-0"
+          class="w-full border-b border-slate-100 px-3 py-2 text-left last:border-b-0
+                 hover:bg-slate-50 dark:border-slate-900 dark:hover:bg-slate-900"
+          :class="idx === activeIndex ? 'bg-emerald-50 dark:bg-emerald-900/20' : ''"
           @mousedown.prevent="pick(it)"
+          @mousemove="activeIndex = idx"
         >
-          <div class="text-sm font-semibold">{{ it.employeeId }} · {{ it.name }}</div>
+          <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">
+            {{ it.employeeId }} · {{ it.name }}
+          </div>
           <div class="text-xs text-slate-500 dark:text-slate-400">{{ it.department || '—' }}</div>
         </button>
 
@@ -56,21 +77,28 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import api from '@/utils/api'
+
+defineOptions({ name: 'EmployeeDirectorySearch' })
 
 const props = defineProps({
   modelValue: { type: Object, default: null },
   placeholder: { type: String, default: 'Search employee…' },
+  minChars: { type: Number, default: 2 },
+  debounceMs: { type: Number, default: 200 },
 })
 const emit = defineEmits(['update:modelValue'])
 
 const open = ref(false)
-const q = ref('')
 const loading = ref(false)
 const items = ref([])
 const err = ref('')
+const inputValue = ref('')
+const activeIndex = ref(-1)
+
 let t = null
+let lastQuery = ''
 
 const selectedLabel = computed(() => {
   if (!props.modelValue) return ''
@@ -80,62 +108,110 @@ const selectedLabel = computed(() => {
 })
 
 const displayPlaceholder = computed(() => {
+  // If selected, show label as placeholder (like your original behavior)
   return props.modelValue ? selectedLabel.value : props.placeholder
 })
+
+const showClear = computed(() => !!props.modelValue || !!String(inputValue.value || '').trim())
+
+watch(
+  () => props.modelValue,
+  () => {
+    // When parent sets/clears selection, reset input text
+    inputValue.value = ''
+    items.value = []
+    err.value = ''
+    activeIndex.value = -1
+  }
+)
 
 function normalizeResults(resData) {
   const arr = Array.isArray(resData) ? resData : []
   return arr
     .map((x) => ({
       employeeId: String(x.employeeId || x.id || '').trim(),
-      name: x.name || '',
-      department: x.department || '',
+      name: String(x.name || '').trim(),
+      department: String(x.department || '').trim(),
     }))
     .filter((x) => x.employeeId)
 }
 
 async function doSearch(text) {
   err.value = ''
-  if (!text || text.length < 2) {
+  activeIndex.value = -1
+
+  const q = String(text || '').trim()
+  if (!q || q.length < props.minChars) {
     items.value = []
     return
   }
+
+  // avoid repeated same request
+  if (q === lastQuery) return
+  lastQuery = q
+
   loading.value = true
   try {
-    const res = await api.get(`/public/employees?q=${encodeURIComponent(text)}`)
+    const res = await api.get('/public/employees', { params: { q } })
     items.value = normalizeResults(res.data)
+    if (!items.value.length) activeIndex.value = -1
   } catch (e) {
+    items.value = []
     err.value = e?.response?.data?.message || 'Failed to search employees.'
   } finally {
     loading.value = false
   }
 }
 
-function onInput() {
-  const text = String(q.value || '').trim()
+function onInput(e) {
+  open.value = true
+  const text = String(e?.target?.value ?? '').trimStart()
+  inputValue.value = text
+
   clearTimeout(t)
-  t = setTimeout(() => doSearch(text), 200) // small debounce
+  t = setTimeout(() => doSearch(text), props.debounceMs)
 }
 
 function pick(item) {
   emit('update:modelValue', item)
   open.value = false
-  q.value = ''
+  inputValue.value = ''
   items.value = []
   err.value = ''
+  activeIndex.value = -1
 }
 
 function clear() {
   emit('update:modelValue', null)
-  q.value = ''
+  inputValue.value = ''
   items.value = []
   err.value = ''
+  activeIndex.value = -1
+  lastQuery = ''
+}
+
+function closeDropdown() {
+  open.value = false
+  activeIndex.value = -1
 }
 
 function onBlur() {
   // allow click selection
-  setTimeout(() => {
-    open.value = false
-  }, 150)
+  setTimeout(() => closeDropdown(), 150)
+}
+
+function move(delta) {
+  if (!open.value) open.value = true
+  if (!items.value.length) return
+  const max = items.value.length - 1
+  const next = activeIndex.value < 0 ? 0 : activeIndex.value + delta
+  activeIndex.value = Math.max(0, Math.min(max, next))
+}
+
+function onEnter() {
+  if (!open.value) return
+  if (activeIndex.value >= 0 && items.value[activeIndex.value]) {
+    pick(items.value[activeIndex.value])
+  }
 }
 </script>

@@ -8,11 +8,14 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'UserReplaceList' })
+
 const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
 
 /* ───────── Identity for realtime ───────── */
+/* computed so it updates after auth refresh */
 const employeeId = computed(() =>
   String(auth.user?.employeeId || localStorage.getItem('employeeId') || '')
 )
@@ -93,12 +96,14 @@ const processedRows = computed(() => {
   let result = items
 
   if (statusFilter.value !== 'ALL') {
-    result = result.filter(r => String(r.status || '') === String(statusFilter.value))
+    result = result.filter(
+      (r) => String(r.status || '') === String(statusFilter.value)
+    )
   }
 
   const q = search.value.trim().toLowerCase()
   if (q) {
-    result = result.filter(r => {
+    result = result.filter((r) => {
       const dates = `${r.requestDate || ''} ${r.compensatoryDate || ''}`.toLowerCase()
       const reason = String(r.reason || '').toLowerCase()
       const st = statusLabel(String(r.status || '')).toLowerCase()
@@ -135,11 +140,12 @@ async function fetchMyReplaceDays() {
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('fetchMyReplaceDays error', e)
-    loadError.value = e?.response?.data?.message || 'Unable to load your replace-day requests.'
+    loadError.value =
+      e?.response?.data?.message || 'Unable to load your replace-day requests.'
     showToast({
       type: 'error',
       title: 'Failed to load',
-      message: loadError.value
+      message: loadError.value,
     })
   } finally {
     loading.value = false
@@ -179,7 +185,6 @@ function prettyBytes(bytes) {
 
 function safeFilename(name) {
   const s = String(name || 'evidence')
-  // very simple sanitize
   return s.replace(/[\\/:*?"<>|]+/g, '_')
 }
 
@@ -227,7 +232,9 @@ async function viewEvidence(reqId, ev) {
     showToast({
       type: 'error',
       title: 'Cannot open evidence',
-      message: e?.response?.data?.message || 'Evidence download failed. (Check backend evidence endpoint)',
+      message:
+        e?.response?.data?.message ||
+        'Evidence download failed. (Check backend evidence endpoint)',
     })
   } finally {
     evidenceLoadingId.value = ''
@@ -244,7 +251,9 @@ async function downloadEvidence(reqId, ev) {
     showToast({
       type: 'error',
       title: 'Download failed',
-      message: e?.response?.data?.message || 'Evidence download failed. (Check backend evidence endpoint)',
+      message:
+        e?.response?.data?.message ||
+        'Evidence download failed. (Check backend evidence endpoint)',
     })
   } finally {
     evidenceLoadingId.value = ''
@@ -271,6 +280,7 @@ function isMyDoc(payload = {}) {
   return (currentEmp && emp === currentEmp) || (currentLogin && requester === currentLogin)
 }
 
+/** Small debounce so multiple events only trigger one fetch */
 let refreshTimer = null
 function triggerRealtimeRefresh(reason = '') {
   if (refreshTimer) clearTimeout(refreshTimer)
@@ -292,7 +302,7 @@ function setupRealtime() {
     showToast({
       type: 'success',
       title: 'Request created',
-      message: 'Your replace-day request was created successfully.'
+      message: 'Your replace-day request was created successfully.',
     })
   })
 
@@ -305,13 +315,13 @@ function setupRealtime() {
       showToast({
         type: 'success',
         title: 'Manager approved',
-        message: 'Manager approved your replace-day request and sent it to GM.'
+        message: 'Manager approved your replace-day request and sent it to GM.',
       })
     } else if (st === 'REJECTED') {
       showToast({
         type: 'error',
         title: 'Manager rejected',
-        message: 'Manager rejected your replace-day request.'
+        message: 'Manager rejected your replace-day request.',
       })
     }
   })
@@ -325,13 +335,13 @@ function setupRealtime() {
       showToast({
         type: 'success',
         title: 'GM approved',
-        message: 'GM approved your replace-day request.'
+        message: 'GM approved your replace-day request.',
       })
     } else if (st === 'REJECTED') {
       showToast({
         type: 'error',
         title: 'GM rejected',
-        message: 'GM rejected your replace-day request.'
+        message: 'GM rejected your replace-day request.',
       })
     }
   })
@@ -356,28 +366,21 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
-  offHandlers.forEach(off => {
-    try { off && off() } catch {}
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
   })
 })
 </script>
 
 <template>
   <div class="px-1 py-1 sm:px-3">
-    <div
-      class="rounded-2xl border border-slate-200 bg-white shadow-sm
-             dark:border-slate-800 dark:bg-slate-900"
-    >
-      <!-- Gradient header (same style as MyRequests.vue) -->
-      <div
-        class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500
-               px-4 py-3 text-white"
-      >
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <!-- Gradient header -->
+      <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
         <!-- Desktop header / filters -->
-        <div
-          v-if="!isMobile"
-          class="flex flex-wrap items-end justify-between gap-4"
-        >
+        <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-col gap-1 min-w-[220px]">
             <p class="text-sm font-semibold">My Replace Day Requests</p>
             <p class="text-[11px] text-sky-50/90">
@@ -389,9 +392,7 @@ onBeforeUnmount(() => {
             <!-- Create -->
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-xl bg-white/95 px-3 py-1.5
-                     text-[11px] font-semibold text-sky-700 shadow-sm
-                     hover:bg-white"
+              class="inline-flex items-center gap-2 rounded-xl bg-white/95 px-3 py-1.5 text-[11px] font-semibold text-sky-700 shadow-sm hover:bg-white"
               @click="goCreate"
             >
               <i class="fa-solid fa-plus text-[11px]" />
@@ -401,17 +402,13 @@ onBeforeUnmount(() => {
             <!-- Search -->
             <div class="min-w-[220px] max-w-xs">
               <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
-              <div
-                class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/25
-                       px-2.5 py-1.5 text-xs"
-              >
+              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/25 px-2.5 py-1.5 text-xs">
                 <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-50/80" />
                 <input
                   v-model="search"
                   type="text"
                   placeholder="Date, status or reason..."
-                  class="flex-1 bg-transparent text-[11px] outline-none
-                         placeholder:text-sky-100/80"
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/80"
                 />
               </div>
             </div>
@@ -477,8 +474,7 @@ onBeforeUnmount(() => {
             <div class="flex items-center justify-between gap-2">
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-xl bg-white/95 px-3 py-1.5
-                       text-[11px] font-semibold text-sky-700 shadow-sm"
+                class="inline-flex items-center gap-2 rounded-xl bg-white/95 px-3 py-1.5 text-[11px] font-semibold text-sky-700 shadow-sm"
                 @click="goCreate"
               >
                 <i class="fa-solid fa-plus text-[11px]" />
@@ -487,8 +483,7 @@ onBeforeUnmount(() => {
 
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-xl border border-sky-100/70 bg-sky-900/25 px-3 py-1.5
-                       text-[11px] font-semibold text-sky-50/95 hover:bg-sky-900/35 disabled:opacity-60"
+                class="inline-flex items-center gap-2 rounded-xl border border-sky-100/70 bg-sky-900/25 px-3 py-1.5 text-[11px] font-semibold text-sky-50/95 hover:bg-sky-900/35 disabled:opacity-60"
                 @click="fetchMyReplaceDays"
                 :disabled="loading"
               >
@@ -499,17 +494,13 @@ onBeforeUnmount(() => {
 
             <div class="space-y-1">
               <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
-              <div
-                class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/25
-                       px-2.5 py-1.5 text-[11px]"
-              >
+              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/25 px-2.5 py-1.5 text-[11px]">
                 <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-50/80" />
                 <input
                   v-model="search"
                   type="text"
                   placeholder="Date, status or reason..."
-                  class="flex-1 bg-transparent text-[11px] outline-none
-                         placeholder:text-sky-100/80"
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/80"
                 />
               </div>
             </div>
@@ -563,7 +554,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </div>
-      </div><!-- /header -->
+      </div>
 
       <!-- Body -->
       <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
@@ -785,23 +776,9 @@ onBeforeUnmount(() => {
 
             <div class="flex items-center justify-end gap-1">
               <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = 1">«</button>
-              <button
-                type="button"
-                class="pagination-btn"
-                :disabled="page <= 1"
-                @click="page = Math.max(1, page - 1)"
-              >
-                Prev
-              </button>
+              <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
               <span class="px-2">Page {{ page }} / {{ pageCount }}</span>
-              <button
-                type="button"
-                class="pagination-btn"
-                :disabled="page >= pageCount"
-                @click="page = Math.min(pageCount, page + 1)"
-              >
-                Next
-              </button>
+              <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
               <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
             </div>
           </div>
@@ -836,8 +813,7 @@ onBeforeUnmount(() => {
 
             <button
               type="button"
-              class="inline-flex h-8 w-8 items-center justify-center rounded-md
-                     hover:bg-slate-100 dark:hover:bg-slate-800"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
               @click="closeEvidence"
               aria-label="Close"
             >
@@ -878,7 +854,10 @@ onBeforeUnmount(() => {
                     @click="viewEvidence(evidenceFor?._id, ev)"
                     title="Open in new tab"
                   >
-                    <i class="fa-regular" :class="evidenceLoadingId === String(ev._id) ? 'fa-spinner animate-spin' : 'fa-eye'"></i>
+                    <i
+                      class="fa-regular"
+                      :class="evidenceLoadingId === String(ev._id) ? 'fa-spinner animate-spin' : 'fa-eye'"
+                    />
                     View
                   </button>
 
@@ -891,7 +870,10 @@ onBeforeUnmount(() => {
                     @click="downloadEvidence(evidenceFor?._id, ev)"
                     title="Download"
                   >
-                    <i class="fa-solid" :class="evidenceLoadingId === String(ev._id) ? 'fa-spinner animate-spin' : 'fa-download'"></i>
+                    <i
+                      class="fa-solid"
+                      :class="evidenceLoadingId === String(ev._id) ? 'fa-spinner animate-spin' : 'fa-download'"
+                    />
                     Download
                   </button>
                 </div>

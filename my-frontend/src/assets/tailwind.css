@@ -1,3 +1,308 @@
+/* src/assets/tailwind.css */
+
+/* ✅ Google Font (Kantumruy Pro) */
+@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────────
+   Base: Tokens + Global defaults (Light/Dark)
+   - Use rgb(var(--token)) pattern so we can reuse everywhere.
+   - Dark mode uses .dark on <html>.
+   ───────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    /* Typography */
+    --ui-font: "Kantumruy Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+      Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+
+    /* Core surfaces */
+    --ui-bg: 248 250 252;       /* slate-50 */
+    --ui-bg-2: 240 249 255;     /* sky-50 */
+    --ui-fg: 15 23 42;          /* slate-900 */
+    --ui-muted: 100 116 139;    /* slate-500 */
+
+    --ui-card: 255 255 255;     /* white */
+    --ui-card-2: 248 250 252;   /* slate-50 */
+    --ui-border: 226 232 240;   /* slate-200 */
+    --ui-ring: 56 189 248;      /* sky-400 */
+
+    /* Brand */
+    --ui-primary: 2 132 199;    /* sky-600 */
+    --ui-primary-2: 14 165 233; /* sky-500 */
+    --ui-accent: 99 102 241;    /* indigo-500 */
+    --ui-success: 16 185 129;   /* emerald-500 */
+    --ui-warning: 245 158 11;   /* amber-500 */
+    --ui-danger: 244 63 94;     /* rose-500 */
+
+    /* Shadows */
+    --ui-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
+    --ui-shadow-2: 0 18px 38px rgba(15, 23, 42, 0.14);
+  }
+
+  .dark {
+    --ui-bg: 2 6 23;            /* slate-950 */
+    --ui-bg-2: 15 23 42;        /* slate-900 */
+    --ui-fg: 248 250 252;       /* slate-50 */
+    --ui-muted: 148 163 184;    /* slate-400 */
+
+    --ui-card: 2 6 23;          /* slate-950 */
+    --ui-card-2: 15 23 42;      /* slate-900 */
+    --ui-border: 30 41 59;      /* slate-800 */
+    --ui-ring: 56 189 248;      /* sky-400 */
+
+    --ui-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+    --ui-shadow-2: 0 18px 38px rgba(0, 0, 0, 0.45);
+  }
+
+  html,
+  body {
+    font-family: var(--ui-font);
+  }
+
+  body {
+    background: rgb(var(--ui-bg));
+    color: rgb(var(--ui-fg));
+  }
+
+  /* Better focus ring */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(var(--ui-ring), 0.35);
+    border-radius: 10px;
+  }
+
+  /* Selection */
+  ::selection {
+    background: rgba(var(--ui-primary), 0.20);
+  }
+
+  /* Smooth */
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Components: Standard UI building blocks
+   - Use these classes across the whole app for consistent look
+   ───────────────────────────────────────────────────────────── */
+@layer components {
+  /* Page background (subtle “premium” gradient) */
+  .ui-page {
+    background:
+      radial-gradient(900px circle at 8% 0%, rgba(var(--ui-primary), 0.10), transparent 45%),
+      radial-gradient(900px circle at 100% 18%, rgba(var(--ui-accent), 0.10), transparent 45%),
+      rgb(var(--ui-bg));
+    color: rgb(var(--ui-fg));
+  }
+
+  /* Card */
+  .ui-card {
+    @apply rounded-2xl border;
+    border-color: rgb(var(--ui-border));
+    background: rgba(var(--ui-card), 0.92);
+    box-shadow: var(--ui-shadow);
+    backdrop-filter: blur(10px);
+  }
+
+  .ui-card-header {
+    @apply rounded-t-2xl px-4 py-3;
+    background:
+      radial-gradient(900px circle at 10% 0%, rgba(var(--ui-primary), 0.22), transparent 48%),
+      radial-gradient(900px circle at 100% 20%, rgba(var(--ui-accent), 0.18), transparent 48%),
+      linear-gradient(90deg, rgba(var(--ui-primary), 0.25), rgba(var(--ui-accent), 0.18));
+    color: rgb(var(--ui-fg));
+  }
+
+  .ui-card-body {
+    @apply px-3 sm:px-4 py-3;
+  }
+
+  /* Buttons (base) */
+  .ui-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-[12px] font-semibold
+           transition disabled:opacity-60 disabled:cursor-not-allowed;
+  }
+
+  .ui-btn-sm {
+    @apply px-3 py-1.5 text-[11px] rounded-xl;
+  }
+
+  .ui-btn-xs {
+    @apply px-2.5 py-1 text-[11px] rounded-lg;
+  }
+
+  /* Button variants */
+  .ui-btn-primary {
+    @apply text-white;
+    background: linear-gradient(90deg, rgba(var(--ui-primary), 1), rgba(var(--ui-primary-2), 1));
+    box-shadow: 0 10px 24px rgba(var(--ui-primary), 0.22);
+  }
+  .ui-btn-primary:hover {
+    filter: brightness(1.03);
+  }
+
+  .ui-btn-soft {
+    @apply border;
+    border-color: rgba(var(--ui-border), 0.9);
+    background: rgba(var(--ui-card), 0.70);
+  }
+  .ui-btn-soft:hover {
+    background: rgba(var(--ui-card), 0.92);
+  }
+
+  .ui-btn-ghost {
+    @apply border border-transparent;
+    background: transparent;
+  }
+  .ui-btn-ghost:hover {
+    background: rgba(var(--ui-border), 0.35);
+  }
+
+  .ui-btn-danger {
+    @apply text-white;
+    background: linear-gradient(90deg, rgba(var(--ui-danger), 1), rgba(var(--ui-warning), 0.75));
+  }
+
+  /* Inputs */
+  .ui-field {
+    @apply space-y-1;
+  }
+
+  .ui-label {
+    @apply block text-[11px] font-semibold;
+    color: rgba(var(--ui-fg), 0.75);
+  }
+
+  .ui-input,
+  .ui-select,
+  .ui-textarea {
+    @apply w-full rounded-xl border px-3 py-2 text-[12px] outline-none transition;
+    border-color: rgba(var(--ui-border), 0.95);
+    background: rgba(var(--ui-card), 0.85);
+    color: rgb(var(--ui-fg));
+  }
+
+  .ui-input:focus,
+  .ui-select:focus,
+  .ui-textarea:focus {
+    border-color: rgba(var(--ui-ring), 0.85);
+    box-shadow: 0 0 0 3px rgba(var(--ui-ring), 0.20);
+  }
+
+  .ui-input::placeholder,
+  .ui-textarea::placeholder {
+    color: rgba(var(--ui-muted), 0.95);
+  }
+
+  /* Search input (with icon container) */
+  .ui-search {
+    @apply flex items-center gap-2 rounded-xl border px-3 py-2 text-[12px];
+    border-color: rgba(var(--ui-border), 0.95);
+    background: rgba(var(--ui-card), 0.75);
+  }
+
+  /* Badges / chips */
+  .ui-badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border;
+    border-color: rgba(var(--ui-border), 0.9);
+    background: rgba(var(--ui-border), 0.25);
+    color: rgba(var(--ui-fg), 0.85);
+  }
+
+  .ui-badge-success {
+    border-color: rgba(var(--ui-success), 0.35);
+    background: rgba(var(--ui-success), 0.12);
+    color: rgba(var(--ui-success), 1);
+  }
+
+  .ui-badge-warning {
+    border-color: rgba(var(--ui-warning), 0.35);
+    background: rgba(var(--ui-warning), 0.12);
+    color: rgba(var(--ui-warning), 1);
+  }
+
+  .ui-badge-danger {
+    border-color: rgba(var(--ui-danger), 0.35);
+    background: rgba(var(--ui-danger), 0.12);
+    color: rgba(var(--ui-danger), 1);
+  }
+
+  .ui-badge-info {
+    border-color: rgba(var(--ui-primary), 0.35);
+    background: rgba(var(--ui-primary), 0.12);
+    color: rgba(var(--ui-primary), 1);
+  }
+
+  /* Table */
+  .ui-table-wrap {
+    @apply overflow-x-auto rounded-2xl border;
+    border-color: rgba(var(--ui-border), 0.95);
+    background: rgba(var(--ui-card), 0.75);
+  }
+
+  .ui-table {
+    @apply w-full min-w-[980px] table-fixed border-collapse text-[12px];
+    color: rgba(var(--ui-fg), 0.92);
+  }
+
+  .ui-th {
+    @apply px-3 py-2 text-[11px] font-extrabold uppercase tracking-wide;
+    background: rgba(var(--ui-border), 0.25);
+    color: rgba(var(--ui-muted), 1);
+    border-bottom: 1px solid rgba(var(--ui-border), 0.95);
+  }
+
+  .ui-td {
+    @apply px-3 py-2 align-middle;
+    border-bottom: 1px solid rgba(var(--ui-border), 0.85);
+  }
+
+  .ui-tr-hover:hover {
+    background: rgba(var(--ui-border), 0.20);
+  }
+
+  /* Pagination */
+  .ui-pagebtn {
+    @apply rounded-full border px-3 py-1 text-[11px] font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed;
+    border-color: rgba(var(--ui-muted), 0.55);
+    background: rgba(var(--ui-card), 0.85);
+    color: rgba(var(--ui-fg), 0.92);
+  }
+  .ui-pagebtn:hover:not(:disabled) {
+    background: rgba(var(--ui-primary), 0.10);
+    border-color: rgba(var(--ui-primary), 0.40);
+  }
+
+  /* Skeleton */
+  .ui-skeleton {
+    @apply animate-pulse rounded-xl;
+    background: rgba(var(--ui-border), 0.35);
+  }
+
+  /* Divider */
+  .ui-divider {
+    @apply border-t;
+    border-color: rgba(var(--ui-border), 0.95);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Utilities: Nice scrollbars (optional)
+   ───────────────────────────────────────────────────────────── */
+@layer utilities {
+  .ui-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .ui-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(var(--ui-muted), 0.35);
+    border-radius: 999px;
+  }
+  .ui-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(var(--ui-muted), 0.48);
+  }
+}

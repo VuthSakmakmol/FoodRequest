@@ -8,18 +8,23 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'GmExpatProfile' })
+
 const { showToast } = useToast()
 const auth = useAuth()
 const route = useRoute()
 const router = useRouter()
 
+/* ───────── helpers ───────── */
+const s = (v) => String(v ?? '').trim()
+
+/**
+ * ✅ IMPORTANT:
+ * - Prefer loginId string, NOT Mongo _id
+ * - Rooms + LeaveRequest store loginId string
+ */
 const loginId = computed(() =>
-  String(
-    auth.user?.id ||
-      auth.user?.loginId ||
-      localStorage.getItem('loginId') ||
-      ''
-  ).trim()
+  s(auth.user?.loginId || localStorage.getItem('loginId') || auth.user?.employeeId || '')
 )
 
 const isMobile = ref(false)
@@ -28,10 +33,10 @@ function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
 
-const targetEmployeeId = computed(() => String(route.query?.employeeId || '').trim())
+const targetEmployeeId = computed(() => s(route.query?.employeeId || ''))
 const isDetailMode = computed(() => !!targetEmployeeId.value)
 
-/* list */
+/* ───────── LIST ───────── */
 const listLoading = ref(false)
 const listError = ref('')
 const rows = ref([])
@@ -53,24 +58,26 @@ async function fetchManagedList(silent = false) {
 }
 
 const filteredRows = computed(() => {
-  const s = q.value.trim().toLowerCase()
-  if (!s) return rows.value
+  const kw = q.value.trim().toLowerCase()
+  if (!kw) return rows.value
   return rows.value.filter((r) => {
     const a = String(r.employeeId || '').toLowerCase()
     const b = String(r.name || '').toLowerCase()
     const c = String(r.department || '').toLowerCase()
-    return a.includes(s) || b.includes(s) || c.includes(s)
+    return a.includes(kw) || b.includes(kw) || c.includes(kw)
   })
 })
 
 function openDetail(employeeId) {
-  router.push({ path: route.path, query: { employeeId: String(employeeId) } })
+  const empId = s(employeeId)
+  if (!empId) return
+  router.push({ path: route.path, query: { employeeId: empId } })
 }
 function backToList() {
   router.push({ path: route.path, query: {} })
 }
 
-/* detail */
+/* ───────── DETAIL ───────── */
 const loading = ref(false)
 const loadError = ref('')
 const profile = ref(null)
@@ -114,7 +121,8 @@ async function fetchEmployeeProfile(silent = false) {
       params: { employeeId: targetEmployeeId.value },
     })
 
-    profile.value = res?.data || null
+    // Accept either { profile: {...} } or { ...profile }
+    profile.value = res?.data?.profile || res?.data || null
     lastUpdatedAt.value = dayjs().toISOString()
   } catch (e) {
     console.error('fetchEmployeeProfile error', e)
@@ -125,10 +133,16 @@ async function fetchEmployeeProfile(silent = false) {
   }
 }
 
-/* realtime */
+/* ───────── REALTIME ───────── */
 function isTargetDoc(payload = {}) {
-  const emp = String(payload.employeeId || payload?.profile?.employeeId || '').trim()
-  return targetEmployeeId.value && emp === targetEmployeeId.value
+  const pEmp = s(
+    payload.employeeId ||
+      payload.profileEmployeeId ||
+      payload?.profile?.employeeId ||
+      payload?.profile?.employee ||
+      ''
+  )
+  return targetEmployeeId.value && pEmp === targetEmployeeId.value
 }
 
 let refreshTimer = null
@@ -139,6 +153,7 @@ function triggerRefresh() {
 
 const offHandlers = []
 function setupRealtime() {
+  // ✅ subscribe to GM personal room + target employee room
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
   if (targetEmployeeId.value) subscribeEmployeeIfNeeded(targetEmployeeId.value)
 
@@ -162,7 +177,7 @@ function teardownRealtime() {
 
 onMounted(async () => {
   updateIsMobile()
-  window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
   await fetchManagedList(true)
   await fetchEmployeeProfile(true)
@@ -180,7 +195,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
 })

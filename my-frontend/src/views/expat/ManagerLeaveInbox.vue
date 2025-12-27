@@ -8,16 +8,21 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'ManagerLeaveInbox' })
+
 const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ✅ Manager decide check (supports role + roles[]) */
-const canManagerDecide = computed(() => {
-  const r1 = String(auth.user?.role || '')
-  const r2 = Array.isArray(auth.user?.roles) ? auth.user.roles : []
-  return r1 === 'LEAVE_MANAGER' || r2.includes('LEAVE_MANAGER')
+/* ✅ roles helper (supports user.role + user.roles[]) */
+const roles = computed(() => {
+  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  const base = auth.user?.role ? [auth.user.role] : []
+  return [...new Set([...raw, ...base].map(r => String(r || '').trim()))]
 })
+
+/* ✅ Manager decide check */
+const canManagerDecide = computed(() => roles.value.includes('LEAVE_MANAGER'))
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -83,13 +88,18 @@ function statusWeight(s) {
 function goProfile(row) {
   const empId = String(row?.employeeId || '').trim()
   if (!empId) return
-  router.push({
-    name: 'leave-manager-profile',
-    query: { employeeId: empId }
-  })
+  router.push({ name: 'leave-manager-profile', query: { employeeId: empId } })
 }
 
-/* ───────── Data ───────── */
+/* quick tools */
+function clearFilters() {
+  search.value = ''
+  employeeFilter.value = ''
+  fromDate.value = ''
+  toDate.value = ''
+  statusTab.value = 'PENDING_MANAGER'
+}
+
 async function fetchInbox() {
   try {
     loading.value = true
@@ -129,9 +139,6 @@ const filteredRows = computed(() => {
   // Tab filter
   if (statusTab.value === 'PENDING_GM') {
     list = list.filter(r => ['PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED'].includes(r.status))
-  } else {
-    // PENDING_MANAGER tab shows all, but manager action only applies for PENDING_MANAGER
-    // (keep as is)
   }
 
   // ✅ Date filter by REQUEST DATE (createdAt)
@@ -170,6 +177,9 @@ const pageCount = computed(() => {
   const per = Number(perPage.value || 20)
   return Math.ceil(filteredRows.value.length / per) || 1
 })
+
+const totalCount = computed(() => rows.value.length)
+const filteredCount = computed(() => filteredRows.value.length)
 
 watch(
   () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
@@ -256,6 +266,7 @@ async function submitDecision() {
     })
 
     closeDecisionDialog()
+    // ✅ realtime will refresh too, but we refresh immediately for best UX
     await fetchInbox()
   } catch (e) {
     console.error('managerDecision error', e)
@@ -282,7 +293,8 @@ function setupRealtime() {
   subscribeRoleIfNeeded({
     role: auth.user?.role,
     employeeId: auth.user?.employeeId,
-    loginId: auth.user?.id,
+    // ✅ IMPORTANT: prefer loginId (string used in your leave rooms), not Mongo _id
+    loginId: auth.user?.loginId || auth.user?.employeeId || auth.user?.id,
     company: auth.user?.companyCode,
   })
 
@@ -292,7 +304,7 @@ function setupRealtime() {
       showToast({
         type: 'info',
         title: 'New leave request',
-        message: `New leave from ${payload.employeeName || payload.employeeId || 'employee'}.`
+        message: `New leave from ${payload.employeeName || payload.employeeId || 'employee'}.`,
       })
     }
   })
@@ -328,6 +340,15 @@ onBeforeUnmount(() => {
             <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
             <p class="text-sm font-semibold">Manager Inbox</p>
             <p class="text-[11px] text-sky-50/90">Review and approve expatriate leave requests assigned to you.</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Total: {{ totalCount }}
+              </span>
+              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Showing: {{ filteredCount }}
+              </span>
+            </div>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -336,8 +357,12 @@ onBeforeUnmount(() => {
               <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
               <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-xs">
                 <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
-                <input v-model="search" type="text" placeholder="Employee / type / reason..."
-                       class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70" />
+                <input
+                  v-model="search"
+                  type="text"
+                  placeholder="Employee / type / reason..."
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
+                />
               </div>
             </div>
 
@@ -345,16 +370,24 @@ onBeforeUnmount(() => {
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/90 mr-1">Status</span>
               <div class="flex rounded-full bg-sky-900/30 p-0.5">
-                <button type="button"
-                        class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                        :class="statusTab === 'PENDING_MANAGER' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                        @click="statusTab = 'PENDING_MANAGER'">
+                <button
+                  type="button"
+                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                  :class="statusTab === 'PENDING_MANAGER'
+                    ? 'bg-white text-sky-700 shadow-sm'
+                    : 'text-sky-100 hover:bg-sky-900/50'"
+                  @click="statusTab = 'PENDING_MANAGER'"
+                >
                   Pending (Manager)
                 </button>
-                <button type="button"
-                        class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                        :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                        @click="statusTab = 'PENDING_GM'">
+                <button
+                  type="button"
+                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
+                  :class="statusTab === 'PENDING_GM'
+                    ? 'bg-white text-sky-700 shadow-sm'
+                    : 'text-sky-100 hover:bg-sky-900/50'"
+                  @click="statusTab = 'PENDING_GM'"
+                >
                   Sent to GM
                 </button>
               </div>
@@ -363,18 +396,53 @@ onBeforeUnmount(() => {
             <!-- ✅ Requested at range filter (default empty = show all) -->
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/80">Requested</span>
-              <input v-model="fromDate" type="date"
-                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="fromDate"
+                type="date"
+                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
               <span>to</span>
-              <input v-model="toDate" type="date"
-                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="toDate"
+                type="date"
+                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
             </div>
 
             <!-- Expat ID filter -->
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/80">Expat ID</span>
-              <input v-model="employeeFilter" type="text" placeholder="EMP001..."
-                     class="w-28 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="employeeFilter"
+                type="text"
+                placeholder="EMP001..."
+                class="w-28 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70"
+              />
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                @click="fetchInbox"
+                :disabled="loading"
+                title="Refresh"
+              >
+                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                Refresh
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
+                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
             </div>
           </div>
         </div>
@@ -385,6 +453,15 @@ onBeforeUnmount(() => {
             <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
             <p class="text-sm font-semibold">Manager Inbox</p>
             <p class="text-[11px] text-sky-50/90">Review and approve expatriate leave requests assigned to you.</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Total: {{ totalCount }}
+              </span>
+              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Showing: {{ filteredCount }}
+              </span>
+            </div>
           </div>
 
           <div class="space-y-2">
@@ -392,8 +469,12 @@ onBeforeUnmount(() => {
               <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
               <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-[11px]">
                 <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
-                <input v-model="search" type="text" placeholder="Employee / type / reason..."
-                       class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70" />
+                <input
+                  v-model="search"
+                  type="text"
+                  placeholder="Employee / type / reason..."
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
+                />
               </div>
             </div>
 
@@ -401,31 +482,70 @@ onBeforeUnmount(() => {
               <div class="flex items-center gap-1">
                 <span class="text-sky-50/90">Status</span>
                 <div class="flex rounded-full bg-sky-900/30 p-0.5">
-                  <button type="button" class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                          :class="statusTab === 'PENDING_MANAGER' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                          @click="statusTab = 'PENDING_MANAGER'">
+                  <button
+                    type="button"
+                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                    :class="statusTab === 'PENDING_MANAGER' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                    @click="statusTab = 'PENDING_MANAGER'"
+                  >
                     Manager
                   </button>
-                  <button type="button" class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                          :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                          @click="statusTab = 'PENDING_GM'">
+                  <button
+                    type="button"
+                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
+                    :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                    @click="statusTab = 'PENDING_GM'"
+                  >
                     GM
                   </button>
                 </div>
               </div>
 
-              <input v-model="employeeFilter" type="text" placeholder="Expat ID..."
-                     class="w-24 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="employeeFilter"
+                type="text"
+                placeholder="Expat ID..."
+                class="w-24 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70"
+              />
             </div>
 
             <!-- ✅ Requested at range filter (mobile) -->
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
               <span class="text-sky-50/80">Requested</span>
-              <input v-model="fromDate" type="date"
-                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="fromDate"
+                type="date"
+                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
               <span>to</span>
-              <input v-model="toDate" type="date"
-                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="toDate"
+                type="date"
+                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                @click="fetchInbox"
+                :disabled="loading"
+              >
+                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                Refresh
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
+                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
             </div>
           </div>
         </div>
@@ -433,9 +553,11 @@ onBeforeUnmount(() => {
 
       <!-- Body -->
       <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
-        <div v-if="loading && !filteredRows.length"
-             class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
-                    text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100">
+        <div
+          v-if="loading && !filteredRows.length"
+          class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
+                 text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
+        >
           Loading manager inbox...
         </div>
 
@@ -445,10 +567,13 @@ onBeforeUnmount(() => {
             No leave requests in your manager queue.
           </p>
 
-          <article v-for="row in pagedRows" :key="row._id"
-                   class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
-                          shadow-[0_10px_24px_rgba(15,23,42,0.12)]
-                          dark:border-slate-700 dark:bg-slate-900/95">
+          <article
+            v-for="row in pagedRows"
+            :key="row._id"
+            class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
+                   shadow-[0_10px_24px_rgba(15,23,42,0.12)]
+                   dark:border-slate-700 dark:bg-slate-900/95"
+          >
             <div class="flex items-start justify-between gap-3">
               <div class="space-y-1">
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">
@@ -493,26 +618,32 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-2 flex flex-wrap justify-end gap-2">
-              <button type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
-                             text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                      @click="goProfile(row)">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
+                       text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                @click="goProfile(row)"
+              >
                 <i class="fa-solid fa-id-badge text-[10px]" />
                 Profile
               </button>
 
               <template v-if="canManagerDecide && row.status === 'PENDING_MANAGER'">
-                <button type="button"
-                        class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                        @click="openDecisionDialog(row, 'APPROVE')">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
+                  @click="openDecisionDialog(row, 'APPROVE')"
+                >
                   <i class="fa-solid fa-check text-[10px]" />
                   Approve
                 </button>
-                <button type="button"
-                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50
-                               dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                        @click="openDecisionDialog(row, 'REJECT')">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50
+                         dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
+                  @click="openDecisionDialog(row, 'REJECT')"
+                >
                   <i class="fa-solid fa-xmark text-[10px]" />
                   Reject
                 </button>
@@ -548,8 +679,11 @@ onBeforeUnmount(() => {
                 </td>
               </tr>
 
-              <tr v-for="row in pagedRows" :key="row._id"
-                  class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70">
+              <tr
+                v-for="row in pagedRows"
+                :key="row._id"
+                class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70"
+              >
                 <td class="table-td whitespace-nowrap align-top">
                   {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                 </td>
@@ -589,26 +723,32 @@ onBeforeUnmount(() => {
 
                 <td class="table-td text-right align-top">
                   <div class="inline-flex flex-wrap justify-end gap-2">
-                    <button type="button"
-                            class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
-                                   text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
-                                   dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                            @click="goProfile(row)">
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
+                             text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                      @click="goProfile(row)"
+                    >
                       <i class="fa-solid fa-id-badge text-[10px]" />
                       Profile
                     </button>
 
                     <template v-if="canManagerDecide && row.status === 'PENDING_MANAGER'">
-                      <button type="button"
-                              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
-                              @click="openDecisionDialog(row, 'APPROVE')">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
+                        @click="openDecisionDialog(row, 'APPROVE')"
+                      >
                         <i class="fa-solid fa-check text-[10px]" />
                         Approve
                       </button>
-                      <button type="button"
-                              class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50
-                                     dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                              @click="openDecisionDialog(row, 'REJECT')">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50
+                               dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
+                        @click="openDecisionDialog(row, 'REJECT')"
+                      >
                         <i class="fa-solid fa-xmark text-[10px]" />
                         Reject
                       </button>
@@ -646,8 +786,7 @@ onBeforeUnmount(() => {
 
     <!-- Confirm dialog -->
     <transition name="modal-fade">
-      <div v-if="confirmDialog.open"
-           class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
+      <div v-if="confirmDialog.open" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
         <div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
           <!-- Header -->
           <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
@@ -667,9 +806,11 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <button type="button"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/80"
-                      @click="closeDecisionDialog">
+              <button
+                type="button"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/80"
+                @click="closeDecisionDialog"
+              >
                 <i class="fa-solid fa-xmark text-xs" />
               </button>
             </div>
@@ -707,18 +848,22 @@ onBeforeUnmount(() => {
 
           <!-- Footer -->
           <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button type="button"
-                    class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
-                    @click="closeDecisionDialog">
+            <button
+              type="button"
+              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              @click="closeDecisionDialog"
+            >
               Cancel
             </button>
 
-            <button type="button"
-                    class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-sm
-                           focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-900"
-                    :class="confirmPrimaryClasses"
-                    :disabled="loading"
-                    @click="submitDecision">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-sm
+                     focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-900"
+              :class="confirmPrimaryClasses"
+              :disabled="loading"
+              @click="submitDecision"
+            >
               <i class="fa-solid mr-1 text-[10px]" :class="confirmDialog.action === 'APPROVE' ? 'fa-check' : 'fa-xmark'" />
               <span>{{ confirmPrimaryLabel }}</span>
             </button>
@@ -762,3 +907,4 @@ onBeforeUnmount(() => {
   transform: translateY(6px) scale(0.98);
 }
 </style>
+ 

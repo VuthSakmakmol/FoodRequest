@@ -8,6 +8,8 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
+defineOptions({ name: 'GmLeaveInbox' })
+
 const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
@@ -16,7 +18,7 @@ const auth = useAuth()
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const base = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...base])]
+  return [...new Set([...raw, ...base].map(r => String(r || '').trim()))]
 })
 const canGmDecide = computed(() => roles.value.includes('LEAVE_GM'))
 
@@ -72,12 +74,12 @@ function statusChipClasses(status) {
 /* Sort order for GM queue */
 function statusWeight(s) {
   switch (s) {
-    case 'PENDING_GM': return 0
-    case 'APPROVED': return 1
-    case 'REJECTED': return 2
-    case 'CANCELLED': return 3
+    case 'PENDING_GM':      return 0
+    case 'APPROVED':        return 1
+    case 'REJECTED':        return 2
+    case 'CANCELLED':       return 3
     case 'PENDING_MANAGER': return 4
-    default: return 99
+    default:                return 99
   }
 }
 
@@ -102,6 +104,15 @@ function goProfile(row) {
   router.push({ name: 'leave-gm-profile', query: { employeeId: empId } })
 }
 
+/* Quick actions */
+function clearFilters() {
+  search.value = ''
+  employeeFilter.value = ''
+  fromDate.value = ''
+  toDate.value = ''
+  statusTab.value = 'PENDING_GM'
+}
+
 /* ───────── Data ───────── */
 async function fetchInbox() {
   try {
@@ -113,7 +124,7 @@ async function fetchInbox() {
     showToast({
       type: 'error',
       title: 'Failed to load',
-      message: e?.response?.data?.message || 'Unable to load GM inbox.'
+      message: e?.response?.data?.message || 'Unable to load GM inbox.',
     })
   } finally {
     loading.value = false
@@ -122,7 +133,7 @@ async function fetchInbox() {
 
 /**
  * Tabs:
- * - PENDING_GM: show all rows for this GM
+ * - PENDING_GM: show all rows (default)
  * - FINISHED:   only APPROVED/REJECTED/CANCELLED
  */
 const filteredRows = computed(() => {
@@ -187,6 +198,9 @@ const pageCount = computed(() => {
   return Math.ceil(filteredRows.value.length / per) || 1
 })
 
+const totalCount = computed(() => rows.value.length)
+const filteredCount = computed(() => filteredRows.value.length)
+
 watch(
   () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
   () => { page.value = 1 }
@@ -197,13 +211,17 @@ const confirmDialog = ref({
   open: false,
   action: 'APPROVE', // 'APPROVE' | 'REJECT'
   row: null,
-  comment: ''
+  comment: '',
 })
 const rejectError = ref('')
 
 function openDecisionDialog(row, action) {
   if (!canGmDecide.value) {
-    showToast({ type: 'error', title: 'Not allowed', message: 'You do not have permission to approve or reject as GM.' })
+    showToast({
+      type: 'error',
+      title: 'Not allowed',
+      message: 'You do not have permission to approve or reject as GM.',
+    })
     return
   }
   confirmDialog.value.open = true
@@ -221,7 +239,9 @@ function closeDecisionDialog() {
 }
 
 const confirmTitle = computed(() =>
-  confirmDialog.value.action === 'APPROVE' ? 'Approve this leave request?' : 'Reject this leave request?'
+  confirmDialog.value.action === 'APPROVE'
+    ? 'Approve this leave request?'
+    : 'Reject this leave request?'
 )
 
 const confirmPrimaryLabel = computed(() =>
@@ -250,15 +270,16 @@ async function submitDecision() {
 
   try {
     loading.value = true
+
     await api.post(`/leave/requests/${row._id}/gm-decision`, {
       action,
-      ...(action === 'REJECT' ? { comment } : {})
+      ...(action === 'REJECT' ? { comment } : {}),
     })
 
     showToast({
       type: 'success',
       title: action === 'APPROVE' ? 'Approved' : 'Rejected',
-      message: 'GM decision has been saved.'
+      message: 'GM decision has been saved.',
     })
 
     closeDecisionDialog()
@@ -268,7 +289,7 @@ async function submitDecision() {
     showToast({
       type: 'error',
       title: 'Update failed',
-      message: e?.response?.data?.message || 'Unable to update this leave request.'
+      message: e?.response?.data?.message || 'Unable to update this leave request.',
     })
   } finally {
     loading.value = false
@@ -288,8 +309,9 @@ function setupRealtime() {
   subscribeRoleIfNeeded({
     role: auth.user?.role,
     employeeId: auth.user?.employeeId,
-    loginId: auth.user?.id,
-    company: auth.user?.companyCode
+    // ✅ IMPORTANT: prefer loginId (string used in leave rooms), not Mongo _id
+    loginId: auth.user?.loginId || auth.user?.employeeId || auth.user?.id,
+    company: auth.user?.companyCode,
   })
 
   const offCreated = onSocket('leave:req:created', () => triggerRealtimeRefresh())
@@ -321,10 +343,19 @@ onBeforeUnmount(() => {
       <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex flex-col gap-1 min-w-[220px]">
+          <div class="flex flex-col gap-1 min-w-[240px]">
             <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
             <p class="text-sm font-semibold">GM Inbox</p>
             <p class="text-[11px] text-sky-50/90">Final approval queue for expatriate leave requests.</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Total: {{ totalCount }}
+              </span>
+              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Showing: {{ filteredCount }}
+              </span>
+            </div>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -365,14 +396,20 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- ✅ Requested at range filter (default empty = show all) -->
+            <!-- Requested at range filter -->
             <div class="flex items-center gap-1 text-[11px]">
               <span class="text-sky-50/80">Requested</span>
-              <input v-model="fromDate" type="date"
-                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="fromDate"
+                type="date"
+                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
               <span>to</span>
-              <input v-model="toDate" type="date"
-                     class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="toDate"
+                type="date"
+                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
             </div>
 
             <!-- Expat ID filter -->
@@ -385,6 +422,31 @@ onBeforeUnmount(() => {
                 class="w-28 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70"
               />
             </div>
+
+            <!-- Actions -->
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                @click="fetchInbox"
+                :disabled="loading"
+                title="Refresh"
+              >
+                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                Refresh
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
+                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
+            </div>
           </div>
         </div>
 
@@ -394,6 +456,15 @@ onBeforeUnmount(() => {
             <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
             <p class="text-sm font-semibold">GM Inbox</p>
             <p class="text-[11px] text-sky-50/90">Final approval queue for expatriate leave requests.</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Total: {{ totalCount }}
+              </span>
+              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Showing: {{ filteredCount }}
+              </span>
+            </div>
           </div>
 
           <div class="space-y-2">
@@ -441,14 +512,44 @@ onBeforeUnmount(() => {
               />
             </div>
 
-            <!-- ✅ Requested at range filter (mobile) -->
+            <!-- Requested at range filter -->
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
               <span class="text-sky-50/80">Requested</span>
-              <input v-model="fromDate" type="date"
-                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="fromDate"
+                type="date"
+                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
               <span>to</span>
-              <input v-model="toDate" type="date"
-                     class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70" />
+              <input
+                v-model="toDate"
+                type="date"
+                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
+              />
+            </div>
+
+            <!-- Actions -->
+            <div class="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                @click="fetchInbox"
+                :disabled="loading"
+              >
+                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                Refresh
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
+                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
             </div>
           </div>
         </div>
@@ -473,7 +574,8 @@ onBeforeUnmount(() => {
           <article
             v-for="row in pagedRows"
             :key="row._id"
-            class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs shadow-[0_10px_24px_rgba(15,23,42,0.12)]
+            class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
+                   shadow-[0_10px_24px_rgba(15,23,42,0.12)]
                    dark:border-slate-700 dark:bg-slate-900/95"
           >
             <div class="flex items-start justify-between gap-3">
@@ -520,14 +622,15 @@ onBeforeUnmount(() => {
               class="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
                      dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
             >
-              <span class="font-semibold">{{ rejectedByLabel(row) }}<span v-if="row.department"> ({{ row.department }})</span>:</span>
+              <span class="font-semibold">{{ rejectedByLabel(row) }}:</span>
               <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
             </div>
 
             <div class="mt-3 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
+                       text-[11px] font-semibold text-slate-700 hover:bg-slate-50
                        dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
                 @click="goProfile(row)"
               >
@@ -621,7 +724,7 @@ onBeforeUnmount(() => {
                            dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
                   >
                     <span class="font-semibold whitespace-nowrap">
-                      {{ rejectedByLabel(row) }}<span v-if="row.department"> ({{ row.department }})</span>:
+                      {{ rejectedByLabel(row) }}:
                     </span>
                     <span class="min-w-0 break-words">{{ getRejectReason(row) || '—' }}</span>
                   </div>
@@ -637,7 +740,8 @@ onBeforeUnmount(() => {
                   <div class="inline-flex flex-wrap justify-end gap-2">
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
+                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
+                             text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
                              dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
                       @click="goProfile(row)"
                     >
@@ -732,7 +836,9 @@ onBeforeUnmount(() => {
               <div v-if="confirmDialog.row" class="mb-2 text-[11px]">
                 <div class="font-semibold">
                   {{ confirmDialog.row.employeeId }} — {{ confirmDialog.row.employeeName || '—' }}
-                  <span v-if="confirmDialog.row.department" class="font-normal text-slate-500 dark:text-slate-400">· {{ confirmDialog.row.department }}</span>
+                  <span v-if="confirmDialog.row.department" class="font-normal text-slate-500 dark:text-slate-400">
+                    · {{ confirmDialog.row.department }}
+                  </span>
                 </div>
                 <div class="text-slate-500 dark:text-slate-400">
                   {{ formatRange(confirmDialog.row) }} · {{ confirmDialog.row.leaveTypeCode }} · Days: {{ Number(confirmDialog.row.totalDays || 0).toLocaleString() }}
@@ -744,7 +850,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- ✅ Reject comment only -->
+            <!-- Reject comment only -->
             <div v-if="confirmDialog.action === 'REJECT'" class="mt-3">
               <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
                 Reject reason <span class="text-rose-600">*</span>
@@ -816,10 +922,12 @@ onBeforeUnmount(() => {
 .dark .pagination-btn { background: #020617; color: #e5e7eb; border-color: rgba(148, 163, 184, 0.9); }
 .dark .pagination-btn:not(:disabled):hover { background: #1e293b; }
 
-.modal-fade-enter-active, .modal-fade-leave-active {
+.modal-fade-enter-active,
+.modal-fade-leave-active {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
 }
-.modal-fade-enter-from, .modal-fade-leave-to {
+.modal-fade-enter-from,
+.modal-fade-leave-to {
   opacity: 0;
   transform: translateY(6px) scale(0.98);
 }
