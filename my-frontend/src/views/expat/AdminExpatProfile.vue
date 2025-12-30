@@ -54,6 +54,8 @@ const filteredCount = computed(() =>
   filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
 )
 
+const managerCount = computed(() => filteredManagers.value.length)
+
 function compactBalances(balances) {
   const arr = Array.isArray(balances) ? balances : []
   const order = ['AL', 'SP', 'MC', 'MA', 'UL']
@@ -65,6 +67,18 @@ function compactBalances(balances) {
     out.push({ k, v: Number.isFinite(Number(b.remaining)) ? Number(b.remaining) : 0 })
   }
   return out
+}
+
+function statusChipClasses(active) {
+  return active
+    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/80'
+    : 'bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/80'
+}
+
+function modeChipClasses(mode) {
+  return mode === 'GM_AND_COO'
+    ? 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
+    : 'bg-sky-100 text-sky-700 border border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80'
 }
 
 /* ───────── navigation ───────── */
@@ -92,10 +106,15 @@ async function fetchGroups() {
   } catch (e) {
     console.error('fetchGroups error', e)
     error.value = e?.response?.data?.message || e.message || 'Failed to load profiles.'
-    showToast({ type: 'error', title: 'Failed', message: error.value })
+    showToast({ type: 'error', title: 'Failed to load', message: error.value })
   } finally {
     loading.value = false
   }
+}
+
+function clearFilters() {
+  q.value = ''
+  includeInactive.value = false
 }
 
 watch(includeInactive, () => fetchGroups())
@@ -109,7 +128,7 @@ const saving = ref(false)
 function newRow() {
   return {
     key: Math.random().toString(16).slice(2),
-    employee: null, // EmployeeSearch returns { employeeId, name, department }
+    employee: null,
     joinDate: '',
     contractDate: '',
     alCarry: 0,
@@ -119,9 +138,8 @@ function newRow() {
 
 const form = ref({
   approvalMode: 'GM_ONLY',
-  manager: null, // optional EmployeeSearch result
+  manager: null,
   rows: [newRow()],
-
   singleEmployee: null,
   singleJoinDate: '',
   singleContractDate: '',
@@ -247,300 +265,433 @@ async function submitCreate() {
 /* ───────── lifecycle ───────── */
 onMounted(() => {
   updateIsMobile()
-  window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   fetchGroups()
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
 })
 </script>
 
 <template>
-  <div class="w-full">
-    <div
-      class="rounded-3xl border border-slate-200/70 bg-white/70 shadow-[0_18px_45px_rgba(15,23,42,0.10)]
-             backdrop-blur dark:border-slate-800/70 dark:bg-slate-950/55 overflow-hidden"
-    >
-      <!-- ✅ Gradient header (natural + modern) -->
-      <header class="relative overflow-hidden px-4 py-4 sm:px-5">
-        <div
-          class="absolute inset-0"
-          style="background: linear-gradient(90deg, rgba(2,132,199,1), rgba(79,70,229,1), rgba(16,185,129,1));"
-        />
-        <div
-          class="absolute inset-0 opacity-60"
-          style="background:
-            radial-gradient(900px circle at 10% 0%, rgba(255,255,255,.22), transparent 45%),
-            radial-gradient(900px circle at 100% 20%, rgba(255,255,255,.18), transparent 45%);"
-        />
-        <div class="relative flex flex-wrap items-start justify-between gap-3 text-white">
-          <div class="min-w-0">
-            <p class="text-[10px] font-extrabold uppercase tracking-[0.25em] text-white/80">
-              Expat leave · Admin
-            </p>
-            <h1 class="mt-0.5 text-[16px] sm:text-[18px] font-extrabold tracking-tight truncate">
-              Expat Profiles
-            </h1>
-            <p class="mt-1 text-[12px] text-white/85">
-              Profiles grouped by manager. Approval chain is enforced by backend rules.
-            </p>
+  <div class="px-1 py-1 sm:px-3">
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <!-- Header -->
+      <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+        <!-- Desktop -->
+        <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
+          <div class="flex flex-col gap-1 min-w-[240px]">
+            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
+            <p class="text-sm font-semibold">Expat Profiles</p>
+            <p class="text-[11px] text-sky-50/90">Profiles grouped by manager.</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Employees: {{ filteredCount }}
+              </span>
+              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Managers: {{ managerCount }}
+              </span>
+            </div>
           </div>
 
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2
-                     text-[12px] font-extrabold text-white transition hover:bg-white/15
-                     disabled:cursor-not-allowed disabled:opacity-60"
-              @click="fetchGroups"
-              :disabled="loading"
-              title="Refresh"
-            >
-              <i class="fa-solid fa-rotate-right text-[12px]" :class="loading ? 'fa-spin' : ''"></i>
-              Refresh
-            </button>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[12px]
-                     font-extrabold text-slate-900 shadow hover:bg-white/95 transition"
-              @click="openCreate()"
-            >
-              <i class="fa-solid fa-plus text-[12px]"></i>
-              New profile
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <!-- ✅ Filter bar -->
-      <div class="px-3 sm:px-4 pt-4">
-        <div
-          class="rounded-3xl border border-slate-200/70 bg-white/75 p-3 sm:p-4
-                 dark:border-slate-800/70 dark:bg-slate-950/55"
-        >
-          <div class="flex flex-col sm:flex-row gap-3 sm:items-end sm:justify-between">
-            <div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div class="sm:col-span-2">
-                <label class="mb-1 block text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
-                  Search
-                </label>
-                <div
-                  class="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2
-                         focus-within:ring-2 focus-within:ring-emerald-500/30
-                         dark:border-slate-800 dark:bg-slate-900/60"
-                >
-                  <i class="fa-solid fa-magnifying-glass text-[12px] text-slate-400"></i>
-                  <input
-                    v-model="q"
-                    type="text"
-                    placeholder="Search employeeId, name, department…"
-                    class="w-full bg-transparent text-[13px] outline-none placeholder:text-slate-400
-                           text-slate-900 dark:text-slate-100"
-                  />
-                </div>
-              </div>
-
-              <div class="flex items-center">
-                <label class="flex items-center gap-2 text-[13px] font-semibold text-slate-700 dark:text-slate-200 select-none">
-                  <input
-                    type="checkbox"
-                    class="h-4 w-4 rounded border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900"
-                    v-model="includeInactive"
-                  />
-                  Include inactive
-                </label>
+          <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
+            <!-- Search -->
+            <div class="min-w-[260px] max-w-sm">
+              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
+              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-xs">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
+                <input
+                  v-model="q"
+                  type="text"
+                  placeholder="Employee / manager / department..."
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
+                />
               </div>
             </div>
 
+            <!-- Include inactive -->
+            <div class="flex items-center gap-2 text-[11px]">
+              <label class="inline-flex items-center gap-2 rounded-full bg-sky-900/30 px-3 py-1.5">
+                <input
+                  v-model="includeInactive"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-sky-100/60 bg-transparent"
+                />
+                <span class="text-sky-50/90">Include inactive</span>
+              </label>
+            </div>
+
+            <!-- Actions -->
             <div class="flex items-center gap-2">
-              <span class="rounded-full bg-sky-50 px-3 py-1 text-[12px] font-extrabold text-sky-800 dark:bg-sky-900/30 dark:text-sky-200">
-                {{ filteredCount }} employees
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                @click="fetchGroups"
+                :disabled="loading"
+                title="Refresh"
+              >
+                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                Refresh
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
+                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                @click="openCreate"
+              >
+                <i class="fa-solid fa-plus text-[11px]"></i>
+                New
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
+                @click="clearFilters"
+                title="Clear filters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Mobile -->
+        <div v-else class="space-y-2">
+          <div>
+            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
+            <p class="text-sm font-semibold">Expat Profiles</p>
+            <p class="text-[11px] text-sky-50/90">Profiles grouped by manager.</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Employees: {{ filteredCount }}
               </span>
-              <span class="rounded-full bg-emerald-50 px-3 py-1 text-[12px] font-extrabold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
-                {{ groups.length }} managers
+              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
+                Managers: {{ managerCount }}
               </span>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <div class="space-y-1">
+              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
+              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-[11px]">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
+                <input
+                  v-model="q"
+                  type="text"
+                  placeholder="Employee / manager / dept..."
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
+                />
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <label class="inline-flex items-center gap-2 rounded-full bg-sky-900/30 px-3 py-1.5">
+                <input
+                  v-model="includeInactive"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-sky-100/60 bg-transparent"
+                />
+                <span class="text-sky-50/90">Include inactive</span>
+              </label>
+
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
+                         text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                  @click="fetchGroups"
+                  :disabled="loading"
+                >
+                  <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
+                         text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                  @click="openCreate"
+                >
+                  <i class="fa-solid fa-plus text-[11px]"></i>
+                  New
+                </button>
+              </div>
+            </div>
+
+            <div class="flex justify-end">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5
+                       text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Body -->
-      <div class="px-3 sm:px-4 py-4 space-y-3">
+      <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
         <!-- Error -->
         <div
           v-if="error"
-          class="rounded-3xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-[13px] text-rose-800
-                 dark:border-rose-500/60 dark:bg-rose-950/35 dark:text-rose-100"
+          class="mb-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px]
+                 text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
         >
-          <div class="font-extrabold mb-1">Failed</div>
-          <div class="opacity-95">{{ error }}</div>
+          <span class="font-semibold">Failed:</span> {{ error }}
         </div>
 
         <!-- Loading -->
         <div
-          v-if="loading"
-          class="rounded-3xl border border-slate-200/70 bg-white/75 px-4 py-4 text-[13px] text-slate-600
-                 dark:border-slate-800/70 dark:bg-slate-950/55 dark:text-slate-300"
+          v-if="loading && !filteredManagers.length"
+          class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
+                 text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
         >
-          <div class="h-4 w-44 animate-pulse rounded bg-slate-200/80 dark:bg-slate-800/60"></div>
-          <div class="mt-2 h-10 w-full animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/50"></div>
+          Loading profiles...
         </div>
 
         <!-- Empty -->
-        <div
-          v-if="!loading && !error && filteredManagers.length === 0"
-          class="rounded-3xl border border-slate-200/70 bg-white/75 p-8 text-center
-                 dark:border-slate-800/70 dark:bg-slate-950/55"
-        >
-          <div class="text-slate-900 dark:text-slate-50 font-extrabold">No profiles found</div>
-          <div class="text-slate-500 dark:text-slate-400 text-[13px] mt-1">
-            Try changing search or include inactive.
-          </div>
+        <div v-if="!loading && !error && filteredManagers.length === 0" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+          No profiles found.
         </div>
 
-        <!-- Desktop -->
-        <div v-if="!isMobile && filteredManagers.length" class="space-y-4">
+        <!-- Mobile cards -->
+        <div v-if="isMobile && filteredManagers.length" class="space-y-3">
           <section
             v-for="(g, idx) in filteredManagers"
             :key="idx"
-            class="rounded-3xl border border-slate-200/70 bg-white/75 overflow-hidden
-                   dark:border-slate-800/70 dark:bg-slate-950/55"
+            class="rounded-2xl border border-slate-200 bg-white/95
+                   shadow-[0_10px_24px_rgba(15,23,42,0.10)]
+                   dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
           >
-            <!-- Manager header -->
-            <div class="px-4 py-3 border-b border-slate-200/70 dark:border-slate-800/70 flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
-                  <span class="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-extrabold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200 mr-2">
-                    Manager
-                  </span>
-                  <span>{{ g.manager.name || '—' }}</span>
-                  <span class="text-slate-500 dark:text-slate-400 font-semibold ml-2">
-                    ({{ g.manager.employeeId }})
-                  </span>
-                </div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400 truncate">
-                  {{ g.manager.department || '—' }}
-                </div>
+            <div class="border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/40">
+              <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                Manager: {{ g.manager?.name || '—' }}
+                <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">({{ g.manager?.employeeId || '—' }})</span>
               </div>
-
-              <div class="text-[12px] font-extrabold text-slate-600 dark:text-slate-300">
-                {{ g.employees.length }} employees
+              <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                {{ g.manager?.department || '—' }} · {{ g.employees?.length || 0 }} employees
               </div>
             </div>
 
-            <!-- Table -->
+            <div class="p-3 space-y-2">
+              <article
+                v-for="e in g.employees"
+                :key="e.employeeId"
+                class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
+                       shadow-[0_10px_24px_rgba(15,23,42,0.10)]
+                       dark:border-slate-700 dark:bg-slate-950/40"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 space-y-1">
+                    <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
+                      {{ e.employeeId || '—' }}
+                    </div>
+                    <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
+                      {{ e.name || '—' }}
+                    </div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                      {{ e.department || '—' }}
+                    </div>
+                  </div>
+
+                  <div class="text-right space-y-1 text-[11px]">
+                    <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                          :class="statusChipClasses(!!e.isActive)">
+                      {{ e.isActive ? 'Active' : 'Inactive' }}
+                    </span>
+                    <div>
+                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                            :class="modeChipClasses(e.approvalMode)">
+                        {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                  <div class="rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
+                    <div class="text-slate-500 dark:text-slate-400">Join</div>
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ e.joinDate || '—' }}</div>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
+                    <div class="text-slate-500 dark:text-slate-400">Contract</div>
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ e.contractDate || '—' }}</div>
+                    <div class="text-[10px] text-slate-500 dark:text-slate-400">end: {{ e.contractEndDate || '—' }}</div>
+                  </div>
+                </div>
+
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <span
+                    v-for="b in compactBalances(e.balances)"
+                    :key="b.k"
+                    class="rounded-full px-2 py-0.5 text-[11px] font-semibold
+                           border border-slate-200 bg-white text-slate-700
+                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  >
+                    {{ b.k }}: {{ b.v }}
+                  </span>
+                  <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                </div>
+
+                <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  Manager login: {{ e.managerLoginId || '—' }}
+                </div>
+
+                <div class="mt-2 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
+                           text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                    @click="goProfile(e.employeeId)"
+                  >
+                    <i class="fa-regular fa-folder-open text-[10px]" />
+                    Open
+                  </button>
+
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
+                    @click="goEdit(e.employeeId)"
+                  >
+                    <i class="fa-solid fa-pen-to-square text-[10px]" />
+                    Edit
+                  </button>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <!-- Desktop table -->
+        <div v-else-if="!isMobile && filteredManagers.length" class="space-y-3">
+          <section
+            v-for="(g, idx) in filteredManagers"
+            :key="idx"
+            class="rounded-2xl border border-slate-200 bg-white/95
+                   shadow-[0_10px_24px_rgba(15,23,42,0.08)]
+                   dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
+          >
+            <div class="border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/40">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
+                    Manager: {{ g.manager?.name || '—' }}
+                    <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">({{ g.manager?.employeeId || '—' }})</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                    {{ g.manager?.department || '—' }}
+                  </div>
+                </div>
+                <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                  {{ g.employees?.length || 0 }} employees
+                </div>
+              </div>
+            </div>
+
             <div class="overflow-x-auto">
-              <table class="min-w-full text-[13px]">
-                <thead class="text-[11px] uppercase tracking-wide">
-                  <tr class="bg-gradient-to-r from-sky-600 via-indigo-600 to-emerald-600 text-white">
-                    <th class="px-4 py-3 text-left font-extrabold">Employee</th>
-                    <th class="px-4 py-3 text-left font-extrabold">Department</th>
-                    <th class="px-4 py-3 text-left font-extrabold">Join</th>
-                    <th class="px-4 py-3 text-left font-extrabold">Contract</th>
-                    <th class="px-4 py-3 text-left font-extrabold">Mode</th>
-                    <th class="px-4 py-3 text-left font-extrabold">Balances</th>
-                    <th class="px-4 py-3 text-right font-extrabold">Status</th>
-                    <th class="px-4 py-3 text-right font-extrabold">Actions</th>
+              <table class="min-w-[1100px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+                <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+                  <tr>
+                    <th class="table-th">Employee</th>
+                    <th class="table-th">Department</th>
+                    <th class="table-th">Join</th>
+                    <th class="table-th">Contract</th>
+                    <th class="table-th">Mode</th>
+                    <th class="table-th">Balances</th>
+                    <th class="table-th text-center">Status</th>
+                    <th class="table-th text-right">Actions</th>
                   </tr>
                 </thead>
 
-                <!-- ✅ Row split + zebra -->
-                <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
+                <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
                   <tr
-                    v-for="(e, rIdx) in g.employees"
+                    v-for="e in g.employees"
                     :key="e.employeeId"
-                    class="transition cursor-pointer"
-                    :class="[
-                      rIdx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/25' : 'bg-sky-50/50 dark:bg-slate-900/35',
-                      'hover:bg-emerald-50/70 dark:hover:bg-emerald-900/20'
-                    ]"
+                    class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70 cursor-pointer"
                     @click="goProfile(e.employeeId)"
                   >
-                    <td class="px-4 py-3">
-                      <div class="font-extrabold text-slate-900 dark:text-slate-50">
-                        {{ e.employeeId }} · {{ e.name || '—' }}
+                    <td class="table-td align-top">
+                      <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
+                        {{ e.employeeId || '—' }}
                       </div>
-                      <div class="text-[12px] text-slate-500 dark:text-slate-400">
+                      <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                        {{ e.name || '—' }}
+                      </div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
                         Manager: {{ e.managerLoginId || '—' }}
                       </div>
                     </td>
 
-                    <td class="px-4 py-3 text-slate-700 dark:text-slate-200">
-                      {{ e.department || '—' }}
-                    </td>
+                    <td class="table-td align-top">{{ e.department || '—' }}</td>
+                    <td class="table-td align-top whitespace-nowrap">{{ e.joinDate || '—' }}</td>
 
-                    <td class="px-4 py-3 text-slate-700 dark:text-slate-200">
-                      {{ e.joinDate || '—' }}
-                    </td>
-
-                    <td class="px-4 py-3 text-slate-700 dark:text-slate-200">
+                    <td class="table-td align-top whitespace-nowrap">
                       <div class="font-semibold">{{ e.contractDate || '—' }}</div>
-                      <div class="text-[12px] text-slate-500 dark:text-slate-400">
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
                         end: {{ e.contractEndDate || '—' }}
                       </div>
                     </td>
 
-                    <td class="px-4 py-3">
-                      <span
-                        class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold border"
-                        :class="e.approvalMode === 'GM_AND_COO'
-                          ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/25 dark:text-amber-200 dark:border-amber-700/40'
-                          : 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/25 dark:text-emerald-200 dark:border-emerald-700/40'"
-                      >
+                    <td class="table-td align-top">
+                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                            :class="modeChipClasses(e.approvalMode)">
                         {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
                       </span>
                     </td>
 
-                    <td class="px-4 py-3">
+                    <td class="table-td align-top">
                       <div class="flex flex-wrap gap-2">
                         <span
                           v-for="b in compactBalances(e.balances)"
                           :key="b.k"
-                          class="rounded-full px-2 py-1 text-[11px] font-extrabold
+                          class="rounded-full px-2 py-0.5 text-[11px] font-semibold
                                  border border-slate-200 bg-white text-slate-700
-                                 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-200"
+                                 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
                         >
                           {{ b.k }}: {{ b.v }}
                         </span>
-                        <span v-if="!e.balances?.length" class="text-[12px] text-slate-500 dark:text-slate-400">—</span>
+                        <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
                       </div>
                     </td>
 
-                    <td class="px-4 py-3 text-right">
-                      <span
-                        class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold border"
-                        :class="e.isActive
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/25 dark:text-emerald-200 dark:border-emerald-700/40'
-                          : 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-900/25 dark:text-rose-200 dark:border-rose-700/40'"
-                      >
+                    <td class="table-td align-top text-center">
+                      <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                            :class="statusChipClasses(!!e.isActive)">
                         {{ e.isActive ? 'Active' : 'Inactive' }}
                       </span>
                     </td>
 
-                    <!-- Actions -->
-                    <td class="px-4 py-3 text-right" @click.stop>
-                      <div class="inline-flex items-center gap-2">
+                    <td class="table-td align-top text-right" @click.stop>
+                      <div class="inline-flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
-                          class="rounded-full px-3 py-1.5 text-[12px] font-extrabold
-                                 border border-slate-200 bg-white hover:bg-slate-50 transition
-                                 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:bg-slate-900"
+                          class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
+                                 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
+                                 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
                           @click="goProfile(e.employeeId)"
-                          title="Open profile"
                         >
-                          <i class="fa-regular fa-folder-open mr-2"></i>
+                          <i class="fa-regular fa-folder-open text-[10px]" />
                           Open
                         </button>
 
                         <button
                           type="button"
-                          class="rounded-full px-3 py-1.5 text-[12px] font-extrabold text-white
-                                 bg-emerald-600 hover:bg-emerald-500 transition"
+                          class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1
+                                 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
                           @click="goEdit(e.employeeId)"
-                          title="Edit profile"
                         >
-                          <i class="fa-solid fa-pen-to-square mr-2"></i>
+                          <i class="fa-solid fa-pen-to-square text-[10px]" />
                           Edit
                         </button>
                       </div>
@@ -551,392 +702,241 @@ onBeforeUnmount(() => {
             </div>
           </section>
         </div>
-
-        <!-- Mobile -->
-        <div v-else-if="isMobile && filteredManagers.length" class="space-y-4">
-          <section
-            v-for="(g, idx) in filteredManagers"
-            :key="idx"
-            class="rounded-3xl border border-slate-200/70 bg-white/75 overflow-hidden
-                   dark:border-slate-800/70 dark:bg-slate-950/55"
-          >
-            <div class="px-4 py-3 border-b border-slate-200/70 dark:border-slate-800/70">
-              <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">
-                <span class="mr-2 text-emerald-700 dark:text-emerald-200">Manager</span>
-                {{ g.manager.name || '—' }}
-                <span class="text-slate-500 dark:text-slate-400 font-semibold">({{ g.manager.employeeId }})</span>
-              </div>
-              <div class="text-[12px] text-slate-500 dark:text-slate-400">{{ g.manager.department || '—' }}</div>
-            </div>
-
-            <div class="p-4 space-y-3">
-              <article
-                v-for="e in g.employees"
-                :key="e.employeeId"
-                class="rounded-3xl border border-slate-200/70 bg-white/70 p-3
-                       dark:border-slate-800/70 dark:bg-slate-900/35"
-              >
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
-                      {{ e.employeeId }} · {{ e.name || '—' }}
-                    </div>
-                    <div class="text-[12px] text-slate-500 dark:text-slate-400 truncate">
-                      {{ e.department || '—' }}
-                    </div>
-                  </div>
-
-                  <span
-                    class="shrink-0 inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold border"
-                    :class="e.isActive
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/25 dark:text-emerald-200 dark:border-emerald-700/40'
-                      : 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-900/25 dark:text-rose-200 dark:border-rose-700/40'"
-                  >
-                    {{ e.isActive ? 'Active' : 'Inactive' }}
-                  </span>
-                </div>
-
-                <div class="mt-2 grid grid-cols-2 gap-2 text-[12px]">
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/70 p-2 dark:border-slate-800/70 dark:bg-slate-950/40">
-                    <div class="text-slate-500 dark:text-slate-400">Join</div>
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50">{{ e.joinDate || '—' }}</div>
-                  </div>
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/70 p-2 dark:border-slate-800/70 dark:bg-slate-950/40">
-                    <div class="text-slate-500 dark:text-slate-400">Contract</div>
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50">{{ e.contractDate || '—' }}</div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400">end: {{ e.contractEndDate || '—' }}</div>
-                  </div>
-                </div>
-
-                <div class="mt-2 flex items-center justify-between gap-2">
-                  <span
-                    class="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-extrabold border"
-                    :class="e.approvalMode === 'GM_AND_COO'
-                      ? 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-900/25 dark:text-amber-200 dark:border-amber-700/40'
-                      : 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/25 dark:text-emerald-200 dark:border-emerald-700/40'"
-                  >
-                    {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
-                  </span>
-
-                  <div class="flex flex-wrap justify-end gap-2">
-                    <span
-                      v-for="b in compactBalances(e.balances)"
-                      :key="b.k"
-                      class="rounded-full px-2 py-1 text-[11px] font-extrabold
-                             border border-slate-200 bg-white text-slate-700
-                             dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200"
-                    >
-                      {{ b.k }}: {{ b.v }}
-                    </span>
-                    <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
-                  </div>
-                </div>
-
-                <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  Manager: {{ e.managerLoginId || '—' }}
-                </div>
-
-                <!-- Actions -->
-                <div class="mt-3 flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    class="rounded-full px-4 py-2 text-[12px] font-extrabold
-                           border border-slate-200 bg-white hover:bg-slate-50 transition
-                           dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:bg-slate-900"
-                    @click="goProfile(e.employeeId)"
-                  >
-                    <i class="fa-regular fa-folder-open mr-2"></i>
-                    Open
-                  </button>
-
-                  <button
-                    type="button"
-                    class="rounded-full px-4 py-2 text-[12px] font-extrabold text-white
-                           bg-emerald-600 hover:bg-emerald-500 transition"
-                    @click="goEdit(e.employeeId)"
-                  >
-                    <i class="fa-solid fa-pen-to-square mr-2"></i>
-                    Edit
-                  </button>
-                </div>
-              </article>
-            </div>
-          </section>
-        </div>
       </div>
     </div>
 
-    <!-- ✅ Create modal (your style) -->
-    <transition name="fade">
-      <div
-        v-if="createOpen"
-        class="fixed inset-0 z-40 bg-black/55 backdrop-blur-sm"
-        @click.self="closeCreate()"
-      >
-        <div class="mx-auto max-w-3xl px-3 sm:px-4 lg:px-6 py-6">
-          <div class="rounded-3xl border border-slate-200/30 bg-white/90 shadow-2xl overflow-hidden
-                      dark:border-slate-800/50 dark:bg-slate-950/92">
-            <!-- modal header -->
-            <div class="relative overflow-hidden px-4 sm:px-5 py-4">
-              <div
-                class="absolute inset-0"
-                style="background: linear-gradient(90deg, rgba(2,132,199,1), rgba(79,70,229,1), rgba(16,185,129,1));"
-              />
-              <div
-                class="absolute inset-0 opacity-60"
-                style="background: radial-gradient(900px circle at 10% 0%, rgba(255,255,255,.22), transparent 45%);"
-              />
-              <div class="relative flex items-start justify-between gap-3 text-white">
-                <div>
-                  <div class="text-[15px] font-extrabold">New leave profile</div>
-                  <div class="text-[12px] text-white/85 mt-1">
-                    UI selects <span class="font-extrabold">mode</span> only. Backend enforces approval chain.
-                  </div>
-                </div>
+    <!-- Create modal -->
+    <transition name="modal-fade">
+      <div v-if="createOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2" @click.self="closeCreate">
+        <div class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
+          <!-- Header -->
+          <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+            <div class="flex items-start justify-between gap-2">
+              <div>
+                <div class="text-sm font-semibold">New leave profile</div>
+                <div class="text-[11px] text-white/85">Backend enforces approval chain rules.</div>
+              </div>
+
+              <button
+                type="button"
+                class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 hover:bg-white/20"
+                @click="closeCreate"
+              >
+                <i class="fa-solid fa-xmark text-xs"></i>
+              </button>
+            </div>
+
+            <!-- Tabs -->
+            <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+              <div class="flex rounded-full bg-sky-900/30 p-0.5">
                 <button
-                  class="h-10 w-10 rounded-2xl border border-white/25 bg-white/10 hover:bg-white/15 transition"
-                  @click="closeCreate()"
+                  type="button"
+                  class="rounded-full px-3 py-1 font-medium"
+                  :class="createTab === 'bulk' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                  @click="createTab = 'bulk'"
                 >
-                  <i class="fa-solid fa-xmark"></i>
+                  Manager + multiple
+                </button>
+                <button
+                  type="button"
+                  class="rounded-full px-3 py-1 font-medium"
+                  :class="createTab === 'single' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                  @click="createTab = 'single'"
+                >
+                  Single
                 </button>
               </div>
             </div>
+          </div>
 
-            <div class="p-4 sm:p-5 space-y-4">
-              <!-- tabs -->
-              <div class="flex flex-wrap items-center gap-2">
+          <!-- Body -->
+          <div class="px-4 py-3 space-y-3">
+            <div>
+              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Approval mode</label>
+              <select
+                v-model="form.approvalMode"
+                class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+              >
+                <option value="GM_ONLY">Only GM (COO read-only)</option>
+                <option value="GM_AND_COO">GM + COO (both must approve)</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Direct manager (optional)</label>
+              <EmployeeSearch v-model="form.manager" placeholder="Search manager…" />
+              <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                If empty, request goes directly to GM/COO chain.
+              </p>
+            </div>
+
+            <!-- Bulk -->
+            <div v-if="createTab === 'bulk'" class="space-y-2">
+              <div class="flex items-center justify-between gap-2">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
                 <button
-                  class="px-4 py-2 rounded-2xl text-[13px] font-extrabold border transition"
-                  :class="createTab==='bulk'
-                    ? 'bg-emerald-600 text-white border-emerald-600'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900/60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900'"
-                  @click="createTab='bulk'"
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                         text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                         dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                  @click="addRow"
                 >
-                  Manager + multiple employees
-                </button>
-
-                <button
-                  class="px-4 py-2 rounded-2xl text-[13px] font-extrabold border transition"
-                  :class="createTab==='single'
-                    ? 'bg-emerald-600 text-white border-emerald-600'
-                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 dark:bg-slate-900/60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900'"
-                  @click="createTab='single'"
-                >
-                  Single employee
+                  <i class="fa-solid fa-plus text-[10px]" />
+                  Add row
                 </button>
               </div>
 
-              <!-- mode select -->
-              <div>
-                <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Approval mode</label>
-                <select
-                  v-model="form.approvalMode"
-                  class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                         focus:ring-2 focus:ring-emerald-500/30
-                         dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
-                >
-                  <option value="GM_ONLY">Only GM (COO read-only)</option>
-                  <option value="GM_AND_COO">GM + COO (both must approve)</option>
-                </select>
-              </div>
-
-              <!-- manager optional -->
-              <div>
-                <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">
-                  Direct manager (optional)
-                </label>
-                <EmployeeSearch v-model="form.manager" placeholder="Search manager…" />
-                <p class="mt-1 text-[12px] text-slate-500 dark:text-slate-400">
-                  If empty, request goes directly to GM/COO chain.
-                </p>
-              </div>
-
-              <!-- bulk -->
-              <div v-if="createTab==='bulk'" class="space-y-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Employees</div>
-                    <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                      Join date auto sets first contract date.
-                    </div>
+              <div
+                v-for="(r, i) in form.rows"
+                :key="r.key"
+                class="rounded-2xl border border-slate-200 bg-white/95 p-3
+                       dark:border-slate-700 dark:bg-slate-950/40"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                    Employee #{{ i + 1 }}
                   </div>
                   <button
-                    class="rounded-full px-4 py-2 text-[12px] font-extrabold
-                           border border-slate-200 bg-white hover:bg-slate-50 transition
-                           dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:bg-slate-900"
-                    @click="addRow()"
+                    type="button"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-slate-50
+                           disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
+                    @click="removeRow(i)"
+                    :disabled="form.rows.length === 1"
+                    title="Remove"
                   >
-                    <i class="fa-solid fa-plus mr-2"></i>
-                    Add row
+                    <i class="fa-solid fa-trash text-[11px]"></i>
                   </button>
                 </div>
 
-                <div
-                  v-for="(r, i) in form.rows"
-                  :key="r.key"
-                  class="rounded-3xl border border-slate-200/70 bg-white/75 p-4
-                         dark:border-slate-800/70 dark:bg-slate-950/55"
-                >
-                  <div class="flex items-start justify-between gap-3">
-                    <div class="font-extrabold text-[13px] text-slate-900 dark:text-slate-50">
-                      Employee #{{ i + 1 }}
-                    </div>
-                    <button
-                      class="h-10 w-10 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 transition
-                             disabled:opacity-40 disabled:cursor-not-allowed
-                             dark:border-slate-800 dark:bg-slate-900/60 dark:hover:bg-slate-900"
-                      @click="removeRow(i)"
-                      :disabled="form.rows.length===1"
-                      title="Remove"
-                    >
-                      <i class="fa-solid fa-trash"></i>
-                    </button>
-                  </div>
-
-                  <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div class="sm:col-span-2">
-                      <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Employee *</label>
-                      <EmployeeSearch v-model="r.employee" placeholder="Search employee…" />
-                    </div>
-
-                    <div class="flex items-center">
-                      <label class="flex items-center gap-2 text-[13px] font-semibold text-slate-700 dark:text-slate-200 select-none">
-                        <input
-                          type="checkbox"
-                          class="h-4 w-4 rounded border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900"
-                          v-model="r.isActive"
-                        />
-                        Active
-                      </label>
-                    </div>
-
-                    <div>
-                      <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Join date *</label>
-                      <input
-                        type="date"
-                        v-model="r.joinDate"
-                        class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                               focus:ring-2 focus:ring-emerald-500/30
-                               dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
-                        @change="syncContractFromJoin(r)"
-                      />
-                    </div>
-
-                    <div>
-                      <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Contract date</label>
-                      <input
-                        type="date"
-                        v-model="r.contractDate"
-                        class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                               focus:ring-2 focus:ring-emerald-500/30
-                               dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
-                      />
-                    </div>
-
-                    <div>
-                      <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">AL carry</label>
-                      <input
-                        type="number"
-                        v-model.number="r.alCarry"
-                        class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                               focus:ring-2 focus:ring-emerald-500/30
-                               dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- single -->
-              <div v-else class="rounded-3xl border border-slate-200/70 bg-white/75 p-4 dark:border-slate-800/70 dark:bg-slate-950/55">
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div class="sm:col-span-2">
-                    <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Employee *</label>
-                    <EmployeeSearch v-model="form.singleEmployee" placeholder="Search employee…" />
+                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Employee *</label>
+                    <EmployeeSearch v-model="r.employee" placeholder="Search employee…" />
                   </div>
 
                   <div class="flex items-center">
-                    <label class="flex items-center gap-2 text-[13px] font-semibold text-slate-700 dark:text-slate-200 select-none">
-                      <input
-                        type="checkbox"
-                        class="h-4 w-4 rounded border-slate-300 bg-white dark:border-slate-700 dark:bg-slate-900"
-                        v-model="form.singleActive"
-                      />
+                    <label class="inline-flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200">
+                      <input v-model="r.isActive" type="checkbox" class="h-4 w-4 rounded border-slate-300 dark:border-slate-700" />
                       Active
                     </label>
                   </div>
 
                   <div>
-                    <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Join date *</label>
+                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join date *</label>
                     <input
+                      v-model="r.joinDate"
                       type="date"
-                      v-model="form.singleJoinDate"
-                      class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                             focus:ring-2 focus:ring-emerald-500/30
-                             dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
-                      @change="syncSingleContract()"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      @change="syncContractFromJoin(r)"
                     />
                   </div>
 
                   <div>
-                    <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">Contract date</label>
+                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract date</label>
                     <input
+                      v-model="r.contractDate"
                       type="date"
-                      v-model="form.singleContractDate"
-                      class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                             focus:ring-2 focus:ring-emerald-500/30
-                             dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                   </div>
 
                   <div>
-                    <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200 mb-1">AL carry</label>
+                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL carry</label>
                     <input
+                      v-model.number="r.alCarry"
                       type="number"
-                      v-model.number="form.singleAlCarry"
-                      class="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-semibold outline-none
-                             focus:ring-2 focus:ring-emerald-500/30
-                             dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100"
                       placeholder="0"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                   </div>
                 </div>
               </div>
+            </div>
 
-              <!-- modal error -->
-              <div
-                v-if="createError"
-                class="rounded-3xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-[13px] text-rose-800
-                       dark:border-rose-500/60 dark:bg-rose-950/35 dark:text-rose-100"
-              >
-                <div class="font-extrabold mb-1">Failed</div>
-                <div>{{ createError }}</div>
-              </div>
+            <!-- Single -->
+            <div v-else class="rounded-2xl border border-slate-200 bg-white/95 p-3 dark:border-slate-700 dark:bg-slate-950/40">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div class="sm:col-span-2">
+                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Employee *</label>
+                  <EmployeeSearch v-model="form.singleEmployee" placeholder="Search employee…" />
+                </div>
 
-              <div class="flex items-center justify-end gap-2 pt-2">
-                <button
-                  class="rounded-full px-5 py-2 text-[12px] font-extrabold
-                         border border-slate-200 bg-white hover:bg-slate-50 transition
-                         dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100 dark:hover:bg-slate-900
-                         disabled:opacity-50"
-                  @click="closeCreate()"
-                  :disabled="saving"
-                >
-                  Cancel
-                </button>
+                <div class="flex items-center">
+                  <label class="inline-flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200">
+                    <input v-model="form.singleActive" type="checkbox" class="h-4 w-4 rounded border-slate-300 dark:border-slate-700" />
+                    Active
+                  </label>
+                </div>
 
-                <button
-                  class="rounded-full px-5 py-2 text-[12px] font-extrabold text-white
-                         bg-emerald-600 hover:bg-emerald-500 transition disabled:opacity-50"
-                  @click="submitCreate()"
-                  :disabled="saving"
-                >
-                  <i class="fa-solid fa-check mr-2"></i>
-                  {{ saving ? 'Creating…' : 'Create' }}
-                </button>
+                <div>
+                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join date *</label>
+                  <input
+                    v-model="form.singleJoinDate"
+                    type="date"
+                    class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                    @change="syncSingleContract"
+                  />
+                </div>
+
+                <div>
+                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract date</label>
+                  <input
+                    v-model="form.singleContractDate"
+                    type="date"
+                    class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
+
+                <div>
+                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL carry</label>
+                  <input
+                    v-model.number="form.singleAlCarry"
+                    type="number"
+                    placeholder="0"
+                    class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  />
+                </div>
               </div>
             </div>
+
+            <!-- Error -->
+            <div
+              v-if="createError"
+              class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px]
+                     text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+            >
+              <span class="font-semibold">Failed:</span> {{ createError }}
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
+            <button
+              type="button"
+              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              @click="closeCreate"
+              :disabled="saving"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5
+                     text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              @click="submitCreate"
+              :disabled="saving"
+            >
+              <i class="fa-solid fa-check text-[10px]" />
+              {{ saving ? 'Creating…' : 'Create' }}
+            </button>
           </div>
         </div>
       </div>
@@ -945,12 +945,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.18s ease;
+.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; }
+.table-td { padding: 8px 10px; vertical-align: top; }
+
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
 }
-.fade-enter-from,
-.fade-leave-to {
+.modal-fade-enter-from,
+.modal-fade-leave-to {
   opacity: 0;
+  transform: translateY(6px) scale(0.98);
 }
 </style>

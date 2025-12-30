@@ -4,6 +4,8 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
+import ToastContainer from '@/components/AppToast.vue' // ✅ glass toast
+
 const router = useRouter()
 const route = useRoute()
 const auth = useAuth()
@@ -34,7 +36,7 @@ const groups = [
     header: 'Approvals',
     icon: 'fa-solid fa-clipboard-check',
     children: [
-      { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-manager-inbox' } },
+      { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',  to: { name: 'leave-admin-manager-inbox' } },
       { label: 'GM Inbox',      icon: 'fa-solid fa-user-star', to: { name: 'leave-admin-gm-inbox' } },
     ],
   },
@@ -105,6 +107,9 @@ onBeforeUnmount(() => {
 <template>
   <!-- ✅ Font Kantumruy Pro is applied globally by tailwind.css: html,body { font-family: var(--ui-font); } -->
   <div class="ui-page flex h-screen w-screen overflow-hidden">
+    <!-- ✅ Global glass toast (ONLY ONE renderer) -->
+    <ToastContainer />
+
     <!-- Desktop sidebar -->
     <aside
       class="hidden h-full flex-col border-r bg-white/75 backdrop-blur

@@ -1,16 +1,15 @@
+
 <!-- src/layouts/LeaveExpat/GMLeaveExpat.vue -->
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
-import { useToast } from '@/composables/useToast'
+
+import ToastContainer from '@/components/AppToast.vue' // ✅ use the glass toast UI
 
 const router = useRouter()
 const route  = useRoute()
 const auth   = useAuth()
-
-/* ───────── Toast (shared) ───────── */
-const { toasts, removeToast } = useToast()
 
 /* ───────── Sidebar state ───────── */
 const sidebarOpen = ref(true)
@@ -27,15 +26,13 @@ const groups = [
         icon: 'fa-solid fa-star',
         to: { name: 'leave-gm-inbox' },
       },
-        {
+      {
         label: 'Profile',
-        header: 'Profile',
         icon: 'fa-solid fa-user-group',
-        to: { name: 'leave-gm-profile'}
-      }
+        to: { name: 'leave-gm-profile' },
+      },
     ],
   },
-
 ]
 
 /* Open/close state (accordion) */
@@ -90,35 +87,8 @@ function toggleAuth() {
     class="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-900
            dark:bg-slate-950 dark:text-slate-50"
   >
-    <!-- Global toast stack -->
-    <div class="fixed top-4 right-4 z-50 flex max-w-xs flex-col gap-2">
-      <div
-        v-for="t in toasts"
-        :key="t.id"
-        class="flex gap-2 rounded-xl border px-3.5 py-2.5 text-sm shadow-xl bg-slate-900/95"
-        :class="{
-          'border-emerald-400/70 text-emerald-100': t.type === 'success',
-          'border-red-400/70 text-red-100': t.type === 'error',
-          'border-amber-400/70 text-amber-100': t.type === 'warning',
-        }"
-      >
-        <div class="flex-1">
-          <div class="mb-0.5 font-semibold">
-            {{ t.title || (t.type === 'success' ? 'Success' : t.type === 'error' ? 'Error' : 'Notice') }}
-          </div>
-          <p class="text-xs leading-snug">
-            {{ t.message }}
-          </p>
-        </div>
-        <button
-          type="button"
-          class="ml-1 text-xs opacity-70 hover:opacity-100"
-          @click="removeToast(t.id)"
-        >
-          ✕
-        </button>
-      </div>
-    </div>
+    <!-- ✅ ONLY one toast UI (glass) -->
+    <ToastContainer />
 
     <!-- Desktop sidebar -->
     <aside
@@ -358,7 +328,7 @@ function toggleAuth() {
                px-2 py-1.5 text-[13px] shadow-sm
                dark:border-slate-800 dark:bg-slate-950/95"
       >
-        <div class="flex h-9 items-center gap-2">
+        <div class="flex h-9 items-center gap-2 min-w-0">
           <button
             type="button"
             class="inline-flex h-8 w-8 items-center justify-center rounded-md
@@ -367,6 +337,15 @@ function toggleAuth() {
           >
             <i class="fa-solid fa-bars text-[13px]"></i>
           </button>
+
+          <div class="flex flex-col leading-tight min-w-0">
+            <div class="truncate text-[11px] font-semibold text-slate-900 dark:text-slate-50">
+              {{ appTitle }}
+            </div>
+            <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+              {{ auth.user?.name || auth.user?.loginId || 'GM' }}
+            </div>
+          </div>
         </div>
       </header>
 

@@ -1,16 +1,14 @@
-src/layouts/LeaveExpat/LeaveExpatUnified.vue
+<!-- src/layouts/LeaveExpat/LeaveExpatUnified.vue -->
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
-import { useToast } from '@/composables/useToast'
+
+import ToastContainer from '@/components/AppToast.vue' // ✅ ONLY toast UI
 
 const router = useRouter()
 const route  = useRoute()
 const auth   = useAuth()
-
-/* ───────── Toast (shared) ───────── */
-const { toasts, removeToast } = useToast()
 
 /* ───────── Sidebar state ───────── */
 const sidebarOpen = ref(true)
@@ -60,7 +58,7 @@ const groups = computed(() => {
     })
   }
 
-  // ✅ GM approvals (optional: keep if you already have these routes)
+  // ✅ GM approvals
   if (canGm.value) {
     out.push({
       key: 'approvals-gm',
@@ -69,11 +67,11 @@ const groups = computed(() => {
       children: [
         { label: 'GM Inbox',  icon: 'fa-solid fa-inbox',     to: { name: 'leave-gm-inbox' } },
         { label: 'Profile',   icon: 'fa-solid fa-id-badge',  to: { name: 'leave-gm-profile' } },
-      ].filter(x => x.to?.name), // safe
+      ].filter(x => x.to?.name),
     })
   }
 
-  // ✅ COO approvals (optional: keep if you already have these routes)
+  // ✅ COO approvals
   if (canCoo.value) {
     out.push({
       key: 'approvals-coo',
@@ -86,7 +84,7 @@ const groups = computed(() => {
     })
   }
 
-  // ✅ Admin portal shortcuts (optional)
+  // ✅ Admin portal shortcuts
   if (canAdmin.value) {
     out.push({
       key: 'admin',
@@ -99,7 +97,6 @@ const groups = computed(() => {
     })
   }
 
-  // Remove groups that have zero children
   return out.filter(g => Array.isArray(g.children) && g.children.length)
 })
 
@@ -112,18 +109,13 @@ function initOpenState() {
     const hasActiveChild = g.children.some(c => c.to?.name === route.name)
     next[g.key] = hasActiveChild
   }
-
-  // Keep existing state if already present, but ensure keys exist
   for (const k of Object.keys(open)) delete open[k]
   Object.assign(open, next)
 }
 
 onMounted(initOpenState)
-
-// Re-init when roles or groups change (login/logout, role changes, etc.)
 watch(groups, () => initOpenState(), { deep: true })
 
-// Keep correct group open when route changes
 watch(
   () => route.name,
   (name) => {
@@ -160,12 +152,10 @@ function handleNavClick(it) {
 async function toggleAuth() {
   if (auth.isLoggingOut) return
   await auth.logout()
-  router.replace({ name: 'greeting' }) 
+  router.replace({ name: 'greeting' })
 }
 
-
 const roleLabel = computed(() => {
-  // Show multiple roles nicely
   const r = roles.value
   if (!r.length) return '—'
   return r.join(', ')
@@ -174,30 +164,8 @@ const roleLabel = computed(() => {
 
 <template>
   <div class="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
-    <!-- Global toast stack -->
-    <div class="fixed top-4 right-4 z-50 flex max-w-xs flex-col gap-2">
-      <div
-        v-for="t in toasts"
-        :key="t.id"
-        class="flex gap-2 rounded-xl border px-3.5 py-2.5 text-sm shadow-xl bg-slate-900/95"
-        :class="{
-          'border-emerald-400/70 text-emerald-100': t.type === 'success',
-          'border-red-400/70 text-red-100': t.type === 'error',
-          'border-amber-400/70 text-amber-100': t.type === 'warning',
-          'border-sky-400/70 text-sky-100': t.type === 'info',
-        }"
-      >
-        <div class="flex-1">
-          <div class="mb-0.5 font-semibold">
-            {{ t.title || (t.type === 'success' ? 'Success' : t.type === 'error' ? 'Error' : t.type === 'warning' ? 'Notice' : 'Info') }}
-          </div>
-          <p class="text-xs leading-snug">{{ t.message }}</p>
-        </div>
-        <button type="button" class="ml-1 text-xs opacity-70 hover:opacity-100" @click="removeToast(t.id)">
-          ✕
-        </button>
-      </div>
-    </div>
+    <!-- ✅ ONLY ONE toast renderer -->
+    <ToastContainer />
 
     <!-- Desktop sidebar -->
     <aside
