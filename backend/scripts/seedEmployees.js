@@ -353,7 +353,7 @@ function loadEmployees() {
     "name": "Sot Sreynit",
     "department": "HR and Payroll",
     "contactNumber": "15347477",
-    "telegramChatId": "",
+    "telegramChatId": "1055055243",
     "isActive": true
   },
   {
@@ -1121,7 +1121,7 @@ function loadEmployees() {
     "name": "Ken Sophea",
     "department": "Merchandise",
     "contactNumber": "017889271",
-    "telegramChatId": "",
+    "telegramChatId": "1183658210",
     "isActive": true
   },
   {

@@ -736,7 +736,7 @@ onBeforeUnmount(() => {
                     <thead class="bg-slate-50 text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
                       <tr>
                         <th class="px-3 py-2 text-left font-extrabold">Type</th>
-                        <th class="px-3 py-2 text-right font-extrabold">Ent</th>
+                        <!-- <th class="px-3 py-2 text-right font-extrabold">Ent</th> -->
                         <th class="px-3 py-2 text-right font-extrabold">Used</th>
                         <th class="px-3 py-2 text-right font-extrabold">Remain</th>
                       </tr>
@@ -753,7 +753,7 @@ onBeforeUnmount(() => {
                           : 'bg-slate-50/70 dark:bg-slate-900/35'"
                       >
                         <td class="px-3 py-2 font-extrabold">{{ b.leaveTypeCode }}</td>
-                        <td class="px-3 py-2 text-right font-mono">{{ fmt(b.yearlyEntitlement) }}</td>
+                        <!-- <td class="px-3 py-2 text-right font-mono">{{ fmt(b.yearlyEntitlement) }}</td> -->
                         <td class="px-3 py-2 text-right font-mono">{{ fmt(b.used) }}</td>
                         <td class="px-3 py-2 text-right font-mono">
                           <span
@@ -804,8 +804,8 @@ onBeforeUnmount(() => {
                       <th class="px-3 py-2 text-right font-extrabold">AL Carry</th>
                       <th class="px-3 py-2 text-left font-extrabold">Snapshot</th>
                       <th class="px-3 py-2 text-left font-extrabold">Note</th>
-                      <th class="px-3 py-2 text-left font-extrabold">By</th>
-                      <th class="px-3 py-2 text-left font-extrabold">At</th>
+                      <!-- <th class="px-3 py-2 text-left font-extrabold">By</th>
+                      <th class="px-3 py-2 text-left font-extrabold">At</th> -->
                     </tr>
                   </thead>
 
@@ -847,10 +847,10 @@ onBeforeUnmount(() => {
                         </div>
                       </td>
 
-                      <td class="px-3 py-2 font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
+                      <!-- <td class="px-3 py-2 font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
                       <td class="px-3 py-2 font-mono text-[11px]">
                         {{ c.createdAt ? dayjs(c.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                      </td>
+                      </td> -->
                     </tr>
                   </tbody>
                 </table>

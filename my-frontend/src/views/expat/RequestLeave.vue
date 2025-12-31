@@ -239,7 +239,6 @@ function setupRealtimeListeners() {
       })
     }
 
-    // balance reservation changes (reject frees)
     profileTick.value += 1
   })
 
@@ -262,7 +261,6 @@ function setupRealtimeListeners() {
       })
     }
 
-    // balances definitely change here
     profileTick.value += 1
   })
 
@@ -324,12 +322,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="px-1 py-1 sm:px-3 space-y-3">
-    <!-- My remaining leave panel -->
     <UserLeaveProfile :key="profileTick" />
 
-    <!-- Request form -->
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Gradient header -->
       <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -351,9 +346,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Body -->
       <div class="px-3 pb-3 pt-3 sm:px-4 sm:pb-4">
-        <!-- Types error banner -->
         <div
           v-if="typesError"
           class="mb-3 rounded-md border border-amber-400 bg-amber-50 px-3 py-2 text-[11px]
@@ -568,7 +561,6 @@ onBeforeUnmount(() => {
           <span class="opacity-80"> — {{ selectedType.description || 'Follow company policy and approval flow.' }}</span>
         </div>
 
-        <!-- Realtime note (optional) -->
         <div v-if="!isRealtimeReady" class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
           Realtime is not connected yet (employeeId missing).
         </div>

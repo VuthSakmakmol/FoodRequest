@@ -75,14 +75,14 @@ function statusLabel(s) {
 function statusBadgeClass(s) {
   const st = String(s || '').toUpperCase()
   if (st === 'APPROVED')
-    return 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/80'
+    return 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-200 dark:border-emerald-900/40'
   if (st === 'REJECTED')
-    return 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/80'
+    return 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/30 dark:text-rose-200 dark:border-rose-900/40'
   if (st === 'CANCELLED')
-    return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700'
+    return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800'
   if (st === 'PENDING_MANAGER' || st === 'PENDING_GM')
-    return 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
-  return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700'
+    return 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/25 dark:text-amber-200 dark:border-amber-900/40'
+  return 'bg-slate-50 text-slate-700 border-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-800'
 }
 
 /* ───────── API ───────── */
@@ -118,18 +118,6 @@ async function fetchReport(silent = false) {
   }
 }
 
-function clearFilters() {
-  q.value = ''
-  includeInactive.value = false
-  department.value = ''
-  managerLoginId.value = ''
-  asOf.value = dayjs().format('YYYY-MM-DD')
-  dateFrom.value = dayjs().startOf('month').format('YYYY-MM-DD')
-  dateTo.value = dayjs().format('YYYY-MM-DD')
-  page.value = 1
-  fetchReport(true)
-}
-
 /* ───────── KPIs ───────── */
 const reqCountsByStatus = computed(() => report.value?.leaveRequests?.countsByStatus || {})
 const totalRequests = computed(() => num(report.value?.meta?.counts?.leaveRequests))
@@ -147,8 +135,6 @@ const employeesPage = computed(() => {
   const start = (page.value - 1) * pageSize.value
   return employeesAll.value.slice(start, start + pageSize.value)
 })
-const shownFrom = computed(() => (employeesAll.value.length ? (page.value - 1) * pageSize.value + 1 : 0))
-const shownTo = computed(() => Math.min(page.value * pageSize.value, employeesAll.value.length))
 function nextPage() {
   if (page.value < pageCount.value) page.value += 1
 }
@@ -297,10 +283,6 @@ watch([dateFrom, dateTo], () => {
   fetchReport(true)
 })
 
-watch(pageSize, () => {
-  page.value = 1
-})
-
 /* ───────── realtime refresh ───────── */
 const offHandlers = []
 let refreshTimer = null
@@ -311,6 +293,7 @@ function triggerRefresh() {
 
 function setupRealtime() {
   subscribeRoleIfNeeded()
+
   offHandlers.push(
     onSocket('leave:req:created', triggerRefresh),
     onSocket('leave:req:updated', triggerRefresh),
@@ -327,9 +310,7 @@ function setupRealtime() {
 
 function teardownRealtime() {
   offHandlers.forEach((off) => {
-    try {
-      off && off()
-    } catch {}
+    try { off && off() } catch {}
   })
   offHandlers.length = 0
 }
@@ -351,155 +332,126 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- ✅ FULL EDGE: no max-w wrapper -->
-  <div class="w-full min-h-[calc(100vh-48px)] px-1 py-1 sm:px-3">
-    <div class="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+  <!-- ✅ FULL EDGE: no max-w wrapper, no wasted space -->
+  <div class="w-full min-h-[calc(100vh-48px)]">
+    <div class="w-full rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <!-- Header -->
-      <header class="relative overflow-hidden">
-        <div class="bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500 px-4 py-3 text-white">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div class="min-w-0">
-              <p class="text-[10px] font-extrabold uppercase tracking-[0.25em] text-white/80">Expat leave · Admin</p>
-              <h1 class="mt-0.5 truncate text-[14px] sm:text-[15px] font-extrabold">Leave Report</h1>
-              <p class="mt-1 text-[11px] text-white/90">
-                Analytics + balances (as of <span class="font-extrabold">{{ asOf || '—' }}</span>). Realtime refresh enabled.
-              </p>
+      <div class="rounded-t-2xl bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500 px-4 py-3 text-white">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/80">Expat Leave</p>
+            <p class="text-sm font-semibold">Admin Leave Report</p>
+            <p class="text-[11px] text-emerald-50/90">
+              Compact analytics + balances. Export employees and requests anytime.
+            </p>
+          </div>
 
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-extrabold">
-                  Profiles: {{ report?.meta?.counts?.profiles ?? 0 }}
-                </span>
-                <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-extrabold">
-                  Requests: {{ report?.meta?.counts?.leaveRequests ?? 0 }}
-                </span>
-                <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-extrabold">
-                  Replace Days: {{ report?.meta?.counts?.replaceDays ?? 0 }}
-                </span>
+          <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
+            <div class="min-w-[240px] w-full sm:w-[360px]">
+              <label class="mb-1 block text-[11px] font-medium text-emerald-50">Search</label>
+              <div class="flex items-center rounded-xl border border-emerald-200/80 bg-emerald-900/20 px-2.5 py-1.5 text-xs">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-emerald-50/80" />
+                <input
+                  v-model="q"
+                  type="text"
+                  placeholder="Employee ID, name, dept, manager..."
+                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-emerald-100/80"
+                />
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-2">
-              <!-- Search -->
-              <div class="w-full sm:w-[360px] min-w-[240px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-[11px] text-white/75" />
-                  <input
-                    v-model="q"
-                    type="text"
-                    placeholder="Employee ID, name, dept, manager..."
-                    class="w-full bg-transparent text-[11px] outline-none placeholder:text-white/65"
-                  />
-                </div>
-              </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+              :disabled="loading || !report"
+              @click="exportEmployeesExcel"
+            >
+              <i class="fa-solid fa-file-excel text-[11px]" />
+              Export Employees
+            </button>
 
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-[11px] font-extrabold text-emerald-700 shadow-sm hover:bg-white/95 disabled:opacity-60"
-                :disabled="loading || !report"
-                @click="exportEmployeesExcel"
-              >
-                <i class="fa-solid fa-file-excel text-[11px]" />
-                Export Employees
-              </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-semibold text-indigo-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+              :disabled="loading || !report"
+              @click="exportRequestsExcel"
+            >
+              <i class="fa-solid fa-file-excel text-[11px]" />
+              Export Requests
+            </button>
 
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-[11px] font-extrabold text-indigo-700 shadow-sm hover:bg-white/95 disabled:opacity-60"
-                :disabled="loading || !report"
-                @click="exportRequestsExcel"
-              >
-                <i class="fa-solid fa-file-excel text-[11px]" />
-                Export Requests
-              </button>
-
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-2 text-[11px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
-                :disabled="loading"
-                @click="fetchReport(false)"
-                title="Refresh"
-              >
-                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''" />
-                Refresh
-              </button>
-
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-2 text-[11px] font-extrabold text-white hover:bg-white/15"
-                @click="clearFilters"
-                title="Reset filters"
-              >
-                <i class="fa-solid fa-broom text-[11px]" />
-                Reset
-              </button>
-            </div>
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-white/15 disabled:opacity-60"
+              :disabled="loading"
+              @click="fetchReport(false)"
+            >
+              <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
+              Refresh
+            </button>
           </div>
         </div>
-      </header>
+      </div>
 
       <!-- Body -->
       <div class="space-y-3 px-2 pb-2 pt-3 sm:px-3 sm:pb-3 lg:px-4 xl:px-5">
-        <!-- Filters -->
-        <section class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+        <!-- Filters bar -->
+        <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
           <div class="grid grid-cols-1 gap-2 md:grid-cols-12">
             <div class="md:col-span-2">
-              <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Date From</label>
+              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date From</label>
               <input v-model="dateFrom" type="date" class="input-mini" />
             </div>
 
             <div class="md:col-span-2">
-              <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Date To</label>
+              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date To</label>
               <input v-model="dateTo" type="date" class="input-mini" />
-              <p v-if="!dateRangeOk" class="mt-1 text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+              <p v-if="!dateRangeOk" class="mt-1 text-[11px] text-rose-600 dark:text-rose-300">
                 Date From cannot be after Date To.
               </p>
             </div>
 
             <div class="md:col-span-2">
-              <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200">As of</label>
+              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
               <input v-model="asOf" type="date" class="input-mini" />
             </div>
 
             <div class="md:col-span-3">
-              <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Department</label>
+              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
               <input v-model="department" type="text" placeholder="HR, IT..." class="input-mini" />
             </div>
 
             <div class="md:col-span-3">
-              <label class="block text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Manager Login ID</label>
+              <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Manager Login ID</label>
               <input v-model="managerLoginId" type="text" placeholder="Manager employeeId" class="input-mini" />
             </div>
 
             <div class="md:col-span-12 flex flex-wrap items-center justify-between gap-2 pt-1">
-              <label class="inline-flex items-center gap-2 text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+              <label class="inline-flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200">
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-slate-300 dark:border-slate-700" />
                 Include inactive profiles
               </label>
 
-              <div class="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">Page size</span>
-                <select v-model.number="pageSize" class="select-mini">
-                  <option :value="10">10</option>
-                  <option :value="15">15</option>
-                  <option :value="25">25</option>
-                  <option :value="50">50</option>
-                </select>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                <span class="font-semibold text-slate-700 dark:text-slate-200">Showing:</span>
+                {{ report?.meta?.counts?.profiles ?? 0 }} profiles ·
+                {{ report?.meta?.counts?.leaveRequests ?? 0 }} leave requests ·
+                {{ report?.meta?.counts?.replaceDays ?? 0 }} replace days
               </div>
             </div>
           </div>
 
           <div
             v-if="error"
-            class="mt-2 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-700
-                   dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+            class="mt-2 rounded-md border border-rose-400 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                   dark:border-rose-500/70 dark:bg-rose-950/40 dark:text-rose-100"
           >
             {{ error }}
           </div>
-        </section>
+        </div>
 
         <!-- KPI pills -->
-        <section class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2">
           <div class="kpi-pill">
             <span class="kpi-title">Total</span>
             <span class="kpi-value">{{ totalRequests }}</span>
@@ -525,22 +477,22 @@ onBeforeUnmount(() => {
             <span class="kpi-title">Cancelled</span>
             <span class="kpi-value">{{ cancelledRequests }}</span>
           </div>
-        </section>
+        </div>
 
         <!-- Analytics -->
-        <section class="grid gap-3 xl:grid-cols-12">
+        <div class="grid gap-3 xl:grid-cols-12">
           <!-- Usage -->
           <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 xl:col-span-6">
             <div class="flex items-center justify-between gap-2">
               <div>
-                <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">Most Used Leave Types</div>
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Most Used Leave Types</div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">Rank by days or request count.</div>
               </div>
 
               <div class="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-950">
                 <button
                   type="button"
-                  class="rounded-lg px-3 py-1.5 text-[11px] font-extrabold"
+                  class="rounded-lg px-3 py-1.5 text-[11px] font-semibold"
                   :class="usageMode==='DAYS'
                     ? 'bg-emerald-600 text-white'
                     : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'"
@@ -550,7 +502,7 @@ onBeforeUnmount(() => {
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg px-3 py-1.5 text-[11px] font-extrabold"
+                  class="rounded-lg px-3 py-1.5 text-[11px] font-semibold"
                   :class="usageMode==='COUNT'
                     ? 'bg-emerald-600 text-white'
                     : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'"
@@ -563,14 +515,14 @@ onBeforeUnmount(() => {
 
             <div class="mt-3 space-y-2">
               <div v-for="r in usageRows.slice(0, 8)" :key="r.code" class="flex items-center gap-3">
-                <div class="w-10 text-[11px] font-extrabold text-slate-700 dark:text-slate-200">{{ r.code }}</div>
+                <div class="w-10 text-[11px] font-semibold text-slate-700 dark:text-slate-200">{{ r.code }}</div>
                 <div class="flex-1">
                   <div class="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                     <div class="h-2 rounded-full bg-emerald-600" :style="{ width: usagePct(r) + '%' }" />
                   </div>
                 </div>
                 <div class="w-24 text-right text-[11px] text-slate-500 dark:text-slate-300">
-                  <span class="font-extrabold text-slate-900 dark:text-white">{{ usageValue(r) }}</span>
+                  <span class="font-semibold text-slate-900 dark:text-white">{{ usageValue(r) }}</span>
                   <span class="ml-2">({{ usagePct(r) }}%)</span>
                 </div>
               </div>
@@ -584,13 +536,16 @@ onBeforeUnmount(() => {
           <!-- Monthly -->
           <div class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 xl:col-span-6">
             <div>
-              <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">Monthly Trend</div>
+              <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Monthly Trend</div>
               <div class="text-[11px] text-slate-500 dark:text-slate-400">Requests + total days per month.</div>
             </div>
 
             <div class="mt-3 overflow-auto">
               <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
-                <thead class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
+                <thead
+                  class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
+                         dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+                >
                   <tr>
                     <th class="table-th">Month</th>
                     <th class="table-th text-right">Requests</th>
@@ -613,28 +568,25 @@ onBeforeUnmount(() => {
               </table>
             </div>
           </div>
-        </section>
+        </div>
 
         <!-- Employees balances -->
-        <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div class="border-b border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950/40">
-            <div class="flex flex-wrap items-end justify-between gap-2">
+            <div class="flex items-center justify-between gap-2">
               <div>
-                <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">Employees Balances</div>
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees Balances</div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                  Showing "Used" + "Remaining" (as of <span class="font-extrabold">{{ asOf || '—' }}</span>).
+                  Showing "Used/Remaining" (as of {{ asOf || '—' }}).
                 </div>
               </div>
-
               <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                Page <span class="font-extrabold text-slate-700 dark:text-slate-200">{{ page }}</span> /
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">{{ pageCount }}</span>
-                · {{ employeesAll.length }} employees · Showing {{ shownFrom }}–{{ shownTo }}
+                Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees
               </div>
             </div>
           </div>
 
-          <!-- Mobile cards -->
+          <!-- ✅ Mobile cards -->
           <div v-if="isMobile" class="space-y-2 p-3">
             <article
               v-for="emp in employeesPage"
@@ -642,21 +594,22 @@ onBeforeUnmount(() => {
               class="rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
             >
               <div class="flex items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                <div>
+                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
                     <span class="font-mono">{{ emp.employeeId }}</span> — {{ emp.name || '—' }}
                   </div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">{{ emp.department || '—' }}</div>
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">{{ emp.department || '—' }}</div>
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                    Join: <span class="font-extrabold text-slate-700 dark:text-slate-100">{{ fmtYMD(emp.joinDate) }}</span>
-                    · Contract: <span class="font-extrabold text-slate-700 dark:text-slate-100">{{ fmtYMD(emp.contractDate) }}</span>
+                    Join: <span class="font-medium text-slate-700 dark:text-slate-100">{{ fmtYMD(emp.joinDate) }}</span>
+                    · Contract: <span class="font-medium text-slate-700 dark:text-slate-100">{{ fmtYMD(emp.contractDate) }}</span>
                   </div>
                 </div>
 
-                <span class="rounded-full border px-2 py-1 text-[10px] font-extrabold"
+                <span
+                  class="rounded-full border px-2 py-1 text-[10px]"
                   :class="emp.isActive
-                    ? 'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-700/80 dark:bg-emerald-900/40 dark:text-emerald-200'
-                    : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'"
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'"
                 >
                   {{ emp.isActive ? 'Active' : 'Inactive' }}
                 </span>
@@ -669,29 +622,40 @@ onBeforeUnmount(() => {
                   class="rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-[10px] dark:border-slate-800 dark:bg-slate-900"
                 >
                   <div class="flex items-center justify-between">
-                    <span class="font-extrabold">{{ code }}</span>
-                    <span class="font-extrabold text-slate-700 dark:text-slate-100">
-                      U{{ num(balOf(emp, code)?.used) }}
+                    <span class="font-semibold">{{ code }}</span>
+
+                    <!-- ✅ used/remaining in one value -->
+                    <span class="font-semibold text-slate-700 dark:text-slate-100">
+                      {{ num(balOf(emp, code)?.used) }}/{{ num(balOf(emp, code)?.remaining) }}
                     </span>
                   </div>
                   <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-300">
-                    Remaining: <span class="font-extrabold">R{{ num(balOf(emp, code)?.remaining) }}</span>
+                    Used / Remaining
                   </div>
                 </div>
               </div>
             </article>
 
             <div class="flex items-center justify-between pt-1">
-              <button class="pager-btn" @click="prevPage" :disabled="page<=1">
+              <button
+                class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800 disabled:opacity-50"
+                @click="prevPage"
+                :disabled="page<=1"
+              >
                 <i class="fa-solid fa-chevron-left mr-2 text-[11px]" /> Prev
               </button>
-              <button class="pager-btn" @click="nextPage" :disabled="page>=pageCount">
+
+              <button
+                class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800 disabled:opacity-50"
+                @click="nextPage"
+                :disabled="page>=pageCount"
+              >
                 Next <i class="fa-solid fa-chevron-right ml-2 text-[11px]" />
               </button>
             </div>
           </div>
 
-          <!-- Desktop table -->
+          <!-- ✅ Desktop table -->
           <div v-else class="overflow-x-auto">
             <table class="table-fixed min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
               <colgroup>
@@ -704,7 +668,10 @@ onBeforeUnmount(() => {
                 <col style="width: 90px;" />
               </colgroup>
 
-              <thead class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
+              <thead
+                class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
+                       dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+              >
                 <tr>
                   <th class="table-th">Employee ID</th>
                   <th class="table-th">Name</th>
@@ -724,24 +691,32 @@ onBeforeUnmount(() => {
                 >
                   <td class="table-td truncate font-mono">{{ emp.employeeId || '—' }}</td>
                   <td class="table-td truncate">
-                    <span class="font-extrabold text-slate-900 dark:text-slate-50">{{ emp.name || '—' }}</span>
+                    <span class="font-medium text-slate-900 dark:text-slate-50">{{ emp.name || '—' }}</span>
                   </td>
                   <td class="table-td truncate">{{ emp.department || '—' }}</td>
                   <td class="table-td whitespace-nowrap font-mono">{{ fmtYMD(emp.joinDate) }}</td>
                   <td class="table-td whitespace-nowrap font-mono">{{ fmtYMD(emp.contractDate) }}</td>
 
-                  <td v-for="code in TYPE_ORDER" :key="emp.employeeId + '-' + code" class="table-td align-middle text-center">
+                  <td
+                    v-for="code in TYPE_ORDER"
+                    :key="emp.employeeId + '-' + code"
+                    class="table-td align-middle text-center"
+                  >
                     <div class="bal-box">
-                      <div class="bal-top">U{{ num(balOf(emp, code)?.used) }}</div>
-                      <div class="bal-bot">R{{ num(balOf(emp, code)?.remaining) }}</div>
+                      <!-- ✅ used/remaining together -->
+                      <div class="bal-pair">
+                        {{ num(balOf(emp, code)?.used) }}/{{ num(balOf(emp, code)?.remaining) }}
+                      </div>
+                      <div class="bal-hint">Used / Remaining</div>
                     </div>
                   </td>
 
                   <td class="table-td align-middle text-center">
-                    <span class="inline-flex justify-center rounded-full border px-2 py-1 text-[10px] font-extrabold"
+                    <span
+                      class="inline-flex justify-center rounded-full border px-2 py-1 text-[10px]"
                       :class="emp.isActive
-                        ? 'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-700/80 dark:bg-emerald-900/40 dark:text-emerald-200'
-                        : 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'"
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200'
+                        : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'"
                     >
                       {{ emp.isActive ? 'YES' : 'NO' }}
                     </span>
@@ -749,7 +724,10 @@ onBeforeUnmount(() => {
                 </tr>
 
                 <tr v-if="employeesPage.length === 0">
-                  <td :colspan="6 + TYPE_ORDER.length" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+                  <td
+                    :colspan="6 + TYPE_ORDER.length"
+                    class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400"
+                  >
                     No employees found.
                   </td>
                 </tr>
@@ -757,31 +735,43 @@ onBeforeUnmount(() => {
             </table>
 
             <div class="flex items-center justify-between px-3 py-2">
-              <button class="pager-btn" @click="prevPage" :disabled="page<=1">
+              <button
+                class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800 disabled:opacity-50"
+                @click="prevPage"
+                :disabled="page<=1"
+              >
                 <i class="fa-solid fa-chevron-left mr-2 text-[11px]" /> Prev
               </button>
 
               <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                Showing {{ shownFrom }}–{{ shownTo }} of {{ employeesAll.length }}
+                Showing {{ employeesAll.length ? (page - 1) * pageSize + 1 : 0 }}–{{ Math.min(page * pageSize, employeesAll.length) }}
+                of {{ employeesAll.length }}
               </div>
 
-              <button class="pager-btn" @click="nextPage" :disabled="page>=pageCount">
+              <button
+                class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800 disabled:opacity-50"
+                @click="nextPage"
+                :disabled="page>=pageCount"
+              >
                 Next <i class="fa-solid fa-chevron-right ml-2 text-[11px]" />
               </button>
             </div>
           </div>
-        </section>
+        </div>
 
         <!-- Recent Leave Requests -->
-        <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div class="border-b border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950/40">
-            <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">Recent Leave Requests</div>
+            <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Recent Leave Requests</div>
             <div class="text-[11px] text-slate-500 dark:text-slate-400">Latest activity in your selected date range.</div>
           </div>
 
           <div class="overflow-x-auto">
             <table class="min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
-              <thead class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
+              <thead
+                class="border-b border-slate-200 bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
+                       dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
+              >
                 <tr>
                   <th class="table-th">Employee</th>
                   <th class="table-th">Type</th>
@@ -792,17 +782,23 @@ onBeforeUnmount(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="r in (report?.leaveRequests?.recent || [])" :key="r._id" class="border-b border-slate-200 dark:border-slate-700">
+                <tr
+                  v-for="r in (report?.leaveRequests?.recent || [])"
+                  :key="r._id"
+                  class="border-b border-slate-200 dark:border-slate-700"
+                >
                   <td class="table-td font-mono">{{ r.employeeId }}</td>
                   <td class="table-td">
-                    <span class="inline-flex rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-extrabold dark:border-slate-700">
+                    <span class="inline-flex rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold dark:border-slate-700">
                       {{ r.leaveTypeCode }}
                     </span>
                   </td>
-                  <td class="table-td whitespace-nowrap font-mono">{{ fmtYMD(r.startDate) }} → {{ fmtYMD(r.endDate) }}</td>
-                  <td class="table-td text-right font-extrabold">{{ num(r.totalDays) }}</td>
+                  <td class="table-td whitespace-nowrap font-mono">
+                    {{ fmtYMD(r.startDate) }} → {{ fmtYMD(r.endDate) }}
+                  </td>
+                  <td class="table-td text-right font-semibold">{{ num(r.totalDays) }}</td>
                   <td class="table-td">
-                    <span class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-extrabold" :class="statusBadgeClass(r.status)">
+                    <span class="inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold" :class="statusBadgeClass(r.status)">
                       {{ statusLabel(r.status) }}
                     </span>
                   </td>
@@ -819,21 +815,21 @@ onBeforeUnmount(() => {
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
 
         <!-- Loading skeleton -->
-        <section v-if="loading" class="space-y-2">
+        <div v-if="loading" class="space-y-2">
           <div class="h-10 w-full animate-pulse rounded-xl bg-slate-200/90 dark:bg-slate-800/70" />
           <div class="h-14 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
           <div class="h-14 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
-        </section>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 900; white-space: nowrap; }
+.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 800; white-space: nowrap; }
 .table-td { padding: 10px 10px; vertical-align: middle; }
 .table-fixed { table-layout: fixed; }
 
@@ -847,21 +843,7 @@ onBeforeUnmount(() => {
   font-size: 12px;
   outline: none;
 }
-.select-mini{
-  border-radius: 9999px;
-  border: 1px solid rgb(203 213 225);
-  background: white;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 800;
-  outline: none;
-}
 :global(.dark) .input-mini{
-  border-color: rgb(51 65 85);
-  background: rgb(2 6 23 / 0.6);
-  color: rgb(226 232 240);
-}
-:global(.dark) .select-mini{
   border-color: rgb(51 65 85);
   background: rgb(2 6 23 / 0.6);
   color: rgb(226 232 240);
@@ -883,8 +865,8 @@ onBeforeUnmount(() => {
   background: rgb(2 6 23 / 0.35);
   color: rgb(226 232 240);
 }
-.kpi-title{ font-size: 11px; font-weight: 900; opacity: .85; }
-.kpi-value{ font-size: 14px; font-weight: 950; }
+.kpi-title{ font-size: 11px; font-weight: 700; opacity: .85; }
+.kpi-value{ font-size: 14px; font-weight: 900; }
 .kpi-sub{ font-size: 11px; opacity: .75; }
 
 .kpi-amber{ border-color: rgb(253 230 138); background: rgb(255 251 235); }
@@ -913,26 +895,19 @@ onBeforeUnmount(() => {
   border-color: rgb(30 41 59);
   background: rgb(2 6 23 / 0.35);
 }
-.bal-top{ font-size: 11px; font-weight: 950; color: rgb(15 23 42); }
-:global(.dark) .bal-top{ color: rgb(226 232 240); }
-.bal-bot{ font-size: 10px; font-weight: 900; color: rgb(71 85 105); }
-:global(.dark) .bal-bot{ color: rgb(148 163 184); }
 
-/* pager buttons */
-.pager-btn{
-  border-radius: 9999px;
-  padding: 6px 12px;
-  font-size: 11px;
-  font-weight: 900;
+.bal-pair{
+  font-size: 12px;
+  font-weight: 950;
+  color: rgb(15 23 42);
+  line-height: 1.1;
+}
+:global(.dark) .bal-pair{ color: rgb(226 232 240); }
+
+.bal-hint{
+  font-size: 10px;
+  font-weight: 800;
   color: rgb(71 85 105);
-  transition: background 120ms ease;
 }
-.pager-btn:hover{ background: rgb(226 232 240 / .7); }
-.pager-btn:disabled{ opacity: .5; cursor: not-allowed; }
-:global(.dark) .pager-btn{
-  color: rgb(226 232 240);
-}
-:global(.dark) .pager-btn:hover{
-  background: rgb(30 41 59);
-}
+:global(.dark) .bal-hint{ color: rgb(148 163 184); }
 </style>

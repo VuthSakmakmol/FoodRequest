@@ -25,37 +25,17 @@ const includeInactive = ref(false)
 const q = ref('')
 const groups = ref([])
 
-/* ───────── computed ───────── */
-const filteredManagers = computed(() => {
-  const term = String(q.value || '').trim().toLowerCase()
-  const base = Array.isArray(groups.value) ? groups.value : []
+/* ───────── helpers ───────── */
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+function safeTxt(v) {
+  const s = String(v ?? '').trim()
+  return s ? s : 'None'
+}
 
-  return base
-    .map((g) => {
-      const emps = (g.employees || []).filter((e) => {
-        const hay = [
-          e.employeeId,
-          e.name,
-          e.department,
-          e.managerLoginId,
-          e.approvalMode,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return term ? hay.includes(term) : true
-      })
-      return { ...g, employees: emps }
-    })
-    .filter((g) => (g.employees || []).length > 0)
-})
-
-const filteredCount = computed(() =>
-  filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
-)
-
-const managerCount = computed(() => filteredManagers.value.length)
-
+/* used/remaining chips (example: 1/17) */
 function compactBalances(balances) {
   const arr = Array.isArray(balances) ? balances : []
   const order = ['AL', 'SP', 'MC', 'MA', 'UL']
@@ -64,7 +44,9 @@ function compactBalances(balances) {
   for (const k of order) {
     const b = m.get(k)
     if (!b) continue
-    out.push({ k, v: Number.isFinite(Number(b.remaining)) ? Number(b.remaining) : 0 })
+    const used = num(b.used)
+    const remaining = num(b.remaining) // backend truth (can be negative)
+    out.push({ k, used, remaining, pair: `${used}/${remaining}` })
   }
   return out
 }
@@ -79,6 +61,12 @@ function modeChipClasses(mode) {
   return mode === 'GM_AND_COO'
     ? 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
     : 'bg-sky-100 text-sky-700 border border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80'
+}
+
+function pairChipClasses(remaining) {
+  return remaining >= 0
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+    : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'
 }
 
 /* ───────── navigation ───────── */
@@ -117,6 +105,94 @@ function clearFilters() {
   includeInactive.value = false
 }
 
+/* ───────── filtering ───────── */
+const filteredManagers = computed(() => {
+  const term = String(q.value || '').trim().toLowerCase()
+  const base = Array.isArray(groups.value) ? groups.value : []
+
+  return base
+    .map((g) => {
+      const emps = (g.employees || []).filter((e) => {
+        const hay = [
+          e.employeeId,
+          e.name,
+          e.department,
+          e.managerLoginId,
+          e.approvalMode,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+        return term ? hay.includes(term) : true
+      })
+      return { ...g, employees: emps }
+    })
+    .filter((g) => (g.employees || []).length > 0)
+})
+
+const filteredCount = computed(() =>
+  filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
+)
+const managerCount = computed(() => filteredManagers.value.length)
+
+/* ───────── pagination (flatten -> slice -> regroup) ───────── */
+const page = ref(1)
+const pageSize = ref(12)
+const PAGE_SIZES = [8, 12, 20, 50]
+
+const flatEmployees = computed(() => {
+  const out = []
+  for (const g of filteredManagers.value) {
+    for (const e of g.employees || []) out.push(e)
+  }
+  return out
+})
+
+const totalRows = computed(() => flatEmployees.value.length)
+const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / pageSize.value)))
+
+watch([totalRows, pageSize], () => {
+  page.value = 1
+})
+
+watch(page, () => {
+  if (page.value > totalPages.value) page.value = totalPages.value
+  if (page.value < 1) page.value = 1
+})
+
+const pageFrom = computed(() => {
+  if (!totalRows.value) return 0
+  return (page.value - 1) * pageSize.value + 1
+})
+const pageTo = computed(() => Math.min(totalRows.value, page.value * pageSize.value))
+
+const pagedEmployees = computed(() => {
+  const start = (page.value - 1) * pageSize.value
+  return flatEmployees.value.slice(start, start + pageSize.value)
+})
+
+const pagedIdSet = computed(() => new Set(pagedEmployees.value.map((e) => String(e.employeeId || '').trim())))
+
+/* regroup managers but keep original order */
+const pagedManagers = computed(() => {
+  const set = pagedIdSet.value
+  return filteredManagers.value
+    .map((g) => ({
+      ...g,
+      employees: (g.employees || []).filter((e) => set.has(String(e.employeeId || '').trim())),
+    }))
+    .filter((g) => (g.employees || []).length > 0)
+})
+
+function prevPage() {
+  page.value = Math.max(1, page.value - 1)
+}
+function nextPage() {
+  page.value = Math.min(totalPages.value, page.value + 1)
+}
+
+/* reset page when filters change */
+watch([q, includeInactive], () => { page.value = 1 })
 watch(includeInactive, () => fetchGroups())
 
 /* ───────── create modal ───────── */
@@ -292,6 +368,9 @@ onBeforeUnmount(() => {
               <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
                 Managers: {{ managerCount }}
               </span>
+              <span class="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/90">
+                Page: {{ page }}/{{ totalPages }}
+              </span>
             </div>
           </div>
 
@@ -320,6 +399,20 @@ onBeforeUnmount(() => {
                 />
                 <span class="text-sky-50/90">Include inactive</span>
               </label>
+            </div>
+
+            <!-- Page size -->
+            <div class="min-w-[120px]">
+              <label class="mb-1 block text-[11px] font-medium text-sky-50">Per page</label>
+              <select
+                v-model.number="pageSize"
+                class="w-full rounded-xl border border-sky-100/60 bg-sky-900/30 px-2.5 py-1.5 text-[11px]
+                       text-white outline-none"
+              >
+                <option v-for="n in PAGE_SIZES" :key="n" :value="n" class="text-slate-900">
+                  {{ n }}
+                </option>
+              </select>
             </div>
 
             <!-- Actions -->
@@ -374,6 +467,9 @@ onBeforeUnmount(() => {
               <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
                 Managers: {{ managerCount }}
               </span>
+              <span class="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/90">
+                Page: {{ page }}/{{ totalPages }}
+              </span>
             </div>
           </div>
 
@@ -402,6 +498,15 @@ onBeforeUnmount(() => {
               </label>
 
               <div class="flex items-center gap-2">
+                <select
+                  v-model.number="pageSize"
+                  class="rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white"
+                >
+                  <option v-for="n in PAGE_SIZES" :key="n" :value="n" class="text-slate-900">
+                    {{ n }}/page
+                  </option>
+                </select>
+
                 <button
                   type="button"
                   class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
@@ -412,6 +517,7 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
                   Refresh
                 </button>
+
                 <button
                   type="button"
                   class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
@@ -452,34 +558,94 @@ onBeforeUnmount(() => {
 
         <!-- Loading -->
         <div
-          v-if="loading && !filteredManagers.length"
+          v-if="loading && !pagedManagers.length"
           class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
                  text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
         >
           Loading profiles...
         </div>
 
+        <!-- Pagination bar -->
+        <div
+          v-if="!loading && totalRows"
+          class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2
+                 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300"
+        >
+          <div>
+            Showing <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageFrom }}</span>–
+            <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageTo }}</span>
+            of <span class="font-semibold text-slate-900 dark:text-slate-50">{{ totalRows }}</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
+                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+              :disabled="page <= 1"
+              @click="prevPage"
+            >
+              <i class="fa-solid fa-chevron-left text-[10px]" />
+              Prev
+            </button>
+
+            <div class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700
+                        dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              Page {{ page }} / {{ totalPages }}
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
+                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+              :disabled="page >= totalPages"
+              @click="nextPage"
+            >
+              Next
+              <i class="fa-solid fa-chevron-right text-[10px]" />
+            </button>
+          </div>
+        </div>
+
         <!-- Empty -->
-        <div v-if="!loading && !error && filteredManagers.length === 0" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+        <div v-if="!loading && !error && pagedManagers.length === 0" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
           No profiles found.
         </div>
 
         <!-- Mobile cards -->
-        <div v-if="isMobile && filteredManagers.length" class="space-y-3">
+        <div v-if="isMobile && pagedManagers.length" class="space-y-3">
           <section
-            v-for="(g, idx) in filteredManagers"
+            v-for="(g, idx) in pagedManagers"
             :key="idx"
             class="rounded-2xl border border-slate-200 bg-white/95
                    shadow-[0_10px_24px_rgba(15,23,42,0.10)]
                    dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
           >
-            <div class="border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/40">
-              <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
-                Manager: {{ g.manager?.name || '—' }}
-                <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">({{ g.manager?.employeeId || '—' }})</span>
-              </div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                {{ g.manager?.department || '—' }} · {{ g.employees?.length || 0 }} employees
+            <!-- Manager header (highlight background) -->
+            <div class="border-b border-slate-200 bg-indigo-50 px-3 py-2 dark:border-slate-700 dark:bg-indigo-950/30">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
+                    <span class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
+                                 dark:bg-indigo-500/15 dark:text-indigo-200">
+                      MANAGER
+                    </span>
+                    {{ safeTxt(g.manager?.name) }}
+                    <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      ({{ safeTxt(g.manager?.employeeId) }})
+                    </span>
+                  </div>
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                    {{ safeTxt(g.manager?.department) }}
+                  </div>
+                </div>
+
+                <div class="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 border border-slate-200
+                            dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800">
+                  {{ g.employees?.length || 0 }}
+                </div>
               </div>
             </div>
 
@@ -487,20 +653,24 @@ onBeforeUnmount(() => {
               <article
                 v-for="e in g.employees"
                 :key="e.employeeId"
-                class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
+                role="button"
+                tabindex="0"
+                class="cursor-pointer rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
                        shadow-[0_10px_24px_rgba(15,23,42,0.10)]
                        dark:border-slate-700 dark:bg-slate-950/40"
+                @click="goProfile(e.employeeId)"
+                @keydown.enter.prevent="goProfile(e.employeeId)"
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0 space-y-1">
                     <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
-                      {{ e.employeeId || '—' }}
+                      {{ safeTxt(e.employeeId) }}
                     </div>
                     <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                      {{ e.name || '—' }}
+                      {{ safeTxt(e.name) }}
                     </div>
                     <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                      {{ e.department || '—' }}
+                      {{ safeTxt(e.department) }}
                     </div>
                   </div>
 
@@ -521,48 +691,38 @@ onBeforeUnmount(() => {
                 <div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
                   <div class="rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
                     <div class="text-slate-500 dark:text-slate-400">Join</div>
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ e.joinDate || '—' }}</div>
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ safeTxt(e.joinDate) }}</div>
                   </div>
                   <div class="rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
                     <div class="text-slate-500 dark:text-slate-400">Contract</div>
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ e.contractDate || '—' }}</div>
-                    <div class="text-[10px] text-slate-500 dark:text-slate-400">end: {{ e.contractEndDate || '—' }}</div>
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ safeTxt(e.contractDate) }}</div>
+                    <div class="text-[10px] text-slate-500 dark:text-slate-400">end: {{ safeTxt(e.contractEndDate) }}</div>
                   </div>
                 </div>
 
+                <!-- balances: used/remaining -->
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
                     v-for="b in compactBalances(e.balances)"
                     :key="b.k"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-semibold
-                           border border-slate-200 bg-white text-slate-700
-                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                    class="rounded-full px-2 py-0.5 text-[11px] font-semibold border"
+                    :class="pairChipClasses(b.remaining)"
                   >
-                    {{ b.k }}: {{ b.v }}
+                    {{ b.k }}: {{ b.pair }}
                   </span>
-                  <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                  <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">None</span>
                 </div>
 
                 <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  Manager login: {{ e.managerLoginId || '—' }}
+                  Manager login: {{ safeTxt(e.managerLoginId) }}
                 </div>
 
-                <div class="mt-2 flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
-                           text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                    @click="goProfile(e.employeeId)"
-                  >
-                    <i class="fa-regular fa-folder-open text-[10px]" />
-                    Open
-                  </button>
-
+                <!-- Actions (✅ removed Open button) -->
+                <div class="mt-2 flex flex-wrap justify-end gap-2" @click.stop>
                   <button
                     type="button"
                     class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                    @click="goEdit(e.employeeId)"
+                    @click.stop="goEdit(e.employeeId)"
                   >
                     <i class="fa-solid fa-pen-to-square text-[10px]" />
                     Edit
@@ -574,23 +734,30 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Desktop table -->
-        <div v-else-if="!isMobile && filteredManagers.length" class="space-y-3">
+        <div v-else-if="!isMobile && pagedManagers.length" class="space-y-3">
           <section
-            v-for="(g, idx) in filteredManagers"
+            v-for="(g, idx) in pagedManagers"
             :key="idx"
             class="rounded-2xl border border-slate-200 bg-white/95
                    shadow-[0_10px_24px_rgba(15,23,42,0.08)]
                    dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
           >
-            <div class="border-b border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950/40">
+            <!-- Manager header (highlight background) -->
+            <div class="border-b border-slate-200 bg-indigo-50 px-3 py-2 dark:border-slate-700 dark:bg-indigo-950/30">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                    Manager: {{ g.manager?.name || '—' }}
-                    <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">({{ g.manager?.employeeId || '—' }})</span>
+                    <span class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
+                                 dark:bg-indigo-500/15 dark:text-indigo-200">
+                      MANAGER
+                    </span>
+                    {{ safeTxt(g.manager?.name) }}
+                    <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      ({{ safeTxt(g.manager?.employeeId) }})
+                    </span>
                   </div>
                   <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {{ g.manager?.department || '—' }}
+                    {{ safeTxt(g.manager?.department) }}
                   </div>
                 </div>
                 <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
@@ -608,7 +775,7 @@ onBeforeUnmount(() => {
                     <th class="table-th">Join</th>
                     <th class="table-th">Contract</th>
                     <th class="table-th">Mode</th>
-                    <th class="table-th">Balances</th>
+                    <th class="table-th">Balances (U/R)</th>
                     <th class="table-th text-center">Status</th>
                     <th class="table-th text-right">Actions</th>
                   </tr>
@@ -623,23 +790,23 @@ onBeforeUnmount(() => {
                   >
                     <td class="table-td align-top">
                       <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
-                        {{ e.employeeId || '—' }}
+                        {{ safeTxt(e.employeeId) }}
                       </div>
                       <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
-                        {{ e.name || '—' }}
+                        {{ safeTxt(e.name) }}
                       </div>
                       <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        Manager: {{ e.managerLoginId || '—' }}
+                        Manager: {{ safeTxt(e.managerLoginId) }}
                       </div>
                     </td>
 
-                    <td class="table-td align-top">{{ e.department || '—' }}</td>
-                    <td class="table-td align-top whitespace-nowrap">{{ e.joinDate || '—' }}</td>
+                    <td class="table-td align-top">{{ safeTxt(e.department) }}</td>
+                    <td class="table-td align-top whitespace-nowrap">{{ safeTxt(e.joinDate) }}</td>
 
                     <td class="table-td align-top whitespace-nowrap">
-                      <div class="font-semibold">{{ e.contractDate || '—' }}</div>
+                      <div class="font-semibold">{{ safeTxt(e.contractDate) }}</div>
                       <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        end: {{ e.contractEndDate || '—' }}
+                        end: {{ safeTxt(e.contractEndDate) }}
                       </div>
                     </td>
 
@@ -655,13 +822,12 @@ onBeforeUnmount(() => {
                         <span
                           v-for="b in compactBalances(e.balances)"
                           :key="b.k"
-                          class="rounded-full px-2 py-0.5 text-[11px] font-semibold
-                                 border border-slate-200 bg-white text-slate-700
-                                 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                          class="rounded-full px-2 py-0.5 text-[11px] font-semibold border"
+                          :class="pairChipClasses(b.remaining)"
                         >
-                          {{ b.k }}: {{ b.v }}
+                          {{ b.k }}: {{ b.pair }}
                         </span>
-                        <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                        <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">None</span>
                       </div>
                     </td>
 
@@ -672,19 +838,9 @@ onBeforeUnmount(() => {
                       </span>
                     </td>
 
+                    <!-- Actions (✅ removed Open button) -->
                     <td class="table-td align-top text-right" @click.stop>
                       <div class="inline-flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
-                                 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
-                                 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                          @click="goProfile(e.employeeId)"
-                        >
-                          <i class="fa-regular fa-folder-open text-[10px]" />
-                          Open
-                        </button>
-
                         <button
                           type="button"
                           class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1
@@ -701,6 +857,50 @@ onBeforeUnmount(() => {
               </table>
             </div>
           </section>
+        </div>
+
+        <!-- Bottom pagination repeat -->
+        <div
+          v-if="!loading && totalRows"
+          class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2
+                 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300"
+        >
+          <div>
+            Showing <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageFrom }}</span>–
+            <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageTo }}</span>
+            of <span class="font-semibold text-slate-900 dark:text-slate-50">{{ totalRows }}</span>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
+                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+              :disabled="page <= 1"
+              @click="prevPage"
+            >
+              <i class="fa-solid fa-chevron-left text-[10px]" />
+              Prev
+            </button>
+
+            <div class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700
+                        dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+              Page {{ page }} / {{ totalPages }}
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
+                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+              :disabled="page >= totalPages"
+              @click="nextPage"
+            >
+              Next
+              <i class="fa-solid fa-chevron-right text-[10px]" />
+            </button>
+          </div>
         </div>
       </div>
     </div>

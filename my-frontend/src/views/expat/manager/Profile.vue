@@ -16,7 +16,9 @@ const route = useRoute()
 const router = useRouter()
 
 /* ───────── Identity ───────── */
-const loginId = computed(() => String(auth.user?.loginId || auth.user?.id || localStorage.getItem('loginId') || ''))
+const loginId = computed(() =>
+  String(auth.user?.loginId || auth.user?.id || localStorage.getItem('loginId') || '')
+)
 
 /* ───────── responsive ───────── */
 const isMobile = ref(false)
@@ -82,6 +84,11 @@ function num(v) {
   const n = Number(v ?? 0)
   return Number.isFinite(n) ? n : 0
 }
+function fmtYMD(v) {
+  if (!v) return '—'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD') : '—'
+}
 
 /**
  * ✅ IMPORTANT:
@@ -114,6 +121,178 @@ const balances = computed(() => {
   return arr
 })
 
+/* ───────── Contract end + days left (LIST + DETAIL) ───────── */
+function pickContractEnd(obj = {}) {
+  // try many possible keys safely
+  return (
+    obj.contractEndDate ||
+    obj.contractEnd ||
+    obj.contractEndAt ||
+    obj.currentContractEnd ||
+    obj.currentContract?.endDate ||
+    obj.currentContract?.end ||
+    obj.latestContractEnd ||
+    ''
+  )
+}
+function contractEndYmdFrom(obj = {}) {
+  const v = pickContractEnd(obj)
+  if (!v) return ''
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD') : ''
+}
+function daysLeftFromEndYmd(endYmd) {
+  if (!endYmd) return null
+  const end = dayjs(endYmd).startOf('day')
+  const now = dayjs().startOf('day')
+  return end.diff(now, 'day')
+}
+function daysLeftLabel(daysLeft) {
+  if (daysLeft == null) return '—'
+  if (daysLeft < 0) return `Expired ${Math.abs(daysLeft)}d`
+  return `${daysLeft}d`
+}
+function daysLeftClass(daysLeft) {
+  if (daysLeft == null) {
+    return 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100'
+  }
+  if (daysLeft < 0 || daysLeft <= 30) {
+    return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'
+  }
+  if (daysLeft <= 200) {
+    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'
+  }
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+}
+
+/* Detail computed (current contract end/days left) */
+const detailContractEndYmd = computed(() => contractEndYmdFrom(profile.value || {}))
+const detailDaysLeft = computed(() => daysLeftFromEndYmd(detailContractEndYmd.value))
+
+/* ───────── Contract history (Detail View) ───────── */
+const contractsLoading = ref(false)
+const contractsError = ref('')
+const contracts = ref([])
+const expandedContractId = ref('')
+
+function normalizeBalancesLike(arr) {
+  const raw = Array.isArray(arr) ? arr : []
+  return raw
+    .map((b) => ({
+      leaveTypeCode: String(b?.leaveTypeCode || b?.code || '').toUpperCase(),
+      used: num(b?.used),
+      remaining: b?.remaining != null ? num(b.remaining) : null,
+      yearlyEntitlement: b?.yearlyEntitlement != null ? num(b.yearlyEntitlement) : null,
+    }))
+    .filter((x) => x.leaveTypeCode)
+}
+
+function normalizeContracts(raw) {
+  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
+  const mapped = list.map((c, idx) => {
+    const id = String(c?._id || c?.id || c?.contractId || `${idx}`)
+    const start =
+      c?.startDate || c?.contractDate || c?.newContractDate || c?.fromDate || c?.from || c?.start || null
+    const end = c?.endDate || c?.contractEndDate || c?.toDate || c?.to || c?.end || null
+    const note = String(c?.note || c?.remark || '')
+    // contract-level balances snapshot (if backend provides it)
+    const b =
+      c?.balances || c?.balanceSnapshot || c?.leaveBalances || c?.leaveUsed || c?.summaryBalances || null
+
+    return {
+      id,
+      startDate: start,
+      endDate: end,
+      note,
+      createdAt: c?.createdAt || c?.created_at || null,
+      balances: normalizeBalancesLike(b),
+      raw: c,
+    }
+  })
+
+  // sort by start date asc
+  mapped.sort((a, b) => {
+    const da = a.startDate ? dayjs(a.startDate).valueOf() : 0
+    const db = b.startDate ? dayjs(b.startDate).valueOf() : 0
+    return da - db
+  })
+
+  return mapped
+}
+
+function contractDaysLeft(c) {
+  const endYmd = c?.endDate ? fmtYMD(c.endDate) : ''
+  if (!endYmd || endYmd === '—') return null
+  return daysLeftFromEndYmd(endYmd)
+}
+
+function contractUsedChips(c) {
+  // show used per type (manager asked: per contract leave used)
+  if (!Array.isArray(c?.balances) || !c.balances.length) return []
+  const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
+  const arr = [...c.balances]
+  arr.sort((a, b) => {
+    const ia = ORDER.indexOf(a.leaveTypeCode)
+    const ib = ORDER.indexOf(b.leaveTypeCode)
+    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
+    return a.leaveTypeCode.localeCompare(b.leaveTypeCode)
+  })
+  return arr.map((b) => `${b.leaveTypeCode}: ${num(b.used)}`)
+}
+
+function toggleContract(id) {
+  expandedContractId.value = expandedContractId.value === id ? '' : id
+}
+
+async function fetchContractsForDetail(silent = false) {
+  if (!targetEmployeeId.value) {
+    contracts.value = []
+    contractsError.value = ''
+    return
+  }
+
+  // 1) Prefer contracts already included inside profile (if backend returns it)
+  const embedded =
+    profile.value?.contracts ||
+    profile.value?.contractHistory ||
+    profile.value?.contractHistories ||
+    profile.value?.contractPeriods ||
+    null
+
+  if (embedded && (Array.isArray(embedded) ? embedded.length : Array.isArray(embedded?.contracts))) {
+    contracts.value = normalizeContracts(embedded)
+    contractsError.value = ''
+    return
+  }
+
+  // 2) Try a lightweight endpoint (if exists). If 404/401, just ignore and show no contracts.
+  try {
+    contractsLoading.value = true
+    contractsError.value = ''
+
+    const res = await api.get('/leave/profile/contracts', {
+      params: { employeeId: targetEmployeeId.value },
+    })
+
+    contracts.value = normalizeContracts(res?.data || [])
+  } catch (e) {
+    const status = e?.response?.status
+    const msg = e?.response?.data?.message || e?.message || ''
+
+    // if endpoint doesn't exist, don't spam toast; show empty state
+    if (status === 404) {
+      contracts.value = []
+      contractsError.value = ''
+      return
+    }
+
+    contractsError.value = msg || 'Unable to load contracts.'
+    if (!silent) showToast({ type: 'error', title: 'Failed to load contracts', message: contractsError.value })
+  } finally {
+    contractsLoading.value = false
+  }
+}
+
 async function fetchEmployeeProfile(silent = false) {
   if (!targetEmployeeId.value) {
     profile.value = null
@@ -132,6 +311,9 @@ async function fetchEmployeeProfile(silent = false) {
     // Accept either { profile: {...} } OR direct profile object
     profile.value = res?.data?.profile || res?.data || null
     lastUpdatedAt.value = dayjs().toISOString()
+
+    // ✅ load contracts after profile
+    await fetchContractsForDetail(true)
   } catch (e) {
     console.error('fetchEmployeeProfile error', e)
     loadError.value = e?.response?.data?.message || 'Unable to load leave balance.'
@@ -208,6 +390,7 @@ onMounted(async () => {
 watch(
   () => targetEmployeeId.value,
   async () => {
+    expandedContractId.value = ''
     teardownRealtime()
     await fetchEmployeeProfile(true)
     if (isDetailMode.value) setupRealtime()
@@ -358,13 +541,30 @@ onBeforeUnmount(() => {
                   {{ r.contractDate ? dayjs(r.contractDate).format('YYYY-MM-DD') : '—' }}
                 </span>
               </div>
+
+              <!-- ✅ NEW: Contract End + Days Left -->
+              <div class="col-span-2 flex items-center justify-between">
+                <div>
+                  End:
+                  <span class="font-semibold text-slate-800 dark:text-slate-100">
+                    {{ contractEndYmdFrom(r) || '—' }}
+                  </span>
+                </div>
+                <span
+                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums"
+                  :class="daysLeftClass(daysLeftFromEndYmd(contractEndYmdFrom(r)))"
+                >
+                  <i class="fa-regular fa-clock mr-1 text-[10px]" />
+                  {{ daysLeftLabel(daysLeftFromEndYmd(contractEndYmdFrom(r))) }}
+                </span>
+              </div>
             </div>
           </article>
         </div>
 
         <!-- Desktop table -->
         <div v-else class="overflow-x-auto">
-          <table class="min-w-[900px] w-full text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+          <table class="min-w-[1050px] w-full text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
             <thead
               class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
                      dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
@@ -375,6 +575,9 @@ onBeforeUnmount(() => {
                 <th class="table-th">Department</th>
                 <th class="table-th">Join date</th>
                 <th class="table-th">Contract date</th>
+                <!-- ✅ NEW -->
+                <th class="table-th">Contract end</th>
+                <th class="table-th">Days left</th>
                 <th class="table-th text-right">Action</th>
               </tr>
             </thead>
@@ -390,6 +593,19 @@ onBeforeUnmount(() => {
                 <td class="table-td">{{ r.department || '—' }}</td>
                 <td class="table-td">{{ r.joinDate ? dayjs(r.joinDate).format('YYYY-MM-DD') : '—' }}</td>
                 <td class="table-td">{{ r.contractDate ? dayjs(r.contractDate).format('YYYY-MM-DD') : '—' }}</td>
+
+                <!-- ✅ NEW -->
+                <td class="table-td">{{ contractEndYmdFrom(r) || '—' }}</td>
+                <td class="table-td">
+                  <span
+                    class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+                    :class="daysLeftClass(daysLeftFromEndYmd(contractEndYmdFrom(r)))"
+                  >
+                    <i class="fa-regular fa-clock mr-1 text-[10px]" />
+                    {{ daysLeftLabel(daysLeftFromEndYmd(contractEndYmdFrom(r))) }}
+                  </span>
+                </td>
+
                 <td class="table-td text-right">
                   <button
                     class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
@@ -427,9 +643,10 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else>
+          <!-- ✅ Detail meta + NEW contract end + days left -->
           <div
             class="mb-2 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-3
-                   text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300 sm:grid-cols-3"
+                   text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300 sm:grid-cols-5"
           >
             <div class="flex items-center justify-between sm:block">
               <div class="font-semibold text-slate-800 dark:text-slate-100">Employee</div>
@@ -446,16 +663,232 @@ onBeforeUnmount(() => {
               <div>{{ profile?.contractDate ? dayjs(profile.contractDate).format('YYYY-MM-DD') : '—' }}</div>
             </div>
 
-            <div v-if="lastUpdatedAt" class="sm:col-span-3 text-[10px] text-slate-500 dark:text-slate-400">
+            <!-- ✅ NEW -->
+            <div class="flex items-center justify-between sm:block">
+              <div class="font-semibold text-slate-800 dark:text-slate-100">Contract end</div>
+              <div class="font-semibold text-slate-900 dark:text-slate-50">
+                {{ detailContractEndYmd || '—' }}
+              </div>
+            </div>
+
+            <!-- ✅ NEW -->
+            <div class="flex items-center justify-between sm:block">
+              <div class="font-semibold text-slate-800 dark:text-slate-100">Days left</div>
+              <div>
+                <span
+                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+                  :class="daysLeftClass(detailDaysLeft)"
+                >
+                  <i class="fa-regular fa-clock mr-1 text-[10px]" />
+                  {{ daysLeftLabel(detailDaysLeft) }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="lastUpdatedAt" class="sm:col-span-5 text-[10px] text-slate-500 dark:text-slate-400">
               Last updated: {{ dayjs(lastUpdatedAt).format('YYYY-MM-DD HH:mm') }}
             </div>
           </div>
 
+          <!-- ✅ NEW: Contract History (per contract leave used) -->
+          <div
+            class="mb-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/30"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-xs font-semibold text-slate-900 dark:text-slate-50">
+                  Contract History
+                </div>
+                <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                  Each contract can show “leave used per type” if backend provides balances snapshot.
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
+                       font-semibold text-slate-800 hover:bg-slate-50
+                       dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:bg-slate-900/60
+                       disabled:opacity-60 disabled:cursor-not-allowed"
+                :disabled="contractsLoading"
+                @click="fetchContractsForDetail()"
+              >
+                <i class="fa-solid fa-rotate text-[11px]" :class="contractsLoading ? 'fa-spin' : ''" />
+                Refresh contracts
+              </button>
+            </div>
+
+            <div
+              v-if="contractsError"
+              class="mt-2 rounded-md border border-rose-400 bg-rose-50 px-3 py-2 text-[11px]
+                     text-rose-700 dark:border-rose-500/70 dark:bg-rose-950/40 dark:text-rose-100"
+            >
+              {{ contractsError }}
+            </div>
+
+            <div v-if="contractsLoading" class="mt-2 space-y-2">
+              <div class="h-9 w-full animate-pulse rounded-xl bg-slate-200/90 dark:bg-slate-800/70" />
+              <div class="h-20 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
+            </div>
+
+            <p v-else-if="!contracts.length" class="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              No contract history found.
+            </p>
+
+            <!-- Mobile contract cards -->
+            <div v-else-if="isMobile" class="mt-3 space-y-2">
+              <article
+                v-for="(c, idx) in contracts"
+                :key="c.id"
+                class="rounded-2xl border border-slate-200 bg-white p-3 text-xs
+                       shadow-[0_10px_24px_rgba(15,23,42,0.08)]
+                       dark:border-slate-800 dark:bg-slate-900/60"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400">Contract #{{ idx + 1 }}</div>
+                    <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
+                      {{ fmtYMD(c.startDate) }} → {{ fmtYMD(c.endDate) }}
+                    </div>
+                    <div class="mt-1 flex flex-wrap items-center gap-2">
+                      <span
+                        class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                        :class="daysLeftClass(contractDaysLeft(c))"
+                      >
+                        <i class="fa-regular fa-clock mr-1 text-[10px]" />
+                        {{ daysLeftLabel(contractDaysLeft(c)) }}
+                      </span>
+                      <span v-if="c.note" class="text-[10px] text-slate-500 dark:text-slate-400">
+                        • {{ c.note }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
+                           font-semibold text-slate-800 hover:bg-slate-50
+                           dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:bg-slate-900/60"
+                    @click="toggleContract(c.id)"
+                  >
+                    <i class="fa-solid" :class="expandedContractId === c.id ? 'fa-chevron-up' : 'fa-chevron-down'" />
+                    Details
+                  </button>
+                </div>
+
+                <div v-if="expandedContractId === c.id" class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                  <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Leave used (this contract)</div>
+
+                  <div v-if="!contractUsedChips(c).length" class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    No per-contract leave snapshot provided by backend.
+                  </div>
+
+                  <div v-else class="mt-2 flex flex-wrap gap-2">
+                    <span
+                      v-for="chip in contractUsedChips(c)"
+                      :key="chip"
+                      class="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-800
+                             dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100"
+                    >
+                      {{ chip }}
+                    </span>
+                  </div>
+                </div>
+              </article>
+            </div>
+
+            <!-- Desktop contract table -->
+            <div v-else class="mt-3 overflow-x-auto">
+              <table class="min-w-[980px] w-full text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+                <thead
+                  class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
+                         dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
+                >
+                  <tr>
+                    <th class="table-th">#</th>
+                    <th class="table-th">Start</th>
+                    <th class="table-th">End</th>
+                    <th class="table-th">Days left</th>
+                    <th class="table-th">Leave used (this contract)</th>
+                    <th class="table-th text-right">Action</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  <template v-for="(c, idx) in contracts" :key="c.id">
+                    <tr class="border-b border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70">
+                      <td class="table-td font-semibold">{{ idx + 1 }}</td>
+                      <td class="table-td">{{ fmtYMD(c.startDate) }}</td>
+                      <td class="table-td">{{ fmtYMD(c.endDate) }}</td>
+                      <td class="table-td">
+                        <span
+                          class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+                          :class="daysLeftClass(contractDaysLeft(c))"
+                        >
+                          <i class="fa-regular fa-clock mr-1 text-[10px]" />
+                          {{ daysLeftLabel(contractDaysLeft(c)) }}
+                        </span>
+                      </td>
+
+                      <td class="table-td">
+                        <div v-if="contractUsedChips(c).length" class="flex flex-wrap gap-2">
+                          <span
+                            v-for="chip in contractUsedChips(c)"
+                            :key="chip"
+                            class="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-800
+                                   dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100"
+                          >
+                            {{ chip }}
+                          </span>
+                        </div>
+                        <span v-else class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
+                      </td>
+
+                      <td class="table-td text-right">
+                        <button
+                          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
+                                 font-semibold text-slate-800 hover:bg-slate-50
+                                 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:bg-slate-900/60"
+                          @click="toggleContract(c.id)"
+                        >
+                          <i class="fa-solid" :class="expandedContractId === c.id ? 'fa-chevron-up' : 'fa-chevron-down'" />
+                          Detail
+                        </button>
+                      </td>
+                    </tr>
+
+                    <tr v-if="expandedContractId === c.id" class="border-b border-slate-200 dark:border-slate-700">
+                      <td class="table-td" colspan="6">
+                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
+                          <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                            Contract record detail
+                          </div>
+
+                          <div class="mt-2 grid gap-2 sm:grid-cols-3 text-[11px] text-slate-600 dark:text-slate-300">
+                            <div><span class="font-semibold text-slate-800 dark:text-slate-100">Start:</span> {{ fmtYMD(c.startDate) }}</div>
+                            <div><span class="font-semibold text-slate-800 dark:text-slate-100">End:</span> {{ fmtYMD(c.endDate) }}</div>
+                            <div><span class="font-semibold text-slate-800 dark:text-slate-100">Note:</span> {{ c.note || '—' }}</div>
+                          </div>
+
+                          <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+                            If you want to show “leave request rows like Excel” per contract, backend should provide
+                            contract-level requests or an endpoint like:
+                            <span class="font-mono">/leave/requests?employeeId=...&contractId=...</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ✅ KEEP balances table exactly as your original -->
           <p v-if="!balances.length" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
             No leave balance data found.
           </p>
 
-          <!-- Mobile -->
+          <!-- Mobile balances (unchanged) -->
           <div v-else-if="isMobile" class="space-y-2">
             <article
               v-for="b in balances"
@@ -500,7 +933,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- Desktop -->
+          <!-- Desktop balances (unchanged) -->
           <div v-else class="overflow-x-auto">
             <table class="min-w-[760px] w-full table-fixed text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
               <colgroup>
@@ -516,7 +949,6 @@ onBeforeUnmount(() => {
               >
                 <tr>
                   <th class="table-th">Type</th>
-                  <th class="table-th text-right">Entitlement</th>
                   <th class="table-th text-right">Used</th>
                   <th class="table-th text-right">Remaining</th>
                 </tr>
@@ -539,7 +971,6 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <td class="table-td text-right tabular-nums align-middle">{{ b.yearlyEntitlement }}</td>
                   <td class="table-td text-right tabular-nums align-middle">{{ b.used }}</td>
 
                   <td class="table-td text-right align-middle">
