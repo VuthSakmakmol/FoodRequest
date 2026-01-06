@@ -352,7 +352,7 @@ function loadEmployees() {
     "employeeId": "51821047",
     "name": "Sot Sreynit",
     "department": "HR and Payroll",
-    "contactNumber": "15347477",
+    "contactNumber": "015347477",
     "telegramChatId": "1055055243",
     "isActive": true
   },
@@ -1819,7 +1819,192 @@ function loadEmployees() {
     "contactNumber": "0963849696",
     "telegramChatId": "",
     "isActive": true
-  }
+  }, 
+  // Add new
+  {
+    "employeeId": "52521105",
+    "name": "Yi Saovory",
+    "department": "Merchandise",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52521251",
+    "name": "Un Chhai roth",
+    "department": "Merchandise",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521301",
+    "name": "roth",
+    "department": "Ket Kakvey",
+    "contactNumber": "HR and Payroll",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521310",
+    "name": "Ven Dalin",
+    "department": "IT Support",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521317",
+    "name": "Yim Marady",
+    "department": "Accounting & Financial",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521352",
+    "name": "Dy Samnang",
+    "department": "Production Planning",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521353",
+    "name": "Hak Leangky",
+    "department": "Sewing",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521354",
+    "name": "Loek Sreynuch",
+    "department": "Merchandise",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52521355",
+    "name": "Nychan Sopheakmanich",
+    "department": "Industrial Engineering",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52521376",
+    "name": "Nhen Pheaom",
+    "department": "Industrial Engineering",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52521377",
+    "name": "Thy Chivaon",
+    "department": "Production Planning",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+      {
+    "employeeId": "52521427",
+    "name": "Monyvirack Sathya",
+    "department": "Industrial Engineering",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+      {
+    "employeeId": "52521377",
+    "name": "Thy Chivaon",
+    "department": "Production Planning",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+      {
+    "employeeId": "52521428",
+    "name": "luy Samphors",
+    "department": "Industrial Engineering",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+      {
+    "employeeId": "52521442",
+    "name": "Nhouk Chhin",
+    "department": "Shipping",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+        {
+    "employeeId": "52521462",
+    "name": "Bou Malet",
+    "department": "Production Planning",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+        {
+    "employeeId": "52510015",
+    "name": "Moragolle Gedara Ruchira Sampath Chandrarathna",
+    "department": "Management Production",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+        {
+    "employeeId": "52510016",
+    "name": "Mabini  Descalso Ma. Franchezka",
+    "department": "Management Production",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+          {
+    "employeeId": "52510016",
+    "name": "Mabini  Descalso Ma. Franchezka",
+    "department": "Management Production",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+          {
+    "employeeId": "52510017",
+    "name": "Arenas Laurente Edlen",
+    "department": "Management Production",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+          {
+    "employeeId": "52510018",
+    "name": "Cantorni Crispina Savellano",
+    "department": "Management Production",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+            {
+    "employeeId": "52510020",
+    "name": "RANASINGHE KANKANAMAGE LAKSHMAN",
+    "department": "Management Production",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52620009",
+    "name": "Heng Samedy",
+    "department": "HR and Payroll",
+    "contactNumber": "015506272",
+    "telegramChatId": "656461820",
+    "isActive": true
+  },
 ]
 }
 

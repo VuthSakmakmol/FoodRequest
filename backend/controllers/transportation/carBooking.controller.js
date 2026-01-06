@@ -124,6 +124,62 @@ function buildReservedQuery({ tripDate, category, excludeId = null }) {
   }
 }
 
+async function employeeCancelBooking(req, res, next) {
+  try {
+    const io = req.io
+    const { id } = req.params
+
+    // Get employeeId from token/header/body/query (flexible)
+    const employeeId =
+      (req.user?.employeeId) ||
+      (req.headers['x-employee-id']) ||
+      (req.body?.employeeId) ||
+      (req.query?.employeeId) ||
+      ''
+
+    const me = String(employeeId || '').trim()
+    if (!me) throw createError(401, 'Missing employee identity.')
+
+    const doc = await CarBooking.findById(id)
+    if (!doc) throw createError(404, 'Booking not found.')
+
+    // Only owner can cancel
+    if (String(doc.employeeId || '').trim() !== me) {
+      throw createError(403, 'Not allowed: not your booking.')
+    }
+
+    // Match your frontend rules
+    const st = String(doc.status || '').toUpperCase()
+    if (['ON_ROAD', 'ARRIVING', 'COMEBACK', 'COMPLETED', 'CANCELLED'].includes(st)) {
+      throw createError(400, `Cannot cancel when status is ${st}.`)
+    }
+
+    // Block past-date cancel (Phnom Penh date)
+    if (doc.tripDate && isValidDate(doc.tripDate)) {
+      const todayPP = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' }) // YYYY-MM-DD
+      if (String(doc.tripDate) < String(todayPP)) {
+        throw createError(400, 'Cannot cancel a past booking.')
+      }
+    }
+
+    doc.status = 'CANCELLED'
+    await doc.save()
+
+    // Notify realtime
+    broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc))
+
+    // Optional: notify telegram (safe even if not implemented in notify)
+    try {
+      await notify('REQUEST_CANCELLED', { bookingId: doc._id, by: me })
+    } catch {}
+
+    res.json({ ok: true, status: doc.status })
+  } catch (err) {
+    next(err)
+  }
+}
+
+
 /** Minimal (but slightly richer) delta payloads */
 const shape = {
   created: (doc) => ({
@@ -879,4 +935,5 @@ module.exports = {
   deleteBooking,
   listSchedulePublic,
   listMessengerTasks,
+  employeeCancelBooking,
 }

@@ -4,7 +4,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
-import ToastContainer from '@/components/ToastContainer.vue' // ✅ glass toast UI
+import ToastContainer from '@/components/AppToast.vue' // ✅ glass toast UI
 
 const router = useRouter()
 const route  = useRoute()

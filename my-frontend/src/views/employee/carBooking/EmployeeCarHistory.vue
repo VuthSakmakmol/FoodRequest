@@ -31,7 +31,8 @@ const statusFilter   = ref('ALL')
 const categoryFilter = ref('ALL')
 const qSearch        = ref('')
 
-const meId = ref(localStorage.getItem('employeeId') || '')
+const meId = ref(String(localStorage.getItem('employeeId') || '').trim())
+
 
 /* cancel state */
 const cancelLoading = ref('')
@@ -210,7 +211,7 @@ async function confirmCancel() {
   confirmOpen.value = false
   cancelLoading.value = String(item._id)
   try {
-    await api.post(`/employee/car-bookings/${item._id}/cancel`)
+    await api.post(`/car-bookings/${item._id}/cancel`, { employeeId: meId.value })
     item.status = 'CANCELLED'
     toast.success?.('Your booking has been cancelled.')
   } catch (e) {

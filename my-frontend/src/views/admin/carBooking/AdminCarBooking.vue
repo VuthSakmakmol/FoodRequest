@@ -56,6 +56,12 @@ const HOURS   = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
 const MINUTES = ['00', '30']
 
 /* Helpers */
+const canChangeStatus = (item, nextStatus) => {
+  const s = String(nextStatus || '').toUpperCase()
+  if (s === 'CANCELLED') return true
+  return hasAssignee(item)
+}
+
 const API_ORIGIN = (api.defaults.baseURL || '')
   .replace(/\/api\/?$/, '')
   .replace(/\/$/, '')
@@ -582,6 +588,27 @@ async function submitAssign() {
   }
 }
 
+/* ───────── Cancel confirm modal (custom) ───────── */
+const cancelConfirmOpen = ref(false)
+const cancelTarget = ref(null)
+const cancelNextStatus = ref('CANCELLED')
+
+function requestCancel(item) {
+  cancelTarget.value = item
+  cancelNextStatus.value = 'CANCELLED'
+  cancelConfirmOpen.value = true
+}
+function closeCancelConfirm() {
+  cancelConfirmOpen.value = false
+  cancelTarget.value = null
+}
+async function confirmCancel() {
+  if (!cancelTarget.value?._id) return
+  cancelConfirmOpen.value = false
+  await updateStatus(cancelTarget.value, cancelNextStatus.value)
+  cancelTarget.value = null
+}
+
 /* ───────── Status update ───────── */
 async function updateStatus(item, nextStatus) {
   if (!item?._id || !nextStatus) return
@@ -1001,8 +1028,8 @@ async function saveEdit() {
                   :key="s"
                   type="button"
                   :class="[statusButtonClass(s), 'disabled:opacity-50']"
-                  :disabled="!hasAssignee(item) || !!updating[item._id]"
-                  @click.stop="updateStatus(item, s)"
+                  :disabled="!canChangeStatus(item, s) || !!updating[item._id]"
+                  @click.stop="String(s).toUpperCase() === 'CANCELLED' ? requestCancel(item) : updateStatus(item, s)"
                 >
                   {{ s }}
                 </button>
@@ -1210,8 +1237,8 @@ async function saveEdit() {
                           :key="s"
                           type="button"
                           :class="[statusButtonClass(s), 'disabled:opacity-50']"
-                          :disabled="!hasAssignee(item) || !!updating[item._id]"
-                          @click="updateStatus(item, s)"
+                          :disabled="!canChangeStatus(item, s) || !!updating[item._id]"
+                          @click="String(s).toUpperCase() === 'CANCELLED' ? requestCancel(item) : updateStatus(item, s)"
                         >
                           {{ s }}
                         </button>
@@ -1296,6 +1323,75 @@ async function saveEdit() {
         </div>
       </div>
     </div>
+
+    <!-- ✅ Cancel confirm modal -->
+    <transition name="fade">
+      <div
+        v-if="cancelConfirmOpen"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4"
+        @click.self="closeCancelConfirm"
+      >
+        <div
+          class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl
+                 dark:border-slate-700 dark:bg-slate-900"
+        >
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex flex-col gap-1">
+              <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">
+                Cancel this booking?
+              </div>
+              <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                Are you sure you want to mark this booking as
+                <span class="font-semibold text-rose-600 dark:text-rose-400">CANCELLED</span>?
+              </div>
+            </div>
+            <button
+              type="button"
+              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              @click="closeCancelConfirm"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div
+            class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px]
+                   dark:border-slate-700 dark:bg-slate-800/50"
+          >
+            <div class="font-semibold text-slate-800 dark:text-slate-100">
+              {{ cancelTarget?.employee?.name || '—' }}
+              • {{ cancelTarget?.tripDate || '—' }}
+              • {{ cancelTarget?.timeStart || '—' }}–{{ cancelTarget?.timeEnd || '—' }}
+            </div>
+            <div class="mt-1 text-slate-600 dark:text-slate-300">
+              {{ prettyStops(cancelTarget?.stops || []) }}
+            </div>
+          </div>
+
+          <div class="mt-4 flex justify-end gap-2 text-[11px]">
+            <button
+              type="button"
+              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              @click="closeCancelConfirm"
+            >
+              No, keep
+            </button>
+
+            <button
+              type="button"
+              class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
+                     dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
+              :disabled="!cancelTarget?._id || !!updating[cancelTarget?._id]"
+              @click="confirmCancel"
+            >
+              Yes, cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </transition>
 
     <!-- Details modal -->
     <transition name="fade">

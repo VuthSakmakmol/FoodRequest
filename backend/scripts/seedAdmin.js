@@ -88,7 +88,7 @@ const User = require('../models/User');
     // Example chefs
     const chefs = [
       { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '7163451169' },
-      { loginId: '002', name: 'Chef Two', password: defaultPwd },
+      // { loginId: '002', name: 'Chef Two', password: defaultPwd },
     ]
 
     // 👉 Put driver/messenger chat IDs here when you have them.
@@ -98,7 +98,8 @@ const User = require('../models/User');
       { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '1893892841' },
       { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '871865728' },
       { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '5534785017' },
-      { loginId: '090', name: 'Test Car', password: defaultPwd, telegramChatId: '' },
+      { loginId: '090', name: 'Test Car', password: defaultPwd, telegramChatId: '7163451169' },
+      { loginId: '091', name: 'Test Car', password: defaultPwd, telegramChatId: '7163451169' },
 
       // { loginId: '040', name: 'Test car', password: defaultPwd, telegramChatId: '7163451169' },
     ]

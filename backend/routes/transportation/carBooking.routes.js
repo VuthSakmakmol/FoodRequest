@@ -12,6 +12,8 @@ router.post('/', upload.single('ticket'), ctrl.createBooking)
 // Employee's own bookings
 router.get('/mine', ctrl.listMyBookings)
 
+router.post('/:id/cancel', ctrl.employeeCancelBooking)
+
 module.exports = router
 
 // for public booking

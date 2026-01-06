@@ -1,6 +1,6 @@
 <!-- src/views/employee/carbooking/sections/RecurringBookingSection.vue -->
 <script setup>
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 
@@ -8,6 +8,17 @@ const props = defineProps({
   form: { type: Object, required: true },
   maxDays: { type: Number, default: 30 },
   holidays: { type: Array, default: () => [] }
+})
+
+/* ───────── responsive flag ───────── */
+const isMobile = ref(false)
+function updateIsMobile () {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
+onMounted(() => {
+  updateIsMobile()
+  window.addEventListener('resize', updateIsMobile)
 })
 
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
@@ -126,7 +137,11 @@ function schedulePreview () {
   clearTimeout(debounce)
   debounce = setTimeout(fetchServerPreview, 300)
 }
-onBeforeUnmount(() => clearTimeout(debounce))
+
+onBeforeUnmount(() => {
+  clearTimeout(debounce)
+  window.removeEventListener('resize', updateIsMobile)
+})
 
 watch(
   () => [props.form.recurring, props.form.tripDate, props.form.endDate, timeStartWin.value, props.form.skipHolidays],
@@ -207,7 +222,6 @@ function onEndDateInput (e) {
     <header
       class="flex items-center justify-between
              rounded-t-2xl border-b border-slate-200
-             rounded-t-2xl
                bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
                px-4 py-3 text-white"
     >
@@ -219,149 +233,208 @@ function onEndDateInput (e) {
           <i class="fa-solid fa-rotate-right"></i>
         </span>
         <div class="space-y-0.5">
-          <h2 class="text-[11px] uppercase tracking-[0.24em] text-slate-100/80t">
-            Recure booking
+          <h2 class="text-[11px] uppercase tracking-[0.24em] text-slate-100/90">
+            Recurring booking
           </h2>
         </div>
       </div>
     </header>
 
-      <div
-        class="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
-               dark:border-slate-700 dark:bg-slate-950/80"
-      >
-        <div class="grid gap-4 text-xs text-slate-800 dark:text-slate-100 md:grid-cols-3">
-          <!-- toggle -->
-          <div class="space-y-2">
-            <label class="flex items-center gap-3">
-              <button
-                type="button"
-                class="relative inline-flex h-6 w-11 items-center rounded-full
-                       border border-slate-300 bg-slate-200
-                       transition
-                       dark:border-slate-600 dark:bg-slate-800"
-                @click="setRecurring(!form.recurring)"
-              >
-                <span
-                  :class="[
-                    'inline-block h-5 w-5 rounded-full bg-white shadow transform transition',
-                    form.recurring ? 'translate-x-5' : 'translate-x-1'
-                  ]"
-                />
-                <span
-                  v-if="form.recurring"
-                  class="pointer-events-none absolute inset-0 rounded-full bg-emerald-500/50"
-                />
-              </button>
-              <span class="text-[12px] font-semibold">
-                Recurring booking:
-                <span :class="form.recurring ? 'text-emerald-600' : 'text-slate-500'">
-                  {{ form.recurring ? 'On' : 'Off' }}
-                </span>
-              </span>
-            </label>
-
-            <p class="text-[11px] text-slate-500 dark:text-slate-400">
-              Uses the same <strong>start/end time</strong> from the main form.
-            </p>
-
-            <p v-if="form.recurring" class="text-[11px]">
-              <template v-if="serverBusy">
-                Checking with server…
-              </template>
-              <template v-else-if="serverErr">
-                <span class="font-semibold text-red-700">Server preview error:</span>
-                {{ serverErr }}
-              </template>
-              <template v-else-if="serverDates.length || serverSkipped.length">
-                In sync with server holidays (including Sundays).
-              </template>
-            </p>
-          </div>
-
-          <!-- end date -->
-          <template v-if="form.recurring">
-            <div class="space-y-2">
-              <label class="flex items-center gap-2 text-[11px] font-semibold">
-                <i class="fa-solid fa-calendar-check text-xs"></i>
-                <span>End Date</span>
-              </label>
-              <input
-                type="date"
-                :min="form.tripDate || undefined"
-                :max="maxEndAttr || undefined"
-                :value="fmtDate(form.endDate)"
-                @input="onEndDateInput"
-                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
-                       text-slate-900 outline-none
-                       focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+    <div
+      class="rounded-xl border border-slate-200 bg-white/90 p-3 shadow-sm
+             dark:border-slate-700 dark:bg-slate-950/80"
+    >
+      <div class="grid gap-4 text-xs text-slate-800 dark:text-slate-100 md:grid-cols-3">
+        <!-- toggle -->
+        <div class="space-y-2">
+          <label class="flex items-center gap-3">
+            <button
+              type="button"
+              class="relative inline-flex h-6 w-11 items-center rounded-full
+                     border border-slate-300 bg-slate-200
+                     transition
+                     dark:border-slate-600 dark:bg-slate-800"
+              @click="setRecurring(!form.recurring)"
+            >
+              <span
+                :class="[
+                  'inline-block h-5 w-5 rounded-full bg-white shadow transform transition',
+                  form.recurring ? 'translate-x-5' : 'translate-x-1'
+                ]"
               />
-              <p class="text-[11px] text-slate-600 dark:text-slate-400">
-                From <strong>{{ fmtDate(form.tripDate) || '—' }}</strong>
-                to <strong>{{ fmtDate(form.endDate) || '—' }}</strong>
-                <span v-if="form.tripDate && form.endDate">
-                  ({{ daysBetweenInclusive(form.tripDate, form.endDate) }} days)
-                </span>.
-              </p>
-            </div>
+              <span
+                v-if="form.recurring"
+                class="pointer-events-none absolute inset-0 rounded-full bg-emerald-500/50"
+              />
+            </button>
+            <span class="text-[12px] font-semibold">
+              Recurring booking:
+              <span :class="form.recurring ? 'text-emerald-600' : 'text-slate-500'">
+                {{ form.recurring ? 'On' : 'Off' }}
+              </span>
+            </span>
+          </label>
 
-            <!-- skip holidays -->
-            <div class="space-y-2">
-              <label class="flex items-center gap-2 text-[11px] font-semibold">
-                <i class="fa-solid fa-umbrella-beach text-xs"></i>
-                <span>Skip holidays</span>
-              </label>
-              <label class="inline-flex items-center gap-2 text-[12px]">
-                <input
-                  v-model="form.skipHolidays"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>{{ form.skipHolidays ? 'Enabled — holidays will be skipped.' : 'Disabled — include holidays.' }}</span>
-              </label>
-            </div>
-          </template>
+          <p class="text-[11px] text-slate-500 dark:text-slate-400">
+            Uses the same <strong>start/end time</strong> from the main form.
+          </p>
+
+          <p v-if="form.recurring" class="text-[11px]">
+            <template v-if="serverBusy">Checking with server…</template>
+            <template v-else-if="serverErr">
+              <span class="font-semibold text-red-700">Server preview error:</span>
+              {{ serverErr }}
+            </template>
+            <template v-else-if="serverDates.length || serverSkipped.length">
+              In sync with server holidays (including Sundays).
+            </template>
+          </p>
         </div>
 
-        <!-- summary & calendar -->
+        <!-- end date -->
         <template v-if="form.recurring">
-          <!-- summary -->
-          <div class="mt-4 space-y-2">
-            <div class="flex items-center gap-2 text-[11px] font-semibold">
-              <i class="fa-solid fa-list-check text-xs"></i>
-              <span>Summary</span>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <span
-                class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700
-                       dark:bg-indigo-900/40 dark:text-indigo-200"
-              >
-                <i class="fa-solid fa-list text-[10px]"></i> Total: {{ counts.total }}
-              </span>
-              <span
-                class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700
-                       dark:bg-emerald-900/40 dark:text-emerald-200"
-              >
-                <i class="fa-solid fa-circle-check text-[10px]"></i> Will create: {{ counts.create }}
-              </span>
-              <span
-                v-if="counts.skipped > 0"
-                class="inline-flex items-center gap-1 rounded-full bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700
-                       dark:bg-rose-900/40 dark:text-rose-200"
-              >
-                <i class="fa-solid fa-ban text-[10px]"></i> Skipped: {{ counts.skipped }}
-              </span>
-            </div>
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 text-[11px] font-semibold">
+              <i class="fa-solid fa-calendar-check text-xs"></i>
+              <span>End Date</span>
+            </label>
+            <input
+              type="date"
+              :min="form.tripDate || undefined"
+              :max="maxEndAttr || undefined"
+              :value="fmtDate(form.endDate)"
+              @input="onEndDateInput"
+              class="h-9 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs
+                     text-slate-900 outline-none
+                     focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            />
+            <p class="text-[11px] text-slate-600 dark:text-slate-400">
+              From <strong>{{ fmtDate(form.tripDate) || '—' }}</strong>
+              to <strong>{{ fmtDate(form.endDate) || '—' }}</strong>
+              <span v-if="form.tripDate && form.endDate">
+                ({{ daysBetweenInclusive(form.tripDate, form.endDate) }} days)
+              </span>.
+            </p>
           </div>
 
-          <!-- calendar preview -->
-          <div class="mt-4">
-            <div class="mb-2 flex items-center gap-2 text-[11px] font-semibold">
-              <i class="fa-solid fa-calendar-days text-xs"></i>
-              <span>Preview calendar</span>
-            </div>
+          <!-- skip holidays -->
+          <div class="space-y-2">
+            <label class="flex items-center gap-2 text-[11px] font-semibold">
+              <i class="fa-solid fa-umbrella-beach text-xs"></i>
+              <span>Skip holidays</span>
+            </label>
+            <label class="inline-flex items-center gap-2 text-[12px]">
+              <input
+                v-model="form.skipHolidays"
+                type="checkbox"
+                class="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              />
+              <span>{{ form.skipHolidays ? 'Enabled — holidays will be skipped.' : 'Disabled — include holidays.' }}</span>
+            </label>
+          </div>
+        </template>
+      </div>
 
+      <!-- summary & calendar -->
+      <template v-if="form.recurring">
+        <!-- summary -->
+        <div class="mt-4 space-y-2">
+          <div class="flex items-center gap-2 text-[11px] font-semibold">
+            <i class="fa-solid fa-list-check text-xs"></i>
+            <span>Summary</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <span
+              class="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700
+                     dark:bg-indigo-900/40 dark:text-indigo-200"
+            >
+              <i class="fa-solid fa-list text-[10px]"></i> Total: {{ counts.total }}
+            </span>
+            <span
+              class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700
+                     dark:bg-emerald-900/40 dark:text-emerald-200"
+            >
+              <i class="fa-solid fa-circle-check text-[10px]"></i> Will create: {{ counts.create }}
+            </span>
+            <span
+              v-if="counts.skipped > 0"
+              class="inline-flex items-center gap-1 rounded-full bg-rose-50 px-3 py-1 text-[11px] font-semibold text-rose-700
+                     dark:bg-rose-900/40 dark:text-rose-200"
+            >
+              <i class="fa-solid fa-ban text-[10px]"></i> Skipped: {{ counts.skipped }}
+            </span>
+          </div>
+        </div>
+
+        <!-- calendar preview -->
+        <div class="mt-4">
+          <div class="mb-2 flex items-center gap-2 text-[11px] font-semibold">
+            <i class="fa-solid fa-calendar-days text-xs"></i>
+            <span>Preview calendar</span>
+          </div>
+
+          <!-- ✅ MOBILE: list cards -->
+          <template v-if="isMobile">
+            <div class="space-y-2">
+              <div
+                v-for="it in dateItems"
+                :key="it.date"
+                class="rounded-xl border p-3 text-[12px]
+                       dark:border-slate-700"
+                :class="[
+                  it.willCreate ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50',
+                  it.isHoliday ? 'ring-1 ring-rose-300' : ''
+                ]"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-slate-800 dark:text-slate-100">
+                        {{ it.weekday }}
+                      </span>
+                      <span class="text-[11px] text-slate-600 dark:text-slate-300">
+                        {{ it.date }}
+                      </span>
+                      <span
+                        v-if="it.isSunday"
+                        class="rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-semibold text-rose-700"
+                      >
+                        Sun
+                      </span>
+                    </div>
+
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span
+                        class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        :class="it.willCreate
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-rose-100 text-rose-700'"
+                      >
+                        <i
+                          :class="it.willCreate
+                            ? 'fa-solid fa-circle-check text-[10px]'
+                            : 'fa-solid fa-ban text-[10px]'"
+                        ></i>
+                        {{ it.willCreate ? 'Will create' : 'Skipped' }}
+                      </span>
+
+                      <span
+                        v-if="it.isHoliday"
+                        class="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold text-rose-700"
+                      >
+                        <i class="fa-solid fa-umbrella-beach text-[9px]"></i>
+                        Holiday
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- ✅ DESKTOP: grid calendar -->
+          <template v-else>
             <div class="overflow-x-auto">
               <div class="min-w-[720px] space-y-2">
                 <div class="grid grid-cols-7 gap-2 text-center text-[11px] font-semibold text-slate-500">
@@ -432,16 +505,17 @@ function onEndDateInput (e) {
                 </div>
               </div>
             </div>
+          </template>
 
-            <p
-              v-if="!gridCells.length"
-              class="mt-2 text-[11px] text-slate-500 dark:text-slate-400"
-            >
-              Set <strong>Trip Date</strong>, valid <strong>End Date</strong>,
-              and Start/End time in the main form to see the preview.
-            </p>
-          </div>
-        </template>
-      </div>
+          <p
+            v-if="!dateItems.length"
+            class="mt-2 text-[11px] text-slate-500 dark:text-slate-400"
+          >
+            Set <strong>Trip Date</strong>, valid <strong>End Date</strong>,
+            and Start/End time in the main form to see the preview.
+          </p>
+        </div>
+      </template>
+    </div>
   </section>
 </template>

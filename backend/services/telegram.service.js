@@ -54,26 +54,32 @@ async function sendMessage(chat_id, text, opts = {}) {
     const { data } = await axios.post(`${API_BASE}/sendMessage`, payload)
     return { ok: true, data }
   } catch (err) {
-    console.error('[Telegram] sendMessage failed:', { chat_id, err: tgErr(err) })
+    console.error('[Telegram] sendMessage failed:', {
+      chat_id,
+      err: tgErr(err),
+      response: err?.response?.data || null,
+    })
     return { ok: false, err: tgErr(err) }
   }
 }
 
 async function sendToMany(chatIds, text, opts = {}) {
-  if (!assertReady()) return
+  if (!assertReady()) return { ok: false, skipped: true, reason: 'NO_TOKEN' }
+
   const ids = (Array.isArray(chatIds) ? chatIds : [])
     .map(x => String(x).trim())
     .filter(Boolean)
 
-  if (ids.length === 0) return
+  if (ids.length === 0) return { ok: false, skipped: true, reason: 'NO_RECIPIENTS' }
 
-  await Promise.allSettled(ids.map(id => sendMessage(id, text, opts)))
+  const results = await Promise.allSettled(ids.map(id => sendMessage(id, text, opts)))
+  return { ok: true, results }
 }
 
 async function sendToAdmins(text, opts = {}) {
   if (ADMIN_CHAT_IDS.length === 0) {
     console.warn('[Telegram] TELEGRAM_ADMIN_CHAT_IDS empty – no recipients configured.')
-    return
+    return { ok: false, skipped: true, reason: 'NO_ADMIN_CHAT_IDS' }
   }
   return sendToMany(ADMIN_CHAT_IDS, text, opts)
 }
@@ -86,6 +92,17 @@ async function sendToGroupTransport(text, opts = {}) {
 async function sendToGroupFood(text, opts = {}) {
   if (!GROUP_FOOD) return { ok: false, skipped: true, reason: 'NO_GROUP_FOOD' }
   return sendMessage(GROUP_FOOD, text, opts)
+}
+
+/**
+ * ✅ Unified broadcaster for "group alerts":
+ * Prefer FOOD group (if configured), otherwise fallback to ADMIN_CHAT_IDS.
+ * This matches your old "sendToAll" expectation.
+ */
+async function sendToAll(text, opts = {}) {
+  const r = await sendToGroupFood(text, opts)
+  if (r?.ok) return r
+  return sendToAdmins(text, opts)
 }
 
 /**
@@ -118,5 +135,6 @@ module.exports = {
   sendToAdmins,
   sendToGroupTransport,
   sendToGroupFood,
+  sendToAll, // ✅ added
   sendDM,
 }
