@@ -434,8 +434,10 @@ const busyMap = ref(new Map())
 const isBusy = (loginId) => {
   const v = busyMap.value.get(String(loginId))
   if (!v) return false
-  return v.busy && String(v.status || '').toUpperCase() !== 'COMPLETED'
+  const st = String(v.status || '').toUpperCase()
+  return v.busy && !['COMPLETED', 'CANCELLED'].includes(st)
 }
+
 
 async function fetchFirstOk(requests) {
   for (const r of requests) {
@@ -487,7 +489,7 @@ async function loadPeopleAndAvailability(item) {
           m.set(String(v), { busy: true, status: '' })
         } else if (v && v.loginId) {
           const stat = String(v.status || '').toUpperCase()
-          const consideredBusy = stat !== 'COMPLETED'
+          const consideredBusy = !['COMPLETED', 'CANCELLED'].includes(stat)
           m.set(String(v.loginId), { busy: consideredBusy, status: stat })
         }
       }
@@ -502,13 +504,20 @@ function openAssignDialog(item) {
   assignTarget.value = item
   assignError.value  = ''
 
-  const locked = item?.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
-  assignLockedRole.value = locked
-  assignRole.value       = locked
+  if (item?.category === 'Messenger') {
+    // Messenger booking: lock messenger only
+    assignLockedRole.value = 'MESSENGER'
+    assignRole.value = 'MESSENGER'
+  } else {
+    // Car booking: allow BOTH driver/messenger (default to driver)
+    assignLockedRole.value = 'NONE'
+    assignRole.value = 'DRIVER'
+  }
 
   assignOpen.value = true
   loadPeopleAndAvailability(item)
 }
+
 
 watch(assignRole, () => {
   if (assignOpen.value && assignTarget.value?._id) {
@@ -541,30 +550,36 @@ async function submitAssign() {
 
   assignLoading.value = true
   assignError.value = ''
-  try {
-    await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, {
-      driverId: selectedLoginId.value,
-      role: assignRole.value,
-      status: 'ACCEPTED',       // admin assignment = booking accepted
-    })
 
-    const it = rows.value.find(
-      x => String(x._id) === String(assignTarget.value._id),
-    )
+  try {
+    const role = String(assignRole.value || 'DRIVER').toUpperCase()
+
+    // ✅ IMPORTANT: send the correct field
+    const payload = {
+      role,
+      status: 'ACCEPTED',
+      ...(role === 'MESSENGER'
+        ? { messengerId: selectedLoginId.value }
+        : { driverId: selectedLoginId.value }),
+    }
+
+    await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, payload)
+
+    // Update UI instantly
+    const it = rows.value.find(x => String(x._id) === String(assignTarget.value._id))
+    const person = people.value.find(p => String(p.loginId) === String(selectedLoginId.value))
 
     if (it) {
-      if (assignRole.value === 'MESSENGER') {
-        it.assignment = {
-          ...(it.assignment || {}),
-          messengerId: selectedLoginId.value,
-          messengerAck: 'PENDING',
-        }
+      if (!it.assignment) it.assignment = {}
+
+      if (role === 'MESSENGER') {
+        it.assignment.messengerId = selectedLoginId.value
+        it.assignment.messengerName = person?.name || it.assignment.messengerName || ''
+        it.assignment.messengerAck = 'PENDING'
       } else {
-        it.assignment = {
-          ...(it.assignment || {}),
-          driverId: selectedLoginId.value,
-          driverAck: 'PENDING',
-        }
+        it.assignment.driverId = selectedLoginId.value
+        it.assignment.driverName = person?.name || it.assignment.driverName || ''
+        it.assignment.driverAck = 'PENDING'
       }
 
       it.status = 'ACCEPTED'
@@ -587,6 +602,8 @@ async function submitAssign() {
     assignLoading.value = false
   }
 }
+
+
 
 /* ───────── Cancel confirm modal (custom) ───────── */
 const cancelConfirmOpen = ref(false)
@@ -1502,7 +1519,7 @@ async function saveEdit() {
               </div>
             </div>
 
-            <div v-if="detailItem?.notes" class="sm:col-span-2">
+            <div v-if="detailItem?.notes" class="sm:col-span-2 dark:text-slate-200/80">
               <div class="lbl">Notes</div>
               <div class="notes-block">
                 {{ detailItem?.notes }}

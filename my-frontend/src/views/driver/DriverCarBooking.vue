@@ -109,7 +109,7 @@ function detectIdentity() {
       const candLogin = v?.loginId || v?.user?.loginId || v?.me?.loginId
       const candRole = (v?.role || v?.user?.role || v?.me?.role || '').toUpperCase()
       if (candLogin && candRole) {
-        found.push({ loginId: String(candLogin), role: candRole })
+        found.push({ loginId: String(candLogin), role: String(candRole) })
         break
       }
     } catch {}
@@ -134,15 +134,13 @@ function useDevIdentity() {
 /* ─────────────── LABEL MAPS (EN + KM) ─────────────── */
 const STATUS_LABEL = {
   PENDING   : { en: 'Pending',            km: 'កំពុងរង់ចាំ' },
-  ASSIGNED  : { en: 'Assigned',           km: 'បានចាត់ចែង' },
   ACCEPTED  : { en: 'Accepted',           km: 'បានព្រមទទួល' },
   ON_ROAD   : { en: 'On road',            km: 'ចេញធ្វើដំណើរ' },
   ARRIVING  : { en: 'Arrived',            km: 'ដល់គោលដៅ' },
-  COMPLETED : { en: 'Completed',          km: 'បានបញ្ចប់' },
   COMEBACK  : { en: 'Come back',          km: 'ត្រលប់មកវិញ' },
+  COMPLETED : { en: 'Completed',          km: 'បានបញ្ចប់' },
   DELAYED   : { en: 'Delayed',            km: 'យឺតយ៉ាវ' },
   CANCELLED : { en: 'Cancelled',          km: 'បានបោះបង់' },
-  DECLINED  : { en: 'Declined',           km: 'បដិសេធ' },
 }
 const statusLabel = s => {
   const code = String(s || '').toUpperCase()
@@ -159,34 +157,31 @@ const ackLabel = s => {
   return ACK_LABEL[code]?.[lang.value] || ACK_LABEL[code]?.km || s
 }
 
+// ✅ FIX: category is Car | Messenger
 const CATEGORY_LABEL = {
-  Car  : { en: 'Car',        km: 'ឡាន' },
-  Motor: { en: 'Motorbike',  km: 'ម៉ូតូ' },
+  Car      : { en: 'Car',       km: 'ឡាន' },
+  Messenger: { en: 'Messenger', km: 'ម៉ូតូ' },
 }
 const categoryLabel = c =>
   CATEGORY_LABEL[c]?.[lang.value] || CATEGORY_LABEL[c]?.km || c
 
-/* Status filter options (label depends on language) */
+/* ✅ FIX: Status filter options MUST match backend status enum */
 const statusOptions = computed(() => [
-  { label: t('statusAll'),          value: 'ALL' },
-  { label: statusLabel('PENDING'),  value: 'PENDING' },
-  { label: statusLabel('ASSIGNED'), value: 'ASSIGNED' },
-  { label: statusLabel('ACCEPTED'), value: 'ACCEPTED' },
-  { label: statusLabel('ON_ROAD'),  value: 'ON_ROAD' },
-  { label: statusLabel('ARRIVING'), value: 'ARRIVING' },
-  { label: statusLabel('COMPLETED'),value: 'COMPLETED' },
-  { label: statusLabel('COMEBACK'), value: 'COMEBACK' },
-  { label: statusLabel('DELAYED'),  value: 'DELAYED' },
-  { label: statusLabel('CANCELLED'),value: 'CANCELLED' },
-  { label: statusLabel('DECLINED'), value: 'DECLINED' },
+  { label: t('statusAll'),            value: 'ALL' },
+  { label: statusLabel('PENDING'),    value: 'PENDING' },
+  { label: statusLabel('ACCEPTED'),   value: 'ACCEPTED' },
+  { label: statusLabel('ON_ROAD'),    value: 'ON_ROAD' },
+  { label: statusLabel('ARRIVING'),   value: 'ARRIVING' },
+  { label: statusLabel('COMEBACK'),   value: 'COMEBACK' },
+  { label: statusLabel('COMPLETED'),  value: 'COMPLETED' },
+  { label: statusLabel('DELAYED'),    value: 'DELAYED' },
+  { label: statusLabel('CANCELLED'),  value: 'CANCELLED' },
 ])
 
 /* ─────────────── ROLE / HEADERS ─────────────── */
 const roleLabel = computed(() => {
   const isMessenger = identity.value?.role === 'MESSENGER'
-  if (isMessenger) {
-    return lang.value === 'km' ? 'អ្នកបើកម៉ូតូ' : 'Messenger'
-  }
+  if (isMessenger) return lang.value === 'km' ? 'អ្នកបើកម៉ូតូ' : 'Messenger'
   return lang.value === 'km' ? 'អ្នកបើកឡាន' : 'Driver'
 })
 
@@ -205,8 +200,6 @@ const headers = computed(() => [
 const STATUS_BADGE_CLASS = {
   PENDING:
     'bg-slate-100 text-slate-900 border-slate-400 dark:bg-slate-800 dark:text-slate-100 dark:border-slate-500',
-  ASSIGNED:
-    'bg-sky-100 text-sky-900 border-sky-500 dark:bg-sky-900/40 dark:text-sky-100 dark:border-sky-500',
   ACCEPTED:
     'bg-emerald-100 text-emerald-900 border-emerald-500 dark:bg-emerald-900/40 dark:text-emerald-100 dark:border-emerald-500',
   ON_ROAD:
@@ -221,8 +214,6 @@ const STATUS_BADGE_CLASS = {
     'bg-amber-100 text-amber-900 border-amber-500 dark:bg-amber-900/40 dark:text-amber-100 dark:border-amber-500',
   CANCELLED:
     'bg-rose-100 text-rose-900 border-rose-500 dark:bg-rose-900/40 dark:text-rose-100 dark:border-rose-500',
-  DECLINED:
-    'bg-rose-100 text-rose-900 border-rose-500 dark:bg-rose-900/40 dark:text-rose-100 dark:border-rose-500',
 }
 const statusBadgeClass = s =>
   `inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
@@ -232,7 +223,6 @@ const statusBadgeClass = s =>
 
 const STATUS_ICON_FA = {
   PENDING:   'fa-regular fa-clock',
-  ASSIGNED:  'fa-solid fa-id-badge',
   ACCEPTED:  'fa-regular fa-circle-check',
   ON_ROAD:   'fa-solid fa-truck-fast',
   ARRIVING:  'fa-solid fa-flag-checkered',
@@ -240,7 +230,6 @@ const STATUS_ICON_FA = {
   COMEBACK:  'fa-solid fa-arrow-rotate-left',
   DELAYED:   'fa-solid fa-triangle-exclamation',
   CANCELLED: 'fa-regular fa-circle-xmark',
-  DECLINED:  'fa-regular fa-circle-xmark',
 }
 const statusIconClass = s => STATUS_ICON_FA[String(s || '').toUpperCase()] || 'fa-regular fa-clock'
 
@@ -284,9 +273,7 @@ function destText(s = {}) {
 /* multi-stop display */
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
-  return stops
-    .map((s, i) => `#${i + 1}: ${destText(s)}`)
-    .join(' • ')
+  return stops.map((s, i) => `#${i + 1}: ${destText(s)}`).join(' • ')
 }
 
 function absUrl(u) {
@@ -308,6 +295,7 @@ async function loadList() {
     const { loginId, role } = identity.value || { loginId: '', role: '' }
     const isMessenger = role === 'MESSENGER'
     const basePath = isMessenger ? '/messenger/car-bookings' : '/driver/car-bookings'
+
     const params = { role, loginId }
     if (selectedDate.value) params.date = selectedDate.value
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
@@ -324,6 +312,7 @@ async function loadList() {
     }))
 
     const ids = rows.value.map(r => String(r._id)).filter(Boolean)
+
     if (typeof leavePreviousRooms === 'function') {
       await leavePreviousRooms()
       leavePreviousRooms = null
@@ -354,9 +343,7 @@ const filtered = computed(() =>
         r.purpose,
         r.notes,
         prettyStops(r.stops),
-      ]
-        .join(' ')
-        .toLowerCase()
+      ].join(' ').toLowerCase()
       return hay.includes(term)
     })
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
@@ -370,12 +357,8 @@ const pageCount = computed(() => {
   return Math.max(1, n || 1)
 })
 const totalItems = computed(() => filtered.value?.length || 0)
-const rangeStart = computed(() =>
-  totalItems.value ? (page.value - 1) * itemsPerPage + 1 : 0
-)
-const rangeEnd = computed(() =>
-  Math.min(page.value * itemsPerPage, totalItems.value)
-)
+const rangeStart = computed(() => (totalItems.value ? (page.value - 1) * itemsPerPage + 1 : 0))
+const rangeEnd = computed(() => Math.min(page.value * itemsPerPage, totalItems.value))
 
 const paged = computed(() => {
   const start = (page.value - 1) * itemsPerPage
@@ -387,29 +370,25 @@ watch(filtered, () => {
 })
 
 /* ─────────────── ACTION HELPERS ─────────────── */
-const isMine = it =>
-  String(
-    it?.assignment?.driverId || it?.assignment?.messengerId || it?.driverId || ''
-  ).toLowerCase() === String(identity.value?.loginId || '').toLowerCase()
+const myLoginLower = computed(() => String(identity.value?.loginId || '').toLowerCase())
+
+const isMine = it => {
+  const mine = myLoginLower.value
+  if (!mine) return false
+  const d = String(it?.assignment?.driverId || '').toLowerCase()
+  const m = String(it?.assignment?.messengerId || '').toLowerCase()
+  return d === mine || m === mine
+}
 
 const canRespond = it =>
   isMine(it) && !['ACCEPTED', 'DECLINED'].includes(currentAck(it))
 
-/**
- * TERMINAL states from driver perspective:
- * - COMPLETED (finished)
- * - CANCELLED / DECLINED (no more update)
- * COMEBACK is NOT terminal (can still go to COMPLETED)
- */
-const terminalStates = ['CANCELLED', 'COMPLETED', 'DECLINED']
+/** terminal states (status) */
+const terminalStates = ['CANCELLED', 'COMPLETED']
 
 /**
  * Driver journey – aligned with backend FORWARD:
- * PENDING → ACCEPTED (admin)
- * ACCEPTED → ON_ROAD
- * ON_ROAD  → ARRIVING
- * ARRIVING → COMEBACK
- * COMEBACK → COMPLETED
+ * ACCEPTED → ON_ROAD → ARRIVING → COMEBACK → COMPLETED
  * DELAYED  → ON_ROAD / ARRIVING / COMEBACK
  */
 const ALLOWED_NEXT = {
@@ -442,18 +421,15 @@ async function sendAck(item, response) {
       : `/driver/car-bookings/${item._id}/ack`
 
     await api.post(path, { response }, { headers: { 'x-login-id': loginId, 'x-role': role } })
+
+    // optimistic UI
+    if (!item.assignment) item.assignment = {}
     if (isMessenger) {
-      item.assignment = {
-        ...item.assignment,
-        messengerAck: response,
-        messengerAckAt: new Date(),
-      }
+      item.assignment.messengerAck = response
+      item.assignment.messengerAckAt = new Date()
     } else {
-      item.assignment = {
-        ...item.assignment,
-        driverAck: response,
-        driverAckAt: new Date(),
-      }
+      item.assignment.driverAck = response
+      item.assignment.driverAckAt = new Date()
     }
 
     showToast({
@@ -461,12 +437,8 @@ async function sendAck(item, response) {
       title: lang.value === 'km' ? 'បានកត់ត្រាការឆ្លើយតប' : 'Response recorded',
       message:
         response === 'ACCEPTED'
-          ? (lang.value === 'km'
-              ? 'អ្នកបានព្រមទទួលភារកិច្ចនេះ។'
-              : 'You have accepted this job.')
-          : (lang.value === 'km'
-              ? 'បានកត់ត្រាការឆ្លើយតបរួចរាល់។'
-              : 'Response has been recorded.'),
+          ? (lang.value === 'km' ? 'អ្នកបានព្រមទទួលភារកិច្ចនេះ។' : 'You have accepted this job.')
+          : (lang.value === 'km' ? 'បានកត់ត្រាការឆ្លើយតបរួចរាល់។' : 'Response has been recorded.'),
     })
   } catch (e) {
     showToast({
@@ -501,9 +473,7 @@ async function setDriverStatus(item, nextStatus) {
 
     showToast({
       type: 'success',
-      title: lang.value === 'km'
-        ? 'បានបច្ចុប្បន្នភាពស្ថានភាព'
-        : 'Status updated',
+      title: lang.value === 'km' ? 'បានបច្ចុប្បន្នភាពស្ថានភាព' : 'Status updated',
       message: lang.value === 'km'
         ? `បានធ្វើបច្ចុប្បន្នភាពស្ថានភាពទៅ ${statusLabel(nextStatus)}។`
         : `Status changed to ${statusLabel(nextStatus)}.`,
@@ -512,13 +482,8 @@ async function setDriverStatus(item, nextStatus) {
     await loadList()
     showToast({
       type: 'error',
-      title: lang.value === 'km'
-        ? 'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន'
-        : 'Cannot update status',
-      message:
-        e?.response?.data?.message ||
-        e?.message ||
-        'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន',
+      title: lang.value === 'km' ? 'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន' : 'Cannot update status',
+      message: e?.response?.data?.message || e?.message || 'មិនអាចបច្ចុប្បន្នភាពស្ថានភាពបាន',
     })
   } finally {
     statusLoading.value = ''
@@ -529,9 +494,9 @@ async function setDriverStatus(item, nextStatus) {
 async function onCreated(doc) {
   if (!doc?._id) return
 
-  const myLogin = (identity.value?.loginId || '').toLowerCase()
-  const driverId    = String(doc?.assignment?.driverId || doc?.driverId || '').toLowerCase()
-  const messengerId = String(doc?.assignment?.messengerId || doc?.messengerId || '').toLowerCase()
+  const myLogin = myLoginLower.value
+  const driverId    = String(doc?.assignment?.driverId || '').toLowerCase()
+  const messengerId = String(doc?.assignment?.messengerId || '').toLowerCase()
   const mine = myLogin && (driverId === myLogin || messengerId === myLogin)
   if (!mine) return
 
@@ -547,36 +512,90 @@ async function onAssigned(p) {
   const bookingId = String(p?.bookingId || '')
   if (!bookingId) return
 
-  const it = rows.value.find(x => String(x._id) === bookingId)
+  const myLogin = myLoginLower.value
+  if (!myLogin) return
 
-  const myLogin = (identity.value?.loginId || '').toLowerCase()
-  const mine =
+  const nowMine =
     String(p?.driverId || '').toLowerCase() === myLogin ||
     String(p?.messengerId || '').toLowerCase() === myLogin
 
+  // ✅ NEW: use prevAssigneeId from backend (perfect for UNASSIGN/REASSIGN)
+  const prevWasMe = String(p?.prevAssigneeId || '').toLowerCase() === myLogin
+
+  const itIndex = rows.value.findIndex(x => String(x._id) === bookingId)
+  const it = itIndex >= 0 ? rows.value[itIndex] : null
+
+  const wasMine = it ? isMine(it) : false
+
+  // If I had it and now I don't => remove immediately
+  if ((wasMine || prevWasMe) && !nowMine) {
+    if (itIndex >= 0) rows.value.splice(itIndex, 1)
+
+    showToast({
+      type: 'warning',
+      title: lang.value === 'km' ? 'ភារកិច្ចត្រូវបានបោះបង់' : 'Assignment cancelled',
+      message:
+        (p?.action === 'REASSIGN')
+          ? (lang.value === 'km'
+              ? 'Admin បានផ្លាស់ប្តូរភារកិច្ចទៅអ្នកផ្សេង។'
+              : 'Admin reassigned this job to another driver/messenger.')
+          : (lang.value === 'km'
+              ? 'Admin បានដកភារកិច្ចនេះចេញពីអ្នក។'
+              : 'Admin removed this assignment from you.'),
+    })
+    return
+  }
+
+  // If it exists and still mine (or becomes mine) => update local assignment
   if (it) {
+    if (!it.assignment) it.assignment = {}
+
     it.assignment = {
-      ...(it.assignment || {}),
+      ...it.assignment,
       driverId: p.driverId ?? it.assignment?.driverId ?? '',
       driverName: p.driverName ?? it.assignment?.driverName ?? '',
       messengerId: p.messengerId ?? it.assignment?.messengerId ?? '',
       messengerName: p.messengerName ?? it.assignment?.messengerName ?? '',
+      vehicleId: p.vehicleId ?? it.assignment?.vehicleId ?? '',
+      vehicleName: p.vehicleName ?? it.assignment?.vehicleName ?? '',
     }
+
+    // ✅ when (re)assigned, backend resets ack to PENDING → reflect it
+    if (p?.action === 'ASSIGN' || p?.action === 'REASSIGN') {
+      if (identity.value?.role === 'MESSENGER') it.assignment.messengerAck = 'PENDING'
+      else it.assignment.driverAck = 'PENDING'
+    }
+
     if (p.status) it.status = p.status
-  } else if (mine) {
+
+    // If becomes mine now (was not mine before)
+    if (!wasMine && nowMine) {
+      showToast({
+        type: 'success',
+        title: lang.value === 'km' ? 'មានភារកិច្ចថ្មី' : 'New assignment',
+        message: lang.value === 'km'
+          ? 'Admin បានចាត់ចែងភារកិច្ចថ្មីឱ្យអ្នក។'
+          : 'Admin assigned a new job to you.',
+      })
+    }
+    return
+  }
+
+  // If not in list but now mine => reload list (fetch full details)
+  if (!it && nowMine) {
     await loadList()
   }
 }
 
-function onAck(p) {
+// ✅ FIX: update only the correct ack field
+function onAck(p, which) {
   const it = rows.value.find(x => String(x._id) === String(p?.bookingId))
   if (!it) return
-  if (p.response) {
-    it.assignment = {
-      ...it.assignment,
-      driverAck: p.response,
-      messengerAck: p.response,
-    }
+  if (!it.assignment) it.assignment = {}
+
+  if (p?.response) {
+    if (which === 'driver') it.assignment.driverAck = p.response
+    if (which === 'messenger') it.assignment.messengerAck = p.response
   }
 }
 
@@ -622,16 +641,17 @@ onMounted(async () => {
   socket.on('carBooking:created', onCreated)
   socket.on('carBooking:status', onStatus)
   socket.on('carBooking:assigned', onAssigned)
-  socket.on('carBooking:driverAck', onAck)
-  socket.on('carBooking:messengerAck', onAck)
+  socket.on('carBooking:driverAck', (p) => onAck(p, 'driver'))
+  socket.on('carBooking:messengerAck', (p) => onAck(p, 'messenger'))
 })
 
 onBeforeUnmount(() => {
   socket.off('carBooking:created', onCreated)
   socket.off('carBooking:status', onStatus)
   socket.off('carBooking:assigned', onAssigned)
-  socket.off('carBooking:driverAck', onAck)
-  socket.off('carBooking:messengerAck', onAck)
+  socket.off('carBooking:driverAck')
+  socket.off('carBooking:messengerAck')
+
   if (typeof leavePreviousRooms === 'function') leavePreviousRooms()
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', updateIsMobile)
@@ -1422,6 +1442,7 @@ watch([selectedDate, statusFilter], () => {
 </template>
 
 <style scoped>
+/* ✅ STYLE UNCHANGED (yours) */
 @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap');
 
 .driver-shell {
@@ -1434,12 +1455,8 @@ watch([selectedDate, statusFilter], () => {
   animation: rowFlash 2.5s ease-in-out;
 }
 @keyframes rowFlash {
-  0% {
-    background-color: #e0f2fe;
-  }
-  100% {
-    background-color: transparent;
-  }
+  0% { background-color: #e0f2fe; }
+  100% { background-color: transparent; }
 }
 
 .mono {
@@ -1454,69 +1471,25 @@ watch([selectedDate, statusFilter], () => {
 }
 
 /* labels */
-.lbl {
-  font-size: 0.78rem;
-  color: #64748b;
-}
-.val {
-  font-weight: 600;
-}
+.lbl { font-size: 0.78rem; color: #64748b; }
+.val { font-weight: 600; }
 
 /* mobile cards */
-.driver-card-wrap {
-  margin-top: 2px;
-}
-.driver-card-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+.driver-card-wrap { margin-top: 2px; }
+.driver-card-list { display: flex; flex-direction: column; gap: 10px; }
 
-/* card layout (same behaviour as messenger) */
-.card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 8px;
-}
-.card-top-left {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.card-time {
-  font-size: 0.9rem;
-}
-.card-date {
-  font-size: 0.78rem;
-}
-.card-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-top: 6px;
-}
-.card-row.small {
-  margin-top: 4px;
-}
-.card-row .lbl {
-  min-width: 82px;
-  font-size: 0.78rem;
-  color: #64748b;
-  padding-top: 2px;
-}
-.card-row .val {
-  font-weight: 500;
-  font-size: 0.9rem;
-}
-.card-actions-row {
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+/* card layout */
+.card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.card-top-left { display: flex; flex-direction: column; gap: 2px; }
+.card-time { font-size: 0.9rem; }
+.card-date { font-size: 0.78rem; }
+.card-row { display: flex; align-items: flex-start; gap: 8px; margin-top: 6px; }
+.card-row.small { margin-top: 4px; }
+.card-row .lbl { min-width: 82px; font-size: 0.78rem; color: #64748b; padding-top: 2px; }
+.card-row .val { font-weight: 500; font-size: 0.9rem; }
+.card-actions-row { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 
-/* pagination buttons – copied from messenger so dark mode is the same */
+/* pagination buttons */
 .pagination-btn {
   padding: 3px 8px;
   border-radius: 999px;
@@ -1525,31 +1498,17 @@ watch([selectedDate, statusFilter], () => {
   font-size: 11px;
   color: #0f172a;
 }
-.pagination-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.pagination-btn:not(:disabled):hover {
-  background: #e5edff;
-}
+.pagination-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pagination-btn:not(:disabled):hover { background: #e5edff; }
 
-/* dark mode tweak (same trick as MessengerCarBooking.vue) */
 @media (prefers-color-scheme: dark) {
-  .pagination-btn {
-    background: #020617;
-    color: #e2e8f0;
-    border-color: #1e293b;
-  }
-  .pagination-btn:not(:disabled):hover {
-    background: #1f2937;
-  }
+  .pagination-btn { background: #020617; color: #e2e8f0; border-color: #1e293b; }
+  .pagination-btn:not(:disabled):hover { background: #1f2937; }
 }
 
-/* mobile footer stack */
 @media (max-width: 640px) {
-  .table-footer.mobile-footer {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+  .table-footer.mobile-footer { flex-direction: column; align-items: flex-start; }
 }
 </style>
+
+

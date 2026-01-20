@@ -288,10 +288,10 @@ watch(currentMonth, () => loadMonth())
 
           <!-- Month label -->
           <div class="flex flex-col">
-            <span class="text-sm sm:text-base font-semibold">
+            <span class="text-sm sm:text-base font-semibold dark:text-slate-200/80">
               {{ monthLabel }}
             </span>
-            <span class="text-[11px] text-slate-800/80">
+            <span class="text-[11px] text-slate-800/80 dark:text-slate-200/80">
               Tap a day to review car bookings
             </span>
           </div>
@@ -316,7 +316,7 @@ watch(currentMonth, () => loadMonth())
             type="button"
             class="inline-flex items-center rounded-full border border-slate-100/70
                    bg-white/10 px-3 py-1.5 text-[11px] font-medium
-                   hover:bg-white/20"
+                   hover:bg-white/20 dark:text-slate-200/80"
             @click="loadMonth"
           >
             Refresh

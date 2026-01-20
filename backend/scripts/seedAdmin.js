@@ -87,7 +87,7 @@ const User = require('../models/User');
 
     // Example chefs
     const chefs = [
-      { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '7163451169' },
+      { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '1927527232' },
       // { loginId: '002', name: 'Chef Two', password: defaultPwd },
     ]
 
@@ -96,10 +96,10 @@ const User = require('../models/User');
     // If that’s driver01, do this:
     const drivers = [
       { loginId: '010', name: 'Prius',   password: defaultPwd, telegramChatId: '1893892841' },
-      { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '871865728' },
+      { loginId: '020', name: 'Staria',   password: defaultPwd, telegramChatId: '635269035' },
       { loginId: '030', name: 'New Van', password: defaultPwd, telegramChatId: '5534785017' },
-      { loginId: '090', name: 'Test Car', password: defaultPwd, telegramChatId: '7163451169' },
-      { loginId: '091', name: 'Test Car', password: defaultPwd, telegramChatId: '7163451169' },
+      // { loginId: '090', name: 'Test Car', password: defaultPwd, telegramChatId: '7163451169' },
+      // { loginId: '091', name: 'Test Car', password: defaultPwd, telegramChatId: '7163451169' },
 
       // { loginId: '040', name: 'Test car', password: defaultPwd, telegramChatId: '7163451169' },
     ]
@@ -111,14 +111,14 @@ const User = require('../models/User');
     // Bong Cheat 5534785017 new van
     // Kakvey 899957340
     // Bong Hong 1893892841
-    // bong Por 635269035
+    // bong Por 635269035  635269035
     // bong roth 537250678
     // bong new 871865728
 
-    // If that same ID is for messenger01 instead, move it here (and remove from driver01):
+    // If that same ID is for messenger01 instead, momove from driver01):
     const messengers = [
       { loginId: '111', name: 'Messenger',   password: defaultPwd  , telegramChatId: '537250678' },
-      { loginId: '222', name: 'Messenger test',   password: defaultPwd  , telegramChatId: '7163451169' },
+      // { loginId: '222', name: 'Messenger test',   password: defaultPwd  , telegramChatId: '7163451169' },
     ]
 
     /* ---------- run ---------- */

@@ -16,6 +16,10 @@ const { notify } = require('../../services/transport.telegram.notify')
 
 const AIRPORT_DESTINATION = 'Techo International Airport'
 
+// ✅ If a booking is COMPLETED, driver/messenger should be considered FREE for new assignments.
+// (Same as CANCELLED: does not block time.)
+const NON_BLOCKING_STATUSES = ['CANCELLED', 'COMPLETED']
+
 const MAX_CAR = 3
 const MAX_MSGR = 1
 
@@ -23,12 +27,12 @@ const MAX_MSGR = 1
 // Main path for driver: PENDING → ACCEPTED → ON_ROAD → ARRIVING → COMEBACK → COMPLETED
 // DELAYED / CANCELLED are side branches.
 const FORWARD = {
-  PENDING:   new Set(['ACCEPTED', 'CANCELLED']),
-  ACCEPTED:  new Set(['ON_ROAD', 'DELAYED', 'CANCELLED']),
-  ON_ROAD:   new Set(['ARRIVING', 'DELAYED', 'CANCELLED']),
-  ARRIVING:  new Set(['COMEBACK', 'DELAYED', 'CANCELLED']),
-  COMEBACK:  new Set(['COMPLETED', 'DELAYED', 'CANCELLED']),
-  DELAYED:   new Set(['ON_ROAD', 'ARRIVING', 'COMEBACK', 'CANCELLED']),
+  PENDING: new Set(['ACCEPTED', 'CANCELLED']),
+  ACCEPTED: new Set(['ON_ROAD', 'DELAYED', 'CANCELLED']),
+  ON_ROAD: new Set(['ARRIVING', 'DELAYED', 'CANCELLED']),
+  ARRIVING: new Set(['COMEBACK', 'DELAYED', 'CANCELLED']),
+  COMEBACK: new Set(['COMPLETED', 'DELAYED', 'CANCELLED']),
+  DELAYED: new Set(['ON_ROAD', 'ARRIVING', 'COMEBACK', 'CANCELLED']),
   COMPLETED: new Set([]),
   CANCELLED: new Set([]),
 }
@@ -99,8 +103,9 @@ function pickIdentityFrom(req) {
 function buildReservedQuery({ tripDate, category, excludeId = null }) {
   const base = {
     tripDate,
-    status: { $nin: ['CANCELLED'] },
+    status: { $nin: NON_BLOCKING_STATUSES },
   }
+
   if (excludeId) base._id = { $ne: excludeId }
 
   if (category === 'Car') {
@@ -119,7 +124,7 @@ function buildReservedQuery({ tripDate, category, excludeId = null }) {
     ...base,
     $or: [
       { category: 'Messenger', 'assignment.messengerId': { $exists: true, $ne: '' } },
-      { category: 'Car',       'assignment.messengerId': { $exists: true, $ne: '' } },
+      { category: 'Car', 'assignment.messengerId': { $exists: true, $ne: '' } },
     ],
   }
 }
@@ -179,7 +184,6 @@ async function employeeCancelBooking(req, res, next) {
   }
 }
 
-
 /** Minimal (but slightly richer) delta payloads */
 const shape = {
   created: (doc) => ({
@@ -202,11 +206,14 @@ const shape = {
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
   }),
+
   status: (doc) => ({
     bookingId: String(doc._id),
     status: doc.status,
   }),
-  assigned: (doc) => ({
+
+  // ✅ UPDATED: accepts meta for reassignment removal (prevAssigneeId/action/prevRole)
+  assigned: (doc, meta = {}) => ({
     bookingId: String(doc._id),
 
     driverId: doc.assignment?.driverId || '',
@@ -223,17 +230,26 @@ const shape = {
     timeEnd: doc.timeEnd,
     status: doc.status,
     category: doc.category,
+
+    // ✅ extra info for FE to remove job from old driver/messenger
+    prevAssigneeId: meta.prevAssigneeId || '',
+    prevAssigneeName: meta.prevAssigneeName || '',
+    prevRole: meta.prevRole || '',
+    action: meta.action || 'ASSIGN', // ASSIGN | REASSIGN | UNASSIGN
   }),
+
   driverAck: (doc) => ({
     bookingId: String(doc._id),
     response: doc.assignment?.driverAck || 'PENDING',
     at: doc.assignment?.driverAckAt || null,
   }),
+
   messengerAck: (doc) => ({
     bookingId: String(doc._id),
     response: doc.assignment?.messengerAck || 'PENDING',
     at: doc.assignment?.messengerAckAt || null,
   }),
+
   updated: (doc) => ({
     bookingId: String(doc._id),
     patch: {
@@ -249,6 +265,7 @@ const shape = {
       ticketUrl: doc.ticketUrl || '',
     },
   }),
+
   deleted: (doc) => ({
     bookingId: String(doc._id),
   }),
@@ -270,7 +287,7 @@ async function checkAvailability(req, res, next) {
     const reservedQuery = buildReservedQuery({ tripDate: date, category })
     const docs = await CarBooking.find(reservedQuery).lean()
 
-    const busy = docs.filter(b =>
+    const busy = docs.filter((b) =>
       overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
     ).length
 
@@ -293,8 +310,7 @@ async function listSchedulePublic(req, res, next) {
     if (status && status !== 'ALL') filter.status = status
     if (driverId) filter['assignment.driverId'] = String(driverId)
 
-    const list = await CarBooking
-      .find(filter)
+    const list = await CarBooking.find(filter)
       .sort({ tripDate: 1, timeStart: 1 })
       .lean()
 
@@ -330,7 +346,7 @@ async function createBooking(req, res, next) {
         throw createError(400, `Stop ${i + 1}: destinationOther is required for "Other".`)
     }
 
-    const hasAirport = stops.some(st => st.destination === AIRPORT_DESTINATION)
+    const hasAirport = stops.some((st) => st.destination === AIRPORT_DESTINATION)
     let ticketUrl = ''
     if (hasAirport) {
       if (!req.file) {
@@ -341,19 +357,18 @@ async function createBooking(req, res, next) {
       ticketUrl = `/uploads/${req.file.filename}`
     }
 
-    // ✅ IMPORTANT: capacity check uses RESERVED ONLY (assigned driver/vehicle/messenger),
-    // so pending/unassigned requests won't reduce availability.
+    // ✅ capacity check uses RESERVED ONLY (assigned driver/vehicle/messenger)
     const reservedQuery = buildReservedQuery({ tripDate, category })
     const reserved = await CarBooking.find(reservedQuery).lean()
-    const overlapping = reserved.filter(b =>
+    const overlapping = reserved.filter((b) =>
       overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
     ).length
 
     const max = category === 'Car' ? MAX_CAR : MAX_MSGR
     if (overlapping >= max) {
-      return res
-        .status(409)
-        .json({ message: `No ${category.toLowerCase()} available for ${tripDate} ${timeStart}-${timeEnd}.` })
+      return res.status(409).json({
+        message: `No ${category.toLowerCase()} available for ${tripDate} ${timeStart}-${timeEnd}.`,
+      })
     }
 
     let employeeSnapshot = { employeeId, name: '', department: '', contactNumber: '' }
@@ -416,8 +431,6 @@ async function updateStatus(req, res, next) {
     const from = doc.status || 'PENDING'
     const nextStatus = status
 
-    // Re-open to PENDING when editing schedule (even if already PENDING),
-    // but never from COMPLETED / CANCELLED.
     const isReopen =
       !!forceReopen &&
       nextStatus === 'PENDING' &&
@@ -430,7 +443,6 @@ async function updateStatus(req, res, next) {
         doc.assignment.messengerAck = 'PENDING'
       }
     } else {
-      // Normal forward move
       if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
         throw createError(400, `Cannot change from ${from} to ${nextStatus}`)
       }
@@ -458,115 +470,218 @@ async function updateStatus(req, res, next) {
   }
 }
 
-/* ───────── ADMIN assign booking (driver or messenger – symmetric) ───────── */
+/* ───────── ADMIN assign / reassign / unassign ─────────
+   ✅ Messenger booking: only assign MESSENGER
+   ✅ Car booking: can assign DRIVER or MESSENGER (optional helper rider)
+*/
 async function assignBooking(req, res, next) {
   try {
     const io = req.io
     const { id } = req.params
+
     let {
+      role = '',
+
       driverId = '',
       driverName = '',
+
+      messengerId = '',
+      messengerName = '',
+
       vehicleId = '',
       vehicleName = '',
+
       notes = '',
       assignedById = '',
       assignedByName = '',
+
       autoAccept = true,
-      role = 'DRIVER',
     } = req.body || {}
-
-    if (!driverId) throw createError(400, 'driverId (loginId) is required.')
-    role = String(role).toUpperCase()
-    if (!['DRIVER', 'MESSENGER'].includes(role)) {
-      throw createError(400, 'role must be DRIVER or MESSENGER')
-    }
-
-    driverId = String(driverId).trim().toLowerCase()
 
     const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
-    // resolve driver/messenger name from User collection if needed
-    let resolvedName = driverName
+    role = String(role || '').toUpperCase()
+
+    // ✅ Allowed roles depend on booking.category
+    const allowedRoles =
+      doc.category === 'Messenger'
+        ? new Set(['MESSENGER'])
+        : new Set(['DRIVER', 'MESSENGER']) // Car booking supports both
+
+    if (!allowedRoles.has(role)) {
+      // default role if not provided
+      role = doc.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
+    }
+
+    // previous assignee (per role)
+    const prevAssigneeId =
+      role === 'MESSENGER'
+        ? String(doc.assignment?.messengerId || '')
+        : String(doc.assignment?.driverId || '')
+
+    const prevAssigneeName =
+      role === 'MESSENGER'
+        ? String(doc.assignment?.messengerName || '')
+        : String(doc.assignment?.driverName || '')
+
+    // incoming payload normalization
+    const incomingId =
+      role === 'MESSENGER'
+        ? String(messengerId || driverId || '').trim().toLowerCase()
+        : String(driverId || '').trim().toLowerCase()
+
+    const incomingName =
+      role === 'MESSENGER'
+        ? String(messengerName || driverName || '').trim()
+        : String(driverName || '').trim()
+
+    // ✅ UNASSIGN (when incomingId empty) — unassign ONLY the selected role
+    if (!incomingId) {
+      if (!doc.assignment) doc.assignment = {}
+
+      // meta
+      doc.assignment.assignedById = assignedById || ''
+      doc.assignment.assignedByName = assignedByName || ''
+      doc.assignment.assignedAt = new Date()
+      doc.assignment.notes = notes || ''
+
+      // reset acks (safe)
+      doc.assignment.driverAck = 'PENDING'
+      doc.assignment.messengerAck = 'PENDING'
+      doc.assignment.driverAckAt = undefined
+      doc.assignment.messengerAckAt = undefined
+
+      if (role === 'MESSENGER') {
+        doc.assignment.messengerId = ''
+        doc.assignment.messengerName = ''
+      } else {
+        doc.assignment.driverId = ''
+        doc.assignment.driverName = ''
+        doc.assignment.vehicleId = ''
+        doc.assignment.vehicleName = ''
+      }
+
+      // recommended: bring back to pending if not terminal
+      const st = String(doc.status || '').toUpperCase()
+      if (!['COMPLETED', 'CANCELLED'].includes(st)) doc.status = 'PENDING'
+
+      await doc.save()
+
+      broadcastCarBooking(
+        io,
+        doc,
+        'carBooking:assigned',
+        shape.assigned(doc, {
+          prevAssigneeId,
+          prevAssigneeName,
+          prevRole: role,
+          action: 'UNASSIGN',
+        })
+      )
+      broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc))
+
+      try {
+        await notify('ASSIGNMENT_UNASSIGNED', {
+          bookingId: doc._id,
+          prevAssigneeId,
+          byName: req.user?.name || assignedByName || 'Admin',
+        })
+      } catch {}
+
+      return res.json(doc)
+    }
+
+    // Optional: prevent assign into completed/cancelled
+    const currentStatus = String(doc.status || '').toUpperCase()
+    if (['COMPLETED', 'CANCELLED'].includes(currentStatus)) {
+      throw createError(400, `Cannot assign when status is ${currentStatus}.`)
+    }
+
+    // resolve name (fallback from Users collection)
+    let resolvedName = incomingName
     if (!resolvedName && User) {
-      const u = await User.findOne({ loginId: driverId }).lean()
+      const u = await User.findOne({ loginId: incomingId }).lean()
       if (u?.name) resolvedName = u.name
     }
 
+    // per-assignee conflict check (COMPLETED/CANCELLED don't block)
     const s = toMinutes(doc.timeStart)
     const e = toMinutes(doc.timeEnd)
-    const conflictField = role === 'MESSENGER' ? 'assignment.messengerId' : 'assignment.driverId'
+
+    const conflictField =
+      role === 'MESSENGER' ? 'assignment.messengerId' : 'assignment.driverId'
 
     const conflictQuery = {
       _id: { $ne: doc._id },
       tripDate: doc.tripDate,
-      status: { $nin: ['CANCELLED'] },
-      [conflictField]: driverId,
+      status: { $nin: NON_BLOCKING_STATUSES },
+      [conflictField]: incomingId,
     }
 
     const others = await CarBooking.find(conflictQuery).lean()
-    const hasConflict = others.some(b => overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd)))
+    const hasConflict = others.some((b) =>
+      overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
+    )
+
     if (hasConflict) {
       const label = role === 'MESSENGER' ? 'Messenger' : 'Driver'
       return res.status(409).json({ message: `${label} already assigned during this time.` })
     }
 
-    // base assignment – reset both acks to PENDING whenever admin re-assigns
-    const baseAssign = {
-      vehicleId: vehicleId || '',
-      vehicleName: vehicleName || '',
-      notes: notes || '',
-      assignedById: assignedById || '',
-      assignedByName: assignedByName || '',
-      assignedAt: new Date(),
-      driverAck: 'PENDING',
-      messengerAck: 'PENDING',
-      driverAckAt: undefined,
-      messengerAckAt: undefined,
-    }
+    if (!doc.assignment) doc.assignment = {}
 
+    // reset acks
+    doc.assignment.driverAck = 'PENDING'
+    doc.assignment.messengerAck = 'PENDING'
+    doc.assignment.driverAckAt = undefined
+    doc.assignment.messengerAckAt = undefined
+
+    // meta
+    doc.assignment.assignedById = assignedById || ''
+    doc.assignment.assignedByName = assignedByName || ''
+    doc.assignment.assignedAt = new Date()
+    doc.assignment.notes = notes || ''
+
+    // apply role assignment
     if (role === 'MESSENGER') {
-      doc.category = 'Messenger'
-      doc.assignment = {
-        ...baseAssign,
-        messengerId: driverId,
-        messengerName: resolvedName || driverName || '',
-        driverId: '',
-        driverName: '',
-      }
+      doc.assignment.messengerId = incomingId
+      doc.assignment.messengerName = resolvedName || ''
     } else {
-      doc.category = 'Car'
-      doc.assignment = {
-        ...baseAssign,
-        driverId: driverId,
-        driverName: resolvedName || driverName || '',
-        messengerId: '',
-        messengerName: '',
-      }
+      doc.assignment.driverId = incomingId
+      doc.assignment.driverName = resolvedName || ''
+      doc.assignment.vehicleId = vehicleId || ''
+      doc.assignment.vehicleName = vehicleName || ''
     }
 
-    // Business rule: admin assigning means admin already ACCEPTED the job.
-    if (autoAccept) {
-      const from = doc.status || 'PENDING'
-      if (!FORWARD[from] || !FORWARD[from].has('ACCEPTED')) {
-        throw createError(400, `Cannot change from ${from} to ACCEPTED`)
-      }
-      doc.status = 'ACCEPTED'
-    }
+    // auto accept
+    if (autoAccept) doc.status = 'ACCEPTED'
 
     await doc.save()
 
-    broadcastCarBooking(io, doc, 'carBooking:assigned', shape.assigned(doc))
+    const sameAsBefore = String(prevAssigneeId || '').toLowerCase() === incomingId
+    const action = sameAsBefore ? 'ASSIGN' : (prevAssigneeId ? 'REASSIGN' : 'ASSIGN')
+
+    broadcastCarBooking(
+      io,
+      doc,
+      'carBooking:assigned',
+      shape.assigned(doc, {
+        prevAssigneeId,
+        prevAssigneeName,
+        prevRole: role,
+        action,
+      })
+    )
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc))
 
     try {
       await notify('ADMIN_ACCEPTED_ASSIGNED', {
         bookingId: doc._id,
         byName: req.user?.name || assignedByName || 'System',
+        prevAssigneeId,
       })
-    } catch (e) {
-      console.error('[notify error] ADMIN_ACCEPTED_ASSIGNED', e?.message || e)
-    }
+    } catch {}
 
     res.json(doc)
   } catch (err) {
@@ -574,6 +689,8 @@ async function assignBooking(req, res, next) {
     next(err)
   }
 }
+
+
 
 async function listAdmin(req, res, next) {
   try {
@@ -605,7 +722,6 @@ async function listForAssignee(req, res, next) {
         { category: 'Car', 'assignment.messengerId': driverId },
       ]
     } else {
-      // fallback: treat as employee
       filter.employeeId = driverId
     }
 
@@ -618,7 +734,7 @@ async function listForAssignee(req, res, next) {
 
     res.json(list)
   } catch (err) {
-    console.error('[ListForAssignee error]', err)
+    console.error('[listForAssignee error]', err)
     next(err)
   }
 }
@@ -723,17 +839,13 @@ async function updateBooking(req, res, next) {
       throw createError(400, 'timeStart and timeEnd are required.')
     }
 
-    if (!isValidDate(doc.tripDate)) {
-      throw createError(400, 'Invalid tripDate (YYYY-MM-DD).')
-    }
-    if (!['Car', 'Messenger'].includes(doc.category)) {
-      throw createError(400, 'Invalid category.')
-    }
+    if (!isValidDate(doc.tripDate)) throw createError(400, 'Invalid tripDate (YYYY-MM-DD).')
+    if (!['Car', 'Messenger'].includes(doc.category)) throw createError(400, 'Invalid category.')
 
     const s = toMinutes(doc.timeStart)
     const e = toMinutes(doc.timeEnd)
 
-    // ✅ IMPORTANT: capacity check uses RESERVED ONLY (assigned)
+    // ✅ capacity check uses RESERVED ONLY (assigned)
     const reservedQuery = buildReservedQuery({
       tripDate: doc.tripDate,
       category: doc.category,
@@ -741,7 +853,7 @@ async function updateBooking(req, res, next) {
     })
 
     const reserved = await CarBooking.find(reservedQuery).lean()
-    const overlapping = reserved.filter(b =>
+    const overlapping = reserved.filter((b) =>
       overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
     ).length
 
@@ -760,17 +872,14 @@ async function updateBooking(req, res, next) {
       const others = await CarBooking.find({
         _id: { $ne: doc._id },
         tripDate: doc.tripDate,
-        status: { $nin: ['CANCELLED'] },
+        status: { $nin: NON_BLOCKING_STATUSES },
         'assignment.driverId': ass.driverId,
       }).lean()
 
-      const hasConflict = others.some(b =>
+      const hasConflict = others.some((b) =>
         overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
       )
-
-      if (hasConflict) {
-        throw createError(409, 'Driver already assigned during this time.')
-      }
+      if (hasConflict) throw createError(409, 'Driver already assigned during this time.')
     }
 
     if (ass.messengerId) {
@@ -781,22 +890,17 @@ async function updateBooking(req, res, next) {
         'assignment.messengerId': ass.messengerId,
       }).lean()
 
-      const hasConflictM = othersM.some(b =>
+      const hasConflictM = othersM.some((b) =>
         overlaps(s, e, toMinutes(b.timeStart), toMinutes(b.timeEnd))
       )
-
-      if (hasConflictM) {
-        throw createError(409, 'Messenger already assigned during this time.')
-      }
+      if (hasConflictM) throw createError(409, 'Messenger already assigned during this time.')
     }
 
     await doc.save()
 
     broadcastCarBooking(io, doc, 'carBooking:updated', shape.updated(doc))
 
-    try {
-      await notify('REQUEST_UPDATED', { bookingId: doc._id })
-    } catch {}
+    try { await notify('REQUEST_UPDATED', { bookingId: doc._id }) } catch {}
 
     res.json(doc)
   } catch (err) {
@@ -816,9 +920,7 @@ async function deleteBooking(req, res, next) {
 
     broadcastCarBooking(io, doc, 'carBooking:deleted', shape.deleted(doc))
 
-    try {
-      await notify('REQUEST_DELETED', { bookingId: doc._id })
-    } catch {}
+    try { await notify('REQUEST_DELETED', { bookingId: doc._id }) } catch {}
 
     res.json({ ok: true })
   } catch (err) { next(err) }

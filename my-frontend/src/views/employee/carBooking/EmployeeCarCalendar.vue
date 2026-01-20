@@ -199,55 +199,70 @@ onMounted(async () => {
              dark:border-slate-700 dark:bg-slate-900"
     >
       <!-- Toolbar (same style as EmployeeFoodCalendar) -->
+      <!-- Toolbar -->
       <header
         class="flex flex-wrap items-center justify-between gap-2
-               px-3 py-2
-               rounded-t-2xl border-b border-slate-400
-               rounded-t-2xl
-               bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
-               px-4 py-3 text-white"
+              bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
+              px-4 py-3 text-white rounded-t-2xl border-b border-slate-400"
       >
         <div class="flex items-center gap-2">
+          <!-- Prev -->
           <button
             type="button"
             class="inline-flex h-8 w-8 items-center justify-center rounded-full
-                   border border-slate-900/70 bg-white text-slate-900 text-base
-                   shadow-sm hover:bg-slate-100"
+                  border border-slate-900/70 bg-white text-slate-900 text-base
+                  shadow-sm hover:bg-slate-100"
             @click="prevMonth"
+            aria-label="Previous month"
+            title="Previous month"
           >
             ‹
           </button>
+
           <div class="flex flex-col">
-            <span class="text-sm sm:text-base font-semibold">
-              {{ monthLabel }}
-            </span>
+            <span class="text-sm sm:text-base font-semibold">{{ monthLabel }}</span>
             <span class="text-[11px] text-slate-100/80">
               Tap a day to see car & messenger bookings
             </span>
           </div>
+
+          <!-- Next ✅ -->
+          <button
+            type="button"
+            class="inline-flex h-8 w-8 items-center justify-center rounded-full
+                  border border-slate-900/70 bg-white text-slate-900 text-base
+                  shadow-sm hover:bg-slate-100"
+            @click="nextMonth"
+            aria-label="Next month"
+            title="Next month"
+          >
+            ›
+          </button>
         </div>
 
         <div class="flex items-center gap-2">
           <button
             type="button"
             class="inline-flex items-center rounded-full border border-slate-100/70
-                   bg-white/10 px-3 py-1.5 text-[11px] font-medium
-                   hover:bg-white/15"
+                  bg-white/10 px-3 py-1.5 text-[11px] font-medium
+                  hover:bg-white/15"
             @click="loadMonth"
           >
             Refresh
           </button>
+
           <button
             type="button"
             class="inline-flex items-center rounded-full border border-sky-200
-                   bg-sky-600 px-3 py-1.5 text-[11px] font-semibold
-                   hover:bg-sky-500"
+                  bg-sky-600 px-3 py-1.5 text-[11px] font-semibold
+                  hover:bg-sky-500"
             @click="goToday"
           >
             Today
           </button>
         </div>
       </header>
+
 
       <!-- Error banner -->
       <div

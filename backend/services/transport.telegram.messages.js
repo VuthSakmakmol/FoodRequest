@@ -1,14 +1,19 @@
 // backend/services/transport.telegram.messages.js
 const dayjs = require('dayjs')
 
+// ✅ safer esc (also escapes quotes)
 const esc = (s = '') =>
-  String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
 const d = (v) => (v ? dayjs(v).format('YYYY-MM-DD') : '—')
 const t = (v) => (v ? esc(v) : '—')
 const span = (bk) =>
-  `${d(bk.tripDate)} ${t(bk.timeStart)}${
-    bk.timeEnd ? `–${t(bk.timeEnd)}` : ''
-  }`
+  `${d(bk.tripDate)} ${t(bk.timeStart)}${bk.timeEnd ? `–${t(bk.timeEnd)}` : ''}`
 
 /* ──────────────────────────────
  * Single / first stop helpers (kept for compatibility)
@@ -27,9 +32,7 @@ const firstStop = (bk) => {
 const route = (bk) => firstStop(bk)
 
 const pax = (bk) =>
-  `Pax: <b>${Number(bk.passengers || 1)}</b> | Category: ${esc(
-    bk.category || 'Car'
-  )}`
+  `Pax: <b>${Number(bk.passengers || 1)}</b> | Category: ${esc(bk.category || 'Car')}`
 
 const code = (bk) => `#${esc(bk.shortCode || bk.requestId || bk._id)}`
 
@@ -43,18 +46,6 @@ const cut = (s, max = 300) =>
 /* ──────────────────────────────
  * NEW: multi-stop formatting (EN + KH)
  * ────────────────────────────── */
-
-/**
- * Generic formatter for stops list with optional map links
- *
- * @param {Object} bk  booking
- * @param {Object} opt options:
- *    - label: heading label (e.g. 'Route' / 'ទិសដៅ')
- *    - emoji: symbol before heading (e.g. '📍' or '•')
- *    - includeMap: boolean, add map link if mapLink exists
- *    - mapLabel: text before URL (e.g. 'map' / 'ផែនទី')
- *    - mapLinkText: anchor text (e.g. 'Map' / 'ផែនទី')
- */
 function formatStopsLines(bk, opt = {}) {
   const {
     label = 'Route',
@@ -116,7 +107,7 @@ const stopsListKh = (bk, includeMap = true) =>
 
 const CATEGORY_KH = {
   Car: 'ឡាន',
-  Messenger: 'អ្នកបញ្ជូនឯកសារ'
+  Messenger: 'ម៉ូតូ' // ✅ better short label for assignees
 }
 
 const paxKh = (bk) => {
@@ -129,6 +120,7 @@ const STATUS_KH = {
   ACCEPTED: 'ទទួលយក',
   ON_ROAD: 'កំពុងធ្វើដំណើរ',
   ARRIVING: 'កំពុងដល់ក្បែរគោលដៅ',
+  COMEBACK: 'ត្រលប់មកវិញ', // ✅ added
   COMPLETED: 'បញ្ចប់ដំណើរ',
   DELAYED: 'ពន្យារពេល',
   CANCELLED: 'បោះបង់'
@@ -166,10 +158,7 @@ function purposeLineKh(bk) {
   const raw = (bk.purpose || '').trim()
   if (!raw) return null
   const kh = PURPOSE_KH[raw]
-  if (kh) {
-    return `• គោលបំណងដំណើរ៖ ${esc(kh)}`
-  }
-  // fallback if we add new English purpose but forget to map
+  if (kh) return `• គោលបំណងដំណើរ៖ ${esc(kh)}`
   return `• Purpose: ${esc(raw)}`
 }
 
@@ -191,9 +180,7 @@ function newRequestMsg(bk) {
   return [
     '🚗 <b>New transport request</b>',
     '=============================',
-    `👤 Employee: <b>${esc(emp.name || '')}</b>${
-      emp.employeeId ? ` (${esc(emp.employeeId)})` : ''
-    }`,
+    `👤 Employee: <b>${esc(emp.name || '')}</b>${emp.employeeId ? ` (${esc(emp.employeeId)})` : ''}`,
     `🏢 Department: ${esc(emp.department || '')}`,
     `📅 When: ${span(bk)}`,
     `👥 ${pax(bk)}`,
@@ -201,9 +188,7 @@ function newRequestMsg(bk) {
     purpose ? `🎯 Purpose: ${esc(purpose)}` : null,
     notes ? `📝 Note: ${esc(notes)}` : null,
     '-----------------------------'
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function declinedMsg(bk, reason, adminName) {
@@ -223,16 +208,12 @@ function acceptedAssignedMsg(bk) {
     '✅ <b>Accepted & assigned</b>',
     '=============================',
     `👤 Driver: <b>${esc(bk.assignment?.driverName || '—')}</b>`,
-    bk.assignment?.vehicleName
-      ? `🚘 Vehicle: ${esc(bk.assignment.vehicleName)}`
-      : null,
+    bk.assignment?.vehicleName ? `🚘 Vehicle: ${esc(bk.assignment.vehicleName)}` : null,
     `📅 When: ${span(bk)}`,
     `👥 ${pax(bk)}`,
     stopsListEn(bk, true),
     '-----------------------------'
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function statusChangedMsg(bk, status, byName) {
@@ -245,36 +226,49 @@ function statusChangedMsg(bk, status, byName) {
     stopsListEn(bk, true),
     byName ? `🔧 By: ${esc(byName)}` : null,
     '-----------------------------'
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 /* ──────────────────────────────
- * 🚚 Direct messages to Driver / Messenger (KH)
+ * ✅ NEW: Generic assignee messages (Driver + Messenger)
  * ────────────────────────────── */
-function driverAssignmentDM(bk) {
+function assigneeRoleKh(role) {
+  return String(role || '').toUpperCase() === 'MESSENGER'
+    ? 'អ្នកបើកម៉ូតូ'
+    : 'អ្នកបើកឡាន'
+}
+
+function assigneeTitleKh(role) {
+  return String(role || '').toUpperCase() === 'MESSENGER'
+    ? '📥 <b>ភារកិច្ចដឹកជញ្ជូនថ្មី (ម៉ូតូ)</b>'
+    : '📥 <b>ភារកិច្ចដឹកជញ្ជូនថ្មី</b>'
+}
+
+function assigneeAckLabelEn(role, r) {
+  const who = String(role || '').toUpperCase() === 'MESSENGER' ? 'Messenger' : 'Driver'
+  if (r === 'ACCEPTED') return `✅ ${who} accepted`
+  if (r === 'DECLINED') return `⛔ ${who} declined`
+  return `ℹ️ ${who} ack: ${r}`
+}
+
+function assigneeAssignmentDM(bk, role = 'DRIVER') {
   const note = cut(bk.notes, 180)
   const purpose = purposeLineKh(bk)
   const contact = customerContactLineKh(bk)
 
   return [
-    '📥 <b>ភារកិច្ចដឹកជញ្ជូនថ្មី</b>',
+    assigneeTitleKh(role),
     `• ពេលវេលា៖ ${span(bk)}`,
     stopsListKh(bk, true),
     purpose,
     contact,
     `• ${paxKh(bk)}`,
-    bk.assignment?.vehicleName
-      ? `• ឡាន៖ ${esc(bk.assignment.vehicleName)}`
-      : null,
-    note ? `• កំណត់ចំណាំ៖ ${esc(note)}` : null
-  ]
-    .filter(Boolean)
-    .join('\n')
+    bk.assignment?.vehicleName ? `• ឡាន៖ ${esc(bk.assignment.vehicleName)}` : null
+  ,  note ? `• កំណត់ចំណាំ៖ ${esc(note)}` : null
+  ].filter(Boolean).join('\n')
 }
 
-function driverStatusDM(bk, status) {
+function assigneeStatusDM(bk, role = 'DRIVER', status) {
   const s = String(status || bk.status || '').toUpperCase()
   const labelKh = STATUS_KH[s] || s
   const purpose = purposeLineKh(bk)
@@ -282,55 +276,78 @@ function driverStatusDM(bk, status) {
 
   return [
     `🔔 <b>ស្ថានភាពថ្មី៖ ${esc(labelKh)}</b>`,
+    `• តួនាទី៖ ${esc(assigneeRoleKh(role))}`,
     `• ពេលវេលា៖ ${span(bk)}`,
     stopsListKh(bk, true),
     purpose,
     contact
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean).join('\n')
 }
 
-function driverAckGroupMsg(bk, response) {
-  const r = String(response || bk?.assignment?.driverAck || '').toUpperCase()
-  const label =
-    r === 'ACCEPTED'
-      ? '✅ Driver accepted'
-      : r === 'DECLINED'
-      ? '⛔ Driver declined'
-      : `ℹ️ Driver ack: ${r}`
+function assigneeAckConfirmDM(bk, role = 'DRIVER', response) {
+  const r = String(response || '').toUpperCase()
+  let label
+  if (r === 'ACCEPTED') label = '👍 អ្នកបានព្រមទទួលភារកិច្ច'
+  else if (r === 'DECLINED') label = '👋 អ្នកបានបដិសេធភារកិច្ច'
+  else label = `ℹ️ ការឆ្លើយតប៖ ${r}`
+
+  const purpose = purposeLineKh(bk)
+  const contact = customerContactLineKh(bk)
+
   return [
-    `${label}`,
+    `<b>${esc(label)}</b>`,
+    `• តួនាទី៖ ${esc(assigneeRoleKh(role))}`,
+    `• ពេលវេលា៖ ${span(bk)}`,
+    stopsListKh(bk, true),
+    purpose,
+    contact
+  ].filter(Boolean).join('\n')
+}
+
+function assigneeAckGroupMsg(bk, role = 'DRIVER', response) {
+  const r = String(response || '').toUpperCase()
+  return [
+    assigneeAckLabelEn(role, r),
     '=============================',
-    `👤 Driver: ${esc(bk.assignment?.driverName || '—')}`,
+    role === 'MESSENGER'
+      ? `👤 Messenger: ${esc(bk.assignment?.messengerName || '—')}`
+      : `👤 Driver: ${esc(bk.assignment?.driverName || '—')}`,
     `📅 When: ${span(bk)}`,
     stopsListEn(bk, true),
     '-----------------------------'
   ].join('\n')
 }
 
-function driverAckConfirmDM(bk, response) {
-  const r = String(response || bk?.assignment?.driverAck || '').toUpperCase()
-  let label
-  if (r === 'ACCEPTED') {
-    label = '👍 អ្នកបានព្រមទទួលភារកិច្ច'
-  } else if (r === 'DECLINED') {
-    label = '👋 អ្នកបានបដិសេធភារកិច្ច'
-  } else {
-    label = `ℹ️ ការឆ្លើយតប៖ ${r}`
-  }
-  const purpose = purposeLineKh(bk)
-  const contact = customerContactLineKh(bk)
+/* ──────────────────────────────
+ * Backward compatible Driver / Messenger exports
+ * ────────────────────────────── */
 
-  return [
-    `<b>${esc(label)}</b>`,
-    `• ពេលវេលា៖ ${span(bk)}`,
-    stopsListKh(bk, true),
-    purpose,
-    contact
-  ]
-    .filter(Boolean)
-    .join('\n')
+// Driver DMs (KH)
+function driverAssignmentDM(bk) {
+  return assigneeAssignmentDM(bk, 'DRIVER')
+}
+function driverStatusDM(bk, status) {
+  return assigneeStatusDM(bk, 'DRIVER', status)
+}
+function driverAckConfirmDM(bk, response) {
+  return assigneeAckConfirmDM(bk, 'DRIVER', response)
+}
+function driverAckGroupMsg(bk, response) {
+  return assigneeAckGroupMsg(bk, 'DRIVER', response)
+}
+
+// ✅ NEW: Messenger DMs (KH)
+function messengerAssignmentDM(bk) {
+  return assigneeAssignmentDM(bk, 'MESSENGER')
+}
+function messengerStatusDM(bk, status) {
+  return assigneeStatusDM(bk, 'MESSENGER', status)
+}
+function messengerAckConfirmDM(bk, response) {
+  return assigneeAckConfirmDM(bk, 'MESSENGER', response)
+}
+function messengerAckGroupMsg(bk, response) {
+  return assigneeAckGroupMsg(bk, 'MESSENGER', response)
 }
 
 /* ──────────────────────────────
@@ -349,14 +366,10 @@ function employeeAcceptedDM(bk) {
   return [
     '🚗 <b>Your booking was approved</b>',
     `Driver: ${esc(bk.assignment?.driverName || '—')}`,
-    bk.assignment?.vehicleName
-      ? `Vehicle: ${esc(bk.assignment.vehicleName)}`
-      : null,
+    bk.assignment?.vehicleName ? `Vehicle: ${esc(bk.assignment.vehicleName)}` : null,
     `Date: ${span(bk)}`,
     stopsListEn(bk, true)
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function employeeDeclinedDM(bk, reason, adminName) {
@@ -366,9 +379,7 @@ function employeeDeclinedDM(bk, reason, adminName) {
     `By: ${esc(adminName || 'Admin')}`,
     `Date: ${span(bk)}`,
     stopsListEn(bk, true)
-  ]
-    .filter(Boolean)
-    .join('\n')
+  ].filter(Boolean).join('\n')
 }
 
 function employeeStatusDM(bk, status) {
@@ -410,12 +421,20 @@ module.exports = {
   declinedMsg,
   acceptedAssignedMsg,
   statusChangedMsg,
-  driverAckGroupMsg,
 
-  // driver / messenger DMs (KH)
+  // group ack messages
+  driverAckGroupMsg,
+  messengerAckGroupMsg, // ✅ new
+
+  // driver DMs (KH)
   driverAssignmentDM,
   driverStatusDM,
   driverAckConfirmDM,
+
+  // messenger DMs (KH) ✅ new
+  messengerAssignmentDM,
+  messengerStatusDM,
+  messengerAckConfirmDM,
 
   // Employee messages (EN)
   employeeRequestDM,
