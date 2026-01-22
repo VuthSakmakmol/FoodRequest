@@ -10,39 +10,40 @@ import { useToast } from '@/composables/useToast'
 const router = useRouter()
 const { showToast } = useToast()
 
+/* ✅ keep only wanted statuses on calendar */
+const CALENDAR_STATUSES = ['NEW', 'ACCEPTED', 'CANCELED']
+const isAllowedCalendarStatus = (s) => CALENDAR_STATUSES.includes(String(s || '').toUpperCase())
+
 /* ───────── State ───────── */
 const currentMonth = ref(dayjs())
 const selectedDate = ref(dayjs().format('YYYY-MM-DD'))
-const loading      = ref(false)
-const loadError    = ref('')
-const requests     = ref([])
+const loading = ref(false)
+const loadError = ref('')
+const requests = ref([])
 
 const employeeId = ref((localStorage.getItem('employeeId') || '').toString())
 
-/* ───────── Status colors ───────── */
+/* ───────── Status colors (ONLY wanted) ───────── */
 const STATUS_COLOR = {
-  NEW:       '#94a3b8',
-  ACCEPTED:  '#6366f1',
-  COOKING:   '#f97316',
-  READY:     '#0d9488',
-  DELIVERED: '#16a34a',
-  CANCELED:  '#ef4444'
+  NEW: '#94a3b8',
+  ACCEPTED: '#6366f1',
+  CANCELED: '#ef4444',
 }
 
 /* ───────── Helpers ───────── */
-const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
+const fmtDate = (d) => (d ? dayjs(d).format('YYYY-MM-DD') : '')
 
 const normalize = (o) => ({
-  _id:          String(o?._id || ''),
-  status:       o?.status || 'NEW',
-  orderType:    o?.orderType || 'Daily meal',
-  quantity:     Number(o?.quantity || 0),
-  eatDate:      o?.eatDate || o?.serveDate || null,
+  _id: String(o?._id || ''),
+  status: String(o?.status || 'NEW').toUpperCase(),
+  orderType: o?.orderType || 'Daily meal',
+  quantity: Number(o?.quantity || 0),
+  eatDate: o?.eatDate || o?.serveDate || null,
   eatTimeStart: o?.eatTimeStart || '',
-  eatTimeEnd:   o?.eatTimeEnd || '',
-  meals:        Array.isArray(o?.meals) ? o.meals : [],
-  employee:     o?.employee || {},
-  location:     o?.location || {},
+  eatTimeEnd: o?.eatTimeEnd || '',
+  meals: Array.isArray(o?.meals) ? o.meals : [],
+  employee: o?.employee || {},
+  location: o?.location || {},
 })
 
 const fmtTimeRange = (r) =>
@@ -51,16 +52,14 @@ const fmtTimeRange = (r) =>
     : '—'
 
 const fmtMeals = (r) =>
-  Array.isArray(r.meals) && r.meals.length
-    ? r.meals.join(', ')
-    : '—'
+  Array.isArray(r.meals) && r.meals.length ? r.meals.join(', ') : '—'
 
 /* ───────── Month grid ───────── */
-const monthLabel   = computed(() => currentMonth.value.format('MMMM YYYY'))
+const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
 const startOfMonth = computed(() => currentMonth.value.startOf('month'))
-const endOfMonth   = computed(() => currentMonth.value.endOf('month'))
-const startOfGrid  = computed(() => startOfMonth.value.startOf('week')) // Sunday
-const endOfGrid    = computed(() => endOfMonth.value.endOf('week'))
+const endOfMonth = computed(() => currentMonth.value.endOf('month'))
+const startOfGrid = computed(() => startOfMonth.value.startOf('week')) // Sunday
+const endOfGrid = computed(() => endOfMonth.value.endOf('week'))
 
 const days = computed(() => {
   const arr = []
@@ -72,10 +71,11 @@ const days = computed(() => {
   return arr
 })
 
-/* ───────── Group by date ───────── */
+/* ───────── Group by date (calendar only) ───────── */
 const byDate = computed(() => {
   const map = {}
   for (const r of requests.value) {
+    if (!isAllowedCalendarStatus(r.status)) continue
     const key = fmtDate(r.eatDate)
     if (!key) continue
     if (!map[key]) map[key] = []
@@ -97,7 +97,7 @@ function listForDate(dateStr) {
   })
 }
 
-/* Panel data for selected date */
+/* Panel data for selected date (calendar only) */
 const selectedList = computed(() => listForDate(selectedDate.value))
 
 /* ───────── API ───────── */
@@ -107,18 +107,22 @@ async function loadMonth() {
   requests.value = []
   try {
     const from = startOfGrid.value.format('YYYY-MM-DD')
-    const to   = endOfGrid.value.format('YYYY-MM-DD')
+    const to = endOfGrid.value.format('YYYY-MM-DD')
 
     const { data } = await api.get('/public/food-requests', {
       params: {
         employeeId: employeeId.value || undefined,
         from,
-        to
-      }
+        to,
+      },
     })
 
-    const list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
-    requests.value = (list || []).map(normalize)
+    const list = Array.isArray(data) ? data : data?.rows || data?.data || []
+
+    // ✅ filter here too (so panel + calendar both clean)
+    requests.value = (list || [])
+      .map(normalize)
+      .filter((r) => isAllowedCalendarStatus(r.status))
   } catch (e) {
     console.error('[EmployeeFoodCalendar] loadMonth error:', e)
     loadError.value =
@@ -152,27 +156,26 @@ function goToday() {
 
 /* ───────── Click handlers ───────── */
 function selectDay(d) {
-  const dateStr = d.format('YYYY-MM-DD')
-  selectedDate.value = dateStr
+  selectedDate.value = d.format('YYYY-MM-DD')
 }
 
 /* open history + create for selected date */
 function openHistoryForSelected() {
   router.push({
     name: 'employee-request-history',
-    query: { date: selectedDate.value }
+    query: { date: selectedDate.value },
   })
 }
 function createNewForSelected() {
   router.push({
     name: 'employee-request',
-    query: { eatDate: selectedDate.value }
+    query: { eatDate: selectedDate.value },
   })
 }
 function openRowInHistory(r) {
   router.push({
     name: 'employee-request-history',
-    query: { date: selectedDate.value, focus: r._id }
+    query: { date: selectedDate.value, focus: r._id },
   })
 }
 
@@ -182,12 +185,19 @@ function upsert(doc) {
   const empId = doc?.employee?.employeeId || doc?.employeeId
   if (employeeId.value && String(empId) !== String(employeeId.value)) return
 
-  const idx = requests.value.findIndex(x => x._id === d._id)
+  // ✅ ignore unwanted statuses for calendar view
+  if (!isAllowedCalendarStatus(d.status)) {
+    removeById(d._id)
+    return
+  }
+
+  const idx = requests.value.findIndex((x) => x._id === d._id)
   if (idx === -1) requests.value.push(d)
   else requests.value[idx] = d
 }
+
 function removeById(id) {
-  const idx = requests.value.findIndex(x => x._id === id)
+  const idx = requests.value.findIndex((x) => x._id === id)
   if (idx !== -1) requests.value.splice(idx, 1)
 }
 const onDeleted = ({ _id }) => removeById(String(_id || ''))
@@ -213,18 +223,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="px-1 py-1 sm:px-0 text-slate-900 dark:text-slate-100">
-    <div
-      class="rounded-2xl border border-slate-200 bg-white shadow-sm
-             dark:border-slate-700 dark:bg-slate-900"
-    >
+    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
       <!-- Toolbar (same header colors as EmployeeFoodBooking) -->
       <header
         class="flex flex-wrap items-center justify-between gap-2
                px-3 py-2
                rounded-t-2xl border-b border-slate-400
                bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400
-             px-4 py-3 text-white
-             dark:border-slate-700"
+               px-4 py-3 text-white
+               dark:border-slate-700"
       >
         <div class="flex items-center gap-2">
           <button
@@ -241,7 +248,7 @@ onBeforeUnmount(() => {
               {{ monthLabel }}
             </span>
             <span class="text-[11px] text-slate-100/80">
-              Tap a day to see your meals
+              Tap a day to see your meals (NEW / ACCEPTED / CANCELED)
             </span>
           </div>
         </div>
@@ -279,15 +286,9 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Main layout: calendar + side panel -->
-      <div
-        class="flex flex-col lg:flex-row border-t border-slate-200
-               bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/80"
-      >
+      <div class="flex flex-col lg:flex-row border-t border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/80">
         <!-- Calendar -->
-        <section
-          class="flex-1 border-b border-slate-200 lg:border-b-0 lg:border-r
-                 bg-white dark:bg-slate-950"
-        >
+        <section class="flex-1 border-b border-slate-200 lg:border-b-0 lg:border-r bg-white dark:bg-slate-950">
           <div class="overflow-x-auto">
             <div class="w-full sm:min-w-[800px]">
               <!-- Week header -->
@@ -296,11 +297,7 @@ onBeforeUnmount(() => {
                        bg-slate-100 text-[11px] sm:text-xs font-semibold text-slate-700
                        dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
               >
-                <div
-                  v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']"
-                  :key="w"
-                  class="py-2 text-center"
-                >
+                <div v-for="w in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']" :key="w" class="py-2 text-center">
                   {{ w }}
                 </div>
               </div>
@@ -318,26 +315,20 @@ onBeforeUnmount(() => {
                          hover:bg-sky-50 hover:border-sky-300
                          dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
                   :class="{
-                    'bg-slate-100 opacity-60 dark:bg-slate-900/80':
-                      !d.isSame(currentMonth, 'month'),
-                    'border-sky-500 dark:border-sky-500':
-                      d.isSame(dayjs(), 'day'),
+                    'bg-slate-100 opacity-60 dark:bg-slate-900/80': !d.isSame(currentMonth, 'month'),
+                    'border-sky-500 dark:border-sky-500': d.isSame(dayjs(), 'day'),
                     'ring-2 ring-sky-500 ring-offset-1 ring-offset-slate-50 dark:ring-offset-slate-900':
                       selectedDate === d.format('YYYY-MM-DD')
                   }"
                   @click="selectDay(d)"
                 >
                   <div class="flex items-center justify-between gap-1">
-                    <span
-                      class="text-[11px] sm:text-xs font-semibold"
-                      :class="{ 'text-red-600 dark:text-red-400': d.day() === 0 }"
-                    >
+                    <span class="text-[11px] sm:text-xs font-semibold" :class="{ 'text-red-600 dark:text-red-400': d.day() === 0 }">
                       {{ d.date() }}
                     </span>
                     <span
                       v-if="d.isSame(dayjs(), 'day')"
-                      class="rounded-full bg-sky-600 px-1.5 py-0.5
-                             text-[9px] sm:text-[10px] font-semibold text-white"
+                      class="rounded-full bg-sky-600 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-semibold text-white"
                     >
                       Today
                     </span>
@@ -364,59 +355,42 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Legend -->
+          <!-- Legend (ONLY wanted) -->
           <div
             class="flex flex-wrap items-center justify-center gap-2
                    border-t border-slate-200 bg-slate-50 px-3 py-2
                    text-[10px] sm:text-xs text-slate-600
                    dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
           >
-            <div
-              v-for="(color, status) in STATUS_COLOR"
-              :key="status"
-              class="flex items-center gap-1.5"
-            >
-              <span
-                class="h-2.5 w-2.5 rounded-full border border-slate-800"
-                :style="{ backgroundColor: color }"
-              />
+            <div v-for="(color, status) in STATUS_COLOR" :key="status" class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 rounded-full border border-slate-800" :style="{ backgroundColor: color }" />
               <span>{{ status }}</span>
             </div>
           </div>
         </section>
 
         <!-- Selected-day panel -->
-        <aside
-          class="w-full lg:w-80 xl:w-96 bg-slate-50/95
-                 border-t border-slate-200 lg:border-t-0 lg:border-l
-                 px-3 py-3 text-xs
-                 dark:bg-slate-950 dark:border-slate-700"
-        >
+        <aside class="w-full lg:w-80 xl:w-96 bg-slate-50/95 border-t border-slate-200 lg:border-t-0 lg:border-l px-3 py-3 text-xs dark:bg-slate-950 dark:border-slate-700">
           <div class="flex items-start justify-between gap-2">
             <div>
               <div class="text-[13px] font-semibold text-slate-900 dark:text-slate-50">
                 {{ selectedDate }}
               </div>
               <p class="text-[11px] text-slate-500 dark:text-slate-400">
-                {{ selectedList.length }}
-                request{{ selectedList.length === 1 ? '' : 's' }} on this day
+                {{ selectedList.length }} request{{ selectedList.length === 1 ? '' : 's' }} on this day
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                class="rounded-full border border-sky-600 bg-sky-600
-                       px-2.5 py-1 text-[11px] font-semibold text-white
-                       hover:bg-sky-500"
+                class="rounded-full border border-sky-600 bg-sky-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-sky-500"
                 @click="createNewForSelected"
               >
                 ➕ New
               </button>
               <button
                 type="button"
-                class="rounded-full border border-slate-500 bg-white
-                       px-2.5 py-1 text-[11px] font-medium text-slate-800
-                       hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-100"
+                class="rounded-full border border-slate-500 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-800 hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-100"
                 @click="openHistoryForSelected"
               >
                 History
@@ -426,9 +400,7 @@ onBeforeUnmount(() => {
 
           <div
             v-if="!selectedList.length"
-            class="mt-3 rounded-lg border border-dashed border-slate-500
-                   bg-white px-3 py-2 text-[11px] text-slate-600
-                   dark:bg-slate-950 dark:text-slate-300"
+            class="mt-3 rounded-lg border border-dashed border-slate-500 bg-white px-3 py-2 text-[11px] text-slate-600 dark:bg-slate-950 dark:text-slate-300"
           >
             No meal request on this date yet.
             Click <span class="font-semibold">New</span> to create one.
@@ -438,17 +410,12 @@ onBeforeUnmount(() => {
             <article
               v-for="r in selectedList"
               :key="r._id"
-              class="flex flex-col gap-1 rounded-xl border border-slate-600
-                     bg-white px-3 py-2 text-[11px]
-                     shadow-sm
-                     dark:border-slate-600 dark:bg-slate-950"
+              class="flex flex-col gap-1 rounded-xl border border-slate-600 bg-white px-3 py-2 text-[11px] shadow-sm dark:border-slate-600 dark:bg-slate-950"
             >
               <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <span
-                    class="inline-flex items-center rounded-full border border-slate-700
-                           px-2 py-0.5 text-[10px] font-semibold text-slate-900
-                           dark:border-slate-400 dark:text-slate-100"
+                    class="inline-flex items-center rounded-full border border-slate-700 px-2 py-0.5 text-[10px] font-semibold text-slate-900 dark:border-slate-400 dark:text-slate-100"
                     :style="{ backgroundColor: (STATUS_COLOR[r.status] || '#e2e8f0') + '33' }"
                   >
                     {{ r.status }}
@@ -473,9 +440,7 @@ onBeforeUnmount(() => {
                 <span class="min-w-[60px] text-slate-500">Location</span>
                 <span class="font-medium text-slate-900 dark:text-slate-50">
                   {{ r?.location?.kind || '—' }}
-                  <span v-if="r?.location?.other">
-                    — {{ r.location.other }}
-                  </span>
+                  <span v-if="r?.location?.other"> — {{ r.location.other }}</span>
                 </span>
               </div>
 
@@ -484,8 +449,7 @@ onBeforeUnmount(() => {
                 <span class="font-medium text-slate-900 dark:text-slate-50">
                   {{ r?.employee?.name || '—' }}
                   <span class="block text-[10px] font-normal text-slate-500 dark:text-slate-400">
-                    ID {{ r?.employee?.employeeId || '—' }} •
-                    {{ r?.employee?.department || '—' }}
+                    ID {{ r?.employee?.employeeId || '—' }} • {{ r?.employee?.department || '—' }}
                   </span>
                 </span>
               </div>

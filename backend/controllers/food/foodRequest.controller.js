@@ -1,669 +1,480 @@
 // backend/controllers/food/foodRequest.controller.js
-const mongoose = require('mongoose');
-const dayjs = require('dayjs');
-const FoodRequest = require('../../models/food/FoodRequest');
-const RecurringTemplate = require('../../models/food/RecurringTemplate');
-const EmployeeDirectory = require('../../models/EmployeeDirectory');
-const User = require('../../models/User');
+const createError = require('http-errors')
+const FoodRequest = require('../../models/food/FoodRequest')
+const RecurringTemplate = require('../../models/food/RecurringTemplate')
 
-// 🔔 Telegram notify
-const { sendToAll } = require('../../services/telegram.service');
-// reuse transport DM sender (generic Telegram DM)
-const { sendDM } = require('../../services/transport.telegram.service');
+// ✅ Telegram notify (single message per important change)
+const { notifyFood } = require('../../services/food.telegram.notify')
 
-const {
-  // Group EN
-  newRequestMsg,
-  acceptedMsg,
-  cookingMsg,
-  readyMsg,
-  deliveredMsg,
-  cancelMsg,
-  // Chef KH
-  chefNewRequestDM,
-  chefAcceptedDM,
-  chefCookingDM,
-  chefReadyDM,
-  chefDeliveredDM,
-  chefCancelDM,
-  // Employee EN
-  employeeNewRequestDM,
-  employeeAcceptedDM,
-  employeeCookingDM,
-  employeeReadyDM,
-  employeeDeliveredDM,
-  employeeCancelDM,
-} = require('../../services/telegram.messages');
+let EmployeeDir = null
+try { EmployeeDir = require('../../models/EmployeeDirectory') } catch { EmployeeDir = null }
+try { if (!EmployeeDir) EmployeeDir = require('../../models/Employee') } catch { /* ignore */ }
 
-const isObjectId = (v) => mongoose.Types.ObjectId.isValid(v);
-const normDate = (d) => { const v = new Date(d); return isNaN(v.getTime()) ? null : v };
+// ✅ Keep only your real statuses
+const STATUS = ['NEW', 'ACCEPTED', 'CANCELED']
 
-// ───────── constants ─────────
-const MENU_ENUM = ['Standard','Vegetarian','Vegan','No pork','No beef'];
-const BASE_MENU = 'Standard';
+function escapeRegExp(s = '') {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
-// Limits
-const MAX_RECURRING_DAYS = Number(process.env.MAX_RECURRING_DAYS || 30);
+function ymdFromDate(d) {
+  const dt = new Date(d)
+  if (Number.isNaN(dt.getTime())) return ''
+  const yyyy = String(dt.getFullYear())
+  const mm = String(dt.getMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
 
-// Holidays: comma-separated YYYY-MM-DD (e.g., 2025-01-01,2025-04-14)
-const HOLIDAY_SET = new Set(
-  String(process.env.HOLIDAYS || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean)
-);
+// ✅ transition rules (3-status)
+function canTransition(from, to) {
+  if (!STATUS.includes(to)) return false
+  if (from === to) return true
+  if (from === 'NEW') return to === 'ACCEPTED' || to === 'CANCELED'
+  if (from === 'ACCEPTED') return to === 'CANCELED'
+  return false
+}
 
-// Khmer rule: Sunday = holiday; Saturday is NOT
-const isSunday = (dateStr) => dayjs(dateStr).day() === 0;
-const isHoliday = (dateStr) => isSunday(dateStr) || HOLIDAY_SET.has(dateStr);
-
-// ───────── realtime helper ─────────
-function broadcastFood(io, event, payload) {
-  if (!io || !event) return;
+function broadcast(req, event, payload) {
   try {
-    io.emit(event, payload);
-  } catch (e) {
-    console.error('[food realtime] broadcast error:', e?.message || e);
-  }
+    const io = req.io || req.app?.get?.('io')
+    if (io) io.emit(event, payload)
+  } catch (_) {}
 }
 
-// ───────── helpers ─────────
-function coerceMenuCounts(input, qty) {
-  let items = [];
-
-  if (Array.isArray(input)) {
-    items = input
-      .map(x => ({ choice: x?.choice, count: Number(x?.count || 0) }))
-      .filter(x => MENU_ENUM.includes(x.choice) && x.count > 0);
-  } else if (input && typeof input === 'object') {
-    items = Object.entries(input)
-      .map(([choice, cnt]) => ({ choice, count: Number(cnt || 0) }))
-      .filter(x => MENU_ENUM.includes(x.choice) && x.count > 0);
-  }
-
-  const map = new Map();
-  for (const it of items) map.set(it.choice, (map.get(it.choice) || 0) + it.count);
-  items = Array.from(map, ([choice, count]) => ({ choice, count }));
-
-  const q = Number(qty || 0);
-  const specials = items
-    .filter(x => x.choice !== BASE_MENU)
-    .reduce((s, x) => s + x.count, 0);
-
-  if (specials > q) {
-    return {
-      ok: false,
-      reason: 'SPECIALS_EXCEED_QTY',
-      counts: items.filter(x => x.choice !== BASE_MENU),
-      total: specials,
-      delta: specials - q
-    };
-  }
-
-  const standard = q - specials;
-  const iStd = items.findIndex(x => x.choice === BASE_MENU);
-  if (iStd === -1) items.push({ choice: BASE_MENU, count: standard });
-  else items[iStd].count = standard;
-
-  items = items.filter(x => x.count > 0);
-  const total = items.reduce((s, x) => s + x.count, 0);
-  return { ok: total === q, reason: null, counts: items, total, delta: total - q };
-}
-
-function coerceDietaryCounts(input) {
-  let arr = [];
-  if (Array.isArray(input)) {
-    arr = input
-      .map(x => ({
-        allergen: x?.allergen,
-        count: Number(x?.count || 0),
-        menu: x?.menu || BASE_MENU,
-      }))
-      .filter(x => x.allergen && x.count > 0 && MENU_ENUM.includes(x.menu));
-  } else if (input && typeof input === 'object') {
-    arr = Object.entries(input)
-      .map(([allergen, v]) => ({
-        allergen,
-        count: Number(v?.count || 0),
-        menu: v?.menu || BASE_MENU,
-      }))
-      .filter(x => x.allergen && x.count > 0 && MENU_ENUM.includes(x.menu));
-  }
-
-  const key = (x) => `${x.menu}__${x.allergen}`;
-  const map = new Map();
-  for (const it of arr) {
-    const k = key(it);
-    map.set(k, {
-      allergen: it.allergen,
-      menu: it.menu,
-      count: (map.get(k)?.count || 0) + it.count
-    });
-  }
-  return Array.from(map.values());
-}
-
-function buildEatDateRange(query) {
-  const from = query.from || query.dateStart;
-  const to   = query.to   || query.dateEnd;
-  if (!from && !to) return null;
-
-  const range = {};
-  if (from) {
-    const f = new Date(`${from}T00:00:00.000Z`);
-    if (!isNaN(f.getTime())) range.$gte = f;
-  }
-  if (to) {
-    const t = new Date(`${to}T23:59:59.999Z`);
-    if (!isNaN(t.getTime())) range.$lte = t;
-  }
-  return Object.keys(range).length ? range : null;
-}
-
-function clampEndDate(eatDate, endDate) {
-  const s = dayjs(eatDate).startOf('day');
-  let e = dayjs(endDate).startOf('day');
-  if (!e.isValid() || e.isBefore(s)) e = s;
-  const maxE = s.add(Math.max(MAX_RECURRING_DAYS - 1, 0), 'day');
-  if (e.isAfter(maxE)) e = maxE;
-  return e.format('YYYY-MM-DD');
-}
-
-/* ───────── Telegram helpers ───────── */
-
-// Get all active CHEF users with telegramChatId
-async function getChefChatIds() {
-  const chefs = await User.find(
-    {
-      role: 'CHEF',
-      isActive: true,
-      telegramChatId: { $exists: true, $ne: '' },
-    },
-    { telegramChatId: 1, loginId: 1 }
-  ).lean();
-
-  return chefs.map(u => String(u.telegramChatId));
-}
-
-// Send Khmer message to all chefs
-async function notifyChefs(text) {
-  if (!text) return;
+/* ──────────────────────────────────────────────
+   PUBLIC: createRequest  ✅ NO LOGIN REQUIRED
+   POST /api/public/food-requests
+────────────────────────────────────────────── */
+async function createRequest(req, res, next) {
   try {
-    const ids = await getChefChatIds();
-    if (!ids.length) return;
-    await Promise.all(ids.map(id => sendDM(id, text)));
-  } catch (e) {
-    console.warn('[Telegram] chef DM failed:', e?.message);
-  }
-}
+    const b = req.body || {}
 
-// Send English message to employee (requester)
-async function notifyEmployeeByDoc(doc, builderFn) {
-  if (!doc || typeof builderFn !== 'function') return;
-  const empId = doc.employee?.employeeId;
-  if (!empId) return;
+    const employeeId = String(b.employeeId || '').trim()
+    if (!employeeId) throw createError(400, 'employeeId is required')
 
-  try {
-    const emp = await EmployeeDirectory.findOne(
-      { employeeId: empId, isActive: true },
-      { telegramChatId: 1, name: 1 }
-    ).lean();
-
-    if (!emp || !emp.telegramChatId) return;
-
-    const chatId = String(emp.telegramChatId);
-    const text = builderFn(doc);
-    if (!text) return;
-    await sendDM(chatId, text);
-  } catch (e) {
-    console.warn('[Telegram] employee DM failed:', e?.message);
-  }
-}
-
-// ───────── CREATE (public) ─────────
-exports.createRequest = async (req, res, next) => {
-  try {
-    const body = req.body;
-
-    // ---- validations ----
-    const employeeId = body?.employee?.employeeId || body.employeeId;
-    if (!employeeId) return res.status(400).json({ message: 'Invalid Employee ID' });
-
-    const emp = await EmployeeDirectory.findOne({ employeeId, isActive: true });
-    if (!emp) return res.status(400).json({ message: 'Invalid Employee ID' });
-
-    if (!Array.isArray(body.meals) || body.meals.length === 0)
-      return res.status(400).json({ message: 'At least one meal is required' });
-
-    const eatDate = normDate(body.eatDate);
-    if (!eatDate) return res.status(400).json({ message: 'Eat date is required/invalid' });
-
-    if (!Array.isArray(body.menuChoices) || body.menuChoices.length === 0)
-      return res.status(400).json({ message: 'At least one menu choice is required' });
-
-    if (!body?.location?.kind) return res.status(400).json({ message: 'Location.kind is required' });
-
-    const qty = Number(body.quantity || 0);
-    if (!qty || qty < 1) return res.status(400).json({ message: 'Quantity must be >= 1' });
-
-    const normMenus = coerceMenuCounts(body.menuCounts, qty);
-    if (!normMenus.ok) {
-      return res.status(400).json({
-        message: 'Menu counts invalid',
-        reason: normMenus.reason,
-        detail: { total: normMenus.total, delta: normMenus.delta, counts: normMenus.counts }
-      });
+    // Fill employee snapshot from directory (recommended)
+    let emp = null
+    if (EmployeeDir) {
+      emp = await EmployeeDir.findOne({ employeeId }).lean()
     }
 
-    const dietaryCounts = coerceDietaryCounts(body.dietaryCounts);
+    const employee = {
+      employeeId,
+      name: String(emp?.name || b.name || '').trim(),
+      department: String(emp?.department || b.department || '').trim(),
+    }
+    if (!employee.name) throw createError(400, 'Employee name not found (directory) and not provided')
+    if (!employee.department) throw createError(400, 'Employee department not found (directory) and not provided')
 
-    // Common payload bits (will be reused for each occurrence)
-    const baseDoc = {
-      orderDate: new Date(),
+    const eatDate = new Date(b.eatDate)
+    if (Number.isNaN(eatDate.getTime())) throw createError(400, 'eatDate is invalid')
 
-      // eatDate will be overridden per day in recurring flow
+    const doc = await FoodRequest.create({
+      employee,
+      orderType: b.orderType,
+      meals: b.meals,
+      quantity: Number(b.quantity || 1),
       eatDate,
-      eatTimeStart: body.eatTimeStart || null,
-      eatTimeEnd: body.eatTimeEnd || null,
+      eatTimeStart: b.eatTimeStart || '',
+      eatTimeEnd: b.eatTimeEnd || '',
+      location: {
+        kind: b?.location?.kind,
+        other: b?.location?.other || '',
+      },
 
-      employee: { employeeId: emp.employeeId, name: emp.name, department: emp.department },
-      orderType: body.orderType,
-      meals: body.meals,
-      quantity: qty,
-      location: body.location,
+      menuChoices: Array.isArray(b.menuChoices) ? b.menuChoices : [],
+      menuCounts: Array.isArray(b.menuCounts) ? b.menuCounts : [],
 
-      menuChoices: body.menuChoices,
-      menuCounts: normMenus.counts,
+      dietary: Array.isArray(b.dietary) ? b.dietary : [],
+      dietaryCounts: Array.isArray(b.dietaryCounts) ? b.dietaryCounts : [],
+      dietaryOther: b.dietaryOther || '',
 
-      dietary: Array.isArray(body.dietary) ? body.dietary : [],
-      dietaryCounts,
-      dietaryOther: body.dietaryOther || '',
-
-      specialInstructions: body.specialInstructions || '',
+      specialInstructions: b.specialInstructions || '',
 
       status: 'NEW',
-      statusHistory: [{ status: 'NEW', at: new Date() }],
-      notified: { deliveredAt: null, reminderSentAt: null },
-    };
-
-    // ─────────────────────────────────────────────────────────────
-    // RECURRING FLOW (CarBooking-style: create ALL bookings now)
-    // ─────────────────────────────────────────────────────────────
-    if (body?.recurring?.enabled) {
-      if (!body.endDate && !body.recurring.endDate) {
-        return res.status(400).json({ message: 'End Date is required when Recurring = Yes' });
-      }
-
-      const eatISO = dayjs(eatDate).format('YYYY-MM-DD');
-      const endDateISO = clampEndDate(eatISO, body.recurring.endDate || body.endDate);
-      const endDateObj = new Date(`${endDateISO}T00:00:00.000Z`);
-      const skipHolidays = !!body.recurring.skipHolidays;
-
-      // "Series" header
-      const tpl = await RecurringTemplate.create({
-        owner: {
-          employeeId: emp.employeeId,
-          name: emp.name,
-          department: emp.department
-        },
-        orderType: body.orderType,
-        meals: body.meals,
-        quantity: qty,
-
-        location: body.location,
-        menuChoices: body.menuChoices,
-        menuCounts: normMenus.counts,
-
-        dietary: Array.isArray(body.dietary) ? body.dietary : [],
-        dietaryCounts,
-        dietaryOther: body.dietaryOther || '',
-
-        frequency: 'Daily',
-        startDate: new Date(`${eatISO}T00:00:00.000Z`),
-        endDate: endDateObj,
-        skipHolidays,
-
-        eatTimeStart: body.eatTimeStart || null,
-        eatTimeEnd: body.eatTimeEnd || null,
-
-        timezone: 'Asia/Phnom_Penh',
-        status: 'ACTIVE',
-        nextRunAt: null,      // we expand immediately
-        skipDates: []
-      });
-
-      // Build all occurrences from eatDate → endDate (inclusive)
-      const docsToCreate = [];
-      let cursor = dayjs(eatISO);
-      const last = dayjs(endDateISO);
-
-      while (cursor.isSame(last) || cursor.isBefore(last)) {
-        const iso = cursor.format('YYYY-MM-DD');
-        const holiday = isHoliday(iso);
-
-        if (skipHolidays && holiday) {
-          cursor = cursor.add(1, 'day');
-          continue;
-        }
-
-        const eatDateObj = new Date(`${iso}T00:00:00.000Z`);
-
-        const payload = {
-          ...baseDoc,
-          eatDate: eatDateObj,
-          recurring: {
-            enabled: true,
-            frequency: 'Daily',
-            endDate: endDateObj,
-            skipHolidays,
-            parentId: tpl._id,
-            source: 'RECURRING',
-            templateId: tpl._id,
-            occurrenceDate: iso
-          }
-        };
-
-        docsToCreate.push(payload);
-        cursor = cursor.add(1, 'day');
-      }
-
-      if (!docsToCreate.length) {
-        return res.status(400).json({
-          message: 'No days to create (all dates skipped by holiday rules).'
-        });
-      }
-
-      const createdDocs = await FoodRequest.insertMany(docsToCreate, { ordered: true });
-
-      try {
-        for (const doc of createdDocs) {
-          await sendToAll(newRequestMsg(doc));                 // Group EN
-          await notifyChefs(chefNewRequestDM(doc));            // Chef KH
-          await notifyEmployeeByDoc(doc, employeeNewRequestDM);// Employee EN
-          broadcastFood(req.io, 'foodRequest:created', doc);
-        }
-      } catch (e) {
-        console.warn('[Telegram] new recurring requests notify failed:', e?.message);
-      }
-
-      return res.status(201).json({
-        ok: true,
-        recurring: true,
-        count: createdDocs.length,
-        templateId: tpl._id,
-        first: createdDocs[0],
-      });
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // NON-RECURRING FLOW
-    // ─────────────────────────────────────────────────────────────
-    const doc = await FoodRequest.create({
-      ...baseDoc,
+      statusHistory: [{ status: 'NEW', by: 'PUBLIC', at: new Date() }],
+      cancelReason: '',
       recurring: {
-        enabled: false,
-        frequency: null,
-        endDate: null,
-        skipHolidays: false,
-        parentId: null,
-        source: 'MANUAL'
-      }
-    });
+        enabled: !!b?.recurring?.enabled,
+        frequency: b?.recurring?.frequency || 'Daily',
+        endDate: b?.recurring?.endDate ? new Date(b.recurring.endDate) : undefined,
+        skipHolidays: b?.recurring?.skipHolidays !== undefined ? !!b.recurring.skipHolidays : true,
+        source: b?.recurring?.enabled ? 'RECURRING' : 'MANUAL',
+      },
+    })
 
-    try {
-      await sendToAll(newRequestMsg(doc));                  // Group EN
-      await notifyChefs(chefNewRequestDM(doc));             // Chef KH
-      await notifyEmployeeByDoc(doc, employeeNewRequestDM); // Employee EN
-    } catch (e) {
-      console.warn('[Telegram] new request notify failed:', e?.message);
+    // If recurring enabled: create template + link first occurrence
+    if (doc?.recurring?.enabled) {
+      const tpl = await RecurringTemplate.create({
+        owner: employee,
+        orderType: doc.orderType,
+        meals: doc.meals,
+        quantity: doc.quantity,
+        location: doc.location,
+        menuChoices: doc.menuChoices,
+        menuCounts: doc.menuCounts,
+        dietary: doc.dietary,
+        dietaryOther: doc.dietaryOther,
+        dietaryCounts: doc.dietaryCounts,
+
+        frequency: doc.recurring.frequency || 'Daily',
+        startDate: doc.eatDate,
+        endDate: doc.recurring.endDate,
+        skipHolidays: !!doc.recurring.skipHolidays,
+
+        eatTimeStart: doc.eatTimeStart || null,
+        eatTimeEnd: doc.eatTimeEnd || null,
+
+        status: 'ACTIVE',
+        nextRunAt: null,
+        skipDates: [],
+      })
+
+      doc.recurring.source = 'RECURRING'
+      doc.recurring.templateId = tpl._id
+      doc.recurring.occurrenceDate = ymdFromDate(doc.eatDate)
+      await doc.save()
     }
 
-    broadcastFood(req.io, 'foodRequest:created', doc);
-    return res.status(201).json(doc);
+    const fresh = await FoodRequest.findById(doc._id).lean()
 
+    // ✅ ONE socket event for create
+    broadcast(req, 'foodRequest:created', fresh)
+
+    // ✅ ONE telegram notify for create
+    try {
+      await notifyFood('FOOD_REQUEST_CREATED', { requestId: doc._id })
+    } catch (e) {
+      console.warn('[foodRequest] notifyFood create failed:', e?.message)
+    }
+
+    return res.status(201).json(fresh)
   } catch (err) {
-    next(err);
+    next(err)
   }
-};
+}
 
-// ───────── LIST (public/employee/admin) ─────────
-exports.listRequests = async (req, res, next) => {
+/* ──────────────────────────────────────────────
+   PUBLIC/CHEF/ADMIN: listRequests
+   GET /api/public/food-requests
+   GET /api/chef/food-requests
+   GET /api/admin/food-requests
+────────────────────────────────────────────── */
+async function listRequests(req, res, next) {
   try {
-    const q = {};
-    if (req.query.status) q.status = req.query.status;
-    if (req.query.employeeId) q['employee.employeeId'] = req.query.employeeId;
+    const { status, employeeId, q, from, to, page = 1, limit = 50 } = req.query || {}
+    const filter = {}
 
-    if (req.query.q) {
-      const rx = new RegExp(req.query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-      q.$or = [
+    if (status && status !== 'ALL') filter.status = String(status).toUpperCase()
+    if (employeeId) filter['employee.employeeId'] = String(employeeId)
+
+    if (q && String(q).trim()) {
+      const rx = new RegExp(escapeRegExp(String(q).trim()), 'i')
+      filter.$or = [
         { orderType: rx },
-        { menuChoices: rx },
         { 'location.kind': rx },
         { specialInstructions: rx },
-        { requestId: rx }
-      ];
+        { menuChoices: rx },
+        { requestId: rx },
+        { 'employee.employeeId': rx },
+        { 'employee.name': rx },
+      ]
     }
 
-    const range = buildEatDateRange(req.query);
-    if (range) q.eatDate = range;
-
-    const page  = Math.max(parseInt(req.query.page  || '1', 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10), 1), 200);
-    const skip  = (page - 1) * limit;
-
-    const [rows, total] = await Promise.all([
-      FoodRequest.find(q).sort({ eatDate: 1, createdAt: -1 }).skip(skip).limit(limit),
-      FoodRequest.countDocuments(q),
-    ]);
-
-    res.json({ rows, page, limit, total });
-  } catch (err) { next(err); }
-};
-
-// ───────── UPDATE STATUS (admin/chef) ─────────
-exports.updateStatus = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!isObjectId(id)) return res.status(400).json({ message: 'Invalid ID' });
-
-    const { status, reason } = req.body || {};
-    const allowed = ['NEW', 'ACCEPTED', 'COOKING', 'READY', 'DELIVERED', 'CANCELED'];
-    if (!allowed.includes(status)) return res.status(400).json({ message: 'Invalid status' });
-
-    let doc = await FoodRequest.findByIdAndUpdate(
-      id,
-      {
-        $set: { status },
-        $push: { statusHistory: { status, by: req.user?.id || req.user?.loginId || 'admin', at: new Date() } }
-      },
-      { new: true, runValidators: true }
-    );
-    if (!doc) return res.status(404).json({ message: 'Not found' });
-
-    // 🔔 Notify depending on status
-    try {
-      if (status === 'ACCEPTED') {
-        await sendToAll(acceptedMsg(doc));
-        await notifyChefs(chefAcceptedDM(doc));
-        await notifyEmployeeByDoc(doc, employeeAcceptedDM);
+    if (from || to) {
+      const range = {}
+      if (from) {
+        const d = new Date(from)
+        if (!Number.isNaN(d.getTime())) range.$gte = d
       }
-
-      if (status === 'COOKING') {
-        await sendToAll(cookingMsg(doc));
-        await notifyChefs(chefCookingDM(doc));
-        await notifyEmployeeByDoc(doc, employeeCookingDM);
-      }
-
-      if (status === 'READY') {
-        await sendToAll(readyMsg(doc));
-        await notifyChefs(chefReadyDM(doc));
-        await notifyEmployeeByDoc(doc, employeeReadyDM);
-      }
-
-      if (status === 'DELIVERED') {
-        const alreadyNotified = !!doc?.notified?.deliveredAt;
-        if (!alreadyNotified) {
-          await sendToAll(deliveredMsg(doc));
-          await notifyChefs(chefDeliveredDM(doc));
-          await notifyEmployeeByDoc(doc, employeeDeliveredDM);
-
-          doc.notified = doc.notified || {};
-          doc.notified.deliveredAt = new Date();
-          await doc.save();
+      if (to) {
+        const dt = new Date(to)
+        if (!Number.isNaN(dt.getTime())) {
+          dt.setHours(23, 59, 59, 999)
+          range.$lte = dt
         }
       }
+      if (Object.keys(range).length) filter.eatDate = range
+    }
 
-      if (status === 'CANCELED') {
-        doc.cancelReason = reason || '';
-        await doc.save();
+    const p = Math.max(parseInt(page, 10) || 1, 1)
+    const lim = Math.min(Math.max(parseInt(limit, 10) || 50, 1), 200)
+    const skip = (p - 1) * lim
 
-        await sendToAll(cancelMsg(doc));
-        await notifyChefs(chefCancelDM(doc));
-        await notifyEmployeeByDoc(doc, employeeCancelDM);
-      }
+    const [rows, total] = await Promise.all([
+      FoodRequest.find(filter).sort({ createdAt: -1 }).skip(skip).limit(lim).lean(),
+      FoodRequest.countDocuments(filter),
+    ])
+
+    res.json({ rows, page: p, limit: lim, total })
+  } catch (err) {
+    next(err)
+  }
+}
+
+/* ──────────────────────────────────────────────
+   ADMIN/CHEF: updateStatus
+   PATCH /api/admin/food-requests/:id/status
+   PATCH /api/chef/food-requests/:id/status
+
+   ✅ Emits ONLY ONE socket event:
+      - foodRequest:statusChanged (includes oldStatus/newStatus)
+   ✅ Sends ONLY ONE telegram message for a real change
+────────────────────────────────────────────── */
+async function updateStatus(req, res, next) {
+  try {
+    const id = req.params.id
+    const target = String(req.body?.status || '').trim().toUpperCase()
+    const reason = String(req.body?.reason || '').trim()
+
+    if (!STATUS.includes(target)) throw createError(400, `Invalid status: ${target}`)
+
+    const doc = await FoodRequest.findById(id)
+    if (!doc) throw createError(404, 'Not found')
+
+    const oldStatus = String(doc.status || '').toUpperCase()
+
+    if (!canTransition(oldStatus, target)) {
+      throw createError(400, `Invalid transition: ${oldStatus} → ${target}`)
+    }
+
+    // ✅ No change => no broadcast, no telegram
+    if (oldStatus === target) {
+      const same = await FoodRequest.findById(id).lean()
+      return res.json(same)
+    }
+
+    if (target === 'CANCELED') {
+      doc.cancelReason = reason || doc.cancelReason || ''
+    }
+
+    doc.status = target
+    doc.statusHistory = Array.isArray(doc.statusHistory) ? doc.statusHistory : []
+    doc.statusHistory.push({
+      status: target,
+      by: String(req.user?.role || req.user?.loginId || 'SYSTEM'),
+      at: new Date(),
+    })
+
+    await doc.save()
+    const fresh = await FoodRequest.findById(id).lean()
+
+    // ✅ ONE socket event only (prevents double UI update)
+    broadcast(req, 'foodRequest:statusChanged', {
+      ...fresh,
+      oldStatus,
+      newStatus: target,
+    })
+
+    // ✅ ONE telegram notify only
+    try {
+      await notifyFood('FOOD_STATUS_UPDATED', {
+        requestId: id,
+        oldStatus,
+        newStatus: target,
+      })
     } catch (e) {
-      console.warn('[Telegram] notify failed:', e?.message);
+      console.warn('[foodRequest] notifyFood status failed:', e?.message)
     }
 
-    // 🔴 realtime status change to everyone
-    broadcastFood(req.io, 'foodRequest:statusChanged', doc);
+    return res.json(fresh)
+  } catch (err) {
+    next(err)
+  }
+}
 
-    res.json(doc);
-  } catch (err) { next(err); }
-};
-
-// ───────── GENERAL EDIT (admin/chef) ─────────
-exports.updateRequest = async (req, res, next) => {
+/* ──────────────────────────────────────────────
+   ADMIN/CHEF: updateRequest (optional edits)
+   ✅ emits: foodRequest:updated (ONLY for real edits)
+────────────────────────────────────────────── */
+async function updateRequest(req, res, next) {
   try {
-    const { id } = req.params;
-    if (!isObjectId(id)) return res.status(400).json({ message: 'Invalid ID' });
+    const id = req.params.id
+    const doc = await FoodRequest.findById(id)
+    if (!doc) throw createError(404, 'Not found')
 
-    const current = await FoodRequest.findById(id);
-    if (!current) return res.status(404).json({ message: 'Not found' });
+    // recommended: only allow edit when NEW
+    if (String(doc.status) !== 'NEW') throw createError(400, 'Only NEW requests can be edited')
 
-    const body = req.body || {};
-    const {
-      orderType, meals, eatDate, eatTimeStart, eatTimeEnd,
-      quantity, location,
-      menuChoices, menuCounts,
-      dietary, dietaryCounts, dietaryOther,
-      specialInstructions, recurring
-    } = body;
+    const b = req.body || {}
 
-    const nextQty = (quantity !== undefined) ? Number(quantity) : Number(current.quantity);
-    if (!nextQty || nextQty < 1) return res.status(400).json({ message: 'Quantity must be >= 1' });
-
-    const $set = {};
-    if (orderType !== undefined)       $set.orderType = orderType;
-    if (Array.isArray(meals))          $set.meals = meals;
-    if (eatDate !== undefined)         $set.eatDate = normDate(eatDate);
-    if (eatTimeStart !== undefined)    $set.eatTimeStart = eatTimeStart;
-    if (eatTimeEnd !== undefined)      $set.eatTimeEnd = eatTimeEnd;
-    if (quantity !== undefined)        $set.quantity = nextQty;
-    if (location !== undefined)        $set.location = location;
-    if (Array.isArray(menuChoices))    $set.menuChoices = menuChoices;
-
-    if (menuCounts !== undefined) {
-      const normMenus = coerceMenuCounts(menuCounts, nextQty);
-      if (!normMenus.ok) {
-        return res.status(400).json({
-          message: 'Menu counts invalid',
-          reason: normMenus.reason,
-          detail: { total: normMenus.total, delta: normMenus.delta, counts: normMenus.counts }
-        });
-      }
-      $set.menuCounts = normMenus.counts;
+    if (b.eatDate) {
+      const eatDate = new Date(b.eatDate)
+      if (Number.isNaN(eatDate.getTime())) throw createError(400, 'eatDate is invalid')
+      doc.eatDate = eatDate
     }
 
-    if (dietaryCounts !== undefined)   $set.dietaryCounts = coerceDietaryCounts(dietaryCounts);
+    if (b.orderType) doc.orderType = b.orderType
+    if (Array.isArray(b.meals)) doc.meals = b.meals
+    if (b.quantity != null) doc.quantity = Number(b.quantity || 1)
 
-    if (Array.isArray(dietary))        $set.dietary = dietary;
-    if (dietaryOther !== undefined)    $set.dietaryOther = dietaryOther;
-    if (specialInstructions !== undefined) $set.specialInstructions = specialInstructions;
-
-    // Recurring edit (only tweak flags, keep templateId/occurrenceDate/source)
-    if (recurring !== undefined) {
-      const curRec = current.recurring || {};
-      if (recurring?.enabled) {
-        const eatStr = dayjs($set.eatDate || current.eatDate).format('YYYY-MM-DD');
-        const endStr = clampEndDate(eatStr, recurring.endDate || eatStr);
-        const endDateObj = new Date(`${endStr}T00:00:00.000Z`);
-
-        $set.recurring = {
-          ...curRec,
-          enabled: true,
-          frequency: 'Daily',
-          endDate: endDateObj,
-          skipHolidays: !!recurring.skipHolidays,
-          parentId: curRec.parentId || null,
-        };
-      } else {
-        $set.recurring = {
-          ...curRec,
-          enabled: false,
-          frequency: null,
-          endDate: null,
-          skipHolidays: false,
-        };
+    if (b.location) {
+      doc.location = {
+        kind: b.location.kind,
+        other: b.location.other || '',
       }
     }
 
-    const doc = await FoodRequest.findByIdAndUpdate(
-      id,
-      { $set },
-      { new: true, runValidators: true }
-    );
-    if (!doc) return res.status(404).json({ message: 'Not found' });
+    if (Array.isArray(b.menuChoices)) doc.menuChoices = b.menuChoices
+    if (Array.isArray(b.menuCounts)) doc.menuCounts = b.menuCounts
 
-    // 🔴 realtime general update
-    broadcastFood(req.io, 'foodRequest:updated', doc);
+    if (Array.isArray(b.dietary)) doc.dietary = b.dietary
+    if (Array.isArray(b.dietaryCounts)) doc.dietaryCounts = b.dietaryCounts
+    if (b.dietaryOther != null) doc.dietaryOther = String(b.dietaryOther || '')
 
-    res.json(doc);
-  } catch (err) { next(err); }
-};
+    if (b.specialInstructions != null) doc.specialInstructions = String(b.specialInstructions || '')
 
-// ───────── DELETE (admin/chef) ─────────
-exports.deleteRequest = async (req, res, next) => {
+    await doc.save()
+    const fresh = await FoodRequest.findById(id).lean()
+
+    // ✅ use updated only for edit changes
+    broadcast(req, 'foodRequest:updated', fresh)
+    res.json(fresh)
+  } catch (err) {
+    next(err)
+  }
+}
+
+/* ──────────────────────────────────────────────
+   ADMIN/CHEF: deleteRequest
+────────────────────────────────────────────── */
+async function deleteRequest(req, res, next) {
   try {
-    const { id } = req.params;
-    if (!isObjectId(id)) return res.status(400).json({ message: 'Invalid ID' });
+    const id = req.params.id
+    const doc = await FoodRequest.findById(id)
+    if (!doc) throw createError(404, 'Not found')
 
-    const doc = await FoodRequest.findByIdAndDelete(id);
-    if (!doc) return res.status(404).json({ message: 'Not found' });
+    // safe rule
+    if (String(doc.status) !== 'NEW') throw createError(400, 'Only NEW requests can be deleted')
 
-    // 🔴 realtime delete (send minimal payload)
-    broadcastFood(req.io, 'foodRequest:deleted', { _id: id, employee: doc.employee });
+    await FoodRequest.deleteOne({ _id: id })
+    broadcast(req, 'foodRequest:deleted', { _id: id })
+    res.json({ ok: true })
+  } catch (err) {
+    next(err)
+  }
+}
 
-    res.json({ ok: true });
-  } catch (err) { next(err); }
-};
-
-// ───────── DASHBOARD ─────────
-exports.dashboard = async (_req, res, next) => {
+/* ──────────────────────────────────────────────
+   ADMIN/CHEF: dashboard (simple)
+────────────────────────────────────────────── */
+async function dashboard(req, res, next) {
   try {
-    const countsAgg = await FoodRequest.aggregate([
-      { $group: { _id: "$status", count: { $sum: 1 } } }
-    ]);
-    const counts = countsAgg.reduce((a, x) => { a[x._id] = x.count; return a }, {});
+    const { from, to } = req.query || {}
+    const match = {}
 
-    const perDay = await FoodRequest.aggregate([
-      { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$eatDate" } }, count: { $sum: 1 } } },
-      { $sort: { _id: 1 } }
-    ]);
+    if (from || to) {
+      const range = {}
+      if (from) {
+        const d = new Date(from)
+        if (!Number.isNaN(d.getTime())) range.$gte = d
+      }
+      if (to) {
+        const dt = new Date(to)
+        if (!Number.isNaN(dt.getTime())) {
+          dt.setHours(23, 59, 59, 999)
+          range.$lte = dt
+        }
+      }
+      if (Object.keys(range).length) match.eatDate = range
+    }
 
-    const meals = await FoodRequest.aggregate([
-      { $unwind: "$meals" },
-      { $group: { _id: "$meals", count: { $sum: "$quantity" } } },
-      { $sort: { count: -1 } }
-    ]);
+    const byStatus = await FoodRequest.aggregate([
+      { $match: match },
+      { $group: { _id: '$status', count: { $sum: 1 } } },
+      { $project: { _id: 0, status: '$_id', count: 1 } },
+      { $sort: { status: 1 } },
+    ])
 
-    const menuTypes = await FoodRequest.aggregate([
-      { $unwind: "$menuCounts" },
-      { $group: { _id: "$menuCounts.choice", count: { $sum: "$menuCounts.count" } } }
-    ]);
+    res.json({
+      totals: { all: byStatus.reduce((s, x) => s + x.count, 0) },
+      byStatus,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
 
-    const recent = await FoodRequest.find({}).sort({ createdAt: -1 }).limit(10);
+/* ──────────────────────────────────────────────
+   PUBLIC: cancelRequest (employee)
+   PATCH /api/public/food-requests/:id/cancel
 
-    res.json({ counts, perDay, meals, menuTypes, recent });
-  } catch (err) { next(err); }
-};
+   ✅ Only allow cancel when status === NEW
+   ✅ (Recommended) verify employeeId matches snapshot
+   ✅ Broadcast: foodRequest:statusChanged
+   ✅ Telegram: FOOD_STATUS_UPDATED
+────────────────────────────────────────────── */
+async function cancelRequestPublic(req, res, next) {
+  try {
+    const id = req.params.id
+
+    // recommended: require employeeId to prevent canceling others
+    const employeeId = String(req.body?.employeeId || req.query?.employeeId || '').trim()
+    if (!employeeId) throw createError(400, 'employeeId is required')
+
+    const doc = await FoodRequest.findById(id)
+    if (!doc) throw createError(404, 'Not found')
+
+    const oldStatus = String(doc.status || '').toUpperCase()
+
+    // ensure owner
+    const ownerId = String(doc?.employee?.employeeId || '').trim()
+    if (ownerId && ownerId !== employeeId) {
+      throw createError(403, 'You cannot cancel this request (not owner)')
+    }
+
+    // only cancel if NEW
+    if (oldStatus !== 'NEW') {
+      throw createError(400, 'Only NEW requests can be canceled')
+    }
+
+    const target = 'CANCELED'
+
+    // update doc (no reason needed)
+    doc.status = target
+    doc.cancelReason = '' // keep empty
+    doc.statusHistory = Array.isArray(doc.statusHistory) ? doc.statusHistory : []
+    doc.statusHistory.push({
+      status: target,
+      by: `EMPLOYEE:${employeeId}`,
+      at: new Date(),
+    })
+
+    await doc.save()
+
+    const fresh = await FoodRequest.findById(id).lean()
+
+    // ✅ ONE socket event
+    broadcast(req, 'foodRequest:statusChanged', {
+      ...fresh,
+      oldStatus,
+      newStatus: target,
+    })
+
+    // ✅ ONE telegram notify
+    try {
+      await notifyFood('FOOD_STATUS_UPDATED', {
+        requestId: id,
+        oldStatus,
+        newStatus: target,
+      })
+    } catch (e) {
+      console.warn('[foodRequest] notifyFood cancel failed:', e?.message)
+    }
+
+    return res.json(fresh)
+  } catch (err) {
+    next(err)
+  }
+}
+
+module.exports = {
+  createRequest,
+  listRequests,
+  updateStatus,
+  updateRequest,
+  deleteRequest,
+  dashboard,
+  cancelRequestPublic,
+}

@@ -9,39 +9,42 @@ import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
-const auth   = useAuth()
+const auth = useAuth()
 const { showToast } = useToast()
 
-/* ───────── Status colors ───────── */
+/**
+ * ✅ Calendar should ONLY show the statuses we want (same as Chef):
+ * NEW, ACCEPTED, CANCELED
+ *
+ * (You can change this list later if you want.)
+ */
+const ALLOWED_STATUSES = ['NEW', 'ACCEPTED', 'CANCELED']
+
+/* ───────── Status colors (ONLY allowed) ───────── */
 const STATUS_COLOR = {
-  NEW:       '#94a3b8',
-  ACCEPTED:  '#6366f1',
-  COOKING:   '#f97316',
-  READY:     '#0d9488',
-  DELIVERED: '#16a34a',
-  CANCELED:  '#ef4444',
+  NEW: '#94a3b8',
+  ACCEPTED: '#6366f1',
+  CANCELED: '#ef4444'
 }
 
 /* ───────── state ───────── */
 const currentMonth = ref(dayjs())
 const selectedDate = ref(dayjs().format('YYYY-MM-DD'))
 
-const loading   = ref(false)
+const loading = ref(false)
 const loadError = ref('')
-const rows      = ref([]) // normalized food requests
+const rows = ref([]) // normalized food requests
 
 /* ───────── helpers ───────── */
 const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '')
 
 const fmtTimeRange = r =>
-  (r?.eatTimeStart || r?.eatTimeEnd)
+  r?.eatTimeStart || r?.eatTimeEnd
     ? [r.eatTimeStart || '', r.eatTimeEnd || ''].filter(Boolean).join(' – ')
     : '—'
 
-const fmtMeals = (r) =>
-  Array.isArray(r.meals) && r.meals.length
-    ? r.meals.join(', ')
-    : '—'
+const fmtMeals = r =>
+  Array.isArray(r.meals) && r.meals.length ? r.meals.join(', ') : '—'
 
 const asArray = v => (Array.isArray(v) ? v : [])
 
@@ -74,14 +77,17 @@ const normalize = o => {
     updatedAt: o?.updatedAt || null,
     employee: o?.employee || {},
     eatTimeStart: o?.eatTimeStart || '',
-    eatTimeEnd: o?.eatTimeEnd || '',
+    eatTimeEnd: o?.eatTimeEnd || ''
   }
 }
+
+const isAllowed = r => ALLOWED_STATUSES.includes(String(r?.status || ''))
 
 /* ───────── group by date ───────── */
 const byDate = computed(() => {
   const map = {}
   for (const r of rows.value) {
+    if (!isAllowed(r)) continue
     const key = fmtDate(r.eatDate) || fmtDate(r.serveDate)
     if (!key) continue
     if (!map[key]) map[key] = []
@@ -91,7 +97,7 @@ const byDate = computed(() => {
 })
 
 function listForDate(dateStr) {
-  const list = byDate.value[dateStr] || []
+  const list = (byDate.value[dateStr] || []).filter(isAllowed)
   return list.slice().sort((a, b) => {
     const tA = (a.eatTimeStart || '') + (a.eatTimeEnd || '')
     const tB = (b.eatTimeStart || '') + (b.eatTimeEnd || '')
@@ -106,12 +112,12 @@ function listForDate(dateStr) {
 /* panel for selected date */
 const selectedList = computed(() => listForDate(selectedDate.value))
 
-/* ───────── month grid (same logic as employee calendar) ───────── */
-const monthLabel   = computed(() => currentMonth.value.format('MMMM YYYY'))
+/* ───────── month grid ───────── */
+const monthLabel = computed(() => currentMonth.value.format('MMMM YYYY'))
 const startOfMonth = computed(() => currentMonth.value.startOf('month'))
-const endOfMonth   = computed(() => currentMonth.value.endOf('month'))
-const startOfGrid  = computed(() => startOfMonth.value.startOf('week')) // Sunday
-const endOfGrid    = computed(() => endOfMonth.value.endOf('week'))
+const endOfMonth = computed(() => currentMonth.value.endOf('month'))
+const startOfGrid = computed(() => startOfMonth.value.startOf('week')) // Sunday
+const endOfGrid = computed(() => endOfMonth.value.endOf('week'))
 
 const days = computed(() => {
   const arr = []
@@ -124,35 +130,34 @@ const days = computed(() => {
 })
 
 /* ───────── API ───────── */
-async function loadMonth () {
+async function loadMonth() {
   loading.value = true
   loadError.value = ''
   try {
     const from = startOfGrid.value.format('YYYY-MM-DD')
-    const to   = endOfGrid.value.format('YYYY-MM-DD')
+    const to = endOfGrid.value.format('YYYY-MM-DD')
 
-    let { data } = await api.get('/admin/food-requests', {
-      params: { from, to }
-    })
+    let { data } = await api.get('/admin/food-requests', { params: { from, to } })
+    let list = Array.isArray(data) ? data : data?.rows || data?.data || []
 
-    let list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
+    // Fallback if API ignores from/to
     if (!Array.isArray(list) || list.length === 0) {
       const resp2 = await api.get('/admin/food-requests')
       data = resp2.data
-      list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
+      list = Array.isArray(data) ? data : data?.rows || data?.data || []
     }
 
-    rows.value = (list || []).map(normalize)
+    // ✅ filter out unwanted statuses
+    rows.value = (list || []).map(normalize).filter(isAllowed)
   } catch (e) {
     console.error('[AdminFoodCalendar] loadMonth error:', e)
-    loadError.value =
-      e?.response?.data?.message || e?.message || 'Failed to load food calendar.'
+    loadError.value = e?.response?.data?.message || e?.message || 'Failed to load food calendar.'
     rows.value = []
     showToast({
       type: 'error',
       title: 'Load failed',
       message: loadError.value,
-      timeout: 2500,
+      timeout: 2500
     })
   } finally {
     loading.value = false
@@ -162,6 +167,13 @@ async function loadMonth () {
 /* ───────── realtime upsert/remove ───────── */
 function upsertRow(doc) {
   const d = normalize(doc)
+
+  // ✅ if status is not allowed, remove it from calendar
+  if (!isAllowed(d)) {
+    removeRowById(d._id)
+    return
+  }
+
   const i = rows.value.findIndex(x => x._id === d._id)
   if (i === -1) rows.value.push(d)
   else rows.value[i] = d
@@ -172,13 +184,13 @@ function removeRowById(id) {
 }
 
 /* ───────── navigation ───────── */
-function nextMonth () {
+function nextMonth() {
   currentMonth.value = currentMonth.value.add(1, 'month')
 }
-function prevMonth () {
+function prevMonth() {
   currentMonth.value = currentMonth.value.subtract(1, 'month')
 }
-function goToday () {
+function goToday() {
   currentMonth.value = dayjs()
   selectedDate.value = dayjs().format('YYYY-MM-DD')
 }
@@ -194,13 +206,13 @@ function openAdminListForSelected() {
       type: 'info',
       title: 'No requests',
       message: `No meal requests on ${selectedDate.value}.`,
-      timeout: 2000,
+      timeout: 2000
     })
     return
   }
 
   router.push({
-    name: 'admin-requests', // AdminFoodBooking view
+    name: 'admin-requests',
     query: { date: selectedDate.value }
   })
 }
@@ -220,11 +232,12 @@ onMounted(async () => {
 
   await loadMonth()
 
-  socket.on('foodRequest:created', (doc) => doc && upsertRow(doc))
-  socket.on('foodRequest:updated', (doc) => doc && upsertRow(doc))
-  socket.on('foodRequest:statusChanged', (doc) => doc && upsertRow(doc))
+  socket.on('foodRequest:created', doc => doc && upsertRow(doc))
+  socket.on('foodRequest:updated', doc => doc && upsertRow(doc))
+  socket.on('foodRequest:statusChanged', doc => doc && upsertRow(doc))
   socket.on('foodRequest:deleted', ({ _id }) => removeRowById(String(_id || '')))
 })
+
 onBeforeUnmount(() => {
   socket.off('foodRequest:created')
   socket.off('foodRequest:updated')
@@ -287,7 +300,6 @@ watch(currentMonth, () => loadMonth())
             ›
           </button>
         </div>
-
 
         <div class="flex items-center gap-2">
           <button
@@ -387,9 +399,10 @@ watch(currentMonth, () => loadMonth())
                   </div>
 
                   <div class="mt-1 space-y-0.5">
+                    <!-- ✅ only allowed statuses are present in byDate -->
                     <div
                       v-for="(r, i) in byDate[d.format('YYYY-MM-DD')] || []"
-                      :key="i"
+                      :key="r._id || i"
                       class="flex items-center gap-1 rounded-full border border-slate-900/60
                              px-1 py-0.5 text-[9px] sm:text-[10px] text-white truncate"
                       :style="{ backgroundColor: STATUS_COLOR[r.status] || '#94a3b8' }"
@@ -407,7 +420,7 @@ watch(currentMonth, () => loadMonth())
             </div>
           </div>
 
-          <!-- Legend -->
+          <!-- Legend (ONLY allowed) -->
           <div
             class="flex flex-wrap items-center justify-center gap-2
                    border-t border-slate-200 bg-slate-50 px-3 py-2
@@ -415,15 +428,15 @@ watch(currentMonth, () => loadMonth())
                    dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
           >
             <div
-              v-for="(color, status) in STATUS_COLOR"
-              :key="status"
+              v-for="(color, st) in STATUS_COLOR"
+              :key="st"
               class="flex items-center gap-1.5"
             >
               <span
                 class="h-2.5 w-2.5 rounded-full border border-slate-800"
                 :style="{ backgroundColor: color }"
               />
-              <span>{{ status }}</span>
+              <span>{{ st }}</span>
             </div>
           </div>
         </section>
@@ -441,10 +454,10 @@ watch(currentMonth, () => loadMonth())
                 {{ selectedDate }}
               </div>
               <p class="text-[11px] text-slate-500 dark:text-slate-400">
-                {{ selectedList.length }}
-                request{{ selectedList.length === 1 ? '' : 's' }} on this day
+                {{ selectedList.length }} request{{ selectedList.length === 1 ? '' : 's' }} on this day
               </p>
             </div>
+
             <div class="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
@@ -490,6 +503,7 @@ watch(currentMonth, () => loadMonth())
                     {{ r.orderType }}
                   </span>
                 </div>
+
                 <div class="text-right text-[11px] text-slate-500 dark:text-slate-400">
                   {{ fmtTimeRange(r) }}
                 </div>
@@ -506,9 +520,7 @@ watch(currentMonth, () => loadMonth())
                 <span class="min-w-[70px] text-slate-500">Location</span>
                 <span class="font-medium text-slate-900 dark:text-slate-50">
                   {{ r?.location?.kind || '—' }}
-                  <span v-if="r?.location?.other">
-                    — {{ r.location.other }}
-                  </span>
+                  <span v-if="r?.location?.other"> — {{ r.location.other }}</span>
                 </span>
               </div>
 
@@ -517,8 +529,7 @@ watch(currentMonth, () => loadMonth())
                 <span class="font-medium text-slate-900 dark:text-slate-50">
                   {{ r?.employee?.name || '—' }}
                   <span class="block text-[10px] font-normal text-slate-500 dark:text-slate-400">
-                    ID {{ r?.employee?.employeeId || '—' }} •
-                    {{ r?.employee?.department || '—' }}
+                    ID {{ r?.employee?.employeeId || '—' }} • {{ r?.employee?.department || '—' }}
                   </span>
                 </span>
               </div>

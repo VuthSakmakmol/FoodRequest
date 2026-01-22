@@ -1,4 +1,16 @@
-<!-- src/views/admin/foodBooking/AdminFoodBooking.vue -->
+<!-- src/views/admin/foodBooking/AdminFoodBooking.vue
+  ✅ FOLLOW YOUR FILE (keep structure, sockets, excel export, UI)
+  ✅ CHANGE ONLY STATUS SYSTEM (simplify)
+     - statuses: ['ACTIVE','ALL','NEW','ACCEPTED','CANCELED']
+     - workflow: NEW -> ACCEPTED or CANCELED
+     - ACCEPTED -> (no next steps) (or allow CANCELED if you want; I keep it simple)
+  ✅ Keep ACTIVE filter behavior, but now ACTIVE = NOT CANCELED (and optionally NOT ACCEPTED? -> no, ACTIVE should include NEW+ACCEPTED)
+  ✅ Keep cancel reason modal
+  ✅ Keep API paths as you already use:
+       GET    /admin/food-requests
+       PATCH  /admin/food-requests/:id/status
+-->
+
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -31,24 +43,28 @@ const page    = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
-const statuses = ['ACTIVE','ALL','NEW','ACCEPTED','COOKING','READY','DELIVERED','CANCELED']
+/**
+ * ✅ Simplified statuses:
+ * - ACTIVE (virtual): show not-canceled
+ * - ALL: show everything
+ * - NEW / ACCEPTED / CANCELED only
+ */
+const statuses = ['ACTIVE', 'ALL', 'NEW', 'ACCEPTED', 'CANCELED']
 
 /* Status chip + button colors (Tailwind classes) */
 const STATUS_CHIP_CLASS = {
   NEW:       'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900',
-  ACCEPTED:  'bg-indigo-500 text-white',
-  COOKING:   'bg-orange-500 text-white',
-  READY:     'bg-teal-500 text-white',
-  DELIVERED: 'bg-emerald-500 text-white',
+  ACCEPTED:  'bg-emerald-600 text-white',
   CANCELED:  'bg-red-500 text-white',
 }
-const statusChipClass = s => STATUS_CHIP_CLASS[s] || 'bg-slate-300 text-slate-800'
+const statusChipClass = (s) => STATUS_CHIP_CLASS[s] || 'bg-slate-300 text-slate-800'
 
-const fmtDate = d => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
-const normalize = o => ({
+const fmtDate = (d) => (d ? dayjs(d).format('YYYY-MM-DD') : '—')
+const normalize = (o) => ({
   ...o,
   _id: String(o?._id || ''),
   requestId: String(o?.requestId || ''),
+  status: String(o?.status || 'NEW'),
   orderType: o?.orderType || '',
   quantity: Number(o?.quantity || 0),
   meals: Array.isArray(o?.meals) ? o.meals : [],
@@ -93,7 +109,7 @@ function dietaryByMenu(r) {
 
 /* ───────── expand/collapse ───────── */
 const expanded = ref(new Set())
-const isExpanded = id => expanded.value.has(id)
+const isExpanded = (id) => expanded.value.has(id)
 function toggleExpanded(id) {
   const s = new Set(expanded.value)
   s.has(id) ? s.delete(id) : s.add(id)
@@ -104,11 +120,14 @@ function toggleExpanded(id) {
 function upsertRow(doc) {
   const d = normalize(doc)
   const i = rows.value.findIndex(r => r._id === d._id)
-  if (status.value === 'ACTIVE' && ['DELIVERED','CANCELED'].includes(d.status)) {
+
+  // ✅ ACTIVE virtual filter: hide canceled
+  if (status.value === 'ACTIVE' && d.status === 'CANCELED') {
     if (i !== -1) rows.value.splice(i, 1)
     expanded.value.delete(d._id)
     return
   }
+
   if (i === -1) rows.value.unshift(d)
   else rows.value[i] = d
 }
@@ -123,13 +142,22 @@ async function load() {
   try {
     const params = new URLSearchParams()
     if (q.value.trim()) params.set('q', q.value.trim())
-    if (status.value && status.value !== 'ALL' && status.value !== 'ACTIVE') params.set('status', status.value)
+
+    // ✅ Your backend may accept status query.
+    // For ACTIVE we do NOT pass status (we filter client-side), same as your old logic.
+    if (status.value && status.value !== 'ALL' && status.value !== 'ACTIVE') {
+      params.set('status', status.value)
+    }
+
     if (fromDate.value) params.set('from', fromDate.value)
     if (toDate.value) params.set('to', toDate.value)
 
     const { data } = await api.get(`/admin/food-requests?${params.toString()}`)
     let list = Array.isArray(data) ? data : (data?.rows || data?.data || [])
-    if (status.value === 'ACTIVE') list = list.filter(r => !['DELIVERED','CANCELED'].includes(r.status))
+
+    // ✅ ACTIVE: show NEW + ACCEPTED, hide CANCELED
+    if (status.value === 'ACTIVE') list = list.filter(r => r?.status !== 'CANCELED')
+
     rows.value = list.map(normalize)
     page.value = 1
   } catch (e) {
@@ -138,7 +166,9 @@ async function load() {
       title: 'Load failed',
       message: e?.response?.data?.message || e.message || 'Could not load requests.',
     })
-  } finally { loading.value = false }
+  } finally {
+    loading.value = false
+  }
 }
 
 /* ───────── lifecycle ───────── */
@@ -225,21 +255,22 @@ const pagedRows = computed(() => {
   return rows.value.slice(start, start + perPage.value)
 })
 
-/* ───────── workflow ───────── */
+/* ───────── workflow (SIMPLIFIED) ─────────
+   NEW -> ACCEPTED or CANCELED
+   ACCEPTED -> (no further step)
+   CANCELED -> (no further step)
+*/
 const nextSteps = (s) => {
   switch (s) {
-    case 'NEW':       return ['ACCEPTED','CANCELED']
-    case 'ACCEPTED':  return ['COOKING','CANCELED']
-    case 'COOKING':   return ['READY','CANCELED']
-    case 'READY':     return ['DELIVERED','CANCELED']
-    default:          return []
+    case 'NEW': return ['ACCEPTED', 'CANCELED']
+    default:    return []
   }
 }
 
 /* Cancel reason modal */
 const cancelModalOpen = ref(false)
-const cancelModalRow   = ref(null)
-const cancelReason     = ref('')
+const cancelModalRow  = ref(null)
+const cancelReason    = ref('')
 const cancelReasonOptions = [
   { value: 'not_have',       label: 'Not have' },
   { value: 'not_enough',     label: 'Not enough' },
@@ -286,7 +317,8 @@ async function doUpdateStatus(row, target, reason = '') {
   try {
     const url = `/admin/food-requests/${encodeURIComponent(row._id)}/status`
     const payload = { status: target }
-    if (target === 'CANCELED') payload.reason = reason
+    // ✅ align with your controller: send cancelReason
+    if (target === 'CANCELED') payload.cancelReason = reason
 
     const { data: updated } = await api.patch(url, payload)
     upsertRow(updated)
@@ -492,11 +524,7 @@ async function exportExcel() {
                  outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
                  dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
         >
-          <option
-            v-for="s in statuses"
-            :key="s"
-            :value="s"
-          >
+          <option v-for="s in statuses" :key="s" :value="s">
             {{ s }}
           </option>
         </select>
@@ -525,11 +553,7 @@ async function exportExcel() {
                  outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
                  dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
         >
-          <option
-            v-for="opt in perPageOptions"
-            :key="opt"
-            :value="opt"
-          >
+          <option v-for="opt in perPageOptions" :key="opt" :value="opt">
             {{ opt }}
           </option>
         </select>
@@ -679,13 +703,10 @@ async function exportExcel() {
                   v-for="s in nextSteps(r.status)"
                   :key="s"
                   type="button"
-                  class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold
-                         border transition"
+                  class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border transition"
                   :class="s === 'CANCELED'
                     ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-600 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60'
-                    : s === 'DELIVERED'
-                      ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60'
-                      : 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/60'"
+                    : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60'"
                   @click="handleStatusClick(r, s)"
                 >
                   {{ s }}
@@ -710,10 +731,7 @@ async function exportExcel() {
                       <strong>Quantity</strong> {{ r.quantity }}
                     </div>
                     <div class="children">
-                      <template
-                        v-for="[menuName, menuCnt] in menuMap(r)"
-                        :key="menuName"
-                      >
+                      <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                         <div class="tree-node">
                           <div class="node-label">
                             <span class="arrow">→</span>
@@ -724,9 +742,7 @@ async function exportExcel() {
                             class="children"
                           >
                             <div
-                              v-for="[allergen, aCnt] in Array.from(
-                                (dietaryByMenu(r).get(menuName) || new Map()).entries()
-                              )"
+                              v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
                               :key="menuName + '_' + allergen"
                               class="tree-node leaf"
                             >
@@ -766,10 +782,7 @@ async function exportExcel() {
               </tr>
             </thead>
             <tbody>
-              <tr
-                v-if="loading"
-                class="bg-white dark:bg-slate-900"
-              >
+              <tr v-if="loading" class="bg-white dark:bg-slate-900">
                 <td
                   colspan="10"
                   class="border border-slate-300 px-2 py-4 text-center text-xs text-slate-500
@@ -802,13 +815,10 @@ async function exportExcel() {
                           v-for="s in nextSteps(r.status)"
                           :key="s"
                           type="button"
-                          class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold
-                                 border transition"
+                          class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold border transition"
                           :class="s === 'CANCELED'
                             ? 'border-red-300 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-600 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-900/60'
-                            : s === 'DELIVERED'
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60'
-                              : 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-600 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/60'"
+                            : 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60'"
                           @click="handleStatusClick(r, s)"
                         >
                           {{ s }}
@@ -850,24 +860,15 @@ async function exportExcel() {
                     </td>
                   </tr>
 
-                  <tr
-                    v-if="isExpanded(r._id)"
-                    class="bg-slate-50 dark:bg-slate-900/80"
-                  >
-                    <td
-                      colspan="10"
-                      class="border border-slate-300 px-3 py-2 dark:border-slate-700"
-                    >
+                  <tr v-if="isExpanded(r._id)" class="bg-slate-50 dark:bg-slate-900/80">
+                    <td colspan="10" class="border border-slate-300 px-3 py-2 dark:border-slate-700">
                       <div class="tree text-[12px]">
                         <div class="tree-node root">
                           <div class="node-label">
                             <strong>Quantity</strong> {{ r.quantity }}
                           </div>
                           <div class="children">
-                            <template
-                              v-for="[menuName, menuCnt] in menuMap(r)"
-                              :key="menuName"
-                            >
+                            <template v-for="[menuName, menuCnt] in menuMap(r)" :key="menuName">
                               <div class="tree-node">
                                 <div class="node-label">
                                   <span class="arrow">→</span>
@@ -878,9 +879,7 @@ async function exportExcel() {
                                   class="children"
                                 >
                                   <div
-                                    v-for="[allergen, aCnt] in Array.from(
-                                      (dietaryByMenu(r).get(menuName) || new Map()).entries()
-                                    )"
+                                    v-for="[allergen, aCnt] in Array.from((dietaryByMenu(r).get(menuName) || new Map()).entries())"
                                     :key="menuName + '_' + allergen"
                                     class="tree-node leaf"
                                   >
@@ -999,11 +998,7 @@ async function exportExcel() {
                      dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="" disabled>Select reason</option>
-              <option
-                v-for="opt in cancelReasonOptions"
-                :key="opt.value"
-                :value="opt.value"
-              >
+              <option v-for="opt in cancelReasonOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
             </select>
