@@ -35,7 +35,7 @@ const AssignmentSchema = new mongoose.Schema({
 
 /* ───────── Main Booking Schema ───────── */
 const CarBookingSchema = new mongoose.Schema({
-  seriesId: { type: mongoose.Schema.Types.ObjectId, ref: 'TransportationRecurringSeries' },
+  seriesId: { type: mongoose.Schema.Types.ObjectId, ref: 'TransportationRecurringSeries', default: null },
   idempotencyKey: { type: String, default: undefined },
 
   employeeId: { type: String, required: true, index: true },
@@ -85,9 +85,19 @@ CarBookingSchema.index({ employeeId: 1, createdAt: -1 })
 CarBookingSchema.index({ 'assignment.driverId': 1, tripDate: 1 })
 CarBookingSchema.index({ 'assignment.messengerId': 1, tripDate: 1 })
 
+// ✅ HARD STOP duplicates for recurring series: only 1 booking per (seriesId + tripDate)
+CarBookingSchema.index(
+  { seriesId: 1, tripDate: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { seriesId: { $type: 'objectId' } },
+  }
+)
+
+// ✅ Keep idempotencyKey unique (optional but good)
 CarBookingSchema.index(
   { idempotencyKey: 1 },
-  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string', $ne: '' } } }
+  { unique: true, sparse: true }
 )
 
 /* ───────── Validators ───────── */
@@ -105,6 +115,4 @@ CarBookingSchema.methods.hasAirport = function () {
   )
 }
 
-
 module.exports = mongoose.model('CarBooking', CarBookingSchema, 'car_bookings')
-

@@ -13,11 +13,7 @@ const { getHolidaySet, isSunday } = require('../../utils/holidays')
 const { notify } = require('../../services/transport.telegram.notify')
 const { broadcastCarBooking, ROOMS, emitToRoom } = require('../../utils/realtime')
 
-// ✅ single source of truth for recurring key + fallback protection
-const {
-  makeIdempotencyKey,
-  naturalKeyFilter,
-} = require('../../utils/transportRecurringKey')
+const { makeIdempotencyKey } = require('../../utils/transportRecurringKey')
 
 const ZONE = 'Asia/Phnom_Penh'
 const MAX_DAYS = Number(process.env.MAX_RECURRING_DAYS || 30)
@@ -32,8 +28,20 @@ function addMinutes(hhmm, minutes = 60) {
   return base.add(Number(minutes || 0), 'minute').format('HH:mm')
 }
 
+function buildHolidaySet({ dates, skipHolidays }) {
+  return getHolidaySet().then((base) => {
+    const holidays = new Set(base)
+    if (skipHolidays) {
+      for (const d of dates) {
+        if (isSunday(d)) holidays.add(d)
+      }
+    }
+    return holidays
+  })
+}
+
 /* ======================================================================== */
-/* CREATE SERIES (and materialize CarBooking docs, skipping holidays/Sundays) */
+/* CREATE SERIES (and materialize CarBooking docs ONCE, immediately) */
 async function createSeries(req, res) {
   try {
     const io = req.io
@@ -56,93 +64,67 @@ async function createSeries(req, res) {
 
     body.timeStart = padTimeHHMM(body.timeStart)
 
-    // ✅ allow timeEnd omitted if durationMin is provided
+    // allow timeEnd omitted if durationMin is provided
     body.timeEnd = body.timeEnd
       ? padTimeHHMM(body.timeEnd)
       : addMinutes(body.timeStart, body.durationMin)
 
     // validations
     if (!Array.isArray(body.stops) || body.stops.length === 0) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'At least one destination (stop) is required.' })
+      return res.status(400).json({ ok: false, error: 'At least one destination (stop) is required.' })
     }
     for (const s of body.stops) {
       if (!s?.destination) {
-        return res.status(400).json({
-          ok: false,
-          error: 'destination is required for each stop.',
-        })
+        return res.status(400).json({ ok: false, error: 'destination is required for each stop.' })
       }
       if (s.destination === 'Other' && !s.destinationOther) {
-        return res.status(400).json({
-          ok: false,
-          error: 'destinationOther is required when destination is "Other".',
-        })
+        return res.status(400).json({ ok: false, error: 'destinationOther is required when destination is "Other".' })
       }
     }
 
     if (!body.startDate || !body.endDate) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'startDate and endDate are required.' })
+      return res.status(400).json({ ok: false, error: 'startDate and endDate are required.' })
     }
 
     if (!body.timeStart || !body.timeEnd) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'timeStart and timeEnd are required.' })
+      return res.status(400).json({ ok: false, error: 'timeStart and timeEnd are required.' })
     }
 
     if (body.timeStart >= body.timeEnd) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'timeEnd must be after timeStart.' })
+      return res.status(400).json({ ok: false, error: 'timeEnd must be after timeStart.' })
     }
 
     let s = dayjs.tz(body.startDate, ZONE).startOf('day')
     let e = dayjs.tz(body.endDate, ZONE).startOf('day')
     if (!s.isValid() || !e.isValid()) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'Invalid start/end date.' })
+      return res.status(400).json({ ok: false, error: 'Invalid start/end date.' })
     }
 
+    // clamp to MAX_DAYS
     const spanDays = e.diff(s, 'day') + 1
     if (spanDays > MAX_DAYS) {
       e = s.add(MAX_DAYS - 1, 'day')
       body.endDate = e.format('YYYY-MM-DD')
     }
 
-    // Persist series (schema requires timeEnd, so we must set it above)
+    // Persist series
     const series = await Series.create(body)
 
-    // Enumerate dates and compute Holidays/Sundays
+    // Enumerate all dates (INCLUDES startDate = today)
     const days = enumerateLocalDates(series.startDate, series.endDate, ZONE)
 
-    const holidayBase = await getHolidaySet()
-    const holidays = new Set(holidayBase)
-
-    // ✅ when skipHolidays=true, also skip Sundays
-    if (series.skipHolidays) {
-      for (const d of days) if (isSunday(d)) holidays.add(d)
-    }
+    // Holiday/Sunday set (skip Sundays only when skipHolidays=true, same as your previous rule)
+    const holidays = await buildHolidaySet({ dates: days, skipHolidays: !!series.skipHolidays })
 
     const keptDates = days.filter((d) => !holidays.has(d))
     const skippedDates = days.filter((d) => holidays.has(d))
 
-    // Keep your old rule: skip baseDate (because UI already created today’s booking)
-    const baseDate = dayjs(series.startDate).format('YYYY-MM-DD')
-
-    // ✅ BEST FIX: upsert with idempotencyKey OR natural key
-    const createdIds = []
+    // ✅ Materialize ALL keptDates NOW (create only once, no future job needed)
     const createdDates = []
     const empId = series.createdByEmp?.employeeId || ''
 
     for (const d of keptDates) {
-      if (d === baseDate) continue
-
-      const idk = makeIdempotencyKey(series, d)
+      const idk = makeIdempotencyKey(series._id, d)
 
       const insertDoc = {
         seriesId: series._id,
@@ -165,28 +147,21 @@ async function createSeries(req, res) {
         status: 'PENDING',
       }
 
-      const resUpsert = await CarBooking.updateOne(
-        {
-          $or: [
-            { idempotencyKey: idk },
-            naturalKeyFilter(series, empId, d),
-          ],
-        },
+      // ✅ CORE FIX: upsert by (seriesId + tripDate)
+      // If already exists, it will NOT create a new one.
+      const r = await CarBooking.updateOne(
+        { seriesId: series._id, tripDate: d },
         { $setOnInsert: insertDoc },
         { upsert: true }
       )
 
-      // only count/broadcast if newly inserted
-      if (resUpsert?.upsertedCount) {
+      if (r?.upsertedCount) {
         createdDates.push(d)
 
-        // fetch the inserted doc for realtime + ids
-        const createdDoc = await CarBooking.findOne({ idempotencyKey: idk }).lean()
-        if (createdDoc?._id) createdIds.push(createdDoc._id)
-
+        // optional realtime broadcast (only when newly created)
+        const createdDoc = await CarBooking.findOne({ seriesId: series._id, tripDate: d }).lean()
         if (io && createdDoc) {
-          // mimic your carBooking created payload style
-          const payload = {
+          broadcastCarBooking(io, createdDoc, 'carBooking:created', {
             _id: String(createdDoc._id),
             employeeId: createdDoc.employeeId,
             category: createdDoc.category,
@@ -194,24 +169,19 @@ async function createSeries(req, res) {
             timeStart: createdDoc.timeStart,
             timeEnd: createdDoc.timeEnd,
             status: createdDoc.status,
-          }
-          broadcastCarBooking(io, createdDoc, 'carBooking:created', payload)
+          })
         }
       }
     }
 
-    // notify (best effort)
     try {
       await notify('SERIES_CREATED', {
         seriesId: series._id,
         created: createdDates.length,
         skipped: skippedDates.length,
-        sampleDates: skippedDates.slice(0, 5),
         createdByEmp: series.createdByEmp || {},
       })
-    } catch (err) {
-      console.warn('[notify SERIES_CREATED failed]', err.message)
-    }
+    } catch {}
 
     return res.json({
       ok: true,
@@ -222,7 +192,9 @@ async function createSeries(req, res) {
       skippedDates,
     })
   } catch (e) {
-    return res.status(400).json({ ok: false, error: e.message })
+    // if unique index triggers (duplicate), return friendly
+    const msg = e?.message || 'Create recurring failed.'
+    return res.status(400).json({ ok: false, error: msg })
   }
 }
 
@@ -232,19 +204,11 @@ async function preview(req, res) {
   try {
     const { start, end, timeStart, skipHolidays = 'true' } = req.query
     if (!start || !end || !timeStart) {
-      return res.status(400).json({
-        ok: false,
-        error: 'start, end, and timeStart are required.',
-      })
+      return res.status(400).json({ ok: false, error: 'start, end, and timeStart are required.' })
     }
 
     const days = enumerateLocalDates(start, end, ZONE)
-    const base = await getHolidaySet()
-
-    const holidays = new Set(base)
-    if (asBool(skipHolidays)) {
-      for (const d of days) if (isSunday(d)) holidays.add(d)
-    }
+    const holidays = await buildHolidaySet({ dates: days, skipHolidays: asBool(skipHolidays) })
 
     const kept = days.filter((d) => !holidays.has(d))
     const skipped = days.filter((d) => holidays.has(d))
@@ -262,13 +226,13 @@ async function cancelRemaining(req, res) {
     const io = req.io
     const { id } = req.params
     const series = await Series.findById(id)
-    if (!series)
-      return res.status(404).json({ ok: false, error: 'Series not found' })
+    if (!series) return res.status(404).json({ ok: false, error: 'Series not found' })
 
     series.status = 'CANCELLED'
     await series.save()
 
     const todayStr = dayjs().tz(ZONE).format('YYYY-MM-DD')
+
     const upd = await CarBooking.updateMany(
       { seriesId: id, tripDate: { $gt: todayStr }, status: { $ne: 'CANCELLED' } },
       { $set: { status: 'CANCELLED', notes: 'Cancelled by recurring series' } }
@@ -276,25 +240,15 @@ async function cancelRemaining(req, res) {
 
     const affected = upd.modifiedCount || 0
 
-    // 🔄 Realtime summary for admins + original requester
     if (io) {
       const payload = { seriesId: id, affected }
-
-      // All admins can refresh their calendars
       emitToRoom(io, ROOMS.ADMINS, 'recurring:seriesCancelled', payload)
 
-      // Original employee (creator of the series)
       const empId = series.createdByEmp?.employeeId || ''
-      if (empId) {
-        emitToRoom(io, ROOMS.EMPLOYEE(empId), 'recurring:seriesCancelled', payload)
-      }
+      if (empId) emitToRoom(io, ROOMS.EMPLOYEE(empId), 'recurring:seriesCancelled', payload)
     }
 
-    try {
-      await notify('SERIES_CANCELLED', { seriesId: id, affected })
-    } catch (err) {
-      console.warn('[notify SERIES_CANCELLED failed]', err.message)
-    }
+    try { await notify('SERIES_CANCELLED', { seriesId: id, affected }) } catch {}
 
     return res.json({ ok: true, affected })
   } catch (e) {

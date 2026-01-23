@@ -88,7 +88,7 @@ const User = require('../models/User');
     // Example chefs
     const chefs = [
       { loginId: '001', name: 'Chef One', password: defaultPwd, telegramChatId: '1927527232' },
-      { loginId: '002', name: 'Chef Two', password: defaultPwd, telegramChatId: '7163451169'},
+      // { loginId: '002', name: 'Chef Two', password: defaultPwd, telegramChatId: '7163451169'},
     ]
 
     // 👉 Put driver/messenger chat IDs here when you have them.
