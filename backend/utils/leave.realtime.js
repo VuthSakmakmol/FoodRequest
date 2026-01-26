@@ -1,128 +1,51 @@
-/* eslint-disable no-console */
 // backend/utils/leave.realtime.js
 
-const { ROOMS, emitToRoom } = require('./realtime')
-
-const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
-const log = (...args) => {
-  if (!isProd) console.log('[leave:io]', ...args)
+function safeId(v) {
+  return String(v || '').trim()
 }
 
-const str = (v) => (v == null ? '' : String(v).trim())
-
-// Keep LEAVE_ROOMS for compatibility with your old imports
-const LEAVE_ROOMS = Object.freeze({
-  ADMINS: ROOMS.ADMINS,
-  EMPLOYEE: (employeeId) => ROOMS.EMPLOYEE(str(employeeId)),
-  USER: (loginId) => ROOMS.USER(str(loginId)),
-})
-
-/**
- * Broadcast LeaveRequest change to:
- * - admins room (leave admins watching)
- * - employee room (employee profile / balances)
- * - requester user room (employee login room)
- * - manager / gm / coo user rooms (their inbox)
- *
- * Usage:
- *   broadcastLeaveRequest(io, doc, 'leave:req:updated')
- */
-function broadcastLeaveRequest(io, docOrPlain, event, payloadOverride) {
-  if (!io || !docOrPlain || !event) return
-
-  const body =
-    payloadOverride ||
-    (typeof docOrPlain?.toObject === 'function'
-      ? docOrPlain.toObject()
-      : docOrPlain)
-
-  const employeeId = str(body.employeeId)
-  const requester  = str(body.requesterLoginId)
-  const manager    = str(body.managerLoginId)
-  const gm         = str(body.gmLoginId)
-  const coo        = str(body.cooLoginId)
-
-  const rooms = new Set([
-    LEAVE_ROOMS.ADMINS,
-    employeeId && LEAVE_ROOMS.EMPLOYEE(employeeId),
-    requester && LEAVE_ROOMS.USER(requester),
-    manager && LEAVE_ROOMS.USER(manager),
-    gm && LEAVE_ROOMS.USER(gm),
-    coo && LEAVE_ROOMS.USER(coo),
-  ])
-
-  if (!isProd) {
-    log('broadcastLeaveRequest', event, {
-      _id: body?._id,
-      employeeId,
-      requester,
-      manager,
-      gm,
-      coo,
-      rooms: [...rooms].filter(Boolean),
-    })
-  }
-
-  for (const room of rooms) {
-    if (!room) continue
-    emitToRoom(io, room, event, body)
-  }
+const ROOMS = {
+  ADMINS: 'admins',
+  EMPLOYEE: (employeeId) => `employee:${safeId(employeeId)}`,
+  USER: (loginId) => `user:${safeId(loginId)}`,
 }
 
-/**
- * Broadcast LeaveProfile changes to:
- * - admins room
- * - employee room
- * - user rooms (employee, manager, gm, coo)
- *
- * Usage:
- *   broadcastLeaveProfile(io, doc, 'leave:profile:updated')
- */
-function broadcastLeaveProfile(io, docOrPlain, event, payloadOverride) {
-  if (!io || !docOrPlain || !event) return
+function broadcastLeaveProfile(io, profile, event = 'leave:profile:updated') {
+  if (!io) return
+  const employeeId = safeId(profile?.employeeId || profile?.employeeLoginId)
 
-  const body =
-    payloadOverride ||
-    (typeof docOrPlain?.toObject === 'function'
-      ? docOrPlain.toObject()
-      : docOrPlain)
+  io.to(ROOMS.ADMINS).emit(event, profile)
+  if (employeeId) io.to(ROOMS.EMPLOYEE(employeeId)).emit(event, profile)
+  if (employeeId) io.to(ROOMS.USER(employeeId)).emit(event, profile)
 
-  const employeeId  = str(body.employeeId || body.employeeLoginId)
-  const managerLogin = str(body.managerLoginId)
-  const gmLogin      = str(body.gmLoginId)
-  const cooLogin     = str(body.cooLoginId)
+  const managerLoginId = safeId(profile?.managerLoginId)
+  const adminLoginId = safeId(profile?.adminLoginId)
+  const gmLoginId = safeId(profile?.gmLoginId)
+  const cooLoginId = safeId(profile?.cooLoginId)
 
-  const rooms = new Set([
-    LEAVE_ROOMS.ADMINS,
-    employeeId && LEAVE_ROOMS.EMPLOYEE(employeeId),
-
-    // many places in your system treat employeeId == loginId
-    employeeId && LEAVE_ROOMS.USER(employeeId),
-
-    managerLogin && LEAVE_ROOMS.USER(managerLogin),
-    gmLogin && LEAVE_ROOMS.USER(gmLogin),
-    cooLogin && LEAVE_ROOMS.USER(cooLogin),
-  ])
-
-  if (!isProd) {
-    log('broadcastLeaveProfile', event, {
-      _id: body?._id,
-      employeeId,
-      managerLogin,
-      gmLogin,
-      cooLogin,
-      rooms: [...rooms].filter(Boolean),
-    })
-  }
-
-  for (const room of rooms) {
-    if (!room) continue
-    emitToRoom(io, room, event, body)
-  }
+  if (managerLoginId) io.to(ROOMS.USER(managerLoginId)).emit(event, profile)
+  if (adminLoginId) io.to(ROOMS.USER(adminLoginId)).emit(event, profile)
+  if (gmLoginId) io.to(ROOMS.USER(gmLoginId)).emit(event, profile)
+  if (cooLoginId) io.to(ROOMS.USER(cooLoginId)).emit(event, profile)
 }
 
-module.exports = {
-  LEAVE_ROOMS,
-  broadcastLeaveRequest,
-  broadcastLeaveProfile,
+function broadcastLeaveRequest(io, reqDoc, event = 'leave:req:updated') {
+  if (!io) return
+  const employeeId = safeId(reqDoc?.employeeId)
+
+  io.to(ROOMS.ADMINS).emit(event, reqDoc)
+  if (employeeId) io.to(ROOMS.EMPLOYEE(employeeId)).emit(event, reqDoc)
+  if (employeeId) io.to(ROOMS.USER(employeeId)).emit(event, reqDoc)
+
+  const managerLoginId = safeId(reqDoc?.managerLoginId)
+  const adminLoginId = safeId(reqDoc?.adminLoginId)
+  const gmLoginId = safeId(reqDoc?.gmLoginId)
+  const cooLoginId = safeId(reqDoc?.cooLoginId)
+
+  if (managerLoginId) io.to(ROOMS.USER(managerLoginId)).emit(event, reqDoc)
+  if (adminLoginId) io.to(ROOMS.USER(adminLoginId)).emit(event, reqDoc)
+  if (gmLoginId) io.to(ROOMS.USER(gmLoginId)).emit(event, reqDoc)
+  if (cooLoginId) io.to(ROOMS.USER(cooLoginId)).emit(event, reqDoc)
 }
+
+module.exports = { broadcastLeaveProfile, broadcastLeaveRequest }

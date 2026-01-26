@@ -1,16 +1,20 @@
 // backend/routes/leave/leaveAdmin.routes.js
+/* eslint-disable no-console */
 const express = require('express')
-const router = express.Router()
-
-const ctrl = require('../../controllers/leave/leaveProfiles.admin.controller')
-
-// --- Auth / Role guard (keep your pattern) ---
 const jwt = require('jsonwebtoken')
 
+const router = express.Router()
+
+// ✅ Controller (must export the functions used below)
+const ctrl = require('../../controllers/leave/leaveProfiles.admin.controller')
+
+// ─────────────────────────────────────────────
+// Small helpers
+// ─────────────────────────────────────────────
 function getRoles(req) {
   const rawRoles = Array.isArray(req.user?.roles) ? req.user.roles : []
   const baseRole = req.user?.role ? [req.user.role] : []
-  return [...new Set([...rawRoles, ...baseRole].map(r => String(r || '').toUpperCase()))]
+  return [...new Set([...rawRoles, ...baseRole].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 }
 
 function requireAuth(req, res, next) {
@@ -21,8 +25,6 @@ function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ message: 'Unauthorized' })
 
   try {
-    // NOTE: this uses simple verify (no issuer/audience check).
-    // If you want stricter, use your shared middlewares/auth.js instead.
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret')
     req.user = decoded
     return next()
@@ -33,10 +35,26 @@ function requireAuth(req, res, next) {
 
 function requireLeaveAdmin(req, res, next) {
   const roles = getRoles(req)
-  if (roles.includes('ADMIN') || roles.includes('LEAVE_ADMIN')) return next()
+  if (roles.includes('ROOT_ADMIN') || roles.includes('ADMIN') || roles.includes('LEAVE_ADMIN')) return next()
   return res.status(403).json({ message: 'Forbidden' })
 }
 
+// ✅ guard against "argument handler must be a function"
+function h(fn, name) {
+  if (typeof fn !== 'function') {
+    console.error(`[leaveAdmin.routes] Missing handler: ${name}. Check controller exports.`)
+    // Return a safe handler so server won't crash; it will return 500 with clear message.
+    return (req, res) =>
+      res.status(500).json({
+        message: `Server misconfigured: missing handler "${name}". Check controller exports.`,
+      })
+  }
+  return fn
+}
+
+// ─────────────────────────────────────────────
+// Auth & role guard
+// ─────────────────────────────────────────────
 router.use(requireAuth)
 router.use(requireLeaveAdmin)
 
@@ -45,34 +63,37 @@ router.use(requireLeaveAdmin)
 // Mounted at: /api/admin/leave   (from server.js)
 // ─────────────────────────────────────────────
 
-// approvers
-router.get('/approvers', ctrl.getApprovers)
+// Approvers (GM / COO mapping lists, etc.)
+router.get('/approvers', h(ctrl.getApprovers, 'getApprovers'))
 
-// ✅ IMPORTANT: make frontend-friendly endpoints
-// Your UI calls GET /profiles, so provide it:
-router.get('/profiles', ctrl.getProfilesGrouped)
+// Profiles list (frontend-friendly)
+router.get('/profiles', h(ctrl.getProfilesGrouped, 'getProfilesGrouped'))
 
-// keep your old endpoint too (backward compatible)
-router.get('/profiles/grouped', ctrl.getProfilesGrouped)
+// Backward compatible
+router.get('/profiles/grouped', h(ctrl.getProfilesGrouped, 'getProfilesGrouped'))
 
-// profile CRUD
-router.get('/profiles/:employeeId', ctrl.getProfileOne)
-router.post('/profiles', ctrl.createProfileSingle)
+// Profile CRUD
+router.get('/profiles/:employeeId', h(ctrl.getProfileOne, 'getProfileOne'))
+router.post('/profiles', h(ctrl.createProfileSingle, 'createProfileSingle'))
 
-// your UI likely uses PATCH; allow both PATCH + PUT
-router.patch('/profiles/:employeeId', ctrl.updateProfile)
-router.put('/profiles/:employeeId', ctrl.updateProfile)
+// Update (allow PATCH + PUT)
+router.patch('/profiles/:employeeId', h(ctrl.updateProfile, 'updateProfile'))
+router.put('/profiles/:employeeId', h(ctrl.updateProfile, 'updateProfile'))
 
-router.delete('/profiles/:employeeId', ctrl.deactivateProfile)
+// Deactivate
+router.delete('/profiles/:employeeId', h(ctrl.deactivateProfile, 'deactivateProfile'))
 
-// bulk manager + employees
-// ✅ your UI likely calls POST /profiles/manager
-router.post('/profiles/manager', ctrl.createManagerWithEmployees)
+// Bulk create: manager + employees
+// ✅ UI calls POST /profiles/manager
+router.post('/profiles/manager', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
 
-// keep your old endpoint too
-router.post('/managers', ctrl.createManagerWithEmployees)
+// Backward compatible endpoint
+router.post('/managers', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
 
-// renew contract
-router.post('/profiles/:employeeId/contracts/renew', ctrl.renewContract)
+// Renew contract
+router.post(
+  '/profiles/:employeeId/contracts/renew',
+  h(ctrl.renewContract, 'renewContract')
+)
 
 module.exports = router

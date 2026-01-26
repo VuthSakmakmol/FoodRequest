@@ -12,15 +12,17 @@ const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/le
 const notify = require('../../services/leave/leave.telegram.notify')
 
 /**
- * ✅ IMPORTANT:
- * Your LeaveRequest model enum uses:
- * approvalMode: 'GM_ONLY' | 'GM_OR_COO'
- * So COO shared final stage must use 'GM_OR_COO'
+ * ✅ enum:
+ * approvalMode: 'MANAGER_AND_GM' | 'GM_AND_COO'
  */
-const COO_MODE = 'GM_OR_COO'
 
-// Pending statuses COO can act on (support legacy just in case)
-const COO_PENDING = ['PENDING_GM', 'PENDING_COO']
+const COO_MODE = 'GM_AND_COO'
+
+/**
+ * ✅ NEW rule:
+ * COO can only act when GM already approved and request moved to PENDING_COO.
+ */
+const COO_PENDING = ['PENDING_COO']
 
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
@@ -30,7 +32,6 @@ function getRoles(req) {
 
 /**
  * ✅ Prefer loginId first (your LeaveRequest stores loginId strings)
- * req.user.id might be Mongo ObjectId and will not match cooLoginId/gmLoginId.
  */
 function actorLoginId(req) {
   return String(req.user?.loginId || req.user?.employeeId || req.user?.sub || req.user?.id || '').trim()
@@ -39,6 +40,11 @@ function actorLoginId(req) {
 function isAdminViewer(req) {
   const roles = getRoles(req)
   return roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN') || roles.includes('ROOT_ADMIN')
+}
+
+function hasCooRole(req) {
+  const roles = getRoles(req)
+  return roles.includes('LEAVE_COO') || isAdminViewer(req)
 }
 
 function getIo(req) {
@@ -158,29 +164,24 @@ async function recalcAndEmitProfile(req, employeeId) {
 
 /**
  * ✅ COO Inbox
- * GM and COO are SAME final stage.
- *
- * IMPORTANT FIX:
- * - your schema uses approvalMode: GM_OR_COO
- * - your old code used GM_OR_COO → that caused "no data"
+ * NEW RULE:
+ * - COO should NOT see request until GM approved and moved to PENDING_COO
  */
 exports.listCooInbox = async (req, res) => {
   try {
-    const roles = getRoles(req)
-    if (!roles.includes('LEAVE_COO') && !roles.includes('LEAVE_ADMIN') && !roles.includes('ADMIN')) {
-      return res.status(403).json({ message: 'Forbidden' })
-    }
+    if (!hasCooRole(req)) return res.status(403).json({ message: 'Forbidden' })
 
     const me = actorLoginId(req)
     if (!me && !isAdminViewer(req)) return res.status(400).json({ message: 'Missing user identity' })
 
-    // ✅ Return all COO-mode requests (UI can filter pending/finished)
+    // ✅ Strict visibility:
+    // - non-admin COO sees only his assigned and only relevant statuses
+    // - admin sees all COO-mode requests, but still filtered to COO-stage/final
+    const statusFilter = { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] }
+
     const query = isAdminViewer(req)
-      ? { approvalMode: COO_MODE }
-      : {
-          approvalMode: COO_MODE,
-          cooLoginId: me, // ✅ strict, secure
-        }
+      ? { approvalMode: COO_MODE, status: statusFilter }
+      : { approvalMode: COO_MODE, cooLoginId: me, status: statusFilter }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -192,14 +193,12 @@ exports.listCooInbox = async (req, res) => {
 
 /**
  * ✅ COO Decision (race-safe)
- * Whoever approves/rejects first locks it.
+ * NEW RULE:
+ * - COO can decide ONLY when status === PENDING_COO
  */
 exports.cooDecision = async (req, res) => {
   try {
-    const roles = getRoles(req)
-    if (!roles.includes('LEAVE_COO') && !roles.includes('LEAVE_ADMIN') && !roles.includes('ADMIN')) {
-      return res.status(403).json({ message: 'Forbidden' })
-    }
+    if (!hasCooRole(req)) return res.status(403).json({ message: 'Forbidden' })
 
     const me = actorLoginId(req)
     const { id } = req.params
@@ -208,19 +207,21 @@ exports.cooDecision = async (req, res) => {
     const existing = await LeaveRequest.findById(id)
     if (!existing) return res.status(404).json({ message: 'Request not found' })
 
-    // must be COO-mode to decide
+    // ✅ must be COO-mode to decide
     if (String(existing.approvalMode || '') !== COO_MODE) {
       return res.status(400).json({ message: 'This request is not in GM & COO approval mode.' })
     }
 
-    // permission: cooLoginId must match (unless admin viewer)
+    // ✅ permission: cooLoginId must match (unless admin viewer)
     if (!isAdminViewer(req) && String(existing.cooLoginId || '') !== me) {
       return res.status(403).json({ message: 'Not your request' })
     }
 
-    // ✅ lock: if GM already decided first, COO cannot change
+    // ✅ Strict: COO can decide ONLY at PENDING_COO (GM must approve first)
     if (!COO_PENDING.includes(String(existing.status || ''))) {
-      return res.status(400).json({ message: `Request already ${existing.status}. You cannot change it.` })
+      return res.status(400).json({
+        message: `Request is ${existing.status}. COO can only decide when status is PENDING_COO.`,
+      })
     }
 
     const act = String(action || '').toUpperCase()
@@ -241,9 +242,9 @@ exports.cooDecision = async (req, res) => {
       },
     }
 
-    // ✅ race-safe update: only if still pending at update time
+    // ✅ race-safe update: only if still PENDING_COO at update time
     const doc = await LeaveRequest.findOneAndUpdate(
-      { _id: id, status: { $in: COO_PENDING } },
+      { _id: id, status: { $in: COO_PENDING }, approvalMode: COO_MODE },
       update,
       { new: true }
     )
@@ -261,13 +262,8 @@ exports.cooDecision = async (req, res) => {
     emitReq(req, payload, 'leave:req:updated')
 
     // ✅ Telegram notifications (safe)
-    // 1) Notify employee about COO decision (if you added this function)
     await safeNotify(notify.notifyCooDecisionToEmployee, doc)
-
-    // 2) Notify LEAVE_ADMIN activity (if you added this function)
     await safeNotify(notify.notifyLeaveAdminCooDecision, doc)
-
-    // 3) Optional: notify GM that COO already decided (if you added this function)
     await safeNotify(notify.notifyCooDecisionToGm, doc)
 
     // ✅ Recalc balances after final decision

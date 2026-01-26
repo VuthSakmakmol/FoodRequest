@@ -34,6 +34,18 @@ function safeTxt(v) {
   const s = String(v ?? '').trim()
   return s ? s : 'None'
 }
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function pickLoginId(emp) {
+  const e = emp || {}
+  return String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
+}
+function pickEmployeeId(emp) {
+  const e = emp || {}
+  return String(e.employeeId || e.empId || e.id || '').trim()
+}
 
 /* used/remaining chips (example: 1/17) */
 function compactBalances(balances) {
@@ -57,10 +69,20 @@ function statusChipClasses(active) {
     : 'bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/80'
 }
 
+/**
+ * ✅ approvalMode (2 modes only)
+ * - MANAGER_AND_GM
+ * - GM_AND_COO
+ */
 function modeChipClasses(mode) {
-  return mode === 'GM_AND_COO'
+  const m = up(mode)
+  return m === 'GM_AND_COO'
     ? 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
     : 'bg-sky-100 text-sky-700 border border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80'
+}
+function modeLabel(mode) {
+  const m = up(mode)
+  return m === 'GM_AND_COO' ? 'GM + COO' : 'Manager + GM'
 }
 
 function pairChipClasses(remaining) {
@@ -75,7 +97,6 @@ function goProfile(employeeId) {
   if (!id) return
   router.push({ name: 'leave-admin-profile', params: { employeeId: id } })
 }
-
 function goEdit(employeeId) {
   const id = String(employeeId || '').trim()
   if (!id) return
@@ -113,7 +134,15 @@ const filteredManagers = computed(() => {
   return base
     .map((g) => {
       const emps = (g.employees || []).filter((e) => {
-        const hay = [e.employeeId, e.name, e.department, e.managerLoginId, e.approvalMode]
+        const hay = [
+          e.employeeId,
+          e.name,
+          e.department,
+          e.managerLoginId,
+          e.gmLoginId,
+          e.cooLoginId,
+          e.approvalMode,
+        ]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -191,6 +220,63 @@ watch([q, includeInactive], () => {
 })
 watch(includeInactive, () => fetchGroups())
 
+/* ───────── default approvers (AUTO from seed) ───────── */
+const approversLoading = ref(false)
+const approversError = ref('')
+
+const defaultGm = ref({ loginId: 'leave_gm', name: 'Expat GM', role: 'LEAVE_GM' })
+const defaultCoo = ref({ loginId: 'leave_coo', name: 'COO', role: 'LEAVE_COO' })
+
+function normRole(x) {
+  return up(x?.role || x?.code || x?.type || x?.key || '')
+}
+function normLoginId(x) {
+  return String(x?.loginId || x?.loginID || x?.userLoginId || x?.username || x?._id || '').trim()
+}
+function normName(x) {
+  return String(x?.name || x?.displayName || x?.fullName || '').trim()
+}
+
+/**
+ * Backend should return approvers seeded in DB.
+ * We try to fetch /admin/leave/approvers, then pick:
+ * - LEAVE_GM
+ * - LEAVE_COO
+ * If it fails / missing, fallback to loginIds from seed: leave_gm / leave_coo.
+ */
+async function fetchDefaultApprovers() {
+  approversLoading.value = true
+  approversError.value = ''
+  try {
+    const res = await api.get('/admin/leave/approvers')
+    const arr = Array.isArray(res.data) ? res.data : []
+
+    const gm = arr.find((a) => normRole(a) === 'LEAVE_GM')
+    const coo = arr.find((a) => normRole(a) === 'LEAVE_COO')
+
+    if (gm) {
+      defaultGm.value = {
+        loginId: normLoginId(gm) || defaultGm.value.loginId,
+        name: normName(gm) || defaultGm.value.name,
+        role: 'LEAVE_GM',
+      }
+    }
+
+    if (coo) {
+      defaultCoo.value = {
+        loginId: normLoginId(coo) || defaultCoo.value.loginId,
+        name: normName(coo) || defaultCoo.value.name,
+        role: 'LEAVE_COO',
+      }
+    }
+  } catch (e) {
+    console.warn('fetchDefaultApprovers failed; using seed fallbacks', e)
+    approversError.value = e?.response?.data?.message || e?.message || 'Failed to load approvers (using seed defaults).'
+  } finally {
+    approversLoading.value = false
+  }
+}
+
 /* ───────── create modal ───────── */
 const createOpen = ref(false)
 const createTab = ref('bulk') // bulk | single
@@ -209,30 +295,37 @@ function newRow() {
 }
 
 const form = ref({
-  approvalMode: 'GM_ONLY',
-  manager: null,
+  approvalMode: 'MANAGER_AND_GM', // ✅ default mode
+  manager: null, // optional
   rows: [newRow()],
+
   singleEmployee: null,
   singleJoinDate: '',
   singleContractDate: '',
   singleAlCarry: 0,
   singleActive: true,
+  singleManager: null,
 })
 
 function openCreate() {
   createError.value = ''
   createTab.value = 'bulk'
   form.value = {
-    approvalMode: 'GM_ONLY',
+    approvalMode: 'MANAGER_AND_GM',
     manager: null,
     rows: [newRow()],
+
     singleEmployee: null,
     singleJoinDate: '',
     singleContractDate: '',
     singleAlCarry: 0,
     singleActive: true,
+    singleManager: null,
   }
   createOpen.value = true
+
+  // ensure defaults ready (no UI selection needed)
+  fetchDefaultApprovers()
 }
 function closeCreate() {
   if (saving.value) return
@@ -260,17 +353,37 @@ function mustYmd(v) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
 }
 
+const needsCoo = computed(() => up(form.value.approvalMode) === 'GM_AND_COO')
+
+const approverReady = computed(() => {
+  const gmOk = !!String(defaultGm.value?.loginId || '').trim()
+  const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
+  return needsCoo.value ? gmOk && cooOk : gmOk
+})
+
 async function submitCreate() {
   createError.value = ''
   try {
     saving.value = true
+
+    const mode = up(form.value.approvalMode || '')
+    if (!['MANAGER_AND_GM', 'GM_AND_COO'].includes(mode)) {
+      throw new Error('Invalid approval mode.')
+    }
+
+    // ✅ auto approvers (seeded)
+    const gmLoginId = String(defaultGm.value?.loginId || '').trim()
+    const cooLoginId = String(defaultCoo.value?.loginId || '').trim()
+
+    if (!gmLoginId) throw new Error('GM approver is missing (seed or /admin/leave/approvers).')
+    if (mode === 'GM_AND_COO' && !cooLoginId) throw new Error('COO approver is missing (seed or /admin/leave/approvers).')
 
     if (createTab.value === 'bulk') {
       const rows = form.value.rows || []
       if (!rows.length) throw new Error('Please add at least 1 employee.')
 
       const employees = rows.map((r, i) => {
-        const employeeId = String(r.employee?.employeeId || '').trim()
+        const employeeId = pickEmployeeId(r.employee)
         if (!employeeId) throw new Error(`Employee #${i + 1} is required.`)
         if (!mustYmd(r.joinDate)) throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
@@ -286,42 +399,66 @@ async function submitCreate() {
         }
       })
 
+      const managerEmpId = pickEmployeeId(form.value.manager)
+      const managerLoginId = pickLoginId(form.value.manager)
+
       const payload = {
-        approvalMode: form.value.approvalMode,
-        managerEmployeeId: String(form.value.manager?.employeeId || '').trim(),
+        approvalMode: mode,
+
+        // optional manager
+        managerEmployeeId: managerEmpId,
+        managerLoginId,
+
+        // ✅ auto from seed
+        gmLoginId,
+        cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
+
         employees,
       }
 
       const res = await api.post('/admin/leave/managers', payload)
+
       showToast({
         type: 'success',
         title: 'Created',
         message: `Created ${res.data?.createdCount ?? 0}, updated ${res.data?.updatedCount ?? 0}.`,
       })
+
       createOpen.value = false
       await fetchGroups()
       return
     }
 
-    // single
-    const employeeId = String(form.value.singleEmployee?.employeeId || '').trim()
+    // ───────── single ─────────
+    const employeeId = pickEmployeeId(form.value.singleEmployee)
     if (!employeeId) throw new Error('Employee is required.')
     if (!mustYmd(form.value.singleJoinDate)) throw new Error('Join date must be YYYY-MM-DD.')
 
     const contractDate = form.value.singleContractDate || form.value.singleJoinDate
     if (!mustYmd(contractDate)) throw new Error('Contract date must be YYYY-MM-DD.')
 
+    const singleManagerEmpId = pickEmployeeId(form.value.singleManager || form.value.manager)
+    const singleManagerLoginId = pickLoginId(form.value.singleManager || form.value.manager)
+
     const payload = {
-      approvalMode: form.value.approvalMode,
+      approvalMode: mode,
+
       employeeId,
       joinDate: form.value.singleJoinDate,
       contractDate,
       alCarry: Number(form.value.singleAlCarry || 0),
       isActive: form.value.singleActive !== false,
-      managerEmployeeId: String(form.value.manager?.employeeId || '').trim(),
+
+      managerEmployeeId: singleManagerEmpId,
+      managerLoginId: singleManagerLoginId,
+
+      // ✅ auto from seed
+      gmLoginId,
+      cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
     }
 
     await api.post('/admin/leave/profiles', payload)
+
     showToast({ type: 'success', title: 'Created', message: `Profile created: ${employeeId}` })
     createOpen.value = false
     await fetchGroups()
@@ -345,10 +482,10 @@ onMounted(() => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   fetchGroups()
+  fetchDefaultApprovers()
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  // safety: ensure body not locked if leaving page
   if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
 })
 </script>
@@ -396,11 +533,7 @@ onBeforeUnmount(() => {
             <!-- Include inactive -->
             <div class="flex items-center gap-2 text-[11px]">
               <label class="inline-flex items-center gap-2 rounded-full bg-sky-900/30 px-3 py-1.5">
-                <input
-                  v-model="includeInactive"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-sky-100/60 bg-transparent"
-                />
+                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-sky-100/60 bg-transparent" />
                 <span class="text-sky-50/90">Include inactive</span>
               </label>
             </div>
@@ -410,8 +543,7 @@ onBeforeUnmount(() => {
               <label class="mb-1 block text-[11px] font-medium text-sky-50">Per page</label>
               <select
                 v-model.number="pageSize"
-                class="w-full rounded-xl border border-sky-100/60 bg-sky-900/30 px-2.5 py-1.5 text-[11px]
-                       text-white outline-none"
+                class="w-full rounded-xl border border-sky-100/60 bg-sky-900/30 px-2.5 py-1.5 text-[11px] text-white outline-none"
               >
                 <option v-for="n in PAGE_SIZES" :key="n" :value="n" class="text-slate-900">
                   {{ n }}
@@ -423,8 +555,7 @@ onBeforeUnmount(() => {
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
-                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
                 @click="fetchGroups"
                 :disabled="loading"
                 title="Refresh"
@@ -435,8 +566,7 @@ onBeforeUnmount(() => {
 
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
-                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
                 @click="openCreate"
               >
                 <i class="fa-solid fa-plus text-[11px]"></i>
@@ -445,8 +575,7 @@ onBeforeUnmount(() => {
 
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5
-                       text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
+                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
                 @click="clearFilters"
                 title="Clear filters"
               >
@@ -493,11 +622,7 @@ onBeforeUnmount(() => {
 
             <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
               <label class="inline-flex items-center gap-2 rounded-full bg-sky-900/30 px-3 py-1.5">
-                <input
-                  v-model="includeInactive"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-sky-100/60 bg-transparent"
-                />
+                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-sky-100/60 bg-transparent" />
                 <span class="text-sky-50/90">Include inactive</span>
               </label>
 
@@ -513,8 +638,7 @@ onBeforeUnmount(() => {
 
                 <button
                   type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
-                         text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
+                  class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
                   @click="fetchGroups"
                   :disabled="loading"
                 >
@@ -524,8 +648,7 @@ onBeforeUnmount(() => {
 
                 <button
                   type="button"
-                  class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
-                         text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
+                  class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
                   @click="openCreate"
                 >
                   <i class="fa-solid fa-plus text-[11px]"></i>
@@ -537,8 +660,7 @@ onBeforeUnmount(() => {
             <div class="flex justify-end">
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5
-                       text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
+                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
                 @click="clearFilters"
               >
                 <i class="fa-solid fa-broom text-[11px]"></i>
@@ -686,18 +808,12 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="text-right space-y-1 text-[11px]">
-                    <span
-                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                      :class="statusChipClasses(!!e.isActive)"
-                    >
+                    <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(!!e.isActive)">
                       {{ e.isActive ? 'Active' : 'Inactive' }}
                     </span>
                     <div>
-                      <span
-                        class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                        :class="modeChipClasses(e.approvalMode)"
-                      >
-                        {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
+                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="modeChipClasses(e.approvalMode)">
+                        {{ modeLabel(e.approvalMode) }}
                       </span>
                     </div>
                   </div>
@@ -715,7 +831,6 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <!-- balances -->
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
                     v-for="b in compactBalances(e.balances)"
@@ -807,15 +922,9 @@ onBeforeUnmount(() => {
                     @click="goProfile(e.employeeId)"
                   >
                     <td class="table-td align-top">
-                      <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
-                        {{ safeTxt(e.employeeId) }}
-                      </div>
-                      <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
-                        {{ safeTxt(e.name) }}
-                      </div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        Manager: {{ safeTxt(e.managerLoginId) }}
-                      </div>
+                      <div class="text-xs font-mono text-slate-900 dark:text-slate-50">{{ safeTxt(e.employeeId) }}</div>
+                      <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">{{ safeTxt(e.name) }}</div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">Manager: {{ safeTxt(e.managerLoginId) }}</div>
                     </td>
 
                     <td class="table-td align-top">{{ safeTxt(e.department) }}</td>
@@ -823,17 +932,12 @@ onBeforeUnmount(() => {
 
                     <td class="table-td align-top whitespace-nowrap">
                       <div class="font-semibold">{{ safeTxt(e.contractDate) }}</div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        end: {{ safeTxt(e.contractEndDate) }}
-                      </div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">end: {{ safeTxt(e.contractEndDate) }}</div>
                     </td>
 
                     <td class="table-td align-top">
-                      <span
-                        class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                        :class="modeChipClasses(e.approvalMode)"
-                      >
-                        {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
+                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="modeChipClasses(e.approvalMode)">
+                        {{ modeLabel(e.approvalMode) }}
                       </span>
                     </td>
 
@@ -852,10 +956,7 @@ onBeforeUnmount(() => {
                     </td>
 
                     <td class="table-td align-top text-center">
-                      <span
-                        class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                        :class="statusChipClasses(!!e.isActive)"
-                      >
+                      <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(!!e.isActive)">
                         {{ e.isActive ? 'Active' : 'Inactive' }}
                       </span>
                     </td>
@@ -864,8 +965,7 @@ onBeforeUnmount(() => {
                       <div class="inline-flex flex-wrap justify-end gap-2">
                         <button
                           type="button"
-                          class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1
-                                 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
+                          class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
                           @click="goEdit(e.employeeId)"
                         >
                           <i class="fa-solid fa-pen-to-square text-[10px]" />
@@ -928,31 +1028,28 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- ✅ Create modal (UPDATED: scrollable overlay + fixed header/footer + body scroll) -->
+    <!-- ✅ Create modal -->
     <transition name="modal-fade">
-      <div
-        v-if="createOpen"
-        class="fixed inset-0 z-40 overflow-y-auto bg-slate-900/50 px-2 py-6"
-        @click.self="closeCreate"
-      >
+      <div v-if="createOpen" class="fixed inset-0 z-40 overflow-y-auto bg-slate-900/50 px-2 py-6" @click.self="closeCreate">
         <div
           class="mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl
                  dark:border-slate-700 dark:bg-slate-950
                  max-h-[calc(100vh-3rem)] flex flex-col"
         >
-          <!-- Header (fixed) -->
+          <!-- Header -->
           <div class="shrink-0 rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
             <div class="flex items-start justify-between gap-2">
               <div>
                 <div class="text-sm font-semibold">New leave profile</div>
-                <div class="text-[11px] text-white/85">Backend enforces approval chain rules.</div>
+                <div class="text-[11px] text-white/85">
+                  Approval chain:
+                  <span class="font-semibold">Manager</span> →
+                  <span class="font-semibold">GM</span>
+                  <span v-if="needsCoo"> → <span class="font-semibold">COO</span></span>
+                </div>
               </div>
 
-              <button
-                type="button"
-                class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 hover:bg-white/20"
-                @click="closeCreate"
-              >
+              <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 hover:bg-white/20" @click="closeCreate">
                 <i class="fa-solid fa-xmark text-xs"></i>
               </button>
             </div>
@@ -980,7 +1077,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Body (scroll) -->
+          <!-- Body -->
           <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3 overscroll-contain">
             <div>
               <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Approval mode</label>
@@ -989,16 +1086,68 @@ onBeforeUnmount(() => {
                 class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
                        dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
               >
-                <option value="GM_ONLY">Only GM (COO read-only)</option>
-                <option value="GM_AND_COO">GM + COO (both must approve)</option>
+                <option value="MANAGER_AND_GM">Manager + GM</option>
+                <option value="GM_AND_COO">GM + COO</option>
               </select>
+
+              <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                GM must approve first. If Manager exists, GM cannot see until Manager approves.
+              </p>
             </div>
 
+            <!-- ✅ Auto approvers (readonly, no search) -->
+            <div class="rounded-2xl border border-slate-200 bg-white/95 p-3 dark:border-slate-700 dark:bg-slate-950/40">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Approvers (auto from seed)</div>
+
+                <div class="flex items-center gap-2 text-[11px]">
+                  <span
+                    class="inline-flex items-center rounded-full border px-2 py-0.5 font-semibold"
+                    :class="approverReady ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200' : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
+                  >
+                    {{ approversLoading ? 'Loading…' : approverReady ? 'Ready' : 'Missing approver' }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="approversError" class="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
+                {{ approversError }}
+              </div>
+
+              <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+                  <div class="text-slate-500 dark:text-slate-400">GM</div>
+                  <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
+                    {{ safeTxt(defaultGm.name) }}
+                    <span class="ml-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">({{ safeTxt(defaultGm.loginId) }})</span>
+                  </div>
+                </div>
+
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+                  <div class="text-slate-500 dark:text-slate-400">
+                    COO <span v-if="needsCoo" class="text-rose-600">*</span>
+                  </div>
+                  <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
+                    {{ needsCoo ? safeTxt(defaultCoo.name) : 'Not required' }}
+                    <span v-if="needsCoo" class="ml-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      ({{ safeTxt(defaultCoo.loginId) }})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <p class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                No need to select GM/COO — system uses the seeded users.
+              </p>
+            </div>
+
+            <!-- Manager (optional) -->
             <div>
               <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Direct manager (optional)</label>
-              <EmployeeSearch v-model="form.manager" placeholder="Search manager…" />
+              <EmployeeSearch v-if="createTab === 'bulk'" v-model="form.manager" placeholder="Search manager…" />
+              <EmployeeSearch v-else v-model="form.singleManager" placeholder="Search manager…" />
               <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                If empty, request goes directly to GM/COO chain.
+                If set, request goes to Manager first, then GM (then COO when GM + COO mode).
               </p>
             </div>
 
@@ -1011,8 +1160,7 @@ onBeforeUnmount(() => {
               <div
                 v-for="(r, i) in form.rows"
                 :key="r.key"
-                class="rounded-2xl border border-slate-200 bg-white/95 p-3
-                       dark:border-slate-700 dark:bg-slate-950/40"
+                class="rounded-2xl border border-slate-200 bg-white/95 p-3 dark:border-slate-700 dark:bg-slate-950/40"
               >
                 <div class="flex items-start justify-between gap-2">
                   <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
@@ -1048,8 +1196,7 @@ onBeforeUnmount(() => {
                     <input
                       v-model="r.joinDate"
                       type="date"
-                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                       @change="syncContractFromJoin(r)"
                     />
                   </div>
@@ -1059,8 +1206,7 @@ onBeforeUnmount(() => {
                     <input
                       v-model="r.contractDate"
                       type="date"
-                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                   </div>
 
@@ -1070,22 +1216,22 @@ onBeforeUnmount(() => {
                       v-model.number="r.alCarry"
                       type="number"
                       placeholder="0"
-                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     />
                   </div>
                 </div>
               </div>
+
               <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                         text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                         dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                  @click="addRow"
-                >
-                  <i class="fa-solid fa-plus text-[10px]" />
-                  Add row
-                </button>
+                type="button"
+                class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                       text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                @click="addRow"
+              >
+                <i class="fa-solid fa-plus text-[10px]" />
+                Add row
+              </button>
             </div>
 
             <!-- Single -->
@@ -1147,15 +1293,11 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Footer (fixed) -->
-          <div
-            class="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5
-                   dark:border-slate-700 dark:bg-slate-900/80"
-          >
+          <!-- Footer -->
+          <div class="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
             <button
               type="button"
-              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70
-                     dark:text-slate-200 dark:hover:bg-slate-800"
+              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
               @click="closeCreate"
               :disabled="saving"
             >
@@ -1164,10 +1306,10 @@ onBeforeUnmount(() => {
 
             <button
               type="button"
-              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5
-                     text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
+              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
               @click="submitCreate"
-              :disabled="saving"
+              :disabled="saving || !approverReady"
+              :title="!approverReady ? 'Missing GM/COO approver (seed or /admin/leave/approvers)' : ''"
             >
               <i class="fa-solid fa-check text-[10px]" />
               {{ saving ? 'Creating…' : 'Create' }}
