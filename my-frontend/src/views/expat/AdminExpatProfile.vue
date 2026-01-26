@@ -113,13 +113,7 @@ const filteredManagers = computed(() => {
   return base
     .map((g) => {
       const emps = (g.employees || []).filter((e) => {
-        const hay = [
-          e.employeeId,
-          e.name,
-          e.department,
-          e.managerLoginId,
-          e.approvalMode,
-        ]
+        const hay = [e.employeeId, e.name, e.department, e.managerLoginId, e.approvalMode]
           .filter(Boolean)
           .join(' ')
           .toLowerCase()
@@ -192,7 +186,9 @@ function nextPage() {
 }
 
 /* reset page when filters change */
-watch([q, includeInactive], () => { page.value = 1 })
+watch([q, includeInactive], () => {
+  page.value = 1
+})
 watch(includeInactive, () => fetchGroups())
 
 /* ───────── create modal ───────── */
@@ -338,6 +334,12 @@ async function submitCreate() {
   }
 }
 
+/* ✅ Lock background scroll when modal open */
+watch(createOpen, (open) => {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('overflow-hidden', !!open)
+})
+
 /* ───────── lifecycle ───────── */
 onMounted(() => {
   updateIsMobile()
@@ -346,6 +348,8 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  // safety: ensure body not locked if leaving page
+  if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
 })
 </script>
 
@@ -610,7 +614,10 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Empty -->
-        <div v-if="!loading && !error && pagedManagers.length === 0" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+        <div
+          v-if="!loading && !error && pagedManagers.length === 0"
+          class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400"
+        >
           No profiles found.
         </div>
 
@@ -623,13 +630,15 @@ onBeforeUnmount(() => {
                    shadow-[0_10px_24px_rgba(15,23,42,0.10)]
                    dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
           >
-            <!-- Manager header (highlight background) -->
+            <!-- Manager header -->
             <div class="border-b border-slate-200 bg-indigo-50 px-3 py-2 dark:border-slate-700 dark:bg-indigo-950/30">
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
                   <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                    <span class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
-                                 dark:bg-indigo-500/15 dark:text-indigo-200">
+                    <span
+                      class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
+                             dark:bg-indigo-500/15 dark:text-indigo-200"
+                    >
                       MANAGER
                     </span>
                     {{ safeTxt(g.manager?.name) }}
@@ -642,8 +651,10 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 border border-slate-200
-                            dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800">
+                <div
+                  class="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 border border-slate-200
+                         dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800"
+                >
                   {{ g.employees?.length || 0 }}
                 </div>
               </div>
@@ -675,13 +686,17 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="text-right space-y-1 text-[11px]">
-                    <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                          :class="statusChipClasses(!!e.isActive)">
+                    <span
+                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                      :class="statusChipClasses(!!e.isActive)"
+                    >
                       {{ e.isActive ? 'Active' : 'Inactive' }}
                     </span>
                     <div>
-                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                            :class="modeChipClasses(e.approvalMode)">
+                      <span
+                        class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                        :class="modeChipClasses(e.approvalMode)"
+                      >
                         {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
                       </span>
                     </div>
@@ -700,7 +715,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <!-- balances: used/remaining -->
+                <!-- balances -->
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
                     v-for="b in compactBalances(e.balances)"
@@ -717,7 +732,6 @@ onBeforeUnmount(() => {
                   Manager login: {{ safeTxt(e.managerLoginId) }}
                 </div>
 
-                <!-- Actions (✅ removed Open button) -->
                 <div class="mt-2 flex flex-wrap justify-end gap-2" @click.stop>
                   <button
                     type="button"
@@ -742,13 +756,14 @@ onBeforeUnmount(() => {
                    shadow-[0_10px_24px_rgba(15,23,42,0.08)]
                    dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
           >
-            <!-- Manager header (highlight background) -->
             <div class="border-b border-slate-200 bg-indigo-50 px-3 py-2 dark:border-slate-700 dark:bg-indigo-950/30">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                    <span class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
-                                 dark:bg-indigo-500/15 dark:text-indigo-200">
+                    <span
+                      class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
+                             dark:bg-indigo-500/15 dark:text-indigo-200"
+                    >
                       MANAGER
                     </span>
                     {{ safeTxt(g.manager?.name) }}
@@ -768,7 +783,10 @@ onBeforeUnmount(() => {
 
             <div class="overflow-x-auto">
               <table class="min-w-[1100px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
-                <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
+                <thead
+                  class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
+                         dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
+                >
                   <tr>
                     <th class="table-th">Employee</th>
                     <th class="table-th">Department</th>
@@ -811,8 +829,10 @@ onBeforeUnmount(() => {
                     </td>
 
                     <td class="table-td align-top">
-                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                            :class="modeChipClasses(e.approvalMode)">
+                      <span
+                        class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                        :class="modeChipClasses(e.approvalMode)"
+                      >
                         {{ e.approvalMode === 'GM_AND_COO' ? 'GM + COO' : 'GM only' }}
                       </span>
                     </td>
@@ -832,13 +852,14 @@ onBeforeUnmount(() => {
                     </td>
 
                     <td class="table-td align-top text-center">
-                      <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                            :class="statusChipClasses(!!e.isActive)">
+                      <span
+                        class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                        :class="statusChipClasses(!!e.isActive)"
+                      >
                         {{ e.isActive ? 'Active' : 'Inactive' }}
                       </span>
                     </td>
 
-                    <!-- Actions (✅ removed Open button) -->
                     <td class="table-td align-top text-right" @click.stop>
                       <div class="inline-flex flex-wrap justify-end gap-2">
                         <button
@@ -884,8 +905,10 @@ onBeforeUnmount(() => {
               Prev
             </button>
 
-            <div class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700
-                        dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+            <div
+              class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700
+                     dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
+            >
               Page {{ page }} / {{ totalPages }}
             </div>
 
@@ -905,12 +928,20 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Create modal -->
+    <!-- ✅ Create modal (UPDATED: scrollable overlay + fixed header/footer + body scroll) -->
     <transition name="modal-fade">
-      <div v-if="createOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2" @click.self="closeCreate">
-        <div class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
-          <!-- Header -->
-          <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+      <div
+        v-if="createOpen"
+        class="fixed inset-0 z-40 overflow-y-auto bg-slate-900/50 px-2 py-6"
+        @click.self="closeCreate"
+      >
+        <div
+          class="mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl
+                 dark:border-slate-700 dark:bg-slate-950
+                 max-h-[calc(100vh-3rem)] flex flex-col"
+        >
+          <!-- Header (fixed) -->
+          <div class="shrink-0 rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
             <div class="flex items-start justify-between gap-2">
               <div>
                 <div class="text-sm font-semibold">New leave profile</div>
@@ -949,8 +980,8 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Body -->
-          <div class="px-4 py-3 space-y-3">
+          <!-- Body (scroll) -->
+          <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3 overscroll-contain">
             <div>
               <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Approval mode</label>
               <select
@@ -975,16 +1006,6 @@ onBeforeUnmount(() => {
             <div v-if="createTab === 'bulk'" class="space-y-2">
               <div class="flex items-center justify-between gap-2">
                 <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                         text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                         dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                  @click="addRow"
-                >
-                  <i class="fa-solid fa-plus text-[10px]" />
-                  Add row
-                </button>
               </div>
 
               <div
@@ -1055,6 +1076,16 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
+              <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
+                         text-[11px] font-semibold text-slate-700 hover:bg-slate-50
+                         dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
+                  @click="addRow"
+                >
+                  <i class="fa-solid fa-plus text-[10px]" />
+                  Add row
+                </button>
             </div>
 
             <!-- Single -->
@@ -1116,11 +1147,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Footer -->
-          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
+          <!-- Footer (fixed) -->
+          <div
+            class="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5
+                   dark:border-slate-700 dark:bg-slate-900/80"
+          >
             <button
               type="button"
-              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
+              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70
+                     dark:text-slate-200 dark:hover:bg-slate-800"
               @click="closeCreate"
               :disabled="saving"
             >
@@ -1145,8 +1180,16 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; }
-.table-td { padding: 8px 10px; vertical-align: top; }
+.table-th {
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+}
+.table-td {
+  padding: 8px 10px;
+  vertical-align: top;
+}
 
 .modal-fade-enter-active,
 .modal-fade-leave-active {

@@ -411,12 +411,12 @@ onBeforeUnmount(() => {
                   {{ b.leaveTypeCode }}
                 </span>
 
-                <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                <!-- <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                   Entitlement:
                   <span class="font-semibold text-slate-900 dark:text-slate-50 tabular-nums">
                     {{ b.yearlyEntitlement }}
                   </span>
-                </div>
+                </div> -->
               </div>
 
               <!-- ✅ AL shows used/remaining, others show used only -->

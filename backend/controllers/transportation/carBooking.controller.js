@@ -417,19 +417,32 @@ async function listMyBookings(req, res, next) {
   } catch (err) { next(err) }
 }
 
-/* ───────── ADMIN: update status (Actions buttons + reopen) ───────── */
+/* ───────── ADMIN: update status (Actions buttons + reopen + force complete) ───────── */
 async function updateStatus(req, res, next) {
   try {
     const io = req.io
     const { id } = req.params
-    const { status, forceReopen } = req.body || {}
-    if (!ALLOWED_STATUS.includes(status)) throw createError(400, 'Invalid status.')
+
+    const {
+      status,
+      forceReopen,
+      force,              // old flag
+      forceComplete,      // ✅ new flag from FE
+    } = req.body || {}
+
+    const nextStatus = String(status || '').toUpperCase()
+    if (!ALLOWED_STATUS.includes(nextStatus)) throw createError(400, 'Invalid status.')
 
     const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
-    const from = doc.status || 'PENDING'
-    const nextStatus = status
+    const from = String(doc.status || 'PENDING').toUpperCase()
+
+    // ✅ Admin Force Complete (accept BOTH flags)
+    const isForceComplete =
+      (forceComplete === true || force === true) &&
+      nextStatus === 'COMPLETED' &&
+      !['COMPLETED', 'CANCELLED'].includes(from)
 
     const isReopen =
       !!forceReopen &&
@@ -441,7 +454,26 @@ async function updateStatus(req, res, next) {
       if (doc.assignment) {
         doc.assignment.driverAck = 'PENDING'
         doc.assignment.messengerAck = 'PENDING'
+        doc.assignment.driverAckAt = undefined
+        doc.assignment.messengerAckAt = undefined
       }
+    } else if (isForceComplete) {
+      if (!hasAssignee(doc)) {
+        throw createError(400, 'You must assign a Driver/Messenger before marking COMPLETED.')
+      }
+
+      // optional: normalize ack
+      if (doc.assignment?.driverId && doc.assignment.driverAck === 'PENDING') {
+        doc.assignment.driverAck = 'ACCEPTED'
+        doc.assignment.driverAckAt = doc.assignment.driverAckAt || new Date()
+      }
+      if (doc.assignment?.messengerId && doc.assignment.messengerAck === 'PENDING') {
+        doc.assignment.messengerAck = 'ACCEPTED'
+        doc.assignment.messengerAckAt = doc.assignment.messengerAckAt || new Date()
+      }
+
+      doc.status = 'COMPLETED'
+      doc.updatedAt = new Date()
     } else {
       if (!FORWARD[from] || !FORWARD[from].has(nextStatus)) {
         throw createError(400, `Cannot change from ${from} to ${nextStatus}`)
@@ -452,6 +484,7 @@ async function updateStatus(req, res, next) {
       }
 
       doc.status = nextStatus
+      doc.updatedAt = new Date()
     }
 
     await doc.save()
@@ -460,15 +493,14 @@ async function updateStatus(req, res, next) {
 
     try {
       await notify('STATUS_CHANGED', { bookingId: doc._id, newStatus: doc.status, byName: req.user?.name })
-    } catch (e) {
-      console.error('[notify error] STATUS_CHANGED', e?.message || e)
-    }
+    } catch {}
 
     res.json(doc)
   } catch (err) {
     next(err)
   }
 }
+
 
 /* ───────── ADMIN assign / reassign / unassign ─────────
    ✅ Messenger booking: only assign MESSENGER
