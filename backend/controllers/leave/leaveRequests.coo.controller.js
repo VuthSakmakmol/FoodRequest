@@ -7,34 +7,72 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
 const { computeBalances } = require('../../utils/leave.rules')
 const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/leave.realtime')
-
-// ✅ Telegram notify (safe-call)
 const notify = require('../../services/leave/leave.telegram.notify')
 
-/**
- * ✅ enum:
- * approvalMode: 'MANAGER_AND_GM' | 'GM_AND_COO'
- */
+/* ───────────────── helpers ───────────────── */
 
-const COO_MODE = 'GM_AND_COO'
+function s(v) {
+  return String(v ?? '').trim()
+}
+
+function getEnumValues(model, pathName) {
+  try {
+    const path = model?.schema?.path?.(pathName)
+    const enums = path?.enumValues
+    return Array.isArray(enums) ? enums.map((x) => String(x)) : []
+  } catch {
+    return []
+  }
+}
+
+// semantic mode we want
+function normalizeApprovalModeSemantic(v) {
+  const m = s(v).toUpperCase()
+  if (m === 'GM_AND_COO') return 'GM_AND_COO'
+  if (m === 'GM_OR_COO') return 'GM_AND_COO'
+  if (m === 'COO_AND_GM') return 'GM_AND_COO'
+  if (m === 'GM_THEN_COO') return 'GM_AND_COO'
+  return 'MANAGER_AND_GM'
+}
+
+function storedToSemantic(v) {
+  return normalizeApprovalModeSemantic(v)
+}
 
 /**
- * ✅ NEW rule:
- * COO can only act when GM already approved and request moved to PENDING_COO.
+ * Build query matcher for GM_AND_COO across whatever the schema enum allows.
+ * - If schema allows GM_AND_COO: match that
+ * - Else if schema allows GM_OR_COO (legacy): match that
+ * - Else: fallback to $in of whatever matches
  */
-const COO_PENDING = ['PENDING_COO']
+function approvalModeQueryForGmAndCoo() {
+  const enums = getEnumValues(LeaveRequest, 'approvalMode')
+
+  // schema not strict => store semantic, match semantic
+  if (!enums.length) return 'GM_AND_COO'
+
+  // preferred
+  if (enums.includes('GM_AND_COO')) return 'GM_AND_COO'
+
+  // common legacy values
+  const legacyCandidates = ['GM_OR_COO', 'COO_AND_GM', 'GM_THEN_COO', 'GM_COO']
+  const allowedLegacy = legacyCandidates.filter((x) => enums.includes(x))
+
+  if (allowedLegacy.length === 1) return allowedLegacy[0]
+  if (allowedLegacy.length > 1) return { $in: allowedLegacy }
+
+  // last fallback: just match first enum value so query still returns something
+  return enums[0]
+}
 
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
   const base = req.user?.role ? [req.user.role] : []
-  return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
+  return [...new Set([...raw, ...base].map((r) => s(r).toUpperCase()))].filter(Boolean)
 }
 
-/**
- * ✅ Prefer loginId first (your LeaveRequest stores loginId strings)
- */
 function actorLoginId(req) {
-  return String(req.user?.loginId || req.user?.employeeId || req.user?.sub || req.user?.id || '').trim()
+  return s(req.user?.loginId || req.user?.employeeId || req.user?.sub || req.user?.id || '')
 }
 
 function isAdminViewer(req) {
@@ -80,7 +118,7 @@ async function safeNotify(fn, ...args) {
 }
 
 async function attachEmployeeInfo(docs = []) {
-  const ids = [...new Set((docs || []).map((d) => String(d.employeeId || '').trim()).filter(Boolean))]
+  const ids = [...new Set((docs || []).map((d) => s(d.employeeId)).filter(Boolean))]
   if (!ids.length) return docs
 
   const emps = await EmployeeDirectory.find(
@@ -88,14 +126,15 @@ async function attachEmployeeInfo(docs = []) {
     { employeeId: 1, name: 1, department: 1 }
   ).lean()
 
-  const map = new Map((emps || []).map((e) => [String(e.employeeId || '').trim(), e]))
+  const map = new Map((emps || []).map((e) => [s(e.employeeId), e]))
 
   return (docs || []).map((d) => {
-    const emp = map.get(String(d.employeeId || '').trim())
+    const emp = map.get(s(d.employeeId))
     return {
       ...d,
       employeeName: emp?.name || d.employeeName || '',
       department: emp?.department || d.department || '',
+      approvalMode: storedToSemantic(d.approvalMode), // ✅ always semantic to UI
     }
   })
 }
@@ -103,8 +142,8 @@ async function attachEmployeeInfo(docs = []) {
 async function attachEmployeeInfoToOne(doc) {
   if (!doc) return doc
   const raw = typeof doc.toObject === 'function' ? doc.toObject() : doc
-  const employeeId = String(raw.employeeId || '').trim()
-  if (!employeeId) return raw
+  const employeeId = s(raw.employeeId)
+  if (!employeeId) return { ...raw, approvalMode: storedToSemantic(raw.approvalMode) }
 
   const emp = await EmployeeDirectory.findOne(
     { employeeId },
@@ -115,12 +154,13 @@ async function attachEmployeeInfoToOne(doc) {
     ...raw,
     employeeName: emp?.name || raw.employeeName || '',
     department: emp?.department || raw.department || '',
+    approvalMode: storedToSemantic(raw.approvalMode),
   }
 }
 
 async function recalcAndEmitProfile(req, employeeId) {
   try {
-    const empId = String(employeeId || '').trim()
+    const empId = s(employeeId)
     if (!empId) return
 
     const prof = await LeaveProfile.findOne({ employeeId: empId })
@@ -133,24 +173,19 @@ async function recalcAndEmitProfile(req, employeeId) {
     const snap = computeBalances(prof.toObject ? prof.toObject() : prof, approved, new Date())
 
     const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
-    const nextAsOf = String(snap?.meta?.asOfYMD || prof.balancesAsOf || '').trim()
-    const nextEnd = snap?.meta?.contractYear?.endDate
-      ? String(snap.meta.contractYear.endDate)
-      : String(prof.contractEndDate || '')
-
-    const before = JSON.stringify(prof.balances || [])
-    const after = JSON.stringify(nextBalances)
+    const nextAsOf = s(snap?.meta?.asOfYMD || prof.balancesAsOf || '')
+    const nextEnd = snap?.meta?.contractYear?.endDate ? s(snap.meta.contractYear.endDate) : s(prof.contractEndDate)
 
     let changed = false
-    if (before !== after) {
+    if (JSON.stringify(prof.balances || []) !== JSON.stringify(nextBalances)) {
       prof.balances = nextBalances
       changed = true
     }
-    if (nextAsOf && String(prof.balancesAsOf || '') !== nextAsOf) {
+    if (nextAsOf && s(prof.balancesAsOf) !== nextAsOf) {
       prof.balancesAsOf = nextAsOf
       changed = true
     }
-    if (nextEnd && String(prof.contractEndDate || '') !== nextEnd) {
+    if (nextEnd && s(prof.contractEndDate) !== nextEnd) {
       prof.contractEndDate = nextEnd
       changed = true
     }
@@ -162,10 +197,11 @@ async function recalcAndEmitProfile(req, employeeId) {
   }
 }
 
+/* ───────────────── controllers ───────────────── */
+
 /**
  * ✅ COO Inbox
- * NEW RULE:
- * - COO should NOT see request until GM approved and moved to PENDING_COO
+ * - Should see ONLY PENDING_COO (and finished) for GM+COO mode
  */
 exports.listCooInbox = async (req, res) => {
   try {
@@ -174,14 +210,13 @@ exports.listCooInbox = async (req, res) => {
     const me = actorLoginId(req)
     if (!me && !isAdminViewer(req)) return res.status(400).json({ message: 'Missing user identity' })
 
-    // ✅ Strict visibility:
-    // - non-admin COO sees only his assigned and only relevant statuses
-    // - admin sees all COO-mode requests, but still filtered to COO-stage/final
+    const modeMatcher = approvalModeQueryForGmAndCoo()
+
     const statusFilter = { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] }
 
     const query = isAdminViewer(req)
-      ? { approvalMode: COO_MODE, status: statusFilter }
-      : { approvalMode: COO_MODE, cooLoginId: me, status: statusFilter }
+      ? { approvalMode: modeMatcher, status: statusFilter }
+      : { approvalMode: modeMatcher, cooLoginId: me, status: statusFilter }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -192,9 +227,9 @@ exports.listCooInbox = async (req, res) => {
 }
 
 /**
- * ✅ COO Decision (race-safe)
- * NEW RULE:
+ * ✅ COO Decision
  * - COO can decide ONLY when status === PENDING_COO
+ * - ApprovalMode must be GM+COO (semantic)
  */
 exports.cooDecision = async (req, res) => {
   try {
@@ -207,25 +242,23 @@ exports.cooDecision = async (req, res) => {
     const existing = await LeaveRequest.findById(id)
     if (!existing) return res.status(404).json({ message: 'Request not found' })
 
-    // ✅ must be COO-mode to decide
-    if (String(existing.approvalMode || '') !== COO_MODE) {
-      return res.status(400).json({ message: 'This request is not in GM & COO approval mode.' })
+    // ✅ semantic check (works even if stored enum is legacy)
+    if (storedToSemantic(existing.approvalMode) !== 'GM_AND_COO') {
+      return res.status(400).json({ message: 'This request is not in GM + COO approval mode.' })
     }
 
-    // ✅ permission: cooLoginId must match (unless admin viewer)
-    if (!isAdminViewer(req) && String(existing.cooLoginId || '') !== me) {
+    if (!isAdminViewer(req) && s(existing.cooLoginId) !== me) {
       return res.status(403).json({ message: 'Not your request' })
     }
 
-    // ✅ Strict: COO can decide ONLY at PENDING_COO (GM must approve first)
-    if (!COO_PENDING.includes(String(existing.status || ''))) {
+    if (s(existing.status) !== 'PENDING_COO') {
       return res.status(400).json({
         message: `Request is ${existing.status}. COO can only decide when status is PENDING_COO.`,
       })
     }
 
-    const act = String(action || '').toUpperCase()
-    if (act === 'REJECT' && !String(comment || '').trim()) {
+    const act = s(action).toUpperCase()
+    if (act === 'REJECT' && !s(comment)) {
       return res.status(400).json({ message: 'Reject requires a reason.' })
     }
 
@@ -234,18 +267,16 @@ exports.cooDecision = async (req, res) => {
     else if (act === 'REJECT') newStatus = 'REJECTED'
     else return res.status(400).json({ message: 'Invalid action' })
 
-    const update = {
-      $set: {
-        status: newStatus,
-        cooComment: String(comment || ''),
-        cooDecisionAt: new Date(),
-      },
-    }
-
-    // ✅ race-safe update: only if still PENDING_COO at update time
+    // ✅ race-safe: only update if still pending & same stored approvalMode
     const doc = await LeaveRequest.findOneAndUpdate(
-      { _id: id, status: { $in: COO_PENDING }, approvalMode: COO_MODE },
-      update,
+      { _id: id, status: 'PENDING_COO', approvalMode: existing.approvalMode },
+      {
+        $set: {
+          status: newStatus,
+          cooComment: String(comment || ''),
+          cooDecisionAt: new Date(),
+        },
+      },
       { new: true }
     )
 
@@ -258,15 +289,12 @@ exports.cooDecision = async (req, res) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
 
-    // ✅ Realtime
     emitReq(req, payload, 'leave:req:updated')
 
-    // ✅ Telegram notifications (safe)
     await safeNotify(notify.notifyCooDecisionToEmployee, doc)
     await safeNotify(notify.notifyLeaveAdminCooDecision, doc)
     await safeNotify(notify.notifyCooDecisionToGm, doc)
 
-    // ✅ Recalc balances after final decision
     await recalcAndEmitProfile(req, doc.employeeId)
 
     return res.json(payload)

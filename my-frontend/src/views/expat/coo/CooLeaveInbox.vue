@@ -596,7 +596,7 @@ onBeforeUnmount(() => {
                 Profile
               </button>
 
-              <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_GM'">
+              <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_COO'">
                 <button
                   type="button"
                   class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
@@ -706,7 +706,7 @@ onBeforeUnmount(() => {
                       Profile
                     </button>
 
-                    <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_GM'">
+                    <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_COO'">
                       <button
                         type="button"
                         class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
