@@ -48,6 +48,7 @@ const groups = [
       { label: 'Leave Types',    icon: 'fa-solid fa-gear',         to: { name: 'leave-admin-types' } },
       { label: 'Expat Profiles', icon: 'fa-solid fa-user-group',   to: { name: 'leave-admin-profiles' } },
       { label: 'Report Summary', icon: 'fa-solid fa-chart-column', to: { name: 'leave-admin-report' } },
+      { label: 'Add Signature',  icon: 'fa-solid fa-add', to: { name: 'leave-add-signature'}},
     ],
   },
 ]

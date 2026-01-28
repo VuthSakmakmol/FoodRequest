@@ -1,22 +1,30 @@
-// backend/routes/leave/leaveRequests.coo.routes.js
-const express = require('express')
-const router = express.Router()
+const router = require('express').Router()
 
 const { requireAuth, requireRole } = require('../../middlewares/auth')
-const { listCooInbox, cooDecision } = require('../../controllers/leave/leaveRequests.coo.controller')
+const leaveCtrl = require('../../controllers/leave/leaveRequest.controller')
 
+// All COO leave routes require auth
 router.use(requireAuth)
 
+/**
+ * COO Inbox
+ * GET /api/coo/leave/requests/inbox
+ */
 router.get(
-  '/coo/inbox',
+  '/inbox',
   requireRole('LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
-  listCooInbox
+  leaveCtrl.listCooInbox
 )
 
+/**
+ * COO Decision
+ * POST /api/coo/leave/requests/:id/decision
+ * body: { action: "APPROVE"|"REJECT", comment?: string }
+ */
 router.post(
-  '/:id/coo-decision',
+  '/:id/decision',
   requireRole('LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
-  cooDecision
+  leaveCtrl.cooDecision
 )
 
 module.exports = router

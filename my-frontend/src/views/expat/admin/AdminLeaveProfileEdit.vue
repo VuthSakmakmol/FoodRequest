@@ -75,6 +75,23 @@ function safeStr(v) {
   return String(v || '').trim()
 }
 
+/* ───────── approval mode helpers ───────── */
+const APPROVAL_MODES = [
+  { value: 'MANAGER_AND_GM', label: 'Manager + GM', hint: 'Manager approves first, then GM.' },
+  { value: 'GM_AND_COO', label: 'GM + COO', hint: 'GM approves first, then COO.' },
+]
+
+function normApprovalMode(v) {
+  const s = String(v || '').trim().toUpperCase()
+  if (s === 'GM_AND_COO') return 'GM_AND_COO'
+  if (s === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  // backward aliases
+  if (s === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
+  if (s === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (s === 'MANAGER+GM') return 'MANAGER_AND_GM'
+  return 'MANAGER_AND_GM'
+}
+
 /* ───────── balances normalize ───────── */
 function normalizeBalances(rawBalances = []) {
   const map = new Map()
@@ -122,17 +139,32 @@ const contractHistory = computed(() => {
 /* ───────── EDITABLE FORM ───────── */
 const form = reactive({
   joinDate: '',
+  approvalMode: 'MANAGER_AND_GM',
+
+  // approver mapping
   managerEmployeeId: '',
   gmLoginId: '',
+  cooLoginId: '',
+
   alCarry: 0,
   isActive: true,
 })
+
 const formError = ref('')
 
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
+
+  // ✅ approvalMode
+  form.approvalMode = normApprovalMode(p?.approvalMode)
+
+  // ✅ manager uses employeeId field; fallback to managerLoginId if old data
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
+
+  // ✅ GM + COO
   form.gmLoginId = String(p?.gmLoginId || '')
+  form.cooLoginId = String(p?.cooLoginId || '')
+
   form.alCarry = num(p?.alCarry ?? 0)
   form.isActive = p?.isActive === false ? false : true
 
@@ -145,23 +177,33 @@ const joinDateChanged = computed(() => {
   return a !== b
 })
 
+const needManager = computed(() => String(form.approvalMode || '') === 'MANAGER_AND_GM')
+const needCoo = computed(() => String(form.approvalMode || '') === 'GM_AND_COO')
+
 const isDirty = computed(() => {
   const p = profile.value
   if (!p) return false
+
   const a = {
     joinDate: toInputDate(p.joinDate),
+    approvalMode: normApprovalMode(p.approvalMode),
     managerEmployeeId: String(p.managerEmployeeId || p.managerLoginId || ''),
     gmLoginId: String(p.gmLoginId || ''),
+    cooLoginId: String(p.cooLoginId || ''),
     alCarry: num(p.alCarry ?? 0),
     isActive: p.isActive === false ? false : true,
   }
+
   const b = {
     joinDate: String(form.joinDate || ''),
+    approvalMode: normApprovalMode(form.approvalMode),
     managerEmployeeId: String(form.managerEmployeeId || ''),
     gmLoginId: String(form.gmLoginId || ''),
+    cooLoginId: String(form.cooLoginId || ''),
     alCarry: num(form.alCarry),
     isActive: !!form.isActive,
   }
+
   return JSON.stringify(a) !== JSON.stringify(b)
 })
 
@@ -240,6 +282,27 @@ async function forceRecalcBalances() {
   return false
 }
 
+function validateApprovers() {
+  const mode = normApprovalMode(form.approvalMode)
+
+  // GM always required (for both modes)
+  if (!String(form.gmLoginId || '').trim()) {
+    return 'GM Login ID is required.'
+  }
+
+  // ✅ if Manager + GM, manager must be selected
+  if (mode === 'MANAGER_AND_GM' && !String(form.managerEmployeeId || '').trim()) {
+    return 'Approval Mode is Manager + GM, so Manager Employee ID is required.'
+  }
+
+  // ✅ if GM + COO, COO must be selected
+  if (mode === 'GM_AND_COO' && !String(form.cooLoginId || '').trim()) {
+    return 'Approval Mode is GM + COO, so COO Login ID is required.'
+  }
+
+  return ''
+}
+
 async function saveProfile() {
   formError.value = ''
 
@@ -252,14 +315,31 @@ async function saveProfile() {
     return
   }
 
+  const approverErr = validateApprovers()
+  if (approverErr) {
+    formError.value = approverErr
+    showToast({ type: 'error', title: 'Validation', message: approverErr })
+    return
+  }
+
   saving.value = true
   try {
+    const mode = normApprovalMode(form.approvalMode)
+
     // 1) update profile
     await updateProfile(
       {
         joinDate: form.joinDate ? String(form.joinDate) : null,
+
+        approvalMode: mode,
+
+        // ✅ when MANAGER_AND_GM, require managerEmployeeId
+        // when GM_AND_COO, allow manager optional (keep whatever admin sets)
         managerEmployeeId: form.managerEmployeeId ? String(form.managerEmployeeId).trim() : null,
+
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
+        cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
+
         alCarry: num(form.alCarry),
         isActive: form.isActive !== false,
       },
@@ -418,7 +498,7 @@ onBeforeUnmount(() => {
       class="rounded-3xl border border-slate-200/70 bg-white/70 shadow-[0_18px_45px_rgba(15,23,42,0.10)]
              backdrop-blur dark:border-slate-800/70 dark:bg-slate-950/55 overflow-hidden"
     >
-      <!-- ✅ Natural gradient header (same standard) -->
+      <!-- Header -->
       <header class="relative overflow-hidden px-4 py-4 sm:px-5">
         <div
           class="absolute inset-0"
@@ -447,11 +527,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                class="btn-ghost"
-                @click="goBack"
-              >
+              <button type="button" class="btn-ghost" @click="goBack">
                 <i class="fa-solid fa-arrow-left text-[12px]" />
                 Back
               </button>
@@ -467,12 +543,7 @@ onBeforeUnmount(() => {
                 Reset
               </button>
 
-              <button
-                type="button"
-                class="btn-white"
-                :disabled="loading || !profile"
-                @click="openRenewModal"
-              >
+              <button type="button" class="btn-white" :disabled="loading || !profile" @click="openRenewModal">
                 <i class="fa-solid fa-arrows-rotate text-[12px]" />
                 Renew
               </button>
@@ -494,12 +565,7 @@ onBeforeUnmount(() => {
                 </span>
               </button>
 
-              <button
-                type="button"
-                class="btn-ghost"
-                :disabled="loading"
-                @click="fetchProfile()"
-              >
+              <button type="button" class="btn-ghost" :disabled="loading" @click="fetchProfile()">
                 <i class="fa-solid fa-rotate text-[12px]" :class="loading ? 'fa-spin' : ''" />
                 Refresh
               </button>
@@ -533,22 +599,25 @@ onBeforeUnmount(() => {
           </div>
 
           <template v-else>
-            <!-- ✅ Top summary cards -->
+            <!-- Top summary cards -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <InfoRow label="Employee ID" :value="profile.employeeId || '—'" hint="Read-only" />
               <InfoRow label="Name" :value="profile.name || '—'" hint="Read-only" />
               <InfoRow label="Department" :value="profile.department || '—'" hint="Read-only" />
             </div>
 
-            <!-- ✅ Main content -->
+            <!-- Main content -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <!-- Edit form -->
-              <section class="lg:col-span-2 rounded-3xl border border-slate-200/70 bg-white/80 p-3 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/45">
+              <section
+                class="lg:col-span-2 rounded-3xl border border-slate-200/70 bg-white/80 p-3 shadow-sm
+                       dark:border-slate-800/70 dark:bg-slate-950/45"
+              >
                 <div class="flex items-start justify-between gap-2">
                   <div>
                     <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Profile Settings</div>
                     <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                      Changing Join Date affects accrual. Renew is separate (contract start).
+                      Changing Join Date affects accrual. Approval mode controls workflow.
                     </div>
                   </div>
 
@@ -599,6 +668,42 @@ onBeforeUnmount(() => {
                     :value="fmtYMD(profile.contractDate)"
                     hint="To change contract date, use Renew"
                   />
+
+                  <!-- ✅ Approval Mode dropdown -->
+                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45 sm:col-span-2">
+                    <div
+                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
+                      title="Approval chain for this employee profile"
+                    >
+                      Approval Mode
+                    </div>
+
+                    <div class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        v-model="form.approvalMode"
+                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
+                               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        <option v-for="m in APPROVAL_MODES" :key="m.value" :value="m.value">
+                          {{ m.label }}
+                        </option>
+                      </select>
+
+                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600
+                                  dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
+                        <div class="font-extrabold text-[11px] text-slate-700 dark:text-slate-200">Rule</div>
+                        <div class="mt-0.5">
+                          <span v-if="needManager">Manager is required.</span>
+                          <span v-else>COO is required.</span>
+                          <span class="ml-1 text-slate-400">GM is always required.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      Current: <span class="font-mono">{{ normApprovalMode(profile.approvalMode) }}</span>
+                    </div>
+                  </div>
 
                   <!-- AL Carry -->
                   <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
@@ -656,13 +761,16 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- Manager Employee ID -->
+                  <!-- ✅ Manager Employee ID (required only when MANAGER_AND_GM) -->
                   <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
                     <div
                       class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="Use manager employeeId (not loginId)"
+                      :title="needManager ? 'Required for Manager + GM' : 'Optional (will be skipped if empty)'"
                     >
                       Manager Employee ID
+                      <span v-if="needManager" class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                        required
+                      </span>
                     </div>
 
                     <div class="mt-1">
@@ -670,8 +778,11 @@ onBeforeUnmount(() => {
                         v-model="form.managerEmployeeId"
                         type="text"
                         placeholder="Example: 51820386"
-                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        class="w-full rounded-xl border px-3 py-2 text-[13px] dark:text-slate-100
+                               dark:bg-slate-900"
+                        :class="needManager
+                          ? 'border-amber-300 bg-white focus:border-amber-500 dark:border-amber-800/70'
+                          : 'border-slate-300 bg-white dark:border-slate-700'"
                       />
                       <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                         Current: <span class="font-mono">{{ profile.managerEmployeeId || profile.managerLoginId || '—' }}</span>
@@ -683,9 +794,9 @@ onBeforeUnmount(() => {
                   <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
                     <div
                       class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="Approver loginId with role LEAVE_GM"
+                      title="Approver loginId with role LEAVE_GM (required)"
                     >
-                      GM Login ID
+                      GM Login ID <span class="ml-2 text-rose-600 font-extrabold">*</span>
                     </div>
 
                     <div class="mt-1">
@@ -698,6 +809,32 @@ onBeforeUnmount(() => {
                       />
                       <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                         Current: <span class="font-mono">{{ profile.gmLoginId || '—' }}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- ✅ COO Login ID (only when GM_AND_COO) -->
+                  <div
+                    v-if="needCoo"
+                    class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45 sm:col-span-2"
+                  >
+                    <div
+                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
+                      title="Required when approval mode is GM + COO"
+                    >
+                      COO Login ID <span class="ml-2 text-rose-600 font-extrabold">*</span>
+                    </div>
+
+                    <div class="mt-1">
+                      <input
+                        v-model="form.cooLoginId"
+                        type="text"
+                        placeholder="Example: leave_coo"
+                        class="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-[13px]
+                               focus:border-amber-500 dark:border-amber-800/70 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        Current: <span class="font-mono">{{ profile.cooLoginId || '—' }}</span>
                       </div>
                     </div>
                   </div>
@@ -736,24 +873,19 @@ onBeforeUnmount(() => {
                     <thead class="bg-slate-50 text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
                       <tr>
                         <th class="px-3 py-2 text-left font-extrabold">Type</th>
-                        <!-- <th class="px-3 py-2 text-right font-extrabold">Ent</th> -->
                         <th class="px-3 py-2 text-right font-extrabold">Used</th>
                         <th class="px-3 py-2 text-right font-extrabold">Remain</th>
                       </tr>
                     </thead>
 
-                    <!-- ✅ row split + zebra -->
                     <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
                       <tr
                         v-for="(b, idx) in normalizedBalances"
                         :key="b.leaveTypeCode"
                         class="text-slate-700 dark:text-slate-100"
-                        :class="idx % 2 === 0
-                          ? 'bg-white/70 dark:bg-slate-950/40'
-                          : 'bg-slate-50/70 dark:bg-slate-900/35'"
+                        :class="idx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/40' : 'bg-slate-50/70 dark:bg-slate-900/35'"
                       >
                         <td class="px-3 py-2 font-extrabold">{{ b.leaveTypeCode }}</td>
-                        <!-- <td class="px-3 py-2 text-right font-mono">{{ fmt(b.yearlyEntitlement) }}</td> -->
                         <td class="px-3 py-2 text-right font-mono">{{ fmt(b.used) }}</td>
                         <td class="px-3 py-2 text-right font-mono">
                           <span
@@ -804,19 +936,14 @@ onBeforeUnmount(() => {
                       <th class="px-3 py-2 text-right font-extrabold">AL Carry</th>
                       <th class="px-3 py-2 text-left font-extrabold">Snapshot</th>
                       <th class="px-3 py-2 text-left font-extrabold">Note</th>
-                      <!-- <th class="px-3 py-2 text-left font-extrabold">By</th>
-                      <th class="px-3 py-2 text-left font-extrabold">At</th> -->
                     </tr>
                   </thead>
 
-                  <!-- ✅ row split + zebra -->
                   <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
                     <tr
                       v-for="(c, idx) in contractHistory"
                       :key="c._id || c.createdAt || idx"
-                      :class="idx % 2 === 0
-                        ? 'bg-white/70 dark:bg-slate-950/40'
-                        : 'bg-slate-50/70 dark:bg-slate-900/35'"
+                      :class="idx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/40' : 'bg-slate-50/70 dark:bg-slate-900/35'"
                       class="text-slate-700 dark:text-slate-100"
                     >
                       <td class="px-3 py-2 font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
@@ -846,11 +973,6 @@ onBeforeUnmount(() => {
                           {{ c.note || '—' }}
                         </div>
                       </td>
-
-                      <!-- <td class="px-3 py-2 font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
-                      <td class="px-3 py-2 font-mono text-[11px]">
-                        {{ c.createdAt ? dayjs(c.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                      </td> -->
                     </tr>
                   </tbody>
                 </table>
@@ -1024,9 +1146,7 @@ onBeforeUnmount(() => {
                   <tr
                     v-for="(c, idx) in contractHistory"
                     :key="c._id || c.createdAt || idx"
-                    :class="idx % 2 === 0
-                      ? 'bg-white/70 dark:bg-slate-950/40'
-                      : 'bg-slate-50/70 dark:bg-slate-900/35'"
+                    :class="idx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/40' : 'bg-slate-50/70 dark:bg-slate-900/35'"
                   >
                     <td class="px-3 py-2 font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
                     <td class="px-3 py-2 font-mono">{{ c.startDate || '—' }}</td>

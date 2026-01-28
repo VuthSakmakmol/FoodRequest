@@ -83,7 +83,7 @@ function statusChipClasses(status) {
 async function fetchInbox(silent = false) {
   try {
     loading.value = true
-    const res = await api.get('/leave/requests/coo/inbox')
+    const res = await api.get('/coo/leave/requests/inbox')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('fetchInbox COO error', e)
@@ -290,7 +290,7 @@ async function submitDecision() {
 
   try {
     loading.value = true
-    await api.post(`/leave/requests/${row._id}/coo-decision`, {
+    await api.post(`/coo/leave/requests/${row._id}/decision`, {
       action,
       ...(action === 'REJECT' ? { comment } : {}),
     })

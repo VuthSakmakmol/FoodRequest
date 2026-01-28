@@ -1,11 +1,11 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveReport.admin.controller.js
 
-const LeaveProfile      = require('../../models/leave/LeaveProfile')
-const LeaveRequest      = require('../../models/leave/LeaveRequest')
+const LeaveProfile = require('../../models/leave/LeaveProfile')
+const LeaveRequest = require('../../models/leave/LeaveRequest')
 const ReplaceDayRequest = require('../../models/leave/ReplaceDayRequest')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
-const LeaveType         = require('../../models/leave/LeaveType')
+const LeaveType = require('../../models/leave/LeaveType')
 
 const { computeBalances } = require('../../utils/leave.rules')
 
@@ -13,6 +13,10 @@ const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
 const PP_OFFSET_MINUTES = 7 * 60 // UTC+7
 
 // ───────────────── helpers ─────────────────
+
+function safeText(v) {
+  return String(v ?? '').trim()
+}
 
 function num(v) {
   const n = Number(v ?? 0)
@@ -96,7 +100,7 @@ function isAdminViewer(req) {
 function overlapsRange(docStart, docEnd, from, to) {
   if (!from || !to) return true
   const s = toYMD(docStart) || ''
-  const e = toYMD(docEnd) || s // if end missing, treat as 1-day
+  const e = toYMD(docEnd) || s
   if (!s) return false
   return s <= to && e >= from
 }
@@ -117,16 +121,13 @@ function buildTypeOrder(leaveTypesRows = []) {
 function findBalanceRow(snapshot, code) {
   return (
     (snapshot?.balances || []).find(
-      (b) => String(b.leaveTypeCode).toUpperCase() === String(code).toUpperCase()
-    ) || null
-  )
+      (b) => String(b.leaveTypeCode || '').toUpperCase() === String(code || '').toUpperCase()
+    ) || null)
 }
 
 /**
- * ✅ Pending usage reservation (match strict request behavior)
- * - Use a meta window (contractYear or joinYear) when available.
- * - AL/SP/MC/MA: count pending inside that window.
- * - UL: unlimited (no strict reserve needed).
+ * ✅ Pending usage reservation
+ * - Uses contractYear/joinYear window if provided by computeBalances()
  */
 function computePendingUsage(pendingDocs = [], yearMeta) {
   const start = String(yearMeta?.startDate || '')
@@ -134,7 +135,7 @@ function computePendingUsage(pendingDocs = [], yearMeta) {
 
   const inWindow = (d) => {
     const s = toYMD(d?.startDate || '')
-    return start && end ? s >= start && s <= end : true // if no window provided, count all
+    return start && end ? s >= start && s <= end : true
   }
 
   const sum = (code, docs) =>
@@ -144,19 +145,18 @@ function computePendingUsage(pendingDocs = [], yearMeta) {
 
   const inRange = (pendingDocs || []).filter(inWindow)
 
-  const pendingAL = sum('AL', inRange)
-  const pendingSP = sum('SP', inRange)
-  const pendingMC = sum('MC', inRange)
-  const pendingMA = sum('MA', inRange)
-
-  return { pendingAL, pendingSP, pendingMC, pendingMA }
+  return {
+    pendingAL: sum('AL', inRange),
+    pendingSP: sum('SP', inRange),
+    pendingMC: sum('MC', inRange),
+    pendingMA: sum('MA', inRange),
+  }
 }
 
 function computeStrictRemaining(snapshot, pendingUsage) {
   const rem = (code) => Number(findBalanceRow(snapshot, code)?.remaining ?? 0)
 
   const strict = {
-    // ✅ match your createMyRequest strict logic (AL is affected by pending AL + pending SP)
     AL: rem('AL') - (num(pendingUsage.pendingAL) + num(pendingUsage.pendingSP)),
     SP: rem('SP') - num(pendingUsage.pendingSP),
     MC: rem('MC') - num(pendingUsage.pendingMC),
@@ -168,12 +168,10 @@ function computeStrictRemaining(snapshot, pendingUsage) {
   return strict
 }
 
-/** ✅ important: support old numeric employeeId data + new string employeeId */
+/** ✅ support old numeric employeeId data + new string employeeId */
 function buildEmployeeIdInQuery(employeeIds = []) {
   const strIds = [...new Set(employeeIds.map((x) => String(x || '').trim()).filter(Boolean))]
-  const numIds = strIds
-    .map((x) => Number(x))
-    .filter((n) => Number.isFinite(n))
+  const numIds = strIds.map((x) => Number(x)).filter((n) => Number.isFinite(n))
   return { $in: [...new Set([...strIds, ...numIds])] }
 }
 
@@ -191,6 +189,42 @@ async function loadDirectoryMap(employeeIds = []) {
   return map
 }
 
+/**
+ * ✅ Normalize approval mode (single source of truth)
+ * Rules:
+ * - If approvalMode says GM/COO → GM_COO
+ * - Else if cooLoginId exists → GM_COO
+ * - Else → MANAGER_GM
+ */
+function normalizeApprovalMode(profileLike) {
+  const modeRaw =
+    safeText(profileLike?.approvalMode) ||
+    safeText(profileLike?.meta?.approvalMode) ||
+    ''
+  const m = modeRaw.toUpperCase()
+
+  const cooId = safeText(profileLike?.cooLoginId || profileLike?.meta?.cooLoginId)
+  if (cooId) return 'GM_COO'
+
+  if (
+    m.includes('COO') ||
+    m.includes('GM_COO') ||
+    m.includes('GM+COO') ||
+    m.includes('GM_AND_COO')
+  ) return 'GM_COO'
+
+  return 'MANAGER_GM'
+}
+
+/** parse and normalize requested approvalMode filter */
+function parseApprovalModeFilter(v) {
+  const s = safeText(v).toUpperCase()
+  if (!s) return ''
+  if (s === 'MANAGER_GM' || s === 'MANAGER+GM' || s === 'MANAGER') return 'MANAGER_GM'
+  if (s === 'GM_COO' || s === 'GM+COO' || s === 'GM_AND_COO' || s === 'COO') return 'GM_COO'
+  return '' // invalid → ignore
+}
+
 // ───────────────── controller ─────────────────
 
 /**
@@ -198,25 +232,29 @@ async function loadDirectoryMap(employeeIds = []) {
  * Query:
  *  - q
  *  - includeInactive=1
- *  - managerLoginId (or managerEmployeeId)
+ *  - managerLoginId
  *  - department
- *  - dateFrom/dateTo OR from/to (YYYY-MM-DD)
- *  - asOf (YYYY-MM-DD) default today
- *  - limit (recent list size) default 20, max 200
+ *  - dateFrom/dateTo (or from/to)
+ *  - asOf
+ *  - limit (recent items count)
+ *  - approvalMode=MANAGER_GM|GM_COO (✅ server-side split support)
  */
 exports.getLeaveReportSummary = async (req, res) => {
   try {
     if (!isAdminViewer(req)) return res.status(403).json({ message: 'Forbidden' })
 
-    const q = String(req.query.q || '').trim().toLowerCase()
-    const includeInactive = String(req.query.includeInactive || '') === '1'
-    const managerLoginId = String(req.query.managerLoginId || req.query.managerEmployeeId || '').trim()
-    const departmentQ = String(req.query.department || '').trim().toLowerCase()
+    // ✅ avoid confusing 304 caching while developing
+    res.set('Cache-Control', 'no-store')
 
-    // ✅ accept both dateFrom/dateTo and from/to
+    const q = safeText(req.query.q).toLowerCase()
+    const includeInactive = safeText(req.query.includeInactive) === '1'
+    const managerLoginId = safeText(req.query.managerLoginId || req.query.managerEmployeeId)
+    const departmentQ = safeText(req.query.department).toLowerCase()
+
+    const approvalModeFilter = parseApprovalModeFilter(req.query.approvalMode)
+
     const rawFrom = req.query.dateFrom ?? req.query.from ?? ''
     const rawTo = req.query.dateTo ?? req.query.to ?? ''
-
     const dateFrom = rawFrom ? assertYMD(rawFrom, 'dateFrom') : ''
     const dateTo = rawTo ? assertYMD(rawTo, 'dateTo') : ''
 
@@ -230,9 +268,10 @@ exports.getLeaveReportSummary = async (req, res) => {
     const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : nowYMD()
     const asOfDate = phnomPenhMidnightDate(asOf)
 
-    const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 200)
+    // limit used only for "recent" blocks
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '20', 10) || 20, 1), 500)
 
-    // type order
+    // leave types (type order)
     const leaveTypes = await LeaveType.find({})
       .sort({ order: 1, code: 1 })
       .select('code order isActive isSystem')
@@ -246,29 +285,48 @@ exports.getLeaveReportSummary = async (req, res) => {
 
     const profiles = await LeaveProfile.find(profQuery).lean()
 
-    // join directory (employee + manager)
+    // Build directory lookup IDs: employee + manager + gm + coo
     const allIds = []
     for (const p of profiles || []) {
       allIds.push(String(p.employeeId || ''))
       allIds.push(String(p.managerLoginId || ''))
+      allIds.push(String(p.gmLoginId || ''))
+      allIds.push(String(p.cooLoginId || ''))
     }
     const dirMap = await loadDirectoryMap(allIds)
 
-    // enrich and in-memory filters
+    // enrich + compute approvalMode normalized
     let filteredProfiles = (profiles || []).map((p) => {
-      const empId = String(p.employeeId || '').trim()
+      const empId = safeText(p.employeeId)
       const dir = dirMap.get(empId) || {}
+
+      const managerId = safeText(p.managerLoginId)
+      const gmId = safeText(p.gmLoginId)
+      const cooId = safeText(p.cooLoginId)
+
+      const approvalMode = normalizeApprovalMode({
+        approvalMode: p.approvalMode,
+        cooLoginId: cooId,
+      })
 
       return {
         ...p,
         employeeId: empId,
-        name: dir?.name || dir?.fullName || p.name || '',
-        department: dir?.departmentName || dir?.department || p.department || '',
-        managerLoginId: String(p.managerLoginId || '').trim(),
-        gmLoginId: String(p.gmLoginId || '').trim(),
+        name: safeText(dir?.name || dir?.fullName || p.name || ''),
+        department: safeText(dir?.departmentName || dir?.department || p.department || ''),
+        managerLoginId: managerId,
+        gmLoginId: gmId,
+        cooLoginId: cooId,
+        approvalMode, // ✅ ALWAYS SET
       }
     })
 
+    // ✅ Server-side filter by approvalMode (best for split pages)
+    if (approvalModeFilter) {
+      filteredProfiles = filteredProfiles.filter((p) => safeText(p.approvalMode).toUpperCase() === approvalModeFilter)
+    }
+
+    // filters
     if (departmentQ) {
       filteredProfiles = filteredProfiles.filter((p) =>
         String(p.department || '').toLowerCase().includes(departmentQ)
@@ -281,26 +339,31 @@ exports.getLeaveReportSummary = async (req, res) => {
         String(p.name || '').toLowerCase().includes(q) ||
         String(p.department || '').toLowerCase().includes(q) ||
         String(p.managerLoginId || '').toLowerCase().includes(q) ||
-        String(p.gmLoginId || '').toLowerCase().includes(q)
+        String(p.gmLoginId || '').toLowerCase().includes(q) ||
+        String(p.cooLoginId || '').toLowerCase().includes(q) ||
+        String(p.approvalMode || '').toLowerCase().includes(q)
       ))
     }
+
+    // stable sort (trackable)
+    filteredProfiles.sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId)))
 
     const employeeIds = filteredProfiles.map((p) => String(p.employeeId)).filter(Boolean)
     const empIdQuery = buildEmployeeIdInQuery(employeeIds)
 
-    // balances: all approved history
+    // balances: approved history
     const approvedAll = await LeaveRequest.find({
       employeeId: empIdQuery,
       status: 'APPROVED',
-    }).sort({ startDate: 1 }).lean()
+    }).sort({ startDate: 1, createdAt: 1 }).lean()
 
-    // pending reservations
+    // pending
     const pendingAll = await LeaveRequest.find({
       employeeId: empIdQuery,
-      status: { $in: ['PENDING_MANAGER', 'PENDING_GM'] },
-    }).sort({ startDate: 1 }).lean()
+      status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'] },
+    }).sort({ startDate: 1, createdAt: 1 }).lean()
 
-    // request summary docs (all statuses, later we filter by date range)
+    // request summary docs (all statuses)
     let reqSummaryDocs = await LeaveRequest.find({ employeeId: empIdQuery })
       .sort({ createdAt: -1 })
       .lean()
@@ -323,44 +386,45 @@ exports.getLeaveReportSummary = async (req, res) => {
       })
     }
 
-    // group by employee (normalize request employeeId -> string)
+    // group by employee
     const approvedByEmp = new Map()
     for (const r of approvedAll || []) {
-      const id = String(r.employeeId || '').trim()
+      const id = safeText(r.employeeId)
       if (!approvedByEmp.has(id)) approvedByEmp.set(id, [])
       approvedByEmp.get(id).push(r)
     }
 
     const pendingByEmp = new Map()
     for (const r of pendingAll || []) {
-      const id = String(r.employeeId || '').trim()
+      const id = safeText(r.employeeId)
       if (!pendingByEmp.has(id)) pendingByEmp.set(id, [])
       pendingByEmp.get(id).push(r)
     }
 
-    // per-employee rows
-    const employeeRows = []
+    // totals init
     const totalsMap = new Map()
     for (const code of TYPE_ORDER) {
-      totalsMap.set(code, {
-        leaveTypeCode: code,
-        entitlement: 0,
-        used: 0,
-        remaining: 0,
-        strictRemaining: 0,
-      })
+      totalsMap.set(code, { leaveTypeCode: code, entitlement: 0, used: 0, remaining: 0, strictRemaining: 0 })
     }
 
-    for (const p of filteredProfiles) {
-      const empId = String(p.employeeId || '').trim()
+    // per employee
+    const employeeRows = []
+    const countsByApprovalMode = { MANAGER_GM: 0, GM_COO: 0 }
 
-      // ✅ support old numeric employeeId stored in requests
-      const approved = approvedByEmp.get(empId) || approvedByEmp.get(String(Number(empId))) || []
-      const pending = pendingByEmp.get(empId) || pendingByEmp.get(String(Number(empId))) || []
+    for (const p of filteredProfiles) {
+      const empId = safeText(p.employeeId)
+
+      const approved =
+        approvedByEmp.get(empId) ||
+        approvedByEmp.get(String(Number(empId))) ||
+        []
+
+      const pending =
+        pendingByEmp.get(empId) ||
+        pendingByEmp.get(String(Number(empId))) ||
+        []
 
       const snap = computeBalances(p, approved, asOfDate)
-
-      // ✅ support meta.contractYear OR meta.joinYear (depends on your computeBalances)
       const metaWindow = snap?.meta?.contractYear || snap?.meta?.joinYear || null
 
       const pend = computePendingUsage(pending, metaWindow)
@@ -378,15 +442,10 @@ exports.getLeaveReportSummary = async (req, res) => {
         }
       })
 
+      // totals
       for (const b of balances) {
         if (!totalsMap.has(b.leaveTypeCode)) {
-          totalsMap.set(b.leaveTypeCode, {
-            leaveTypeCode: b.leaveTypeCode,
-            entitlement: 0,
-            used: 0,
-            remaining: 0,
-            strictRemaining: 0,
-          })
+          totalsMap.set(b.leaveTypeCode, { leaveTypeCode: b.leaveTypeCode, entitlement: 0, used: 0, remaining: 0, strictRemaining: 0 })
         }
         const t = totalsMap.get(b.leaveTypeCode)
         t.entitlement += num(b.yearlyEntitlement)
@@ -395,14 +454,23 @@ exports.getLeaveReportSummary = async (req, res) => {
         t.strictRemaining += num(b.strictRemaining)
       }
 
+      const mode = safeText(p.approvalMode).toUpperCase() || 'MANAGER_GM'
+      if (mode === 'GM_COO') countsByApprovalMode.GM_COO += 1
+      else countsByApprovalMode.MANAGER_GM += 1
+
       employeeRows.push({
         employeeId: empId,
         name: p.name || '',
         department: p.department || '',
         joinDate: p.joinDate || null,
         contractDate: p.contractDate || null,
+
+        // ✅ required for split pages
+        approvalMode: mode,
         managerLoginId: p.managerLoginId || '',
         gmLoginId: p.gmLoginId || '',
+        cooLoginId: p.cooLoginId || '',
+
         isActive: p.isActive !== false,
         alCarry: num(p.alCarry),
         balancesAsOf: asOf,
@@ -416,7 +484,7 @@ exports.getLeaveReportSummary = async (req, res) => {
       (a, b) => TYPE_ORDER.indexOf(a.leaveTypeCode) - TYPE_ORDER.indexOf(b.leaveTypeCode)
     )
 
-    // ───────── LeaveRequest stats ─────────
+    // request stats
     const reqCountsByStatus = {}
     const reqCountsByType = {}
     const reqDaysByType = {}
@@ -436,10 +504,10 @@ exports.getLeaveReportSummary = async (req, res) => {
       reqByMonth[mk].days += num(r.totalDays)
     }
 
-    // ───────── ReplaceDay stats ─────────
+    // replace day stats
     const repCountsByStatus = {}
     const repByMonth = {}
-    let repEvidenceFiles = 0
+    let repEvidenceFiles =_ATTACH = 0
 
     for (const r of replaceDocs || []) {
       const st = String(r.status || '—')
@@ -452,30 +520,31 @@ exports.getLeaveReportSummary = async (req, res) => {
       repByMonth[mk].count += 1
     }
 
-    // recent activity
     const recentLeaveRequests = (reqSummaryDocs || []).slice(0, limit).map((r) => ({
       _id: String(r._id || ''),
-      employeeId: String(r.employeeId || '').trim(),
+      employeeId: safeText(r.employeeId),
       leaveTypeCode: String(r.leaveTypeCode || '').toUpperCase(),
       startDate: toYMD(r.startDate),
       endDate: toYMD(r.endDate),
       totalDays: num(r.totalDays),
       status: String(r.status || ''),
       createdAt: r.createdAt || null,
-      managerLoginId: String(r.managerLoginId || ''),
-      gmLoginId: String(r.gmLoginId || ''),
+      managerLoginId: safeText(r.managerLoginId),
+      gmLoginId: safeText(r.gmLoginId),
+      cooLoginId: safeText(r.cooLoginId),
     }))
 
     const recentReplaceDays = (replaceDocs || []).slice(0, limit).map((r) => ({
       _id: String(r._id || ''),
-      employeeId: String(r.employeeId || '').trim(),
+      employeeId: safeText(r.employeeId),
       requestDate: toYMD(r.requestDate),
       compensatoryDate: toYMD(r.compensatoryDate),
       status: String(r.status || ''),
       createdAt: r.createdAt || null,
       evidenceCount: Array.isArray(r.evidences) ? r.evidences.length : 0,
-      managerLoginId: String(r.managerLoginId || ''),
-      gmLoginId: String(r.gmLoginId || ''),
+      managerLoginId: safeText(r.managerLoginId),
+      gmLoginId: safeText(r.gmLoginId),
+      cooLoginId: safeText(r.cooLoginId),
     }))
 
     const counts = {
@@ -485,6 +554,7 @@ exports.getLeaveReportSummary = async (req, res) => {
       leaveRequests: (reqSummaryDocs || []).length,
       replaceDays: (replaceDocs || []).length,
       replaceEvidenceFiles: repEvidenceFiles,
+      countsByApprovalMode, // ✅ track split
     }
 
     return res.json({
@@ -494,11 +564,17 @@ exports.getLeaveReportSummary = async (req, res) => {
         dateTo: dateTo || null,
         typeOrder: TYPE_ORDER,
         counts,
+        // helpful: echo filter used
+        filters: {
+          q: q || null,
+          department: departmentQ || null,
+          managerLoginId: managerLoginId || null,
+          includeInactive,
+          approvalMode: approvalModeFilter || null,
+        },
       },
-
       totalsByType,
       employees: employeeRows,
-
       leaveRequests: {
         countsByStatus: reqCountsByStatus,
         countsByType: reqCountsByType,
@@ -506,7 +582,6 @@ exports.getLeaveReportSummary = async (req, res) => {
         byMonth: reqByMonth,
         recent: recentLeaveRequests,
       },
-
       replaceDays: {
         countsByStatus: repCountsByStatus,
         byMonth: repByMonth,

@@ -57,6 +57,7 @@ const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalenda
 
 // Expat Leave (shared views)
 const ExpatRequestLeave = () => import('@/views/expat/RequestLeave.vue')
+const AdminAddSignature = () => import('@/views/expat/admin/AdminAddSignature.vue')
 const ExpatMyRequests = () => import('@/views/expat/MyRequest.vue')
 const AdminLeaveTypes = () => import('@/views/expat/AdminLeaveTypes.vue')
 const AdminExpatProfiles = () => import('@/views/expat/AdminExpatProfile.vue')
@@ -343,6 +344,7 @@ const router = createRouter({
         { path: 'gm-inbox', name: 'leave-admin-gm-inbox', component: GmLeaveInbox },
         { path: 'request', name: 'leave-admin-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-admin-my-requests', component: ExpatMyRequests },
+        { path: 'add-signature', name: 'leave-add-signature', component: AdminAddSignature },
 
         {
           path: 'profiles/:employeeId/edit',

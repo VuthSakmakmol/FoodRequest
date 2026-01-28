@@ -17,21 +17,14 @@ const { startRecurringEngine } = require('./services/recurring.engine')
 
 const app = express()
 
-/* ───────────────── Telegram polling toggle ───────────────── */
-const POLLING_ENABLED =
-  String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
-
-if (POLLING_ENABLED) {
-  startTelegramPolling()
-  console.log('✅ Telegram polling enabled')
-} else {
-  console.log('ℹ️ Telegram polling disabled')
-}
-
 /* ───────────────── Env & toggles ───────────────── */
 const isProd     = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
 const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true'
 if (isProd) app.set('trust proxy', 1)
+
+/* ───────────────── Telegram polling toggle ───────────────── */
+const POLLING_ENABLED =
+  String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
 
 /* ───────────────── CORS ───────────────── */
 const rawOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
@@ -97,7 +90,7 @@ const ioCors = hasWildcard
 
 const io = new Server(server, {
   cors: ioCors,
-  transports: ['websocket'],
+  transports: ['websocket'], // if you need fallback in dev: ['websocket','polling']
   perMessageDeflate: { threshold: 1024 },
   maxHttpBufferSize: 1 * 1024 * 1024,
   pingInterval: 25_000,
@@ -111,13 +104,13 @@ const io = new Server(server, {
 registerSocket(io)
 app.set('io', io)
 
-/* ✅ IMPORTANT: attach io onto req AFTER io exists, and BEFORE routes */
+/* ✅ attach io to req BEFORE routes */
 app.use((req, _res, next) => {
   req.io = io
   next()
 })
 
-/* optional debug endpoints (must be before /api 404) */
+/* optional debug endpoints */
 attachDebugEndpoints(app)
 
 /* ───────────────── Routes ───────────────── */
@@ -125,19 +118,19 @@ attachDebugEndpoints(app)
 //========================== ADMIN PANEL (Leave module) ===========================
 app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
 
-app.use('/api/leave',          require('./routes/leave/leaveType-expat.routes'))
-app.use('/api/leave/profile',  require('./routes/leave/leaveProfile.routes'))
-app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
+app.use('/api/leave',               require('./routes/leave/leaveType-expat.routes'))
+app.use('/api/leave/profile',       require('./routes/leave/leaveProfile.routes'))
+app.use('/api/leave/replace-days',  require('./routes/leave/replaceDay.routes'))
 
-// ✅ admin leave routes grouped
-app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
-app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
+app.use('/api/admin/leave',         require('./routes/leave/leaveAdmin.routes'))
+app.use('/api/admin/leave/types',   require('./routes/leave/leaveType-admin.routes'))
 
-// ✅ COO inbox (kept same prefix as you had)
-app.use('/api/leave/requests', require('./routes/leave/leaveRequests.coo.routes'))
+// ✅ FIX: COO inbox must NOT reuse same base path
+app.use('/api/coo/leave/requests', require('./routes/leave/leaveRequests.coo.routes'))
 
 // leave report
 app.use('/api', require('./routes/leave/leaveReport-admin.routes'))
+app.use('/api', require('./routes/files/signature.admin.routes'))
 
 // Auth
 app.use('/api/auth', require('./routes/auth.routes'))
@@ -151,7 +144,10 @@ app.use('/api/admin', require('./routes/food/food-admin.routes'))
 app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'))
 
 // Static uploads
-app.use('/uploads', express.static(path.resolve(process.env.UPLOAD_DIR || 'uploads')))
+app.use(
+  '/uploads',
+  express.static(path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads'))
+)
 
 // ============================== Transportation ===========================
 app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'))
@@ -201,6 +197,14 @@ const PORT = Number(process.env.PORT || 4333)
       dbName: process.env.MONGO_DB || undefined,
     })
     console.log('✅ MongoDB connected')
+
+    // ✅ Start polling ONLY after DB is ready (important for leader-lock)
+    if (POLLING_ENABLED) {
+      startTelegramPolling()
+      console.log('✅ Telegram polling enabled')
+    } else {
+      console.log('ℹ️ Telegram polling disabled')
+    }
 
     server.listen(PORT, () => {
       const proto = forceHTTPS ? 'https' : 'http'

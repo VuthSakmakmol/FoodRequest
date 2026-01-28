@@ -2,14 +2,24 @@
 const express = require('express')
 const router = express.Router()
 
-const { requireAuth, requireRole } = require('../../middlewares/auth')
-const { getLeaveReportSummary } = require('../../controllers/leave/leaveReport.admin.controller')
+const auth = require('../../middlewares/auth')
+const leaveReportCtrl = require('../../controllers/leave/leaveReport.admin.controller')
+const leaveRecordCtrl = require('../../controllers/leave/leaveRecord.admin.controller')
 
+// Summary report
 router.get(
   '/admin/leave/reports/summary',
-  requireAuth,
-  requireRole('LEAVE_ADMIN', 'ADMIN'),
-  getLeaveReportSummary
+  auth.requireAuth,
+  auth.requireRole('LEAVE_ADMIN'),
+  leaveReportCtrl.getLeaveReportSummary
+)
+
+// Per employee printable record
+router.get(
+  '/admin/leave/reports/employee/:employeeId/record',
+  auth.requireAuth,
+  auth.requireRole('LEAVE_ADMIN'),
+  leaveRecordCtrl.getEmployeeLeaveRecord
 )
 
 module.exports = router
