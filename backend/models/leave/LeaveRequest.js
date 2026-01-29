@@ -1,9 +1,10 @@
+// backend/models/leave/LeaveRequest.js
 const mongoose = require('mongoose')
 
 const STATUS = Object.freeze([
   'PENDING_MANAGER',
-  'PENDING_GM',       // ✅ final stage for GM or COO
-  // 'PENDING_COO',    // (optional) keep ONLY if you already have old data
+  'PENDING_GM',
+  'PENDING_COO',     // ✅ needed for GM_AND_COO flow
   'APPROVED',
   'REJECTED',
   'CANCELLED',
@@ -11,12 +12,25 @@ const STATUS = Object.freeze([
 
 const DAY_PART = Object.freeze(['AM', 'PM'])
 
-// ✅ OR-mode (what you want)
-const APPROVAL_MODE = Object.freeze(['GM_ONLY', 'GM_OR_COO'])
+// ✅ Only 2 modes forever
+const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'GM_AND_COO'])
 
 // (optional future-proof) approvals array
 const APPROVAL_LEVEL = Object.freeze(['MANAGER', 'GM', 'COO'])
 const APPROVAL_STATUS = Object.freeze(['PENDING', 'APPROVED', 'REJECTED', 'SKIPPED'])
+
+function s(v) {
+  return String(v ?? '').trim()
+}
+
+function normalizeApprovalMode(v) {
+  const x = String(v ?? '').trim().toUpperCase()
+  if (x === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (x === 'MANAGER_GM') return 'MANAGER_AND_GM'
+  if (x === 'GM_OR_COO') return 'GM_AND_COO'
+  if (x === 'GM_COO') return 'GM_AND_COO'
+  return x
+}
 
 const ApprovalStepSchema = new mongoose.Schema(
   {
@@ -47,30 +61,26 @@ const LeaveRequestSchema = new mongoose.Schema(
 
     reason: { type: String, default: '', trim: true },
 
-    // ✅ status: keep final stage as PENDING_GM
     status: { type: String, enum: STATUS, default: 'PENDING_MANAGER' },
 
-    // ✅ store flow config snapshot at request time
-    approvalMode: { type: String, enum: APPROVAL_MODE, default: 'GM_ONLY' },
+    // ✅ flow snapshot at request time (ONLY 2)
+    approvalMode: { type: String, enum: APPROVAL_MODE, default: 'MANAGER_AND_GM' },
 
     // ✅ Approvers snapshot
-    managerLoginId: { type: String, default: '', trim: true }, // optional
+    managerLoginId: { type: String, default: '', trim: true }, // required only for MANAGER_AND_GM
     gmLoginId: { type: String, default: '', trim: true },      // required for both modes
-    cooLoginId: { type: String, default: '', trim: true },     // required only for GM_OR_COO
+    cooLoginId: { type: String, default: '', trim: true },     // required only for GM_AND_COO
 
-    // ✅ Manager decision
+    // ✅ decisions
     managerComment: { type: String, default: '' },
     managerDecisionAt: { type: Date },
 
-    // ✅ GM decision
     gmComment: { type: String, default: '' },
     gmDecisionAt: { type: Date },
 
-    // ✅ COO decision
     cooComment: { type: String, default: '' },
     cooDecisionAt: { type: Date },
 
-    // ✅ optional future-proof approvals array
     approvals: { type: [ApprovalStepSchema], default: [] },
 
     cancelledAt: { type: Date, default: null },
@@ -86,9 +96,12 @@ LeaveRequestSchema.pre('validate', function (next) {
     if (this.dayPart === '') this.dayPart = null
 
     // normalize approver ids
-    if (this.managerLoginId === null) this.managerLoginId = ''
-    if (this.gmLoginId === null) this.gmLoginId = ''
-    if (this.cooLoginId === null) this.cooLoginId = ''
+    this.managerLoginId = s(this.managerLoginId)
+    this.gmLoginId = s(this.gmLoginId)
+    this.cooLoginId = s(this.cooLoginId)
+
+    // normalize mode (backward compat)
+    this.approvalMode = normalizeApprovalMode(this.approvalMode) || 'MANAGER_AND_GM'
 
     // half-day logic
     if (!this.isHalfDay) {
@@ -99,9 +112,15 @@ LeaveRequestSchema.pre('validate', function (next) {
       if (!this.dayPart) this.invalidate('dayPart', 'dayPart is required for half-day')
     }
 
-    // ✅ OR-mode requires cooLoginId
-    if (this.approvalMode === 'GM_OR_COO' && !String(this.cooLoginId || '').trim()) {
-      this.invalidate('cooLoginId', 'cooLoginId is required when approvalMode = GM_OR_COO')
+    // ✅ required approvers by mode
+    if (this.approvalMode === 'MANAGER_AND_GM') {
+      if (!this.managerLoginId) this.invalidate('managerLoginId', 'managerLoginId is required when approvalMode = MANAGER_AND_GM')
+      if (!this.gmLoginId) this.invalidate('gmLoginId', 'gmLoginId is required when approvalMode = MANAGER_AND_GM')
+    }
+
+    if (this.approvalMode === 'GM_AND_COO') {
+      if (!this.gmLoginId) this.invalidate('gmLoginId', 'gmLoginId is required when approvalMode = GM_AND_COO')
+      if (!this.cooLoginId) this.invalidate('cooLoginId', 'cooLoginId is required when approvalMode = GM_AND_COO')
     }
 
     next()

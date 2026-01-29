@@ -5,6 +5,10 @@
   ✅ Small text + clean borders + forced logo size
   ✅ Remark smaller + Approved by wider + one-line header
   ✅ Signature resolver (numeric => employees first, loginId => users first) → no 404 spam
+  ✅ NEW: show GM/COO signature only when that stage is decided (no premature signature)
+  ✅ NEW: fix double print (was printing twice)
+  ✅ NEW: ensure image URLs load inside iframe print (<base> + abs url normalize)
+  ✅ NEW: lock body scroll when modal open
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -84,6 +88,52 @@ const TYPE_ORDER = computed(() => report.value?.meta?.typeOrder || ['AL', 'SP', 
 function balOf(emp, code) {
   const c = String(code || '').toUpperCase()
   return (emp?.balances || []).find((b) => String(b.leaveTypeCode || '').toUpperCase() === c) || null
+}
+
+/* ───────── Approval visibility (NEW) ─────────
+   For GM + COO:
+   - GM signature only when GM decided
+   - COO signature only when COO decided (final)
+*/
+function rowStatusUpper(r) {
+  return safeText(r?.status || r?.reqStatus || r?.workflowStatus || r?.approvalStatus).toUpperCase()
+}
+function gmDecided(r) {
+  if (r?.gmDecisionAt || r?.gmApprovedAt || r?.gmRejectedAt) return true
+  if (typeof r?.gmApproved === 'boolean') return true
+  if (typeof r?.gmRejected === 'boolean') return true
+
+  const st = rowStatusUpper(r)
+  if (!st) return false
+  if (st.includes('PENDING_GM')) return false
+  if (st.includes('CANCEL')) return false
+  // if it is in later stage like PENDING_COO / APPROVED / REJECTED => gm done
+  if (st.includes('PENDING_COO')) return true
+  if (st === 'APPROVED' || st === 'REJECTED') return true
+  if (st.includes('COO_')) return true
+  return true
+}
+function cooDecided(r) {
+  if (r?.cooDecisionAt || r?.cooApprovedAt || r?.cooRejectedAt) return true
+  if (typeof r?.cooApproved === 'boolean') return true
+  if (typeof r?.cooRejected === 'boolean') return true
+
+  const st = rowStatusUpper(r)
+  if (!st) return false
+  if (st.includes('PENDING_COO')) return false
+  if (st === 'APPROVED' || st === 'REJECTED') return true
+  if (st.includes('COO_APPROV') || st.includes('COO_REJECT')) return true
+  return false
+}
+
+/* ───────── URL normalize for iframe printing (NEW) ───────── */
+function toAbsUrl(u) {
+  const s = safeText(u)
+  if (!s) return ''
+  if (s.startsWith('http://') || s.startsWith('https://')) return s
+  if (typeof window === 'undefined') return s
+  if (s.startsWith('/')) return `${window.location.origin}${s}`
+  return `${window.location.origin}/${s}`
 }
 
 /* ───────── API: summary ───────── */
@@ -195,7 +245,7 @@ async function getUserSignatureUrl(loginId) {
     const url = res?.data?.signatureUrl || res?.data?.url || ''
     userSigCache.set(key, url || '')
     return url || ''
-  } catch {
+  } catch (e) {
     userSigCache.set(key, '')
     return ''
   }
@@ -210,7 +260,7 @@ async function getEmployeeSignatureUrl(employeeId) {
     const url = res?.data?.signatureUrl || res?.data?.url || ''
     employeeSigCache.set(id, url || '')
     return url || ''
-  } catch {
+  } catch (e) {
     employeeSigCache.set(id, '')
     return ''
   }
@@ -221,11 +271,7 @@ function isLikelyEmployeeId(v) {
   return /^\d{4,}$/.test(s)
 }
 
-/* ✅ Smart resolver (NO 404 spam in normal data):
-   - numeric => employees first
-   - otherwise => users first
-   - still fallback for edge cases
-*/
+/* ✅ Smart resolver (NO 404 spam in normal data) */
 async function resolveSignatureUrl(idLike) {
   const id = safeText(idLike)
   if (!id) return ''
@@ -274,7 +320,6 @@ const rangeLabel = computed(() => {
 async function loadSignaturesForPreview() {
   const empId = safeText(previewData.value?.meta?.employeeId || previewEmp.value?.employeeId)
 
-  // requester is employee signature
   const requesterUrl = await getEmployeeSignatureUrl(empId)
 
   const leaveAdminLoginId =
@@ -284,17 +329,17 @@ async function loadSignaturesForPreview() {
 
   const leaveAdminUrl = await resolveSignatureUrl(leaveAdminLoginId)
 
-  // GM/COO approvers
   const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
   const cooId = safeText(previewData.value?.meta?.cooLoginId || previewEmp.value?.cooLoginId)
 
   const [gmUrl, cooUrl] = await Promise.all([resolveSignatureUrl(gmId), resolveSignatureUrl(cooId)])
 
+  // Make URLs absolute for iframe printing
   sig.value = {
-    requesterUrl: requesterUrl || '',
-    leaveAdminUrl: leaveAdminUrl || '',
-    gmUrl: gmUrl || '',
-    cooUrl: cooUrl || '',
+    requesterUrl: toAbsUrl(requesterUrl || ''),
+    leaveAdminUrl: toAbsUrl(leaveAdminUrl || ''),
+    gmUrl: toAbsUrl(gmUrl || ''),
+    cooUrl: toAbsUrl(cooUrl || ''),
   }
 }
 
@@ -335,7 +380,7 @@ function closePreview() {
   sig.value = { requesterUrl: '', leaveAdminUrl: '', gmUrl: '', cooUrl: '' }
 }
 
-/* ✅ BEST PDF: Vector Print-to-PDF */
+/* ✅ BEST PDF: Vector Print-to-PDF (FIXED: no double print) */
 async function downloadPdf() {
   try {
     const el = previewRef.value
@@ -343,10 +388,12 @@ async function downloadPdf() {
 
     await nextTick()
 
+    const origin = typeof window !== 'undefined' ? window.location.origin : ''
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
+  <base href="${origin}/">
   <title>Leave Record</title>
   <style>
     @page { size: A4; margin: 0; }
@@ -396,13 +443,6 @@ async function downloadPdf() {
 </head>
 <body>
   ${el.outerHTML}
-  <script>
-    (async () => {
-      const imgs = Array.from(document.images || []);
-      await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload=r; img.onerror=r; })));
-      setTimeout(() => { window.focus(); window.print(); }, 50);
-    })();
-  <\\/script>
 </body>
 </html>`
 
@@ -421,13 +461,29 @@ async function downloadPdf() {
     doc.write(html)
     doc.close()
 
-    const onLoad = () => {
+    const waitAndPrint = async () => {
       try {
-        win.focus()
-        win.print()
+        const imgs = Array.from(win.document.images || [])
+        await Promise.all(
+          imgs.map((img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((r) => {
+                  img.onload = r
+                  img.onerror = r
+                })
+          )
+        )
       } catch {}
+      setTimeout(() => {
+        try {
+          win.focus()
+          win.print()
+        } catch {}
+      }, 50)
     }
-    iframe.onload = onLoad
+
+    iframe.onload = waitAndPrint
 
     const cleanup = () => {
       try {
@@ -534,6 +590,12 @@ function teardownRealtime() {
   offHandlers.length = 0
 }
 
+/* ───────── lock body scroll when modal open (prevents stuck feeling) ───────── */
+watch(previewOpen, (v) => {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = v ? 'hidden' : ''
+})
+
 /* ───────── lifecycle ───────── */
 onMounted(() => {
   updateIsMobile()
@@ -546,6 +608,7 @@ onBeforeUnmount(() => {
   if (tmr) clearTimeout(tmr)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
+  if (typeof document !== 'undefined') document.body.style.overflow = ''
 })
 </script>
 
@@ -920,15 +983,17 @@ onBeforeUnmount(() => {
                         </div>
                       </td>
 
+                      <!-- ✅ GM sign only when GM decided -->
                       <td class="small">
                         <div class="sig-cell">
-                          <img v-if="sig.gmUrl" :src="sig.gmUrl" alt="GM sign" class="sig-img" />
+                          <img v-if="gmDecided(r) && sig.gmUrl" :src="sig.gmUrl" alt="GM sign" class="sig-img" />
                         </div>
                       </td>
 
+                      <!-- ✅ COO sign only when COO decided -->
                       <td class="small">
                         <div class="sig-cell">
-                          <img v-if="sig.cooUrl" :src="sig.cooUrl" alt="COO sign" class="sig-img" />
+                          <img v-if="cooDecided(r) && sig.cooUrl" :src="sig.cooUrl" alt="COO sign" class="sig-img" />
                         </div>
                       </td>
 
@@ -1105,6 +1170,7 @@ onBeforeUnmount(() => {
 }
 </style>
 
+<!-- ✅ IMPORTANT: @page must NOT be scoped -->
 <style>
 @page {
   size: A4;

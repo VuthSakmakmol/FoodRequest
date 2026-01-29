@@ -28,6 +28,22 @@ function addYearsYMD(ymd, years) {
   return `${y}-${m}-${d}`
 }
 
+function s(v) {
+  return String(v ?? '').trim()
+}
+
+// ✅ Only 2 modes forever
+const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'GM_AND_COO'])
+
+function normalizeApprovalMode(v) {
+  const x = String(v ?? '').trim().toUpperCase()
+  if (x === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (x === 'MANAGER_GM') return 'MANAGER_AND_GM'
+  if (x === 'GM_OR_COO') return 'GM_AND_COO'
+  if (x === 'GM_COO') return 'GM_AND_COO'
+  return x
+}
+
 const BalanceSchema = new mongoose.Schema(
   {
     leaveTypeCode: { type: String, required: true }, // AL/SP/MC/MA/UL
@@ -68,20 +84,20 @@ const LeaveProfileSchema = new mongoose.Schema(
     employeeId: { type: String, required: true, unique: true, index: true },
     employeeLoginId: { type: String, default: '' },
 
-    // approver1 (optional)
+    // approver1 (only needed for MANAGER_AND_GM)
     managerLoginId: { type: String, default: '' },
 
     // approver2 always exists via backend seed
     gmLoginId: { type: String, default: '' },
 
-    // COO read-only or final approver (depends on mode)
+    // COO exists for GM_AND_COO mode
     cooLoginId: { type: String, default: '' },
 
-    // ✅ approval mode (frontend chooses ONLY this)
+    // ✅ approval mode (ONLY 2)
     approvalMode: {
       type: String,
-      enum: ['GM_ONLY', 'GM_AND_COO'],
-      default: 'GM_ONLY',
+      enum: APPROVAL_MODE,
+      default: 'MANAGER_AND_GM',
     },
 
     name: { type: String, default: '' },
@@ -108,11 +124,33 @@ const LeaveProfileSchema = new mongoose.Schema(
 // auto calc contractEndDate = contractDate + 1 year - 1 day
 LeaveProfileSchema.pre('validate', function (next) {
   try {
+    // normalize ids
+    this.employeeId = s(this.employeeId)
+    this.employeeLoginId = s(this.employeeLoginId)
+    this.managerLoginId = s(this.managerLoginId)
+    this.gmLoginId = s(this.gmLoginId)
+    this.cooLoginId = s(this.cooLoginId)
+
+    // normalize mode (backward compat)
+    this.approvalMode = normalizeApprovalMode(this.approvalMode) || 'MANAGER_AND_GM'
+
+    // if contractDate missing, use joinDate
     if (!this.contractDate && this.joinDate) this.contractDate = this.joinDate
 
     if (isValidYMD(this.contractDate)) {
       const end = addDaysYMD(addYearsYMD(this.contractDate, 1), -1)
       this.contractEndDate = end
+    }
+
+    // ✅ enforce approver requirement by mode
+    if (this.approvalMode === 'MANAGER_AND_GM') {
+      if (!this.managerLoginId) this.invalidate('managerLoginId', 'managerLoginId is required when approvalMode = MANAGER_AND_GM')
+      if (!this.gmLoginId) this.invalidate('gmLoginId', 'gmLoginId is required when approvalMode = MANAGER_AND_GM')
+    }
+
+    if (this.approvalMode === 'GM_AND_COO') {
+      if (!this.gmLoginId) this.invalidate('gmLoginId', 'gmLoginId is required when approvalMode = GM_AND_COO')
+      if (!this.cooLoginId) this.invalidate('cooLoginId', 'cooLoginId is required when approvalMode = GM_AND_COO')
     }
 
     next()

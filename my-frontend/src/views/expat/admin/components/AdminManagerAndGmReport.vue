@@ -21,13 +21,6 @@ const { showToast } = useToast()
 const MODE = 'MANAGER_GM'
 const LEAVE_ADMIN_LOGIN = 'leave_admin'
 
-/* ───────── responsive ───────── */
-const isMobile = ref(false)
-function updateIsMobile() {
-  if (typeof window === 'undefined') return
-  isMobile.value = window.innerWidth < 768
-}
-
 /* ───────── Filters ───────── */
 const q = ref('')
 const includeInactive = ref(false)
@@ -183,23 +176,6 @@ const previewRef = ref(null)
 const userSigCache = new Map() // key -> url
 const employeeSigCache = new Map() // employeeId -> url
 
-async function getUserSignatureUrl(loginId) {
-  const id = safeText(loginId)
-  if (!id) return ''
-  const key = `user:${id}`
-  if (userSigCache.has(key)) return userSigCache.get(key) || ''
-  try {
-    const res = await api.get(`/admin/signatures/users/${encodeURIComponent(id)}`)
-    const url = res?.data?.signatureUrl || res?.data?.url || ''
-    userSigCache.set(key, url || '')
-    return url || ''
-  } catch (e) {
-    // treat 404 as "not set" (no console spam)
-    userSigCache.set(key, '')
-    return ''
-  }
-}
-
 async function getEmployeeSignatureUrl(employeeId) {
   const id = safeText(employeeId)
   if (!id) return ''
@@ -209,7 +185,7 @@ async function getEmployeeSignatureUrl(employeeId) {
     const url = res?.data?.signatureUrl || res?.data?.url || ''
     employeeSigCache.set(id, url || '')
     return url || ''
-  } catch (e) {
+  } catch {
     employeeSigCache.set(id, '')
     return ''
   }
@@ -217,14 +193,12 @@ async function getEmployeeSignatureUrl(employeeId) {
 
 function isLikelyEmployeeId(v) {
   const s = safeText(v)
-  // your employeeId looks numeric (e.g. 51820386 / 55220351)
   return /^\d{4,}$/.test(s)
 }
 
-/* ✅ Smart resolver (NO 404 spam in normal data):
+/* ✅ Smart resolver:
    - numeric => employees first
    - otherwise => users first
-   - still fallback for edge cases
 */
 async function resolveSignatureUrl(idLike) {
   const id = safeText(idLike)
@@ -242,9 +216,7 @@ async function resolveSignatureUrl(idLike) {
     userSigCache.set(key, u1 || '')
     return u1 || ''
   } catch (e1) {
-    // ignore "not found" silently
     if (e1?.response?.status !== 404) console.warn('signature fetch failed:', first, id, e1)
-
     try {
       const r2 = await api.get(`/admin/signatures/${second}/${encodeURIComponent(id)}`)
       const u2 = r2?.data?.signatureUrl || r2?.data?.url || ''
@@ -282,10 +254,8 @@ async function loadSignaturesForPreview() {
     safeText(report.value?.meta?.leaveAdminLoginId) ||
     LEAVE_ADMIN_LOGIN
 
-  // leave admin should be loginId (but still resolve)
   const leaveAdminUrl = await resolveSignatureUrl(leaveAdminLoginId)
 
-  // manager/gm might be loginId OR employeeId => resolve smartly without 404 spam
   const managerId = safeText(previewData.value?.meta?.managerLoginId || previewEmp.value?.managerLoginId)
   const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
 
@@ -336,7 +306,7 @@ function closePreview() {
   sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
 }
 
-/* ✅ BEST PDF: Vector Print-to-PDF (no thick borders, no rasterization) */
+/* ✅ BEST PDF: Vector Print-to-PDF */
 async function downloadPdf() {
   try {
     const el = previewRef.value
@@ -382,7 +352,7 @@ async function downloadPdf() {
 
     table.sheet-table { width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
     .sheet-table th, .sheet-table td {
-      border: 0.5pt solid #111827; /* ✅ hairline */
+      border: 0.5pt solid #111827;
       padding: 4px 4px;
       vertical-align: top;
     }
@@ -422,13 +392,12 @@ async function downloadPdf() {
     doc.write(html)
     doc.close()
 
-    const onLoad = () => {
+    iframe.onload = () => {
       try {
         win.focus()
         win.print()
       } catch {}
     }
-    iframe.onload = onLoad
 
     const cleanup = () => {
       try {
@@ -534,13 +503,10 @@ function teardownRealtime() {
 
 /* ───────── lifecycle ───────── */
 onMounted(() => {
-  updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   fetchReport(true)
   setupRealtime()
 })
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (tmr) clearTimeout(tmr)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
@@ -952,7 +918,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* compact inputs */
 .input-mini {
   width: 100%;
   border-radius: 0.75rem;
@@ -983,7 +948,6 @@ onBeforeUnmount(() => {
   table-layout: fixed;
 }
 
-/* printable sheet - FULL A4 usage + smaller text */
 .print-sheet {
   width: 210mm;
   min-height: 297mm;
@@ -1007,7 +971,6 @@ onBeforeUnmount(() => {
   letter-spacing: 0.2px;
 }
 
-/* ✅ logo size hard-force */
 .sheet-brand {
   display: flex;
   justify-content: flex-end;
@@ -1054,7 +1017,6 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
-/* table */
 .sheet-table {
   width: 100%;
   border-collapse: collapse;
@@ -1063,7 +1025,7 @@ onBeforeUnmount(() => {
 }
 .sheet-table th,
 .sheet-table td {
-  border: 0.6px solid #111827; /* preview look (print uses hairline in iframe) */
+  border: 0.6px solid #111827;
   padding: 4px 4px;
   vertical-align: top;
 }
@@ -1089,7 +1051,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* signature */
 .sig-cell {
   display: flex;
   flex-direction: column;
@@ -1108,7 +1069,6 @@ onBeforeUnmount(() => {
 }
 </style>
 
-<!-- ✅ IMPORTANT: @page must NOT be scoped -->
 <style>
 @page {
   size: A4;

@@ -1,6 +1,6 @@
 <!-- src/views/expat/admin/AdminLeaveProfileEdit.vue -->
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
@@ -28,8 +28,10 @@ async function fetchLeaveTypes() {
   try {
     const res = await api.get('/admin/leave/types')
     leaveTypes.value = Array.isArray(res.data) ? res.data : []
-  } catch {
+  } catch (e) {
     leaveTypes.value = []
+    const msg = e?.response?.data?.message || 'Failed to load leave types.'
+    showToast({ type: 'warning', title: 'Leave types', message: msg })
   }
 }
 const TYPE_ORDER = computed(() => {
@@ -154,20 +156,12 @@ const formError = ref('')
 
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
-
-  // ✅ approvalMode
   form.approvalMode = normApprovalMode(p?.approvalMode)
-
-  // ✅ manager uses employeeId field; fallback to managerLoginId if old data
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
-
-  // ✅ GM + COO
   form.gmLoginId = String(p?.gmLoginId || '')
   form.cooLoginId = String(p?.cooLoginId || '')
-
   form.alCarry = num(p?.alCarry ?? 0)
   form.isActive = p?.isActive === false ? false : true
-
   originalJoinDate.value = toInputDate(p?.joinDate)
 }
 
@@ -214,7 +208,10 @@ async function fetchProfile() {
   error.value = ''
   try {
     const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
-    profile.value = res?.data?.profile || null
+
+    // ✅ support BOTH: {profile: {...}} OR {...}
+    profile.value = res?.data?.profile ?? res?.data ?? null
+
     if (profile.value) fillFormFromProfile(profile.value)
   } catch (e) {
     console.error(e)
@@ -252,10 +249,7 @@ async function forceRecalcBalances() {
   const id = employeeId.value
   if (!id) return
 
-  const payload = {
-    asOf: dayjs().format('YYYY-MM-DD'),
-    reason: 'JOIN_DATE_CHANGED',
-  }
+  const payload = { asOf: dayjs().format('YYYY-MM-DD'), reason: 'JOIN_DATE_CHANGED' }
 
   const tries = [
     () => api.post(`/admin/leave/profiles/${id}/recalculate`, payload),
@@ -285,21 +279,13 @@ async function forceRecalcBalances() {
 function validateApprovers() {
   const mode = normApprovalMode(form.approvalMode)
 
-  // GM always required (for both modes)
-  if (!String(form.gmLoginId || '').trim()) {
-    return 'GM Login ID is required.'
-  }
-
-  // ✅ if Manager + GM, manager must be selected
+  if (!String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
   if (mode === 'MANAGER_AND_GM' && !String(form.managerEmployeeId || '').trim()) {
     return 'Approval Mode is Manager + GM, so Manager Employee ID is required.'
   }
-
-  // ✅ if GM + COO, COO must be selected
   if (mode === 'GM_AND_COO' && !String(form.cooLoginId || '').trim()) {
     return 'Approval Mode is GM + COO, so COO Login ID is required.'
   }
-
   return ''
 }
 
@@ -326,27 +312,19 @@ async function saveProfile() {
   try {
     const mode = normApprovalMode(form.approvalMode)
 
-    // 1) update profile
     await updateProfile(
       {
         joinDate: form.joinDate ? String(form.joinDate) : null,
-
         approvalMode: mode,
-
-        // ✅ when MANAGER_AND_GM, require managerEmployeeId
-        // when GM_AND_COO, allow manager optional (keep whatever admin sets)
         managerEmployeeId: form.managerEmployeeId ? String(form.managerEmployeeId).trim() : null,
-
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
         cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
-
         alCarry: num(form.alCarry),
         isActive: form.isActive !== false,
       },
       { recalc: joinDateChanged.value }
     )
 
-    // 2) recalc if join date changed
     if (joinDateChanged.value) {
       const ok = await forceRecalcBalances()
       if (!ok) {
@@ -489,6 +467,12 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+})
+
+// ✅ if route changes while component is alive
+watch(employeeId, async (n, o) => {
+  if (!n || n === o) return
+  await fetchProfile()
 })
 </script>
 
@@ -669,7 +653,7 @@ onBeforeUnmount(() => {
                     hint="To change contract date, use Renew"
                   />
 
-                  <!-- ✅ Approval Mode dropdown -->
+                  <!-- Approval Mode -->
                   <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45 sm:col-span-2">
                     <div
                       class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
@@ -761,7 +745,7 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- ✅ Manager Employee ID (required only when MANAGER_AND_GM) -->
+                  <!-- Manager Employee ID -->
                   <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
                     <div
                       class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
@@ -778,8 +762,7 @@ onBeforeUnmount(() => {
                         v-model="form.managerEmployeeId"
                         type="text"
                         placeholder="Example: 51820386"
-                        class="w-full rounded-xl border px-3 py-2 text-[13px] dark:text-slate-100
-                               dark:bg-slate-900"
+                        class="w-full rounded-xl border px-3 py-2 text-[13px] dark:text-slate-100 dark:bg-slate-900"
                         :class="needManager
                           ? 'border-amber-300 bg-white focus:border-amber-500 dark:border-amber-800/70'
                           : 'border-slate-300 bg-white dark:border-slate-700'"
@@ -813,7 +796,7 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- ✅ COO Login ID (only when GM_AND_COO) -->
+                  <!-- COO Login ID -->
                   <div
                     v-if="needCoo"
                     class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45 sm:col-span-2"

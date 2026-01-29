@@ -32,7 +32,7 @@ const CORE = {
   },
   gm: {
     loginId: 'leave_gm',
-    name: '',
+    name: 'GM',
     role: 'LEAVE_GM',
     password: process.env.LEAVE_GM_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
     telegramChatId: '7163451169',
