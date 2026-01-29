@@ -8,10 +8,17 @@ const api = axios.create({
   timeout: 30000,
 })
 
-// Helper: detect FormData
+// ✅ Helper: detect FormData reliably (axios header keys can be lowercase)
 function isFormDataPayload(cfg) {
   if (typeof FormData !== 'undefined' && cfg?.data instanceof FormData) return true
-  const ct = cfg?.headers?.['Content-Type'] || cfg?.headers?.contentType
+
+  const h = cfg?.headers || {}
+  const ct =
+    h['content-type'] ||
+    h['Content-Type'] ||
+    h.contentType ||
+    h.ContentType
+
   return ct && String(ct).toLowerCase().includes('multipart/form-data')
 }
 
@@ -31,7 +38,6 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
 
-  // Only set JSON header for non-FormData bodies
   const method = (config.method || '').toLowerCase()
   const hasBody = ['post', 'put', 'patch'].includes(method)
   const isFD = isFormDataPayload(config)
@@ -40,15 +46,19 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {}
 
     if (isFD) {
-      // Let the browser set the multipart boundary automatically
+      // ✅ CRITICAL: do not set multipart manually; let browser add boundary
       delete config.headers['Content-Type']
+      delete config.headers['content-type']
       delete config.headers.contentType
-    } else if (!config.headers['Content-Type'] && !config.headers.contentType) {
-      config.headers['Content-Type'] = 'application/json'
+      delete config.headers.ContentType
+    } else {
+      // JSON requests only
+      if (!config.headers['Content-Type'] && !config.headers['content-type']) {
+        config.headers['Content-Type'] = 'application/json'
+      }
     }
   }
 
-  // console.debug('[api] →', method.toUpperCase(), config.url)
   return config
 })
 

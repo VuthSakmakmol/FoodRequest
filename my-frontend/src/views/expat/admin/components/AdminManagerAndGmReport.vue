@@ -1,10 +1,9 @@
 <!-- src/views/expat/admin/components/AdminManagerAndGmReport.vue
   ✅ Fixed mode: MANAGER_GM
-  ✅ Full A4 edge PDF + smaller text
-  ✅ Fix: logo huge in preview (force size)
-  ✅ Fix: PDF table borders not too bold + better quality (STOP html2pdf, use PRINT to PDF vector)
-  ✅ Fix: Remark smaller, Approved by (OM / GM) wider + one-line header
-  ✅ Fix: signature 404 spam → smart resolver (numeric => employees first, loginId => users first)
+  ✅ Vector Print-to-PDF (iframe print)
+  ✅ Smaller text, clean borders, forced logo size
+  ✅ Smart signature resolver
+  ✅ FIX: signatures show even when content endpoint requires auth (Blob URLs)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -179,9 +178,9 @@ const previewEmp = ref(null)
 const previewData = ref(null)
 const previewRef = ref(null)
 
-/* signature caches */
-const userSigCache = new Map() // key -> url
-const employeeSigCache = new Map() // employeeId -> url
+/* ───────── signature url caches (META endpoints) ───────── */
+const userSigCache = new Map() // key -> meta url
+const employeeSigCache = new Map() // employeeId -> meta url
 
 async function getUserSignatureUrl(loginId) {
   const id = safeText(loginId)
@@ -193,8 +192,7 @@ async function getUserSignatureUrl(loginId) {
     const url = res?.data?.signatureUrl || res?.data?.url || ''
     userSigCache.set(key, url || '')
     return url || ''
-  } catch (e) {
-    // treat 404 as "not set" (no console spam)
+  } catch {
     userSigCache.set(key, '')
     return ''
   }
@@ -209,7 +207,7 @@ async function getEmployeeSignatureUrl(employeeId) {
     const url = res?.data?.signatureUrl || res?.data?.url || ''
     employeeSigCache.set(id, url || '')
     return url || ''
-  } catch (e) {
+  } catch {
     employeeSigCache.set(id, '')
     return ''
   }
@@ -217,14 +215,12 @@ async function getEmployeeSignatureUrl(employeeId) {
 
 function isLikelyEmployeeId(v) {
   const s = safeText(v)
-  // your employeeId looks numeric (e.g. 51820386 / 55220351)
   return /^\d{4,}$/.test(s)
 }
 
-/* ✅ Smart resolver (NO 404 spam in normal data):
+/* ✅ Smart resolver:
    - numeric => employees first
    - otherwise => users first
-   - still fallback for edge cases
 */
 async function resolveSignatureUrl(idLike) {
   const id = safeText(idLike)
@@ -242,29 +238,71 @@ async function resolveSignatureUrl(idLike) {
     userSigCache.set(key, u1 || '')
     return u1 || ''
   } catch (e1) {
-    // ignore "not found" silently
-    if (e1?.response?.status !== 404) console.warn('signature fetch failed:', first, id, e1)
-
     try {
       const r2 = await api.get(`/admin/signatures/${second}/${encodeURIComponent(id)}`)
       const u2 = r2?.data?.signatureUrl || r2?.data?.url || ''
       userSigCache.set(key, u2 || '')
       return u2 || ''
-    } catch (e2) {
-      if (e2?.response?.status !== 404) console.warn('signature fetch failed:', second, id, e2)
+    } catch {
       userSigCache.set(key, '')
       return ''
     }
   }
 }
 
-/* attached signatures for current preview */
+/* ───────── SIGNATURE FIX: convert protected URLs -> blob URLs ───────── */
+function getToken() {
+  try {
+    return localStorage.getItem('token') || ''
+  } catch {
+    return ''
+  }
+}
+function revokeIfBlob(url) {
+  if (url && String(url).startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch {}
+  }
+}
+async function toAuthedBlobUrl(rawUrl) {
+  const u = safeText(rawUrl)
+  if (!u) return ''
+
+  // absolute url builder
+  const abs = (() => {
+    if (/^https?:\/\//i.test(u)) return u
+    const apiBase = safeText(import.meta.env.VITE_API_URL || '')
+      .replace(/\/api\/?$/i, '')
+      .replace(/\/$/, '')
+    const origin = apiBase || window.location.origin
+    return `${origin}${u.startsWith('/') ? '' : '/'}${u}`
+  })()
+
+  const token = getToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+
+  const res = await fetch(abs, { headers })
+  if (!res.ok) return ''
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+/* attached signatures for current preview (BLOB URLS) */
 const sig = ref({
   requesterUrl: '',
   leaveAdminUrl: '',
   managerUrl: '',
   gmUrl: '',
 })
+
+function clearSig() {
+  revokeIfBlob(sig.value.requesterUrl)
+  revokeIfBlob(sig.value.leaveAdminUrl)
+  revokeIfBlob(sig.value.managerUrl)
+  revokeIfBlob(sig.value.gmUrl)
+  sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
+}
 
 const rangeLabel = computed(() => {
   const f = safeText(dateFrom.value)
@@ -275,21 +313,28 @@ const rangeLabel = computed(() => {
 
 async function loadSignaturesForPreview() {
   const empId = safeText(previewData.value?.meta?.employeeId || previewEmp.value?.employeeId)
-  const requesterUrl = await getEmployeeSignatureUrl(empId)
 
   const leaveAdminLoginId =
     safeText(previewData.value?.meta?.leaveAdminLoginId) ||
     safeText(report.value?.meta?.leaveAdminLoginId) ||
     LEAVE_ADMIN_LOGIN
 
-  // leave admin should be loginId (but still resolve)
-  const leaveAdminUrl = await resolveSignatureUrl(leaveAdminLoginId)
-
-  // manager/gm might be loginId OR employeeId => resolve smartly without 404 spam
   const managerId = safeText(previewData.value?.meta?.managerLoginId || previewEmp.value?.managerLoginId)
   const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
 
-  const [managerUrl, gmUrl] = await Promise.all([resolveSignatureUrl(managerId), resolveSignatureUrl(gmId)])
+  // meta urls
+  const requesterRaw = await getEmployeeSignatureUrl(empId)
+  const leaveAdminRaw = await resolveSignatureUrl(leaveAdminLoginId)
+  const managerRaw = await resolveSignatureUrl(managerId)
+  const gmRaw = await resolveSignatureUrl(gmId)
+
+  // ✅ convert to blob urls (so <img> works with auth)
+  const [requesterUrl, leaveAdminUrl, managerUrl, gmUrl] = await Promise.all([
+    toAuthedBlobUrl(requesterRaw),
+    toAuthedBlobUrl(leaveAdminRaw),
+    toAuthedBlobUrl(managerRaw),
+    toAuthedBlobUrl(gmRaw),
+  ])
 
   sig.value = {
     requesterUrl: requesterUrl || '',
@@ -305,7 +350,7 @@ async function openPreview(emp) {
   previewLoading.value = true
   previewError.value = ''
   previewData.value = null
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
+  clearSig()
 
   try {
     const employeeId = safeText(emp?.employeeId)
@@ -333,10 +378,10 @@ function closePreview() {
   previewError.value = ''
   previewData.value = null
   previewEmp.value = null
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
+  clearSig()
 }
 
-/* ✅ BEST PDF: Vector Print-to-PDF (no thick borders, no rasterization) */
+/* ✅ BEST PDF: Vector Print-to-PDF */
 async function downloadPdf() {
   try {
     const el = previewRef.value
@@ -382,7 +427,7 @@ async function downloadPdf() {
 
     table.sheet-table { width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
     .sheet-table th, .sheet-table td {
-      border: 0.5pt solid #111827; /* ✅ hairline */
+      border: 0.5pt solid #111827;
       padding: 4px 4px;
       vertical-align: top;
     }
@@ -422,13 +467,12 @@ async function downloadPdf() {
     doc.write(html)
     doc.close()
 
-    const onLoad = () => {
+    iframe.onload = () => {
       try {
         win.focus()
         win.print()
       } catch {}
     }
-    iframe.onload = onLoad
 
     const cleanup = () => {
       try {
@@ -544,6 +588,7 @@ onBeforeUnmount(() => {
   if (tmr) clearTimeout(tmr)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
+  clearSig()
 })
 </script>
 
@@ -983,7 +1028,7 @@ onBeforeUnmount(() => {
   table-layout: fixed;
 }
 
-/* printable sheet - FULL A4 usage + smaller text */
+/* printable sheet */
 .print-sheet {
   width: 210mm;
   min-height: 297mm;
@@ -1007,7 +1052,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.2px;
 }
 
-/* ✅ logo size hard-force */
+/* logo size hard-force */
 .sheet-brand {
   display: flex;
   justify-content: flex-end;
@@ -1063,7 +1108,7 @@ onBeforeUnmount(() => {
 }
 .sheet-table th,
 .sheet-table td {
-  border: 0.6px solid #111827; /* preview look (print uses hairline in iframe) */
+  border: 0.6px solid #111827;
   padding: 4px 4px;
   vertical-align: top;
 }
@@ -1108,7 +1153,7 @@ onBeforeUnmount(() => {
 }
 </style>
 
-<!-- ✅ IMPORTANT: @page must NOT be scoped -->
+<!-- IMPORTANT: @page must NOT be scoped -->
 <style>
 @page {
   size: A4;

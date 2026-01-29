@@ -1,91 +1,197 @@
+// backend/controllers/files/signature.admin.controller.js
 const fs = require('fs')
-const path = require('path')
+const { getBucket, uploadBuffer, deleteFile } = require('../../utils/gridfs')
 
-const UPLOAD_DIR = path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads')
-const EMP_DIR = path.join(UPLOAD_DIR, 'signatures', 'employees')
-const USER_DIR = path.join(UPLOAD_DIR, 'signatures', 'users')
-
-const EXT = ['.png', '.jpg', '.jpeg', '.webp']
+const ALLOWED = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 function safeText(v) {
   return String(v ?? '').trim()
 }
 
-function baseUrl(req) {
-  const proto =
-    req.headers['x-forwarded-proto']?.split(',')[0]?.trim() ||
-    (req.secure ? 'https' : 'http')
-  return `${proto}://${req.get('host')}`
-}
-
-function findById(dir, id) {
-  const name = safeText(id)
-  if (!name) return null
-
-  // if already has extension
-  if (/\.[a-z0-9]+$/i.test(name)) {
-    const full = path.join(dir, name)
-    return fs.existsSync(full) ? name : null
-  }
-
-  for (const ext of EXT) {
-    const file = name + ext
-    if (fs.existsSync(path.join(dir, file))) return file
-  }
-  return null
-}
-
 // ✅ accept multer.single OR multer.fields
 function pickUploadedFile(req) {
-  // multer.single(...)
   if (req.file) return req.file
-
-  // multer.fields(...)
-  const f1 = req.files?.file?.[0]
+  const f1 = req.files?.signature?.[0]
   if (f1) return f1
-  const f2 = req.files?.signature?.[0]
+  const f2 = req.files?.file?.[0]
   if (f2) return f2
-
   return null
 }
 
-exports.getEmployeeSignature = (req, res) => {
-  const employeeId = safeText(req.params.employeeId)
-  const file = findById(EMP_DIR, employeeId)
-  if (!file) return res.status(404).json({ signatureUrl: '' })
-
-  return res.json({
-    signatureUrl: `${baseUrl(req)}/uploads/signatures/employees/${encodeURIComponent(file)}`,
-  })
+// ✅ Works for BOTH memoryStorage (buffer) and diskStorage (path)
+function getFileBuffer(file) {
+  if (file?.buffer && Buffer.isBuffer(file.buffer) && file.buffer.length) return file.buffer
+  if (file?.path && fs.existsSync(file.path)) return fs.readFileSync(file.path)
+  return null
 }
 
-exports.getUserSignature = (req, res) => {
-  const loginId = safeText(req.params.loginId)
-  const file = findById(USER_DIR, loginId)
-  if (!file) return res.status(404).json({ signatureUrl: '' })
-
-  return res.json({
-    signatureUrl: `${baseUrl(req)}/uploads/signatures/users/${encodeURIComponent(file)}`,
-  })
+function safeExtFromMime(mime) {
+  if (mime === 'image/png') return '.png'
+  if (mime === 'image/webp') return '.webp'
+  return '.jpg'
 }
 
-exports.uploadSignature = (req, res) => {
-  const kind = safeText(req.params.kind) // employees/users
-  const id = safeText(req.params.id)
+function contentUrl(kind, ownerId, ts) {
+  const q = ts ? `?ts=${ts}` : ''
+  return `/api/admin/signatures/${encodeURIComponent(kind)}/${encodeURIComponent(ownerId)}/content${q}`
+}
 
-  const file = pickUploadedFile(req)
-  if (!file) return res.status(400).json({ message: 'No file uploaded' })
+async function findLatest(kind, ownerId) {
+  const b = getBucket()
+  const arr = await b
+    .find({ 'metadata.kind': kind, 'metadata.ownerId': ownerId })
+    .sort({ uploadDate: -1 })
+    .limit(1)
+    .toArray()
+  return arr?.[0] || null
+}
 
-  const url =
-    kind === 'employees'
-      ? `${baseUrl(req)}/uploads/signatures/employees/${encodeURIComponent(file.filename)}`
-      : `${baseUrl(req)}/uploads/signatures/users/${encodeURIComponent(file.filename)}`
+async function deleteAll(kind, ownerId) {
+  const b = getBucket()
+  const arr = await b.find({ 'metadata.kind': kind, 'metadata.ownerId': ownerId }).toArray()
+  for (const f of arr) {
+    try { await deleteFile(f._id) } catch {}
+  }
+}
 
-  return res.json({
-    ok: true,
-    kind,
-    id,
-    signatureUrl: url,
-    filename: file.filename,
-  })
+/* ───────────────── GET meta (NO 404 spam) ───────────────── */
+exports.getEmployeeSignature = async (req, res, next) => {
+  try {
+    const employeeId = safeText(req.params.employeeId)
+    if (!employeeId) return res.json({ exists: false, url: '' })
+
+    const latest = await findLatest('employees', employeeId)
+    if (!latest) return res.json({ exists: false, url: '' })
+
+    return res.json({
+      exists: true,
+      url: contentUrl('employees', employeeId, latest.uploadDate?.getTime?.()),
+      contentType: latest.contentType || '',
+      size: latest.length || 0,
+      uploadedAt: latest.uploadDate || null,
+    })
+  } catch (e) {
+    next(e)
+  }
+}
+
+exports.getUserSignature = async (req, res, next) => {
+  try {
+    const loginId = safeText(req.params.loginId)
+    if (!loginId) return res.json({ exists: false, url: '' })
+
+    const latest = await findLatest('users', loginId)
+    if (!latest) return res.json({ exists: false, url: '' })
+
+    return res.json({
+      exists: true,
+      url: contentUrl('users', loginId, latest.uploadDate?.getTime?.()),
+      contentType: latest.contentType || '',
+      size: latest.length || 0,
+      uploadedAt: latest.uploadDate || null,
+    })
+  } catch (e) {
+    next(e)
+  }
+}
+
+/* ───────────────── STREAM content ───────────────── */
+exports.streamSignature = async (req, res, next) => {
+  try {
+    const kind = safeText(req.params.kind)
+    const ownerId = safeText(req.params.id)
+
+    if (kind !== 'employees' && kind !== 'users') return res.status(400).end()
+    if (!ownerId) return res.status(404).end()
+
+    const latest = await findLatest(kind, ownerId)
+    if (!latest?._id) return res.status(404).end()
+
+    // url includes ?ts= so caching is safe
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    if (latest.contentType) res.setHeader('Content-Type', latest.contentType)
+
+    const b = getBucket()
+    const stream = b.openDownloadStream(latest._id)
+    stream.on('error', () => res.status(404).end())
+    stream.pipe(res)
+  } catch (e) {
+    next(e)
+  }
+}
+
+/* ───────────────── UPLOAD ───────────────── */
+exports.uploadSignature = async (req, res, next) => {
+  try {
+    const kind = safeText(req.params.kind)
+    const ownerId = safeText(req.params.id)
+
+    if (kind !== 'employees' && kind !== 'users') {
+      return res.status(400).json({ message: 'Invalid kind. Use employees or users.' })
+    }
+    if (!ownerId) return res.status(400).json({ message: 'Missing id' })
+
+    const file = pickUploadedFile(req)
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded (field must be "signature" or "file")' })
+    }
+
+    const mime = String(file.mimetype || '').toLowerCase()
+    if (!ALLOWED.has(mime)) return res.status(400).json({ message: 'Only PNG/JPG/WEBP allowed.' })
+
+    const buffer = getFileBuffer(file)
+    if (!buffer) {
+      return res.status(400).json({ message: 'File buffer missing. Ensure multer memoryStorage is used.' })
+    }
+
+    // remove previous signatures for this person (clean)
+    await deleteAll(kind, ownerId)
+
+    const safeOwner = ownerId.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const filename = `${kind}_${safeOwner}${safeExtFromMime(mime)}`
+
+    const uploadedBy = safeText(req.user?.loginId || req.user?.username || '')
+
+    const gridFile = await uploadBuffer({
+      buffer,
+      filename,
+      contentType: mime,
+      metadata: { kind, ownerId, uploadedBy },
+    })
+
+    const ts = gridFile?.uploadDate ? gridFile.uploadDate.getTime() : Date.now()
+
+    return res.json({
+      ok: true,
+      exists: true,
+      kind,
+      id: ownerId,
+      url: contentUrl(kind, ownerId, ts),
+      contentType: gridFile?.contentType || mime,
+      size: gridFile?.length || buffer.length || 0,
+      uploadedAt: gridFile?.uploadDate || new Date(),
+    })
+
+  } catch (e) {
+    console.error('[sig] upload error:', e)
+    next(e)
+  }
+}
+
+/* ───────────────── DELETE (optional) ───────────────── */
+exports.deleteSignature = async (req, res, next) => {
+  try {
+    const kind = safeText(req.params.kind)
+    const ownerId = safeText(req.params.id)
+
+    if (kind !== 'employees' && kind !== 'users') {
+      return res.status(400).json({ message: 'Invalid kind. Use employees or users.' })
+    }
+    if (!ownerId) return res.status(400).json({ message: 'Missing id' })
+
+    await deleteAll(kind, ownerId)
+    return res.json({ ok: true, deleted: true })
+  } catch (e) {
+    next(e)
+  }
 }
