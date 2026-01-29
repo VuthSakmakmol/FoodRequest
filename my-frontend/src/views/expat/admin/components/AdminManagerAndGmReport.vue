@@ -1,10 +1,9 @@
 <!-- src/views/expat/admin/components/AdminManagerAndGmReport.vue
   ✅ Fixed mode: MANAGER_GM
-  ✅ Full A4 edge PDF + smaller text
-  ✅ Fix: logo huge in preview (force size)
-  ✅ Fix: PDF table borders not too bold + better quality (STOP html2pdf, use PRINT to PDF vector)
-  ✅ Fix: Remark smaller, Approved by (OM / GM) wider + one-line header
-  ✅ Fix: signature 404 spam → smart resolver (numeric => employees first, loginId => users first)
+  ✅ Vector Print-to-PDF (iframe print)
+  ✅ Smaller text, clean borders, forced logo size
+  ✅ Smart signature resolver
+  ✅ FIX: signatures show even when content endpoint requires auth (Blob URLs)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -20,6 +19,13 @@ const { showToast } = useToast()
 /* ───────── constants ───────── */
 const MODE = 'MANAGER_GM'
 const LEAVE_ADMIN_LOGIN = 'leave_admin'
+
+/* ───────── responsive ───────── */
+const isMobile = ref(false)
+function updateIsMobile() {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
 
 /* ───────── Filters ───────── */
 const q = ref('')
@@ -172,9 +178,25 @@ const previewEmp = ref(null)
 const previewData = ref(null)
 const previewRef = ref(null)
 
-/* signature caches */
-const userSigCache = new Map() // key -> url
-const employeeSigCache = new Map() // employeeId -> url
+/* ───────── signature url caches (META endpoints) ───────── */
+const userSigCache = new Map() // key -> meta url
+const employeeSigCache = new Map() // employeeId -> meta url
+
+async function getUserSignatureUrl(loginId) {
+  const id = safeText(loginId)
+  if (!id) return ''
+  const key = `user:${id}`
+  if (userSigCache.has(key)) return userSigCache.get(key) || ''
+  try {
+    const res = await api.get(`/admin/signatures/users/${encodeURIComponent(id)}`)
+    const url = res?.data?.signatureUrl || res?.data?.url || ''
+    userSigCache.set(key, url || '')
+    return url || ''
+  } catch {
+    userSigCache.set(key, '')
+    return ''
+  }
+}
 
 async function getEmployeeSignatureUrl(employeeId) {
   const id = safeText(employeeId)
@@ -216,27 +238,71 @@ async function resolveSignatureUrl(idLike) {
     userSigCache.set(key, u1 || '')
     return u1 || ''
   } catch (e1) {
-    if (e1?.response?.status !== 404) console.warn('signature fetch failed:', first, id, e1)
     try {
       const r2 = await api.get(`/admin/signatures/${second}/${encodeURIComponent(id)}`)
       const u2 = r2?.data?.signatureUrl || r2?.data?.url || ''
       userSigCache.set(key, u2 || '')
       return u2 || ''
-    } catch (e2) {
-      if (e2?.response?.status !== 404) console.warn('signature fetch failed:', second, id, e2)
+    } catch {
       userSigCache.set(key, '')
       return ''
     }
   }
 }
 
-/* attached signatures for current preview */
+/* ───────── SIGNATURE FIX: convert protected URLs -> blob URLs ───────── */
+function getToken() {
+  try {
+    return localStorage.getItem('token') || ''
+  } catch {
+    return ''
+  }
+}
+function revokeIfBlob(url) {
+  if (url && String(url).startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch {}
+  }
+}
+async function toAuthedBlobUrl(rawUrl) {
+  const u = safeText(rawUrl)
+  if (!u) return ''
+
+  // absolute url builder
+  const abs = (() => {
+    if (/^https?:\/\//i.test(u)) return u
+    const apiBase = safeText(import.meta.env.VITE_API_URL || '')
+      .replace(/\/api\/?$/i, '')
+      .replace(/\/$/, '')
+    const origin = apiBase || window.location.origin
+    return `${origin}${u.startsWith('/') ? '' : '/'}${u}`
+  })()
+
+  const token = getToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
+
+  const res = await fetch(abs, { headers })
+  if (!res.ok) return ''
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
+}
+
+/* attached signatures for current preview (BLOB URLS) */
 const sig = ref({
   requesterUrl: '',
   leaveAdminUrl: '',
   managerUrl: '',
   gmUrl: '',
 })
+
+function clearSig() {
+  revokeIfBlob(sig.value.requesterUrl)
+  revokeIfBlob(sig.value.leaveAdminUrl)
+  revokeIfBlob(sig.value.managerUrl)
+  revokeIfBlob(sig.value.gmUrl)
+  sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
+}
 
 const rangeLabel = computed(() => {
   const f = safeText(dateFrom.value)
@@ -247,19 +313,28 @@ const rangeLabel = computed(() => {
 
 async function loadSignaturesForPreview() {
   const empId = safeText(previewData.value?.meta?.employeeId || previewEmp.value?.employeeId)
-  const requesterUrl = await getEmployeeSignatureUrl(empId)
 
   const leaveAdminLoginId =
     safeText(previewData.value?.meta?.leaveAdminLoginId) ||
     safeText(report.value?.meta?.leaveAdminLoginId) ||
     LEAVE_ADMIN_LOGIN
 
-  const leaveAdminUrl = await resolveSignatureUrl(leaveAdminLoginId)
-
   const managerId = safeText(previewData.value?.meta?.managerLoginId || previewEmp.value?.managerLoginId)
   const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
 
-  const [managerUrl, gmUrl] = await Promise.all([resolveSignatureUrl(managerId), resolveSignatureUrl(gmId)])
+  // meta urls
+  const requesterRaw = await getEmployeeSignatureUrl(empId)
+  const leaveAdminRaw = await resolveSignatureUrl(leaveAdminLoginId)
+  const managerRaw = await resolveSignatureUrl(managerId)
+  const gmRaw = await resolveSignatureUrl(gmId)
+
+  // ✅ convert to blob urls (so <img> works with auth)
+  const [requesterUrl, leaveAdminUrl, managerUrl, gmUrl] = await Promise.all([
+    toAuthedBlobUrl(requesterRaw),
+    toAuthedBlobUrl(leaveAdminRaw),
+    toAuthedBlobUrl(managerRaw),
+    toAuthedBlobUrl(gmRaw),
+  ])
 
   sig.value = {
     requesterUrl: requesterUrl || '',
@@ -275,7 +350,7 @@ async function openPreview(emp) {
   previewLoading.value = true
   previewError.value = ''
   previewData.value = null
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
+  clearSig()
 
   try {
     const employeeId = safeText(emp?.employeeId)
@@ -303,7 +378,7 @@ function closePreview() {
   previewError.value = ''
   previewData.value = null
   previewEmp.value = null
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
+  clearSig()
 }
 
 /* ✅ BEST PDF: Vector Print-to-PDF */
@@ -503,13 +578,17 @@ function teardownRealtime() {
 
 /* ───────── lifecycle ───────── */
 onMounted(() => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   fetchReport(true)
   setupRealtime()
 })
 onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (tmr) clearTimeout(tmr)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
+  clearSig()
 })
 </script>
 
@@ -918,6 +997,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* compact inputs */
 .input-mini {
   width: 100%;
   border-radius: 0.75rem;
@@ -948,6 +1028,7 @@ onBeforeUnmount(() => {
   table-layout: fixed;
 }
 
+/* printable sheet */
 .print-sheet {
   width: 210mm;
   min-height: 297mm;
@@ -971,6 +1052,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.2px;
 }
 
+/* logo size hard-force */
 .sheet-brand {
   display: flex;
   justify-content: flex-end;
@@ -1017,6 +1099,7 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+/* table */
 .sheet-table {
   width: 100%;
   border-collapse: collapse;
@@ -1051,6 +1134,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+/* signature */
 .sig-cell {
   display: flex;
   flex-direction: column;
@@ -1069,6 +1153,7 @@ onBeforeUnmount(() => {
 }
 </style>
 
+<!-- IMPORTANT: @page must NOT be scoped -->
 <style>
 @page {
   size: A4;
