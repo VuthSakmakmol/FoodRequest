@@ -1,9 +1,9 @@
 <!-- src/views/expat/admin/components/AdminManagerAndGmReport.vue
   ✅ Fixed mode: MANAGER_GM
+  ✅ Date range filter REMOVED (always shows full record / all-time)
   ✅ Vector Print-to-PDF (iframe print)
-  ✅ Smaller text, clean borders, forced logo size
-  ✅ Smart signature resolver
-  ✅ FIX: signatures show even when content endpoint requires auth (Blob URLs)
+  ✅ Smart signature resolver + auth-protected signatures -> Blob URLs
+  ✅ Uses api util + useToast (no alerts)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -27,14 +27,12 @@ function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── Filters ───────── */
+/* ───────── Filters (date range removed) ───────── */
 const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
 const managerLoginId = ref('')
 const asOf = ref(dayjs().format('YYYY-MM-DD'))
-const dateFrom = ref(dayjs().startOf('month').format('YYYY-MM-DD'))
-const dateTo = ref(dayjs().format('YYYY-MM-DD'))
 
 /* ───────── State ───────── */
 const loading = ref(false)
@@ -44,12 +42,6 @@ const report = ref(null)
 /* ───────── Pagination ───────── */
 const page = ref(1)
 const pageSize = ref(15)
-
-/* ───────── Date validation ───────── */
-const dateRangeOk = computed(() => {
-  if (!dateFrom.value || !dateTo.value) return true
-  return dateFrom.value <= dateTo.value
-})
 
 /* ───────── Helpers ───────── */
 function safeText(v) {
@@ -83,7 +75,7 @@ function balOf(emp, code) {
   return (emp?.balances || []).find((b) => String(b.leaveTypeCode || '').toUpperCase() === c) || null
 }
 
-/* ───────── API: summary ───────── */
+/* ───────── API: summary (NO dateFrom/dateTo) ───────── */
 async function fetchReport(silent = false) {
   loading.value = true
   error.value = ''
@@ -94,13 +86,7 @@ async function fetchReport(silent = false) {
       department: safeText(department.value) || undefined,
       managerLoginId: safeText(managerLoginId.value) || undefined,
       asOf: safeText(asOf.value) || undefined,
-      dateFrom: dateRangeOk.value ? safeText(dateFrom.value) || undefined : undefined,
-      dateTo: dateRangeOk.value ? safeText(dateTo.value) || undefined : undefined,
       limit: 500,
-    }
-    if (!dateFrom.value || !dateTo.value) {
-      delete params.dateFrom
-      delete params.dateTo
     }
     const res = await api.get('/admin/leave/reports/summary', { params })
     report.value = res?.data || null
@@ -161,8 +147,7 @@ async function exportEmployeesExcel() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Manager_GM')
 
-    const from = dateFrom.value && dateTo.value ? `${dateFrom.value}_to_${dateTo.value}` : 'all'
-    XLSX.writeFile(wb, `leave_report_manager_gm_${from}.xlsx`)
+    XLSX.writeFile(wb, `leave_report_manager_gm_all.xlsx`)
     showToast({ type: 'success', title: 'Exported', message: 'Employees exported.' })
   } catch (e) {
     console.error('exportEmployeesExcel error', e)
@@ -237,7 +222,7 @@ async function resolveSignatureUrl(idLike) {
     const u1 = r1?.data?.signatureUrl || r1?.data?.url || ''
     userSigCache.set(key, u1 || '')
     return u1 || ''
-  } catch (e1) {
+  } catch {
     try {
       const r2 = await api.get(`/admin/signatures/${second}/${encodeURIComponent(id)}`)
       const u2 = r2?.data?.signatureUrl || r2?.data?.url || ''
@@ -304,13 +289,6 @@ function clearSig() {
   sig.value = { requesterUrl: '', leaveAdminUrl: '', managerUrl: '', gmUrl: '' }
 }
 
-const rangeLabel = computed(() => {
-  const f = safeText(dateFrom.value)
-  const t = safeText(dateTo.value)
-  if (!f || !t) return 'all → all'
-  return `${f} → ${t}`
-})
-
 async function loadSignaturesForPreview() {
   const empId = safeText(previewData.value?.meta?.employeeId || previewEmp.value?.employeeId)
 
@@ -354,13 +332,9 @@ async function openPreview(emp) {
 
   try {
     const employeeId = safeText(emp?.employeeId)
-    const params = {}
-    if (dateFrom.value && dateTo.value && dateRangeOk.value) {
-      params.from = safeText(dateFrom.value)
-      params.to = safeText(dateTo.value)
-    }
 
-    const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`, { params })
+    // ✅ Date filter removed: do NOT send from/to
+    const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`)
     previewData.value = res?.data || null
 
     await loadSignaturesForPreview()
@@ -517,8 +491,7 @@ async function exportRecordExcel() {
     XLSX.utils.book_append_sheet(wb, ws, 'LeaveRecord')
 
     const empId = safeText(emp.employeeId || previewEmp.value?.employeeId)
-    const from = dateFrom.value && dateTo.value ? `${dateFrom.value}_to_${dateTo.value}` : 'all'
-    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_${from}.xlsx`)
+    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_all.xlsx`)
 
     showToast({ type: 'success', title: 'Exported', message: 'Record exported.' })
   } catch (e) {
@@ -538,11 +511,6 @@ watch(q, () => {
 })
 watch([includeInactive, department, managerLoginId, asOf], () => {
   page.value = 1
-  fetchReport(true)
-})
-watch([dateFrom, dateTo], () => {
-  page.value = 1
-  if (!dateRangeOk.value) return
   fetchReport(true)
 })
 
@@ -602,6 +570,9 @@ onBeforeUnmount(() => {
           <div class="text-[11px] text-slate-500 dark:text-slate-400">
             Shows only employees in <span class="font-semibold">Manager + GM</span> approval mode.
           </div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">
+            Leave record preview shows <span class="font-semibold">ALL rows</span> (no date filter).
+          </div>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
@@ -630,25 +601,12 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-12">
-        <div class="md:col-span-3">
+        <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search</label>
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." class="input-mini" />
         </div>
 
-        <div class="md:col-span-2">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date From</label>
-          <input v-model="dateFrom" type="date" class="input-mini" />
-        </div>
-
-        <div class="md:col-span-2">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date To</label>
-          <input v-model="dateTo" type="date" class="input-mini" />
-          <p v-if="!dateRangeOk" class="mt-1 text-[11px] text-rose-600 dark:text-rose-300">
-            Date From cannot be after Date To.
-          </p>
-        </div>
-
-        <div class="md:col-span-2">
+        <div class="md:col-span-3">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
           <input v-model="asOf" type="date" class="input-mini" />
         </div>
@@ -658,7 +616,7 @@ onBeforeUnmount(() => {
           <input v-model="department" type="text" placeholder="HR, IT..." class="input-mini" />
         </div>
 
-        <div class="md:col-span-3">
+        <div class="md:col-span-2">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Manager Login ID</label>
           <input v-model="managerLoginId" type="text" placeholder="Manager employeeId" class="input-mini" />
         </div>
@@ -692,7 +650,7 @@ onBeforeUnmount(() => {
           <div>
             <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
             <div class="text-[11px] text-slate-500 dark:text-slate-400">
-              Preview generates the Leave Record template with auto-attached signatures.
+              Preview generates the Leave Record template with auto-attached signatures (no date filter).
             </div>
           </div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees</div>
@@ -804,8 +762,8 @@ onBeforeUnmount(() => {
               <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
                 Leave Record — <span class="font-mono">{{ previewEmp?.employeeId }}</span>
               </div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-300">Range: {{ rangeLabel }}</div>
               <div class="text-[11px] text-slate-500 dark:text-slate-300">Mode: <span class="font-semibold">Manager + GM</span></div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-300">Showing: <span class="font-semibold">All rows</span></div>
             </div>
 
             <div class="flex flex-wrap items-center gap-2">

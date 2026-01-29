@@ -1,10 +1,12 @@
 <!-- src/views/expat/admin/components/AdminGmAndCooReport.vue
   ✅ Fixed mode: GM_COO
   ✅ Same UI + behavior as AdminManagerAndGmReport.vue
-  ✅ Full A4 edge Print-to-PDF (vector)
+  ✅ Vector Print-to-PDF (iframe print)
   ✅ Small text + clean borders + forced logo size
-  ✅ Remark smaller + Approved by wider + one-line header
   ✅ Signature resolver (numeric => employees first, loginId => users first) → no 404 spam
+  ✅ FIX: signatures show even when content endpoint requires auth (Blob URLs)
+  ✅ UPDATE: Removed Date From/To filter
+  ✅ UPDATE: Keep As of filter
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -33,9 +35,7 @@ const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
 const managerLoginId = ref('') // kept to match UI; optional
-const asOf = ref(dayjs().format('YYYY-MM-DD'))
-const dateFrom = ref(dayjs().startOf('month').format('YYYY-MM-DD'))
-const dateTo = ref(dayjs().format('YYYY-MM-DD'))
+const asOf = ref(dayjs().format('YYYY-MM-DD')) // ✅ keep this
 
 /* ───────── State ───────── */
 const loading = ref(false)
@@ -45,12 +45,6 @@ const report = ref(null)
 /* ───────── Pagination ───────── */
 const page = ref(1)
 const pageSize = ref(15)
-
-/* ───────── Date validation ───────── */
-const dateRangeOk = computed(() => {
-  if (!dateFrom.value || !dateTo.value) return true
-  return dateFrom.value <= dateTo.value
-})
 
 /* ───────── Helpers ───────── */
 function safeText(v) {
@@ -95,15 +89,9 @@ async function fetchReport(silent = false) {
       q: safeText(q.value) || undefined,
       includeInactive: includeInactive.value ? '1' : undefined,
       department: safeText(department.value) || undefined,
-      managerLoginId: safeText(managerLoginId.value) || undefined, // optional filter if backend supports
+      managerLoginId: safeText(managerLoginId.value) || undefined, // optional if backend supports
       asOf: safeText(asOf.value) || undefined,
-      dateFrom: dateRangeOk.value ? safeText(dateFrom.value) || undefined : undefined,
-      dateTo: dateRangeOk.value ? safeText(dateTo.value) || undefined : undefined,
       limit: 500,
-    }
-    if (!dateFrom.value || !dateTo.value) {
-      delete params.dateFrom
-      delete params.dateTo
     }
     const res = await api.get('/admin/leave/reports/summary', { params })
     report.value = res?.data || null
@@ -164,8 +152,8 @@ async function exportEmployeesExcel() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'GM_COO')
 
-    const from = dateFrom.value && dateTo.value ? `${dateFrom.value}_to_${dateTo.value}` : 'all'
-    XLSX.writeFile(wb, `leave_report_gm_coo_${from}.xlsx`)
+    const stamp = safeText(asOf.value) || 'as_of'
+    XLSX.writeFile(wb, `leave_report_gm_coo_${stamp}.xlsx`)
     showToast({ type: 'success', title: 'Exported', message: 'Employees exported.' })
   } catch (e) {
     console.error('exportEmployeesExcel error', e)
@@ -181,11 +169,11 @@ const previewEmp = ref(null)
 const previewData = ref(null)
 const previewRef = ref(null)
 
-/* signature caches */
-const userSigCache = new Map() // key -> url
-const employeeSigCache = new Map() // employeeId -> url
+/* ───────── signature META caches ───────── */
+const userSigCache = new Map() // key -> meta url
+const employeeSigCache = new Map() // employeeId -> meta url
 
-async function getUserSignatureUrl(loginId) {
+async function getUserSignatureMetaUrl(loginId) {
   const id = safeText(loginId)
   if (!id) return ''
   const key = `user:${id}`
@@ -201,7 +189,7 @@ async function getUserSignatureUrl(loginId) {
   }
 }
 
-async function getEmployeeSignatureUrl(employeeId) {
+async function getEmployeeSignatureMetaUrl(employeeId) {
   const id = safeText(employeeId)
   if (!id) return ''
   if (employeeSigCache.has(id)) return employeeSigCache.get(id) || ''
@@ -221,42 +209,81 @@ function isLikelyEmployeeId(v) {
   return /^\d{4,}$/.test(s)
 }
 
-/* ✅ Smart resolver (NO 404 spam in normal data):
-   - numeric => employees first
-   - otherwise => users first
-   - still fallback for edge cases
-*/
-async function resolveSignatureUrl(idLike) {
+/**
+ * ✅ Resolver WITHOUT calling non-existing routes:
+ * - numeric => employees meta first, then users meta
+ * - else => users meta first, then employees meta
+ * Returns the META url
+ */
+async function resolveSignatureMetaUrl(idLike) {
   const id = safeText(idLike)
   if (!id) return ''
 
   const key = `any:${id}`
   if (userSigCache.has(key)) return userSigCache.get(key) || ''
 
-  const first = isLikelyEmployeeId(id) ? 'employees' : 'users'
-  const second = first === 'employees' ? 'users' : 'employees'
+  const firstEmployees = isLikelyEmployeeId(id)
+  const first = firstEmployees ? 'employees' : 'users'
+
+  let url = ''
+  if (first === 'employees') url = await getEmployeeSignatureMetaUrl(id)
+  else url = await getUserSignatureMetaUrl(id)
+
+  if (!url) {
+    if (first === 'employees') url = await getUserSignatureMetaUrl(id)
+    else url = await getEmployeeSignatureMetaUrl(id)
+  }
+
+  userSigCache.set(key, url || '')
+  return url || ''
+}
+
+/* ───────── SIGNATURE FIX: protected content -> blob urls ───────── */
+function getToken() {
+  try {
+    return localStorage.getItem('token') || ''
+  } catch {
+    return ''
+  }
+}
+function revokeIfBlob(url) {
+  if (url && String(url).startsWith('blob:')) {
+    try {
+      URL.revokeObjectURL(url)
+    } catch {}
+  }
+}
+function toAbsUrl(urlOrPath) {
+  const u = safeText(urlOrPath)
+  if (!u) return ''
+  if (/^https?:\/\//i.test(u)) return u
+
+  const apiBase = safeText(import.meta.env.VITE_API_URL || '')
+    .replace(/\/api\/?$/i, '')
+    .replace(/\/$/, '')
+
+  const origin = apiBase || (typeof window !== 'undefined' ? window.location.origin : '')
+  return `${origin}${u.startsWith('/') ? '' : '/'}${u}`
+}
+async function toAuthedBlobUrl(rawUrl) {
+  const u = safeText(rawUrl)
+  if (!u) return ''
+
+  const abs = toAbsUrl(u)
+  const token = getToken()
+  const headers = token ? { Authorization: `Bearer ${token}` } : {}
 
   try {
-    const r1 = await api.get(`/admin/signatures/${first}/${encodeURIComponent(id)}`)
-    const u1 = r1?.data?.signatureUrl || r1?.data?.url || ''
-    userSigCache.set(key, u1 || '')
-    return u1 || ''
-  } catch (e1) {
-    if (e1?.response?.status !== 404) console.warn('signature fetch failed:', first, id, e1)
-    try {
-      const r2 = await api.get(`/admin/signatures/${second}/${encodeURIComponent(id)}`)
-      const u2 = r2?.data?.signatureUrl || r2?.data?.url || ''
-      userSigCache.set(key, u2 || '')
-      return u2 || ''
-    } catch (e2) {
-      if (e2?.response?.status !== 404) console.warn('signature fetch failed:', second, id, e2)
-      userSigCache.set(key, '')
-      return ''
-    }
+    const res = await fetch(abs, { headers })
+    if (!res.ok) return ''
+    const blob = await res.blob()
+    return URL.createObjectURL(blob)
+  } catch {
+    return ''
   }
 }
 
-/* attached signatures for current preview */
+/* attached signatures for current preview (BLOB URLs) */
 const sig = ref({
   requesterUrl: '',
   leaveAdminUrl: '',
@@ -264,31 +291,38 @@ const sig = ref({
   cooUrl: '',
 })
 
-const rangeLabel = computed(() => {
-  const f = safeText(dateFrom.value)
-  const t = safeText(dateTo.value)
-  if (!f || !t) return 'all → all'
-  return `${f} → ${t}`
-})
+function clearSig() {
+  revokeIfBlob(sig.value.requesterUrl)
+  revokeIfBlob(sig.value.leaveAdminUrl)
+  revokeIfBlob(sig.value.gmUrl)
+  revokeIfBlob(sig.value.cooUrl)
+  sig.value = { requesterUrl: '', leaveAdminUrl: '', gmUrl: '', cooUrl: '' }
+}
+
+const asOfLabel = computed(() => safeText(asOf.value) || dayjs().format('YYYY-MM-DD'))
 
 async function loadSignaturesForPreview() {
   const empId = safeText(previewData.value?.meta?.employeeId || previewEmp.value?.employeeId)
-
-  // requester is employee signature
-  const requesterUrl = await getEmployeeSignatureUrl(empId)
 
   const leaveAdminLoginId =
     safeText(previewData.value?.meta?.leaveAdminLoginId) ||
     safeText(report.value?.meta?.leaveAdminLoginId) ||
     LEAVE_ADMIN_LOGIN
 
-  const leaveAdminUrl = await resolveSignatureUrl(leaveAdminLoginId)
-
-  // GM/COO approvers
   const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
   const cooId = safeText(previewData.value?.meta?.cooLoginId || previewEmp.value?.cooLoginId)
 
-  const [gmUrl, cooUrl] = await Promise.all([resolveSignatureUrl(gmId), resolveSignatureUrl(cooId)])
+  const requesterMeta = await getEmployeeSignatureMetaUrl(empId)
+  const leaveAdminMeta = await resolveSignatureMetaUrl(leaveAdminLoginId)
+  const gmMeta = await resolveSignatureMetaUrl(gmId)
+  const cooMeta = await resolveSignatureMetaUrl(cooId)
+
+  const [requesterUrl, leaveAdminUrl, gmUrl, cooUrl] = await Promise.all([
+    toAuthedBlobUrl(requesterMeta),
+    toAuthedBlobUrl(leaveAdminMeta),
+    toAuthedBlobUrl(gmMeta),
+    toAuthedBlobUrl(cooMeta),
+  ])
 
   sig.value = {
     requesterUrl: requesterUrl || '',
@@ -304,15 +338,13 @@ async function openPreview(emp) {
   previewLoading.value = true
   previewError.value = ''
   previewData.value = null
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', gmUrl: '', cooUrl: '' }
+  clearSig()
 
   try {
     const employeeId = safeText(emp?.employeeId)
-    const params = {}
-    if (dateFrom.value && dateTo.value && dateRangeOk.value) {
-      params.from = safeText(dateFrom.value)
-      params.to = safeText(dateTo.value)
-    }
+
+    // ✅ No date range filter. (Optionally send asOf if backend supports.)
+    const params = { asOf: safeText(asOf.value) || undefined }
 
     const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`, { params })
     previewData.value = res?.data || null
@@ -332,7 +364,7 @@ function closePreview() {
   previewError.value = ''
   previewData.value = null
   previewEmp.value = null
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', gmUrl: '', cooUrl: '' }
+  clearSig()
 }
 
 /* ✅ BEST PDF: Vector Print-to-PDF */
@@ -421,13 +453,12 @@ async function downloadPdf() {
     doc.write(html)
     doc.close()
 
-    const onLoad = () => {
+    iframe.onload = () => {
       try {
         win.focus()
         win.print()
       } catch {}
     }
-    iframe.onload = onLoad
 
     const cleanup = () => {
       try {
@@ -459,12 +490,10 @@ async function exportRecordExcel() {
       UL: r.UL_day,
       SL: r.SL_day,
       ML: r.ML_day,
-
       RecordBy: 'Requester',
       CheckedBy: 'Leave Admin',
       Approved_1: 'GM',
       Approved_2: 'COO',
-
       Remark: r.remark,
       Status: r.status,
       LeaveType: r.leaveTypeCode,
@@ -475,8 +504,8 @@ async function exportRecordExcel() {
     XLSX.utils.book_append_sheet(wb, ws, 'LeaveRecord')
 
     const empId = safeText(emp.employeeId || previewEmp.value?.employeeId)
-    const from = dateFrom.value && dateTo.value ? `${dateFrom.value}_to_${dateTo.value}` : 'all'
-    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_${from}.xlsx`)
+    const stamp = safeText(asOf.value) || 'as_of'
+    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_${stamp}.xlsx`)
 
     showToast({ type: 'success', title: 'Exported', message: 'Record exported.' })
   } catch (e) {
@@ -496,11 +525,6 @@ watch(q, () => {
 })
 watch([includeInactive, department, managerLoginId, asOf], () => {
   page.value = 1
-  fetchReport(true)
-})
-watch([dateFrom, dateTo], () => {
-  page.value = 1
-  if (!dateRangeOk.value) return
   fetchReport(true)
 })
 
@@ -546,6 +570,7 @@ onBeforeUnmount(() => {
   if (tmr) clearTimeout(tmr)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
+  clearSig()
 })
 </script>
 
@@ -592,19 +617,7 @@ onBeforeUnmount(() => {
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." class="input-mini" />
         </div>
 
-        <div class="md:col-span-2">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date From</label>
-          <input v-model="dateFrom" type="date" class="input-mini" />
-        </div>
-
-        <div class="md:col-span-2">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Date To</label>
-          <input v-model="dateTo" type="date" class="input-mini" />
-          <p v-if="!dateRangeOk" class="mt-1 text-[11px] text-rose-600 dark:text-rose-300">
-            Date From cannot be after Date To.
-          </p>
-        </div>
-
+        <!-- ✅ Date From/To removed -->
         <div class="md:col-span-2">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
           <input v-model="asOf" type="date" class="input-mini" />
@@ -615,7 +628,7 @@ onBeforeUnmount(() => {
           <input v-model="department" type="text" placeholder="HR, IT..." class="input-mini" />
         </div>
 
-        <div class="md:col-span-3">
+        <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Manager Login ID</label>
           <input v-model="managerLoginId" type="text" placeholder="(optional filter)" class="input-mini" />
         </div>
@@ -759,7 +772,7 @@ onBeforeUnmount(() => {
               <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
                 Leave Record — <span class="font-mono">{{ previewEmp?.employeeId }}</span>
               </div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-300">Range: {{ rangeLabel }}</div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-300">As of: {{ asOfLabel }}</div>
               <div class="text-[11px] text-slate-500 dark:text-slate-300">
                 Mode: <span class="font-semibold">GM + COO</span>
               </div>
