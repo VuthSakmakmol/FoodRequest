@@ -13,6 +13,20 @@ try { if (!EmployeeDir) EmployeeDir = require('../../models/Employee') } catch {
 // ✅ Keep only your real statuses
 const STATUS = ['NEW', 'ACCEPTED', 'CANCELED']
 
+// ✅ LIMIT order types (enforced server-side)
+const ORDER_TYPES_ALLOWED = ['Daily meal', 'Meeting catering', 'Visitor meal']
+
+// ✅ Cambodia timezone (strict time rules must use THIS)
+const TZ = 'Asia/Phnom_Penh'
+
+// ✅ Meal cutoff rules (apply to ALL order types)
+const MEAL_CUTOFF = {
+  Breakfast: '08:00',
+  Lunch: '10:00',
+  Dinner: '15:00',
+  // Snack: no cutoff (if you want, add one here)
+}
+
 function escapeRegExp(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -24,6 +38,103 @@ function ymdFromDate(d) {
   const mm = String(dt.getMonth() + 1).padStart(2, '0')
   const dd = String(dt.getDate()).padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
+}
+
+/** Format a Date to YYYY-MM-DD in a specific timezone */
+function ymdInTZ(date, timeZone = TZ) {
+  const dt = date instanceof Date ? date : new Date(date)
+  if (Number.isNaN(dt.getTime())) return ''
+  // en-CA gives YYYY-MM-DD format
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(dt)
+}
+
+/** Current HH:mm in a specific timezone */
+function hhmmNowInTZ(timeZone = TZ) {
+  const now = new Date()
+  // Use formatToParts to avoid locale weirdness
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(now)
+  const h = parts.find(p => p.type === 'hour')?.value || '00'
+  const m = parts.find(p => p.type === 'minute')?.value || '00'
+  return `${h}:${m}`
+}
+
+function isValidHHmm(s) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s || '').trim())
+}
+
+/**
+ * STRICT RULES:
+ * - No past eatDate (Cambodia day)
+ * - If eatDate is TODAY (Cambodia day), reject meals whose cutoff has passed
+ * - Applies to ALL order types (Daily/Meeting/Visitor)
+ */
+function enforceStrictMealCutoff({ eatDate, meals }) {
+  const eat = new Date(eatDate)
+  if (Number.isNaN(eat.getTime())) throw createError(400, 'eatDate is invalid')
+
+  const eatYMD = ymdInTZ(eat, TZ)
+  const todayYMD = ymdInTZ(new Date(), TZ)
+  if (!eatYMD) throw createError(400, 'eatDate is invalid')
+
+  // no past day
+  if (eatYMD < todayYMD) {
+    throw createError(400, `eatDate cannot be in the past (${eatYMD}).`)
+  }
+
+  // only enforce cutoffs when eatDate is today
+  if (eatYMD !== todayYMD) return
+
+  const nowHHmm = hhmmNowInTZ(TZ)
+
+  const list = Array.isArray(meals) ? meals : []
+  const blocked = []
+
+  for (const m of list) {
+    const meal = String(m || '').trim()
+    const cutoff = MEAL_CUTOFF[meal]
+    if (!cutoff) continue // meal has no cutoff rule
+    // lexicographic HH:mm compare works for 24h strings
+    if (nowHHmm > cutoff) blocked.push(`${meal} (cutoff ${cutoff})`)
+  }
+
+  if (blocked.length) {
+    throw createError(
+      400,
+      `Too late to order: ${blocked.join(', ')}. Current time ${nowHHmm} (${TZ}).`
+    )
+  }
+}
+
+/** Validate orderType strictly (limit it) */
+function enforceOrderType(orderType) {
+  const v = String(orderType || '').trim()
+  if (!v) throw createError(400, 'orderType is required')
+  if (!ORDER_TYPES_ALLOWED.includes(v)) {
+    throw createError(400, `Invalid orderType. Allowed: ${ORDER_TYPES_ALLOWED.join(', ')}`)
+  }
+  return v
+}
+
+/** Validate eat time range if provided */
+function validateEatTimeRange(eatTimeStart, eatTimeEnd) {
+  const s = String(eatTimeStart || '').trim()
+  const e = String(eatTimeEnd || '').trim()
+  if (!s && !e) return { s: '', e: '' }
+
+  if (!s || !e) throw createError(400, 'eatTimeStart and eatTimeEnd must both be provided')
+  if (!isValidHHmm(s) || !isValidHHmm(e)) throw createError(400, 'eatTimeStart/eatTimeEnd must be HH:mm')
+  if (e <= s) throw createError(400, 'eatTimeEnd must be after eatTimeStart')
+  return { s, e }
 }
 
 // ✅ transition rules (3-status)
@@ -67,17 +178,30 @@ async function createRequest(req, res, next) {
     if (!employee.name) throw createError(400, 'Employee name not found (directory) and not provided')
     if (!employee.department) throw createError(400, 'Employee department not found (directory) and not provided')
 
+    // ✅ LIMIT order type
+    const orderType = enforceOrderType(b.orderType)
+
+    // eatDate
     const eatDate = new Date(b.eatDate)
     if (Number.isNaN(eatDate.getTime())) throw createError(400, 'eatDate is invalid')
 
+    const meals = Array.isArray(b.meals) ? b.meals : []
+    if (!meals.length) throw createError(400, 'Please select at least one meal.')
+
+    // ✅ STRICT cutoff for ALL order types
+    enforceStrictMealCutoff({ eatDate, meals })
+
+    // ✅ Validate time range if provided (works for ALL order types)
+    const { s: eatTimeStart, e: eatTimeEnd } = validateEatTimeRange(b.eatTimeStart, b.eatTimeEnd)
+
     const doc = await FoodRequest.create({
       employee,
-      orderType: b.orderType,
-      meals: b.meals,
+      orderType,
+      meals,
       quantity: Number(b.quantity || 1),
       eatDate,
-      eatTimeStart: b.eatTimeStart || '',
-      eatTimeEnd: b.eatTimeEnd || '',
+      eatTimeStart: eatTimeStart || '',
+      eatTimeEnd: eatTimeEnd || '',
       location: {
         kind: b?.location?.kind,
         other: b?.location?.other || '',
@@ -157,9 +281,6 @@ async function createRequest(req, res, next) {
 
 /* ──────────────────────────────────────────────
    PUBLIC/CHEF/ADMIN: listRequests
-   GET /api/public/food-requests
-   GET /api/chef/food-requests
-   GET /api/admin/food-requests
 ────────────────────────────────────────────── */
 async function listRequests(req, res, next) {
   try {
@@ -215,12 +336,6 @@ async function listRequests(req, res, next) {
 
 /* ──────────────────────────────────────────────
    ADMIN/CHEF: updateStatus
-   PATCH /api/admin/food-requests/:id/status
-   PATCH /api/chef/food-requests/:id/status
-
-   ✅ Emits ONLY ONE socket event:
-      - foodRequest:statusChanged (includes oldStatus/newStatus)
-   ✅ Sends ONLY ONE telegram message for a real change
 ────────────────────────────────────────────── */
 async function updateStatus(req, res, next) {
   try {
@@ -260,14 +375,12 @@ async function updateStatus(req, res, next) {
     await doc.save()
     const fresh = await FoodRequest.findById(id).lean()
 
-    // ✅ ONE socket event only (prevents double UI update)
     broadcast(req, 'foodRequest:statusChanged', {
       ...fresh,
       oldStatus,
       newStatus: target,
     })
 
-    // ✅ ONE telegram notify only
     try {
       await notifyFood('FOOD_STATUS_UPDATED', {
         requestId: id,
@@ -286,7 +399,7 @@ async function updateStatus(req, res, next) {
 
 /* ──────────────────────────────────────────────
    ADMIN/CHEF: updateRequest (optional edits)
-   ✅ emits: foodRequest:updated (ONLY for real edits)
+   ✅ still strict: orderType limit + cutoff rules
 ────────────────────────────────────────────── */
 async function updateRequest(req, res, next) {
   try {
@@ -299,15 +412,32 @@ async function updateRequest(req, res, next) {
 
     const b = req.body || {}
 
+    // orderType (limited)
+    if (b.orderType != null) {
+      doc.orderType = enforceOrderType(b.orderType)
+    }
+
+    // eatDate
     if (b.eatDate) {
       const eatDate = new Date(b.eatDate)
       if (Number.isNaN(eatDate.getTime())) throw createError(400, 'eatDate is invalid')
       doc.eatDate = eatDate
     }
 
-    if (b.orderType) doc.orderType = b.orderType
-    if (Array.isArray(b.meals)) doc.meals = b.meals
+    // meals
+    if (Array.isArray(b.meals)) {
+      if (!b.meals.length) throw createError(400, 'Please select at least one meal.')
+      doc.meals = b.meals
+    }
+
     if (b.quantity != null) doc.quantity = Number(b.quantity || 1)
+
+    // time range if provided
+    if (b.eatTimeStart != null || b.eatTimeEnd != null) {
+      const { s, e } = validateEatTimeRange(b.eatTimeStart, b.eatTimeEnd)
+      doc.eatTimeStart = s || ''
+      doc.eatTimeEnd = e || ''
+    }
 
     if (b.location) {
       doc.location = {
@@ -325,10 +455,12 @@ async function updateRequest(req, res, next) {
 
     if (b.specialInstructions != null) doc.specialInstructions = String(b.specialInstructions || '')
 
+    // ✅ STRICT cutoff check after edits (ALL order types)
+    enforceStrictMealCutoff({ eatDate: doc.eatDate, meals: doc.meals })
+
     await doc.save()
     const fresh = await FoodRequest.findById(id).lean()
 
-    // ✅ use updated only for edit changes
     broadcast(req, 'foodRequest:updated', fresh)
     res.json(fresh)
   } catch (err) {
@@ -398,18 +530,11 @@ async function dashboard(req, res, next) {
 
 /* ──────────────────────────────────────────────
    PUBLIC: cancelRequest (employee)
-   PATCH /api/public/food-requests/:id/cancel
-
-   ✅ Only allow cancel when status === NEW
-   ✅ (Recommended) verify employeeId matches snapshot
-   ✅ Broadcast: foodRequest:statusChanged
-   ✅ Telegram: FOOD_STATUS_UPDATED
 ────────────────────────────────────────────── */
 async function cancelRequestPublic(req, res, next) {
   try {
     const id = req.params.id
 
-    // recommended: require employeeId to prevent canceling others
     const employeeId = String(req.body?.employeeId || req.query?.employeeId || '').trim()
     if (!employeeId) throw createError(400, 'employeeId is required')
 
@@ -418,22 +543,19 @@ async function cancelRequestPublic(req, res, next) {
 
     const oldStatus = String(doc.status || '').toUpperCase()
 
-    // ensure owner
     const ownerId = String(doc?.employee?.employeeId || '').trim()
     if (ownerId && ownerId !== employeeId) {
       throw createError(403, 'You cannot cancel this request (not owner)')
     }
 
-    // only cancel if NEW
     if (oldStatus !== 'NEW') {
       throw createError(400, 'Only NEW requests can be canceled')
     }
 
     const target = 'CANCELED'
 
-    // update doc (no reason needed)
     doc.status = target
-    doc.cancelReason = '' // keep empty
+    doc.cancelReason = ''
     doc.statusHistory = Array.isArray(doc.statusHistory) ? doc.statusHistory : []
     doc.statusHistory.push({
       status: target,
@@ -445,14 +567,12 @@ async function cancelRequestPublic(req, res, next) {
 
     const fresh = await FoodRequest.findById(id).lean()
 
-    // ✅ ONE socket event
     broadcast(req, 'foodRequest:statusChanged', {
       ...fresh,
       oldStatus,
       newStatus: target,
     })
 
-    // ✅ ONE telegram notify
     try {
       await notifyFood('FOOD_STATUS_UPDATED', {
         requestId: id,

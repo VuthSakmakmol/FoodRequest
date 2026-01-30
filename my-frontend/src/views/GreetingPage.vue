@@ -53,9 +53,7 @@ const scrollToServices = () => {
             Trax Apparel Cambodia
           </p>
 
-          <h1
-            class="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight mb-3"
-          >
+          <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight mb-3">
             <span class="bg-gradient-to-r from-white via-amber-200 to-rose-200 bg-clip-text text-transparent">
               Trax Requestor System
             </span>
@@ -93,21 +91,15 @@ const scrollToServices = () => {
 
           <!-- quick badges -->
           <div class="mt-4 flex flex-wrap gap-2 text-[11px] sm:text-xs">
-            <div
-              class="inline-flex items-center gap-1.5 rounded-full bg-sky-900/30 px-3 py-1 border border-sky-100/30"
-            >
+            <div class="inline-flex items-center gap-1.5 rounded-full bg-sky-900/30 px-3 py-1 border border-sky-100/30">
               <span class="h-1.5 w-1.5 rounded-full bg-emerald-300" />
               <span>Real-time updates</span>
             </div>
-            <div
-              class="inline-flex items-center gap-1.5 rounded-full bg-indigo-900/30 px-3 py-1 border border-indigo-100/30"
-            >
+            <div class="inline-flex items-center gap-1.5 rounded-full bg-indigo-900/30 px-3 py-1 border border-indigo-100/30">
               <span class="h-1.5 w-1.5 rounded-full bg-amber-300" />
               <span>English / ខ្មែរ</span>
             </div>
-            <div
-              class="inline-flex items-center gap-1.5 rounded-full bg-emerald-900/30 px-3 py-1 border border-emerald-100/30"
-            >
+            <div class="inline-flex items-center gap-1.5 rounded-full bg-emerald-900/30 px-3 py-1 border border-emerald-100/30">
               <span class="h-1.5 w-1.5 rounded-full bg-sky-300" />
               <span>Secure access</span>
             </div>
@@ -125,9 +117,7 @@ const scrollToServices = () => {
                 <p class="text-xs text-sky-100/80">Today</p>
                 <p class="text-sm font-semibold text-white">Requests overview</p>
               </div>
-              <span
-                class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/40 px-3 py-1 text-[11px]"
-              >
+              <span class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/40 px-3 py-1 text-[11px]">
                 <span class="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
                 Live
               </span>
@@ -166,16 +156,10 @@ const scrollToServices = () => {
       <section ref="servicesRef" class="px-4 sm:px-8 py-6 sm:py-8">
         <div class="max-w-6xl mx-auto">
           <div class="mb-4 sm:mb-6">
-            <h2
-              class="text-lg sm:text-2xl font-semibold text-slate-900
-                     dark:text-slate-50"
-            >
+            <h2 class="text-lg sm:text-2xl font-semibold text-slate-900 dark:text-slate-50">
               Choose what you want to do today
             </h2>
-            <p
-              class="mt-1 text-xs sm:text-sm text-slate-500
-                     dark:text-slate-400"
-            >
+            <p class="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
               Food booking, Vehicle Reservation, meeting rooms (soon), and expat leave.
             </p>
           </div>
@@ -192,33 +176,20 @@ const scrollToServices = () => {
                      transition overflow-hidden"
             >
               <div class="flex gap-4 items-center p-4 sm:p-5">
-                <div
-                  class="flex h-12 w-12 items-center justify-center rounded-xl
-                         bg-gradient-to-br from-amber-400 to-rose-400
-                         text-slate-900 shadow-md"
-                >
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-rose-400 text-slate-900 shadow-md">
                   <font-awesome-icon icon="utensils" class="text-lg" />
                 </div>
 
                 <div class="flex-1 space-y-1">
                   <div class="flex items-center justify-between gap-2">
-                    <span
-                      class="text-sm sm:text-base font-semibold text-slate-900
-                             dark:text-slate-50"
-                    >
+                    <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">
                       Food Booking
                     </span>
-                    <span
-                      class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600
-                             dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium"
-                    >
+                    <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
                       Canteen
                     </span>
                   </div>
-                  <p
-                    class="text-xs sm:text-[13px] text-slate-600
-                           dark:text-slate-300"
-                  >
+                  <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
                     Request meals, see order history, and track daily menu.
                     <span class="block mt-0.5 text-[11px] text-slate-500 km-font">
                       កក់អាហារ និងតាមដានការកក់របស់បុគ្គលិក។
@@ -247,33 +218,20 @@ const scrollToServices = () => {
                      transition overflow-hidden"
             >
               <div class="flex gap-4 items-center p-4 sm:p-5">
-                <div
-                  class="flex h-12 w-12 items-center justify-center rounded-xl
-                         bg-gradient-to-br from-emerald-400 to-sky-400
-                         text-slate-900 shadow-md"
-                >
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-sky-400 text-slate-900 shadow-md">
                   <font-awesome-icon icon="car" class="text-lg" />
                 </div>
 
                 <div class="flex-1 space-y-1">
                   <div class="flex items-center justify-between gap-2">
-                    <span
-                      class="text-sm sm:text-base font-semibold text-slate-900
-                             dark:text-slate-50"
-                    >
+                    <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">
                       Vehicle Reservation
                     </span>
-                    <span
-                      class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600
-                             dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium"
-                    >
+                    <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
                       Transportation
                     </span>
                   </div>
-                  <p
-                    class="text-xs sm:text-[13px] text-slate-600
-                           dark:text-slate-300"
-                  >
+                  <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
                     Book company car or messenger, share destinations and time.
                     <span class="block mt-0.5 text-[11px] text-slate-500 km-font">
                       កក់ឡានក្រុមហ៊ុន ឬ messenger សម្រាប់ដឹកឯកសារ។
@@ -290,46 +248,6 @@ const scrollToServices = () => {
               </div>
             </button>
 
-            <!-- Meeting Room Booking (coming soon) -->
-            <div
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
-                     dark:bg-slate-900/60 dark:border-slate-700/80
-                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
-            >
-              <div
-                class="flex h-12 w-12 items-center justify-center rounded-xl
-                       bg-gradient-to-br from-indigo-400 to-emerald-400
-                       text-slate-900 shadow-md"
-              >
-                <span class="text-sm font-semibold">MR</span>
-              </div>
-              <div class="flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span
-                    class="text-sm sm:text-base font-semibold text-slate-700
-                           dark:text-slate-100"
-                  >
-                    Meeting Room Booking
-                  </span>
-                  <span
-                    class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700
-                           dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold"
-                  >
-                    In development
-                  </span>
-                </div>
-                <p
-                  class="text-xs sm:text-[13px] text-slate-600
-                         dark:text-slate-300"
-                >
-                  Book meeting rooms for internal discussions and visitors.
-                  <span class="block mt-0.5 text-[11px] text-slate-500">
-                    Coming soon.
-                  </span>
-                </p>
-              </div>
-            </div>
-
             <!-- Leave Request for Expat -->
             <button
               type="button"
@@ -341,33 +259,20 @@ const scrollToServices = () => {
                      transition overflow-hidden"
             >
               <div class="flex gap-4 items-center p-4 sm:p-5">
-                <div
-                  class="flex h-12 w-12 items-center justify-center rounded-xl
-                         bg-gradient-to-br from-amber-400 to-sky-400
-                         text-slate-900 shadow-md"
-                >
+                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-sky-400 text-slate-900 shadow-md">
                   <span class="text-sm font-semibold">LV</span>
                 </div>
 
                 <div class="flex-1 space-y-1">
                   <div class="flex items-center justify-between gap-2">
-                    <span
-                      class="text-sm sm:text-base font-semibold text-slate-900
-                             dark:text-slate-50"
-                    >
+                    <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">
                       Leave Request (Expat)
                     </span>
-                    <span
-                      class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600
-                             dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium"
-                    >
+                    <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
                       Expat Portal
                     </span>
                   </div>
-                  <p
-                    class="text-xs sm:text-[13px] text-slate-600
-                           dark:text-slate-300"
-                  >
+                  <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
                     Submit and track leave requests for expatriate employees.
                     <span class="block mt-0.5 text-[11px] text-slate-500">
                       Annual leave, sick leave, unpaid leave and more.
@@ -384,6 +289,133 @@ const scrollToServices = () => {
                 </div>
               </div>
             </button>
+
+            <!-- Booking Meeting Room (coming soon) -->
+            <div
+              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
+                     dark:bg-slate-900/60 dark:border-slate-700/80
+                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
+            >
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-emerald-400 text-slate-900 shadow-md">
+                <span class="text-sm font-semibold">MR</span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
+                    Booking Meeting Room
+                  </span>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
+                    In development
+                  </span>
+                </div>
+                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
+                  Book meeting rooms for internal discussions and visitors.
+                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
+                </p>
+              </div>
+            </div>
+
+            <!-- OT Approve (in development) -->
+            <div
+              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
+                     dark:bg-slate-900/60 dark:border-slate-700/80
+                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
+            >
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-amber-400 text-slate-900 shadow-md">
+                <span class="text-sm font-semibold">OT</span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
+                    OT Approve
+                  </span>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
+                    In development
+                  </span>
+                </div>
+                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
+                  Approve overtime requests with role-based workflow.
+                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
+                </p>
+              </div>
+            </div>
+
+            <!-- Factory Security (in development) -->
+            <div
+              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
+                     dark:bg-slate-900/60 dark:border-slate-700/80
+                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
+            >
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-400 to-emerald-400 text-slate-900 shadow-md">
+                <span class="text-sm font-semibold">FS</span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
+                    Factory Security
+                  </span>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
+                    In development
+                  </span>
+                </div>
+                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
+                  Visitor logs, gate pass, and security approvals.
+                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
+                </p>
+              </div>
+            </div>
+
+            <!-- Auto Email for New comer (in development) -->
+            <div
+              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
+                     dark:bg-slate-900/60 dark:border-slate-700/80
+                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
+            >
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-indigo-400 text-slate-900 shadow-md">
+                <span class="text-sm font-semibold">AE</span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
+                    Auto Email for New comer
+                  </span>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
+                    In development
+                  </span>
+                </div>
+                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
+                  Send onboarding emails automatically when a new employee is created.
+                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
+                </p>
+              </div>
+            </div>
+
+            <!-- Stationary management (in development) -->
+            <div
+              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
+                     dark:bg-slate-900/60 dark:border-slate-700/80
+                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
+            >
+              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-amber-400 text-slate-900 shadow-md">
+                <span class="text-sm font-semibold">SM</span>
+              </div>
+              <div class="flex-1 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
+                    Stationary management
+                  </span>
+                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
+                    In development
+                  </span>
+                </div>
+                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
+                  Request office supplies and track stock levels by department.
+                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
+                </p>
+              </div>
+            </div>
+
+            
           </div>
         </div>
       </section>
@@ -391,24 +423,13 @@ const scrollToServices = () => {
       <!-- Feature strip -->
       <section class="px-4 sm:px-8 pb-6 sm:pb-8">
         <div class="max-w-6xl mx-auto">
-          <div
-            class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3
-                   dark:bg-slate-900/80 dark:border-slate-700"
-          >
+          <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:bg-slate-900/80 dark:border-slate-700">
             <div class="grid gap-2 sm:grid-cols-2 text-xs sm:text-sm">
-              <div
-                class="inline-flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 shadow-sm
-                       border border-slate-200
-                       dark:bg-slate-800 dark:border-slate-600"
-              >
+              <div class="inline-flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 shadow-sm border border-slate-200 dark:bg-slate-800 dark:border-slate-600">
                 <span class="h-1.5 w-1.5 rounded-full bg-sky-500" />
                 <span>Telegram alerts for key roles (Admin, Chef, Driver, Messenger)</span>
               </div>
-              <div
-                class="inline-flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 shadow-sm
-                       border border-slate-200
-                       dark:bg-slate-800 dark:border-slate-600"
-              >
+              <div class="inline-flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 shadow-sm border border-slate-200 dark:bg-slate-800 dark:border-slate-600">
                 <span class="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 <span>Data stored securely in the company’s infrastructure</span>
               </div>
@@ -419,20 +440,14 @@ const scrollToServices = () => {
     </main>
 
     <!-- FOOTER -->
-    <footer
-      class="border-t border-slate-200 bg-slate-50/90
-             dark:border-slate-800 dark:bg-slate-950/90"
-    >
+    <footer class="border-t border-slate-200 bg-slate-50/90 dark:border-slate-800 dark:bg-slate-950/90">
       <div
         class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-center gap-2 text-[11px] sm:text-xs
                text-slate-600 dark:text-slate-400"
       >
         <span>© {{ new Date().getFullYear() }} Trax Apparel Cambodia</span>
         <span class="opacity-40">•</span>
-        <a
-          href="mailto:it@traxapparel.com"
-          class="underline-offset-2 hover:underline"
-        >
+        <a href="mailto:it@traxapparel.com" class="underline-offset-2 hover:underline">
           IT Support: it@traxapparel.com
         </a>
       </div>

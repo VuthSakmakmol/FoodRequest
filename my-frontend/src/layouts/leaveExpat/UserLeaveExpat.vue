@@ -30,18 +30,18 @@ const groups = [
       },
 
       // ✅ NEW: Replace Day Request (create)
-      {
-        label: 'Replace Day Request',
-        icon: 'fa-solid fa-calendar-plus',
-        to: { name: 'leave-user-replace-day' },
-      },
+      // {
+      //   label: 'Replace Day Request',
+      //   icon: 'fa-solid fa-calendar-plus',
+      //   to: { name: 'leave-user-replace-day' },
+      // },
 
       // ✅ NEW: Replace Day List
-      {
-        label: 'Replace Day List',
-        icon: 'fa-solid fa-clipboard-list',
-        to: { name: 'leave-user-replace-list' },
-      },
+      // {
+      //   label: 'Replace Day List',
+      //   icon: 'fa-solid fa-clipboard-list',
+      //   to: { name: 'leave-user-replace-list' },
+      // },
     ],
   },
 ]
