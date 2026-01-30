@@ -13,7 +13,6 @@ const { Server }  = require('socket.io')
 
 const { startTelegramPolling, stopTelegramPolling } = require('./services/telegram.polling')
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime')
-const { startRecurringEngine } = require('./services/recurring.engine')
 
 const app = express()
 
@@ -211,11 +210,9 @@ const PORT = Number(process.env.PORT || 4333)
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`)
     })
 
-    const stopRecurring = startRecurringEngine(io)
 
     const shutdown = async (sig) => {
       console.log(`\n${sig} received. Shutting down...`)
-      try { stopRecurring && stopRecurring() } catch (_) {}
 
       // ✅ stop telegram polling cleanly (prevents 409 after restart)
       try { await stopTelegramPolling() } catch (_) {}

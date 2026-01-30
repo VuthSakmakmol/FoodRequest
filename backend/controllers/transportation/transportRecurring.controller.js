@@ -28,20 +28,24 @@ function addMinutes(hhmm, minutes = 60) {
   return base.add(Number(minutes || 0), 'minute').format('HH:mm')
 }
 
-function buildHolidaySet({ dates, skipHolidays }) {
-  return getHolidaySet().then((base) => {
-    const holidays = new Set(base)
-    if (skipHolidays) {
-      for (const d of dates) {
-        if (isSunday(d)) holidays.add(d)
-      }
+async function buildHolidaySet({ dates, skipHolidays }) {
+  const base = await getHolidaySet()
+  const holidays = new Set(base)
+
+  // your rule: only add Sundays when skipHolidays=true
+  if (skipHolidays) {
+    for (const d of dates) {
+      if (isSunday(d)) holidays.add(d)
     }
-    return holidays
-  })
+  }
+  return holidays
 }
 
 /* ======================================================================== */
-/* CREATE SERIES (and materialize CarBooking docs ONCE, immediately) */
+/* ✅ CREATE SERIES (and create ALL CarBooking docs ONCE, immediately)
+   IMPORTANT: This endpoint is the ONLY place that creates recurring bookings.
+   There must be NO cron/timer that expands series again later.
+*/
 async function createSeries(req, res) {
   try {
     const io = req.io
@@ -110,18 +114,21 @@ async function createSeries(req, res) {
     // Persist series
     const series = await Series.create(body)
 
-    // Enumerate all dates (INCLUDES startDate = today)
+    // Enumerate all dates (INCLUDES startDate)
     const days = enumerateLocalDates(series.startDate, series.endDate, ZONE)
 
-    // Holiday/Sunday set (skip Sundays only when skipHolidays=true, same as your previous rule)
+    // holiday/sunday set
     const holidays = await buildHolidaySet({ dates: days, skipHolidays: !!series.skipHolidays })
 
     const keptDates = days.filter((d) => !holidays.has(d))
     const skippedDates = days.filter((d) => holidays.has(d))
 
-    // ✅ Materialize ALL keptDates NOW (create only once, no future job needed)
+    // ✅ Create ALL keptDates NOW (one-time creation)
+    // ✅ HARD STOP duplicates:
+    //    - unique index (seriesId + tripDate)
+    //    - and upsert filter by (seriesId + tripDate)
     const createdDates = []
-    const empId = series.createdByEmp?.employeeId || ''
+    const empId = String(series.createdByEmp?.employeeId || '').trim()
 
     for (const d of keptDates) {
       const idk = makeIdempotencyKey(series._id, d)
@@ -147,8 +154,7 @@ async function createSeries(req, res) {
         status: 'PENDING',
       }
 
-      // ✅ CORE FIX: upsert by (seriesId + tripDate)
-      // If already exists, it will NOT create a new one.
+      // ✅ upsert by (seriesId + tripDate) so tomorrow cannot create duplicates
       const r = await CarBooking.updateOne(
         { seriesId: series._id, tripDate: d },
         { $setOnInsert: insertDoc },
@@ -158,18 +164,20 @@ async function createSeries(req, res) {
       if (r?.upsertedCount) {
         createdDates.push(d)
 
-        // optional realtime broadcast (only when newly created)
-        const createdDoc = await CarBooking.findOne({ seriesId: series._id, tripDate: d }).lean()
-        if (io && createdDoc) {
-          broadcastCarBooking(io, createdDoc, 'carBooking:created', {
-            _id: String(createdDoc._id),
-            employeeId: createdDoc.employeeId,
-            category: createdDoc.category,
-            tripDate: createdDoc.tripDate,
-            timeStart: createdDoc.timeStart,
-            timeEnd: createdDoc.timeEnd,
-            status: createdDoc.status,
-          })
+        // realtime broadcast only when newly created
+        if (io) {
+          const createdDoc = await CarBooking.findOne({ seriesId: series._id, tripDate: d }).lean()
+          if (createdDoc) {
+            broadcastCarBooking(io, createdDoc, 'carBooking:created', {
+              _id: String(createdDoc._id),
+              employeeId: createdDoc.employeeId,
+              category: createdDoc.category,
+              tripDate: createdDoc.tripDate,
+              timeStart: createdDoc.timeStart,
+              timeEnd: createdDoc.timeEnd,
+              status: createdDoc.status,
+            })
+          }
         }
       }
     }
@@ -192,14 +200,12 @@ async function createSeries(req, res) {
       skippedDates,
     })
   } catch (e) {
-    // if unique index triggers (duplicate), return friendly
-    const msg = e?.message || 'Create recurring failed.'
-    return res.status(400).json({ ok: false, error: msg })
+    return res.status(400).json({ ok: false, error: e?.message || 'Create recurring failed.' })
   }
 }
 
 /* ======================================================================== */
-/* PREVIEW series with the same rules used in createSeries */
+/* PREVIEW series with same rules used in createSeries */
 async function preview(req, res) {
   try {
     const { start, end, timeStart, skipHolidays = 'true' } = req.query
@@ -215,7 +221,7 @@ async function preview(req, res) {
 
     return res.json({ ok: true, dates: kept, skipped })
   } catch (e) {
-    return res.status(400).json({ ok: false, error: e.message })
+    return res.status(400).json({ ok: false, error: e?.message || 'Preview failed.' })
   }
 }
 
@@ -252,7 +258,7 @@ async function cancelRemaining(req, res) {
 
     return res.json({ ok: true, affected })
   } catch (e) {
-    return res.status(400).json({ ok: false, error: e.message })
+    return res.status(400).json({ ok: false, error: e?.message || 'Cancel failed.' })
   }
 }
 
