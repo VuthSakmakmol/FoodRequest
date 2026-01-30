@@ -4,6 +4,7 @@ const CarBooking = require('../../models/transportation/CarBooking')
 
 let User = null
 try { User = require('../../models/User') } catch { User = null }
+const XLSX = require('xlsx')
 
 let Employee = null
 try { Employee = require('../models/Employee') } catch {
@@ -94,6 +95,164 @@ function pickIdentityFrom(req) {
       .toUpperCase()
 
   return { loginId: String(loginId || ''), role }
+}
+
+function safeStr(v) {
+  return String(v ?? '').trim()
+}
+
+function stopsText(stops = []) {
+  if (!Array.isArray(stops) || !stops.length) return ''
+  return stops
+    .map((s) => {
+      const dest = s?.destination === 'Other' ? (s?.destinationOther || 'Other') : (s?.destination || '')
+      return safeStr(dest)
+    })
+    .filter(Boolean)
+    .join(' → ')
+}
+
+function buildExportFilter({ date, status, category, q }) {
+  const filter = {}
+
+  if (date) {
+    if (!isValidDate(date)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
+    filter.tripDate = date
+  }
+
+  if (status && status !== 'ALL') filter.status = String(status).toUpperCase()
+  if (category && category !== 'ALL') filter.category = category
+
+  const term = safeStr(q).toLowerCase()
+  if (term) {
+    // Basic multi-field search
+    filter.$or = [
+      { employeeId: new RegExp(term, 'i') },
+      { 'employee.name': new RegExp(term, 'i') },
+      { 'employee.department': new RegExp(term, 'i') },
+      { purpose: new RegExp(term, 'i') },
+      { notes: new RegExp(term, 'i') },
+      { 'assignment.driverId': new RegExp(term, 'i') },
+      { 'assignment.driverName': new RegExp(term, 'i') },
+      { 'assignment.messengerId': new RegExp(term, 'i') },
+      { 'assignment.messengerName': new RegExp(term, 'i') },
+      { 'assignment.vehicleId': new RegExp(term, 'i') },
+      { 'assignment.vehicleName': new RegExp(term, 'i') },
+      // Stops search (destination or other)
+      { 'stops.destination': new RegExp(term, 'i') },
+      { 'stops.destinationOther': new RegExp(term, 'i') },
+    ]
+  }
+
+  return filter
+}
+
+async function exportAdminExcel(req, res, next) {
+  try {
+    const { date, status, category, q } = req.query || {}
+
+    const filter = buildExportFilter({ date, status, category, q })
+
+    const list = await CarBooking.find(filter)
+      .sort({ tripDate: 1, timeStart: 1 })
+      .lean()
+
+    // ✅ Flatten to rows
+    const rows = (list || []).map((b, idx) => {
+      const cat = safeStr(b.category) || 'Car'
+      const isMessenger = cat === 'Messenger'
+
+      const driverId = safeStr(b?.assignment?.driverId)
+      const driverName = safeStr(b?.assignment?.driverName)
+      const messengerId = safeStr(b?.assignment?.messengerId)
+      const messengerName = safeStr(b?.assignment?.messengerName)
+
+      const assignedTo = isMessenger
+        ? (messengerName || messengerId)
+        : (driverName || driverId)
+
+      const ack = isMessenger
+        ? safeStr(b?.assignment?.messengerAck) || 'PENDING'
+        : safeStr(b?.assignment?.driverAck) || 'PENDING'
+
+      return {
+        No: idx + 1,
+        Date: safeStr(b.tripDate),
+        Start: safeStr(b.timeStart),
+        End: safeStr(b.timeEnd),
+        Category: cat,
+        Status: safeStr(b.status),
+        RequesterId: safeStr(b.employeeId),
+        RequesterName: safeStr(b?.employee?.name),
+        Department: safeStr(b?.employee?.department),
+        Contact: safeStr(b?.employee?.contactNumber) || safeStr(b.customerContact),
+        Pax: Number(b.passengers || 1),
+        Destination: stopsText(b.stops),
+        Purpose: safeStr(b.purpose),
+        Notes: safeStr(b.notes),
+        TicketUrl: safeStr(b.ticketUrl),
+        AssignedTo: safeStr(assignedTo) || 'Unassigned',
+        Response: ack,
+        DriverId: driverId,
+        DriverName: driverName,
+        MessengerId: messengerId,
+        MessengerName: messengerName,
+        VehicleId: safeStr(b?.assignment?.vehicleId),
+        VehicleName: safeStr(b?.assignment?.vehicleName),
+        CreatedAt: b.createdAt ? new Date(b.createdAt).toISOString() : '',
+        UpdatedAt: b.updatedAt ? new Date(b.updatedAt).toISOString() : '',
+      }
+    })
+
+    // ✅ Build workbook
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(rows)
+
+    // Column widths (nice)
+    ws['!cols'] = [
+      { wch: 5 },  // No
+      { wch: 12 }, // Date
+      { wch: 8 },  // Start
+      { wch: 8 },  // End
+      { wch: 12 }, // Category
+      { wch: 12 }, // Status
+      { wch: 14 }, // RequesterId
+      { wch: 22 }, // RequesterName
+      { wch: 18 }, // Department
+      { wch: 14 }, // Contact
+      { wch: 5 },  // Pax
+      { wch: 45 }, // Destination
+      { wch: 35 }, // Purpose
+      { wch: 35 }, // Notes
+      { wch: 30 }, // TicketUrl
+      { wch: 22 }, // AssignedTo
+      { wch: 12 }, // Response
+      { wch: 12 }, // DriverId
+      { wch: 20 }, // DriverName
+      { wch: 14 }, // MessengerId
+      { wch: 20 }, // MessengerName
+      { wch: 12 }, // VehicleId
+      { wch: 18 }, // VehicleName
+      { wch: 24 }, // CreatedAt
+      { wch: 24 }, // UpdatedAt
+    ]
+
+    XLSX.utils.book_append_sheet(wb, ws, 'CarBookings')
+
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
+
+    const nameDate = safeStr(date) || 'all'
+    const filename = `car-bookings_${nameDate}.xlsx`
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    return res.status(200).send(buf)
+  } catch (err) {
+    next(err)
+  }
 }
 
 /* ✅ RESERVED-ONLY availability filter
@@ -1070,4 +1229,5 @@ module.exports = {
   listSchedulePublic,
   listMessengerTasks,
   employeeCancelBooking,
+  exportAdminExcel,
 }

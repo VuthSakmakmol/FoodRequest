@@ -699,6 +699,55 @@ async function saveEdit() {
     editLoading.value = false
   }
 }
+
+function buildQuery(params = {}) {
+  const sp = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === '' || v === 'ALL') return
+    sp.set(k, String(v))
+  })
+  const s = sp.toString()
+  return s ? `?${s}` : ''
+}
+
+async function exportExcel() {
+  try {
+    const params = {
+      date: selectedDate.value,
+      status: statusFilter.value,
+      category: categoryFilter.value,
+      q: (qSearch.value || '').trim(),
+    }
+
+    const res = await api.get(`/admin/car-bookings/export${buildQuery(params)}`, {
+      responseType: 'blob',
+    })
+
+    // try filename from header
+    const cd = res?.headers?.['content-disposition'] || ''
+    const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd)
+    const fileName = decodeURIComponent(match?.[1] || '') || `car-bookings_${params.date || 'all'}.xlsx`
+
+    const blob = new Blob([res.data], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+
+    showToast({ type: 'success', title: 'Exported', message: `Downloaded ${fileName}` })
+  } catch (e) {
+    const msg = e?.response?.data?.message || e?.message || 'Failed to export Excel'
+    showToast({ type: 'error', title: 'Export failed', message: msg })
+  }
+}
+
 </script>
 
 <template>
@@ -797,6 +846,15 @@ async function saveEdit() {
             class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-slate-500 border-t-transparent"
           />
           Refresh
+        </button>
+        <button
+          type="button"
+          class="inline-flex h-8 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500
+                disabled:opacity-60 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+          :disabled="loading"
+          @click="exportExcel"
+        >
+          Export Excel
         </button>
       </div>
 
