@@ -618,10 +618,10 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- ✅ Date From/To removed -->
-        <div class="md:col-span-2">
+        <!-- <div class="md:col-span-2">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
           <input v-model="asOf" type="date" class="input-mini" />
-        </div>
+        </div> -->
 
         <div class="md:col-span-3">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
