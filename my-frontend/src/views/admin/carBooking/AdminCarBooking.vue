@@ -7,6 +7,8 @@ import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useToast } from '@/composables/useToast'
 
+defineOptions({ name: 'AdminCarBooking' })
+
 const route = useRoute()
 const { showToast } = useToast()
 
@@ -42,8 +44,8 @@ const ALLOWED_NEXT = {
   PENDING: ['ACCEPTED', 'CANCELLED'],
   ACCEPTED: ['ON_ROAD', 'DELAYED', 'CANCELLED'],
   ON_ROAD: ['ARRIVING', 'DELAYED', 'COMEBACK', 'CANCELLED'],
-  ARRIVING: ['COMEBACK', 'DELAYED', 'CANCELLED'], // no COMPLETED here
-  COMEBACK: ['COMPLETED', 'DELAYED', 'CANCELLED'], // complete only after COMEBACK
+  ARRIVING: ['COMEBACK', 'DELAYED', 'CANCELLED'],
+  COMEBACK: ['COMPLETED', 'DELAYED', 'CANCELLED'],
   COMPLETED: [],
   DELAYED: ['ON_ROAD', 'ARRIVING', 'COMEBACK', 'CANCELLED'],
   CANCELLED: [],
@@ -55,8 +57,6 @@ const nextStatuses = (from) => ALLOWED_NEXT[String(from || '').toUpperCase()] ||
  * Only show when:
  * - Has assignee
  * - Not CANCELLED / COMPLETED already
- *
- * NOTE: Backend must allow forceComplete=true (or a dedicated endpoint).
  */
 const canForceComplete = (item) => {
   const st = String(item?.status || '').toUpperCase()
@@ -67,7 +67,7 @@ const canForceComplete = (item) => {
 
 /* Time helpers for edit dialog */
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
-const MINUTES = ['00', '30'] // ✅ used in template: {{ m }}
+const MINUTES = ['00', '30']
 
 /* Helpers */
 const canChangeStatus = (item, nextStatus) => {
@@ -77,10 +77,8 @@ const canChangeStatus = (item, nextStatus) => {
 }
 
 const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
-
 const absUrl = (u) =>
   !u ? '' : /^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u.startsWith('/') ? '' : '/'}${u}`
-
 const openTicket = (u) => {
   const url = absUrl(u)
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
@@ -106,6 +104,19 @@ const hasAssignee = (it) => {
   if (!it?.assignment) return false
   if (it.category === 'Messenger') return !!it.assignment.messengerId
   return !!it.assignment.driverId
+}
+
+/* role helpers */
+const assignedRoleOf = (it) => (String(it?.category || '') === 'Messenger' ? 'MESSENGER' : 'DRIVER')
+const assignedLoginIdOf = (it) => {
+  if (!it?.assignment) return ''
+  return assignedRoleOf(it) === 'MESSENGER' ? (it.assignment.messengerId || '') : (it.assignment.driverId || '')
+}
+const assignedNameOf = (it) => {
+  if (!it?.assignment) return ''
+  return assignedRoleOf(it) === 'MESSENGER'
+    ? (it.assignment.messengerName || it.assignment.messengerId || '')
+    : (it.assignment.driverName || it.assignment.driverId || '')
 }
 
 /* ───────── Status / badges (Tailwind) ───────── */
@@ -246,6 +257,32 @@ function onStatus(p) {
 function onAssigned(p) {
   const it = rows.value.find((x) => String(x._id) === String(p?.bookingId))
   if (!it) return
+
+  const action = String(p?.action || 'ASSIGN').toUpperCase()
+  const role = String(p?.prevRole || '').toUpperCase()
+
+  if (!it.assignment) it.assignment = {}
+
+  if (action === 'UNASSIGN') {
+    const unassignRole = role || (p?.messengerId === '' ? 'MESSENGER' : 'DRIVER')
+
+    if (unassignRole === 'MESSENGER') {
+      it.assignment.messengerId = ''
+      it.assignment.messengerName = ''
+      it.assignment.messengerAck = 'PENDING'
+    } else {
+      it.assignment.driverId = ''
+      it.assignment.driverName = ''
+      it.assignment.vehicleId = ''
+      it.assignment.vehicleName = ''
+      it.assignment.driverAck = 'PENDING'
+    }
+
+    if (p.status) it.status = p.status
+    else if (!['COMPLETED', 'CANCELLED'].includes(String(it.status || '').toUpperCase())) it.status = 'PENDING'
+    return
+  }
+
   it.assignment = {
     ...(it.assignment || {}),
     driverId: p.driverId ?? it.assignment?.driverId,
@@ -255,9 +292,11 @@ function onAssigned(p) {
     driverAck: it.assignment?.driverAck || 'PENDING',
     messengerAck: it.assignment?.messengerAck || 'PENDING',
   }
+
   if (p.status) it.status = p.status
   else if (it.status === 'PENDING') it.status = 'ACCEPTED'
 }
+
 function onDriverAck(p) {
   const it = rows.value.find((x) => String(x._id) === String(p?.bookingId))
   if (!it) return
@@ -500,25 +539,34 @@ async function submitAssign() {
   }
 }
 
-/* ───────── Cancel confirm modal (custom) ───────── */
+/* ───────── Cancel confirm modal (CANCEL + optional Unassign) ───────── */
 const cancelConfirmOpen = ref(false)
 const cancelTarget = ref(null)
-const cancelNextStatus = ref('CANCELLED')
+
+const cancelAssignedLoginId = computed(() => assignedLoginIdOf(cancelTarget.value))
+const cancelAssignedName = computed(() => assignedNameOf(cancelTarget.value))
+const cancelAssignedRole = computed(() => assignedRoleOf(cancelTarget.value))
 
 function requestCancel(item) {
+  // close other modals first
+  assignOpen.value = false
+  editOpen.value = false
+  detailOpen.value = false
+  forceConfirmOpen.value = false
+
   cancelTarget.value = item
-  cancelNextStatus.value = 'CANCELLED'
   cancelConfirmOpen.value = true
 }
+
 function closeCancelConfirm() {
   cancelConfirmOpen.value = false
   cancelTarget.value = null
 }
 async function confirmCancel() {
   if (!cancelTarget.value?._id) return
-  cancelConfirmOpen.value = false
-  await updateStatus(cancelTarget.value, cancelNextStatus.value)
-  cancelTarget.value = null
+  const it = cancelTarget.value
+  closeCancelConfirm()
+  await updateStatus(it, 'CANCELLED')
 }
 
 /* ───────── Status update ───────── */
@@ -552,9 +600,15 @@ const forceConfirmOpen = ref(false)
 const forceTarget = ref(null)
 
 function requestForceComplete(item) {
+  cancelConfirmOpen.value = false
+  assignOpen.value = false
+  editOpen.value = false
+  detailOpen.value = false
+
   forceTarget.value = item
   forceConfirmOpen.value = true
 }
+
 function closeForceConfirm() {
   forceConfirmOpen.value = false
   forceTarget.value = null
@@ -576,9 +630,6 @@ async function forceComplete(item) {
   updating.value[item._id] = true
   const prev = item.status
   try {
-    // ✅ requires backend support
-    // Option A: PATCH /admin/car-bookings/:id/status { status:'COMPLETED', forceComplete:true }
-    // Option B: POST  /admin/car-bookings/:id/force-complete
     item.status = 'COMPLETED'
     await api.patch(`/admin/car-bookings/${item._id}/status`, {
       status: 'COMPLETED',
@@ -700,6 +751,7 @@ async function saveEdit() {
   }
 }
 
+/* ───────── Export Excel ───────── */
 function buildQuery(params = {}) {
   const sp = new URLSearchParams()
   Object.entries(params).forEach(([k, v]) => {
@@ -723,7 +775,6 @@ async function exportExcel() {
       responseType: 'blob',
     })
 
-    // try filename from header
     const cd = res?.headers?.['content-disposition'] || ''
     const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd)
     const fileName = decodeURIComponent(match?.[1] || '') || `car-bookings_${params.date || 'all'}.xlsx`
@@ -748,6 +799,80 @@ async function exportExcel() {
   }
 }
 
+/* ───────── Unassign confirm modal (GLOBAL, not nested) ───────── */
+const unassignConfirmOpen = ref(false)
+const unassignLoading = ref(false)
+const unassignError = ref('')
+
+const unassignTarget = ref(null) // booking
+const unassignRole = ref('DRIVER') // DRIVER | MESSENGER
+
+const unassignAssignedLoginId = computed(() => assignedLoginIdOf(unassignTarget.value))
+const unassignAssignedName = computed(() => assignedNameOf(unassignTarget.value))
+
+function requestUnassignFor(item) {
+  if (!item?._id) return
+  unassignError.value = ''
+  unassignTarget.value = item
+  unassignRole.value = assignedRoleOf(item)
+  unassignConfirmOpen.value = true
+}
+
+function closeUnassignConfirm() {
+  unassignConfirmOpen.value = false
+  unassignTarget.value = null
+}
+
+async function confirmUnassign() {
+  if (!unassignTarget.value?._id) return
+
+  const role = String(unassignRole.value || 'DRIVER').toUpperCase()
+
+  unassignLoading.value = true
+  unassignError.value = ''
+  try {
+    const payload =
+      role === 'MESSENGER'
+        ? { role, messengerId: '' }
+        : { role, driverId: '' }
+
+    await api.post(`/admin/car-bookings/${unassignTarget.value._id}/assign`, payload)
+
+    // update local immediately
+    const it = rows.value.find((x) => String(x._id) === String(unassignTarget.value._id))
+    if (it) {
+      if (!it.assignment) it.assignment = {}
+      if (role === 'MESSENGER') {
+        it.assignment.messengerId = ''
+        it.assignment.messengerName = ''
+        it.assignment.messengerAck = 'PENDING'
+      } else {
+        it.assignment.driverId = ''
+        it.assignment.driverName = ''
+        it.assignment.vehicleId = ''
+        it.assignment.vehicleName = ''
+        it.assignment.driverAck = 'PENDING'
+      }
+      if (!['COMPLETED', 'CANCELLED'].includes(String(it.status || '').toUpperCase())) {
+        it.status = 'PENDING'
+      }
+    }
+
+    unassignConfirmOpen.value = false
+    unassignTarget.value = null
+
+    showToast({
+      type: 'success',
+      title: 'Unassigned',
+      message: `Removed ${role === 'MESSENGER' ? 'messenger' : 'driver'} from this booking.`,
+    })
+  } catch (e) {
+    unassignError.value = e?.response?.data?.message || e?.message || 'Failed to unassign'
+    showToast({ type: 'error', title: 'Unassign failed', message: unassignError.value })
+  } finally {
+    unassignLoading.value = false
+  }
+}
 </script>
 
 <template>
@@ -847,6 +972,7 @@ async function exportExcel() {
           />
           Refresh
         </button>
+
         <button
           type="button"
           class="inline-flex h-8 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500
@@ -962,7 +1088,6 @@ async function exportExcel() {
                   Edit
                 </button>
 
-                <!-- Normal transitions -->
                 <button
                   v-for="s in nextStatuses(item.status)"
                   :key="s"
@@ -974,7 +1099,6 @@ async function exportExcel() {
                   {{ s }}
                 </button>
 
-                <!-- ✅ Force complete -->
                 <button
                   v-if="canForceComplete(item)"
                   type="button"
@@ -1034,9 +1158,7 @@ async function exportExcel() {
                 <th class="border border-slate-300 px-2 py-2 text-center font-semibold dark:border-slate-700">Pax</th>
                 <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Purpose</th>
                 <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Assigned</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">
-                  Driver / Messenger Resp.
-                </th>
+                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Driver / Messenger Resp.</th>
                 <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Status</th>
                 <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700 w-72">Actions</th>
               </tr>
@@ -1139,7 +1261,6 @@ async function exportExcel() {
                           {{ s }}
                         </button>
 
-                        <!-- ✅ Force complete -->
                         <button
                           v-if="canForceComplete(item)"
                           type="button"
@@ -1208,9 +1329,9 @@ async function exportExcel() {
       </div>
     </div>
 
-    <!-- ✅ Cancel confirm modal -->
+    <!-- ✅ Cancel confirm modal (FIXED: no Assign UI inside) -->
     <transition name="fade">
-      <div v-if="cancelConfirmOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeCancelConfirm">
+      <div v-if="cancelConfirmOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeCancelConfirm">
         <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col gap-1">
@@ -1239,24 +1360,114 @@ async function exportExcel() {
             <div class="mt-1 text-slate-600 dark:text-slate-300">{{ prettyStops(cancelTarget?.stops || []) }}</div>
           </div>
 
+          <div class="mt-4 flex items-center justify-between gap-2 text-[11px]">
+            <div class="flex items-center gap-2">
+              <div v-if="cancelAssignedLoginId" class="text-slate-600 dark:text-slate-300">
+                Current:
+                <span class="font-semibold">{{ cancelAssignedName }}</span>
+                <span class="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                  {{ cancelAssignedRole }}
+                </span>
+              </div>
+
+              <button
+                v-if="cancelAssignedLoginId"
+                type="button"
+                class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
+                      dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
+                :disabled="unassignLoading"
+                @click="requestUnassignFor(cancelTarget)"
+              >
+                Unassign
+              </button>
+            </div>
+
+            <div class="flex justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
+                      dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                @click="closeCancelConfirm"
+              >
+                Back
+              </button>
+
+              <button
+                type="button"
+                class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
+                      dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
+                :disabled="!cancelTarget?._id || !!updating[cancelTarget?._id]"
+                @click="confirmCancel"
+              >
+                Yes, cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- ✅ Unassign confirm modal (GLOBAL, not nested) -->
+    <transition name="fade">
+      <div
+        v-if="unassignConfirmOpen"
+        class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 px-4"
+        @click.self="closeUnassignConfirm"
+      >
+        <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex flex-col gap-1">
+              <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Unassign {{ unassignRole }}</div>
+              <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                Remove <span class="font-semibold">{{ unassignAssignedName || '—' }}</span> from this booking?
+              </div>
+            </div>
+            <button
+              type="button"
+              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
+                    dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              @click="closeUnassignConfirm"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div
+            v-if="unassignError"
+            class="mt-3 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                   dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
+          >
+            {{ unassignError }}
+          </div>
+
+          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-800/50">
+            <div class="font-semibold text-slate-800 dark:text-slate-100">
+              {{ unassignTarget?.employee?.name || '—' }}
+              • {{ unassignTarget?.tripDate || '—' }}
+              • {{ unassignTarget?.timeStart || '—' }}–{{ unassignTarget?.timeEnd || '—' }}
+            </div>
+            <div class="mt-1 text-slate-600 dark:text-slate-300">{{ prettyStops(unassignTarget?.stops || []) }}</div>
+          </div>
+
           <div class="mt-4 flex justify-end gap-2 text-[11px]">
             <button
               type="button"
               class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="closeCancelConfirm"
+                    dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              @click="closeUnassignConfirm"
             >
-              No, keep
+              Cancel
             </button>
 
             <button
               type="button"
               class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
-                     dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
-              :disabled="!cancelTarget?._id || !!updating[cancelTarget?._id]"
-              @click="confirmCancel"
+                    dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
+              :disabled="unassignLoading || !unassignAssignedLoginId"
+              @click="confirmUnassign"
             >
-              Yes, cancel
+              <span v-if="unassignLoading" class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-white/70 border-t-transparent" />
+              Yes, unassign
             </button>
           </div>
         </div>
@@ -1265,7 +1476,7 @@ async function exportExcel() {
 
     <!-- ✅ Force complete confirm modal -->
     <transition name="fade">
-      <div v-if="forceConfirmOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeForceConfirm">
+      <div v-if="forceConfirmOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeForceConfirm">
         <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col gap-1">
@@ -1320,7 +1531,7 @@ async function exportExcel() {
 
     <!-- Details modal -->
     <transition name="fade">
-      <div v-if="detailOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 px-4">
+      <div v-if="detailOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4">
         <div class="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col gap-1">
@@ -1424,7 +1635,7 @@ async function exportExcel() {
 
     <!-- Edit schedule modal -->
     <transition name="fade">
-      <div v-if="editOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 px-4">
+      <div v-if="editOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4">
         <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex items-center gap-2 text-sm font-semibold">
@@ -1548,7 +1759,7 @@ async function exportExcel() {
 
     <!-- Assign dialog -->
     <transition name="fade">
-      <div v-if="assignOpen" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/60 px-4">
+      <div v-if="assignOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4">
         <div class="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col gap-1">

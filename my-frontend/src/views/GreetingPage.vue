@@ -448,7 +448,7 @@ const scrollToServices = () => {
         <span>© {{ new Date().getFullYear() }} Trax Apparel Cambodia</span>
         <span class="opacity-40">•</span>
         <a href="mailto:it@traxapparel.com" class="underline-offset-2 hover:underline">
-          IT Support: it@traxapparel.com
+          IT Support: sakmakmol.vut@traxapparel.com (0979866163)
         </a>
       </div>
     </footer>

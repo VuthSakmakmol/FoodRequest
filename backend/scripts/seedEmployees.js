@@ -2020,7 +2020,65 @@ function loadEmployees() {
     "contactNumber": "0000000000",
     "telegramChatId": "",
     "isActive": true
+  }, // add new (30-01-2025)
+            {
+    "employeeId": "52620026",
+    "name": "Nem Vindo",
+    "department": "Production",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
   },
+              {
+    "employeeId": "52620027",
+    "name": "Ath Mouyleang",
+    "department": "Sewer",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+              {
+    "employeeId": "52620062",
+    "name": "Un Yaking",
+    "department": "Merchandise",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+                {
+    "employeeId": "52620077",
+    "name": "Chhoun thearin",
+    "department": "HR and Payroll",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+                  {
+    "employeeId": "52620083",
+    "name": "Lot Sreyleak",
+    "department": "Quality Assurance",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+                  {
+    "employeeId": "52620099",
+    "name": "On Sotheavy",
+    "department": "Accounting & Financial",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+                    {
+    "employeeId": "52620106",
+    "name": "Kuy Theavy",
+    "department": "Accounting & Financial",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  
+  
 ]
 }
 
