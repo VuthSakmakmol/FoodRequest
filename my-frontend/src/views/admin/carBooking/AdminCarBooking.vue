@@ -31,6 +31,16 @@ const qSearch = ref('')
 
 const updating = ref({}) // { [bookingId]: boolean }
 
+/* ✅ Export range (backend supports dateFrom/dateTo) */
+const exportFrom = ref(selectedDate.value)
+const exportTo = ref(selectedDate.value)
+
+watch(selectedDate, (d) => {
+  // keep default export range aligned to selected day
+  exportFrom.value = d
+  exportTo.value = d
+})
+
 /* focus from calendar (highlight row/card) */
 const focusId = computed(() => String(route.query.focus || ''))
 
@@ -324,63 +334,11 @@ function onDeleted(p) {
   rows.value = rows.value.filter((x) => String(x._id) !== id)
 }
 
-/* ───────── Lifecycle ───────── */
-onMounted(() => {
-  updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
-
-  try {
-    subscribeRoleIfNeeded({ role: 'ADMIN' })
-  } catch {}
-
-  if (route.query.date) {
-    const dStr = dayjs(route.query.date).isValid()
-      ? dayjs(route.query.date).format('YYYY-MM-DD')
-      : String(route.query.date)
-    selectedDate.value = dStr
-  }
-
-  loadSchedule()
-
-  socket.on('carBooking:created', onCreated)
-  socket.on('carBooking:status', onStatus)
-  socket.on('carBooking:assigned', onAssigned)
-  socket.on('carBooking:driverAck', onDriverAck)
-  socket.on('carBooking:messengerAck', onMessengerAck)
-  socket.on('carBooking:updated', onUpdated)
-  socket.on('carBooking:deleted', onDeleted)
-})
-
-onBeforeUnmount(() => {
-  socket.off('carBooking:created', onCreated)
-  socket.off('carBooking:status', onStatus)
-  socket.off('carBooking:assigned', onAssigned)
-  socket.off('carBooking:driverAck', onDriverAck)
-  socket.off('carBooking:messengerAck', onMessengerAck)
-  socket.off('carBooking:updated', onUpdated)
-  socket.off('carBooking:deleted', onDeleted)
-
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-})
-
-watch([selectedDate, statusFilter, categoryFilter], () => {
-  page.value = 1
-  loadSchedule()
-})
-
-watch(
-  () => route.query.date,
-  (val) => {
-    if (!val) return
-    const dStr = dayjs(val).isValid() ? dayjs(val).format('YYYY-MM-DD') : String(val)
-    selectedDate.value = dStr
-  },
-)
-
 /* ───────── Details modal ───────── */
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item) {
+  closeAllModals()
   detailItem.value = item
   detailOpen.value = true
 }
@@ -464,6 +422,7 @@ async function loadPeopleAndAvailability(item) {
 }
 
 function openAssignDialog(item) {
+  closeAllModals()
   assignTarget.value = item
   assignError.value = ''
 
@@ -548,12 +507,7 @@ const cancelAssignedName = computed(() => assignedNameOf(cancelTarget.value))
 const cancelAssignedRole = computed(() => assignedRoleOf(cancelTarget.value))
 
 function requestCancel(item) {
-  // close other modals first
-  assignOpen.value = false
-  editOpen.value = false
-  detailOpen.value = false
-  forceConfirmOpen.value = false
-
+  closeAllModals()
   cancelTarget.value = item
   cancelConfirmOpen.value = true
 }
@@ -600,11 +554,7 @@ const forceConfirmOpen = ref(false)
 const forceTarget = ref(null)
 
 function requestForceComplete(item) {
-  cancelConfirmOpen.value = false
-  assignOpen.value = false
-  editOpen.value = false
-  detailOpen.value = false
-
+  closeAllModals()
   forceTarget.value = item
   forceConfirmOpen.value = true
 }
@@ -665,6 +615,7 @@ const editLoading = ref(false)
 const editError = ref('')
 
 function openEditDialog(item) {
+  closeAllModals()
   editTarget.value = item
   editError.value = ''
 
@@ -762,10 +713,24 @@ function buildQuery(params = {}) {
   return s ? `?${s}` : ''
 }
 
+function normalizeRange(from, to) {
+  const f = String(from || '').trim()
+  const t = String(to || '').trim()
+  if (!f && !t) return { date: selectedDate.value }
+  // if one side missing, treat as single day
+  const ff = f || t
+  const tt = t || f
+  // if user reversed, swap
+  if (ff && tt && ff > tt) return { dateFrom: tt, dateTo: ff }
+  return { dateFrom: ff, dateTo: tt }
+}
+
 async function exportExcel() {
   try {
+    const range = normalizeRange(exportFrom.value, exportTo.value)
+
     const params = {
-      date: selectedDate.value,
+      ...range,
       status: statusFilter.value,
       category: categoryFilter.value,
       q: (qSearch.value || '').trim(),
@@ -777,7 +742,7 @@ async function exportExcel() {
 
     const cd = res?.headers?.['content-disposition'] || ''
     const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(cd)
-    const fileName = decodeURIComponent(match?.[1] || '') || `car-bookings_${params.date || 'all'}.xlsx`
+    const fileName = decodeURIComponent(match?.[1] || '') || `car-bookings_${selectedDate.value || 'all'}.xlsx`
 
     const blob = new Blob([res.data], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -831,10 +796,7 @@ async function confirmUnassign() {
   unassignLoading.value = true
   unassignError.value = ''
   try {
-    const payload =
-      role === 'MESSENGER'
-        ? { role, messengerId: '' }
-        : { role, driverId: '' }
+    const payload = role === 'MESSENGER' ? { role, messengerId: '' } : { role, driverId: '' }
 
     await api.post(`/admin/car-bookings/${unassignTarget.value._id}/assign`, payload)
 
@@ -873,6 +835,113 @@ async function confirmUnassign() {
     unassignLoading.value = false
   }
 }
+
+/* ───────── Modal UX patches: close-all + scroll lock + ESC close ───────── */
+function closeAllModals() {
+  unassignConfirmOpen.value = false
+  cancelConfirmOpen.value = false
+  forceConfirmOpen.value = false
+  assignOpen.value = false
+  editOpen.value = false
+  detailOpen.value = false
+}
+
+const isAnyModalOpen = computed(() => {
+  return (
+    !!cancelConfirmOpen.value ||
+    !!unassignConfirmOpen.value ||
+    !!forceConfirmOpen.value ||
+    !!detailOpen.value ||
+    !!editOpen.value ||
+    !!assignOpen.value
+  )
+})
+
+function lockBodyScroll(locked) {
+  if (typeof document === 'undefined') return
+  if (locked) {
+    document.body.dataset._scrollY = String(window.scrollY || 0)
+    document.body.style.overflow = 'hidden'
+    document.body.style.touchAction = 'none'
+  } else {
+    document.body.style.overflow = ''
+    document.body.style.touchAction = ''
+    const y = Number(document.body.dataset._scrollY || 0)
+    delete document.body.dataset._scrollY
+    if (!Number.isNaN(y)) window.scrollTo({ top: y, behavior: 'auto' })
+  }
+}
+
+function closeTopModal() {
+  if (unassignConfirmOpen.value) return closeUnassignConfirm()
+  if (cancelConfirmOpen.value) return closeCancelConfirm()
+  if (forceConfirmOpen.value) return closeForceConfirm()
+  if (assignOpen.value) return (assignOpen.value = false)
+  if (editOpen.value) return (editOpen.value = false)
+  if (detailOpen.value) return (detailOpen.value = false)
+}
+
+function onKeyDown(e) {
+  if (e.key === 'Escape') closeTopModal()
+}
+
+watch(isAnyModalOpen, (open) => lockBodyScroll(open), { immediate: true })
+
+/* ───────── Lifecycle ───────── */
+onMounted(() => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.addEventListener('keydown', onKeyDown)
+
+  try {
+    subscribeRoleIfNeeded({ role: 'ADMIN' })
+  } catch {}
+
+  if (route.query.date) {
+    const dStr = dayjs(route.query.date).isValid()
+      ? dayjs(route.query.date).format('YYYY-MM-DD')
+      : String(route.query.date)
+    selectedDate.value = dStr
+  }
+
+  loadSchedule()
+
+  socket.on('carBooking:created', onCreated)
+  socket.on('carBooking:status', onStatus)
+  socket.on('carBooking:assigned', onAssigned)
+  socket.on('carBooking:driverAck', onDriverAck)
+  socket.on('carBooking:messengerAck', onMessengerAck)
+  socket.on('carBooking:updated', onUpdated)
+  socket.on('carBooking:deleted', onDeleted)
+})
+
+onBeforeUnmount(() => {
+  socket.off('carBooking:created', onCreated)
+  socket.off('carBooking:status', onStatus)
+  socket.off('carBooking:assigned', onAssigned)
+  socket.off('carBooking:driverAck', onDriverAck)
+  socket.off('carBooking:messengerAck', onMessengerAck)
+  socket.off('carBooking:updated', onUpdated)
+  socket.off('carBooking:deleted', onDeleted)
+
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') window.removeEventListener('keydown', onKeyDown)
+  lockBodyScroll(false)
+})
+
+watch([selectedDate, statusFilter, categoryFilter], () => {
+  page.value = 1
+  loadSchedule()
+})
+
+watch(
+  () => route.query.date,
+  (val) => {
+    if (!val) return
+    const dStr = dayjs(val).isValid() ? dayjs(val).format('YYYY-MM-DD') : String(val)
+    selectedDate.value = dStr
+  },
+)
 </script>
 
 <template>
@@ -973,6 +1042,26 @@ async function confirmUnassign() {
           Refresh
         </button>
 
+        <!-- ✅ Export range (optional) -->
+        <div class="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+          <span class="hidden sm:inline">Export:</span>
+          <input
+            v-model="exportFrom"
+            type="date"
+            class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
+                   outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500
+                   dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          />
+          <span>→</span>
+          <input
+            v-model="exportTo"
+            type="date"
+            class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
+                   outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500
+                   dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          />
+        </div>
+
         <button
           type="button"
           class="inline-flex h-8 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500
@@ -1022,7 +1111,10 @@ async function confirmUnassign() {
                 <div class="bc-time mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
               </div>
 
-              <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="statusBadgeClass(item.status)">
+              <span
+                class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                :class="statusBadgeClass(item.status)"
+              >
                 {{ item.status }}
               </span>
             </div>
@@ -1072,7 +1164,10 @@ async function confirmUnassign() {
 
               <div class="lbl mt-2">Driver / Messenger response</div>
               <div>
-                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="ackBadgeClass(responseLabel(item))">
+                <span
+                  class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                  :class="ackBadgeClass(responseLabel(item))"
+                >
                   {{ responseLabel(item) }}
                 </span>
               </div>
@@ -1084,7 +1179,11 @@ async function confirmUnassign() {
               </div>
 
               <div class="bc-actions">
-                <button type="button" class="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300" @click.stop="openEditDialog(item)">
+                <button
+                  type="button"
+                  class="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
+                  @click.stop="openEditDialog(item)"
+                >
                   Edit
                 </button>
 
@@ -1110,11 +1209,19 @@ async function confirmUnassign() {
                   COMPLETE
                 </button>
 
-                <button type="button" class="text-[11px] font-semibold text-emerald-700 hover:underline dark:text-emerald-300" @click.stop="openAssignDialog(item)">
+                <button
+                  type="button"
+                  class="text-[11px] font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
+                  @click.stop="openAssignDialog(item)"
+                >
                   Assign
                 </button>
 
-                <button type="button" class="text-[11px] font-semibold text-slate-700 hover:underline dark:text-slate-200" @click.stop="showDetails(item)">
+                <button
+                  type="button"
+                  class="text-[11px] font-semibold text-slate-700 hover:underline dark:text-slate-200"
+                  @click.stop="showDetails(item)"
+                >
                   Details
                 </button>
               </div>
@@ -1300,10 +1407,10 @@ async function confirmUnassign() {
           <!-- Pagination -->
           <div class="table-footer border-t border-slate-200 dark:border-slate-700 dark:bg-slate-900/90">
             <div class="tf-left text-[11px] text-slate-600 dark:text-slate-300">
-              Page {{ page }} / {{ pageCount }} • Showing
-              <span v-if="totalItems === 0">0</span>
+              Page {{ page }} / {{ pageCount }}
+              <!-- <span v-if="totalItems === 0">0</span>
               <span v-else>{{ rangeStart }} – {{ rangeEnd }}</span>
-              of {{ totalItems }}
+              of {{ totalItems }} -->
             </div>
             <div class="tf-middle" />
             <div class="tf-right flex items-center gap-1">
@@ -1329,7 +1436,7 @@ async function confirmUnassign() {
       </div>
     </div>
 
-    <!-- ✅ Cancel confirm modal (FIXED: no Assign UI inside) -->
+    <!-- ✅ Cancel confirm modal -->
     <transition name="fade">
       <div v-if="cancelConfirmOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeCancelConfirm">
         <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
@@ -1407,7 +1514,7 @@ async function confirmUnassign() {
       </div>
     </transition>
 
-    <!-- ✅ Unassign confirm modal (GLOBAL, not nested) -->
+    <!-- ✅ Unassign confirm modal -->
     <transition name="fade">
       <div
         v-if="unassignConfirmOpen"
@@ -1531,7 +1638,7 @@ async function confirmUnassign() {
 
     <!-- Details modal -->
     <transition name="fade">
-      <div v-if="detailOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4">
+      <div v-if="detailOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4" @click.self="detailOpen = false">
         <div class="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col gap-1">
@@ -1635,7 +1742,7 @@ async function confirmUnassign() {
 
     <!-- Edit schedule modal -->
     <transition name="fade">
-      <div v-if="editOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4">
+      <div v-if="editOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4" @click.self="editOpen = false">
         <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex items-center gap-2 text-sm font-semibold">
@@ -1759,7 +1866,7 @@ async function confirmUnassign() {
 
     <!-- Assign dialog -->
     <transition name="fade">
-      <div v-if="assignOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4">
+      <div v-if="assignOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4" @click.self="assignOpen = false">
         <div class="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
           <div class="flex items-start justify-between gap-2">
             <div class="flex flex-col gap-1">
@@ -1870,9 +1977,6 @@ async function confirmUnassign() {
 </template>
 
 <style scoped>
-.admin-car-page {
-}
-
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
 }
@@ -2091,9 +2195,6 @@ async function confirmUnassign() {
 
 /* small screens tweaks */
 @media (max-width: 600px) {
-  .admin-car-page {
-    padding: 0 !important;
-  }
   .table-footer {
     padding: 10px 12px;
     gap: 10px;

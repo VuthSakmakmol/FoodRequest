@@ -4,6 +4,7 @@ const CarBooking = require('../../models/transportation/CarBooking')
 
 let User = null
 try { User = require('../../models/User') } catch { User = null }
+
 const XLSX = require('xlsx')
 
 let Employee = null
@@ -25,8 +26,6 @@ const MAX_CAR = 3
 const MAX_MSGR = 1
 
 // ───────── status workflow (with COMEBACK) ─────────
-// Main path for driver: PENDING → ACCEPTED → ON_ROAD → ARRIVING → COMEBACK → COMPLETED
-// DELAYED / CANCELLED are side branches.
 const FORWARD = {
   PENDING: new Set(['ACCEPTED', 'CANCELLED']),
   ACCEPTED: new Set(['ON_ROAD', 'DELAYED', 'CANCELLED']),
@@ -38,7 +37,6 @@ const FORWARD = {
   CANCELLED: new Set([]),
 }
 
-// allowed statuses for admin updateStatus
 const ALLOWED_STATUS = [
   'PENDING',
   'ACCEPTED',
@@ -56,7 +54,6 @@ function hasAssignee(doc) {
   if (doc.category === 'Messenger') return !!doc.assignment.messengerId
   return !!doc.assignment.driverId
 }
-
 function assigneeIdOf(doc) {
   return doc?.category === 'Messenger'
     ? (doc?.assignment?.messengerId || '')
@@ -112,20 +109,40 @@ function stopsText(stops = []) {
     .join(' → ')
 }
 
-function buildExportFilter({ date, status, category, q }) {
+/**
+ * ✅ SINGLE source of truth for date-range filtering:
+ * - If dateFrom/dateTo provided -> filter ALL dates in range
+ * - Else if date provided -> single day
+ * Also supports status/category/q for both list + export
+ */
+function buildRangeFilter({ date, dateFrom, dateTo, status, category, q }) {
   const filter = {}
 
-  if (date) {
-    if (!isValidDate(date)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
-    filter.tripDate = date
+  const from = safeStr(dateFrom)
+  const to = safeStr(dateTo)
+  const single = safeStr(date)
+
+  // ✅ Range has priority
+  if (from || to) {
+    if (from && !isValidDate(from)) throw createError(400, 'Invalid dateFrom (YYYY-MM-DD).')
+    if (to && !isValidDate(to)) throw createError(400, 'Invalid dateTo (YYYY-MM-DD).')
+
+    const f = from || to
+    const t = to || from
+    if (f && t && f > t) throw createError(400, 'dateFrom must be <= dateTo.')
+
+    // tripDate stored as "YYYY-MM-DD" string -> lexicographic works
+    filter.tripDate = { $gte: f, $lte: t }
+  } else if (single) {
+    if (!isValidDate(single)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
+    filter.tripDate = single
   }
 
   if (status && status !== 'ALL') filter.status = String(status).toUpperCase()
-  if (category && category !== 'ALL') filter.category = category
+  if (category && category !== 'ALL') filter.category = String(category)
 
   const term = safeStr(q).toLowerCase()
   if (term) {
-    // Basic multi-field search
     filter.$or = [
       { employeeId: new RegExp(term, 'i') },
       { 'employee.name': new RegExp(term, 'i') },
@@ -138,7 +155,6 @@ function buildExportFilter({ date, status, category, q }) {
       { 'assignment.messengerName': new RegExp(term, 'i') },
       { 'assignment.vehicleId': new RegExp(term, 'i') },
       { 'assignment.vehicleName': new RegExp(term, 'i') },
-      // Stops search (destination or other)
       { 'stops.destination': new RegExp(term, 'i') },
       { 'stops.destinationOther': new RegExp(term, 'i') },
     ]
@@ -149,15 +165,14 @@ function buildExportFilter({ date, status, category, q }) {
 
 async function exportAdminExcel(req, res, next) {
   try {
-    const { date, status, category, q } = req.query || {}
+    const { date, dateFrom, dateTo, status, category, q } = req.query || {}
+    const filter = buildRangeFilter({ date, dateFrom, dateTo, status, category, q })
 
-    const filter = buildExportFilter({ date, status, category, q })
-
+    // ✅ NO LIMIT — export everything in range (100+ ok)
     const list = await CarBooking.find(filter)
       .sort({ tripDate: 1, timeStart: 1 })
       .lean()
 
-    // ✅ Flatten to rows
     const rows = (list || []).map((b, idx) => {
       const cat = safeStr(b.category) || 'Car'
       const isMessenger = cat === 'Messenger'
@@ -204,50 +219,29 @@ async function exportAdminExcel(req, res, next) {
       }
     })
 
-    // ✅ Build workbook
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(rows)
 
-    // Column widths (nice)
     ws['!cols'] = [
-      { wch: 5 },  // No
-      { wch: 12 }, // Date
-      { wch: 8 },  // Start
-      { wch: 8 },  // End
-      { wch: 12 }, // Category
-      { wch: 12 }, // Status
-      { wch: 14 }, // RequesterId
-      { wch: 22 }, // RequesterName
-      { wch: 18 }, // Department
-      { wch: 14 }, // Contact
-      { wch: 5 },  // Pax
-      { wch: 45 }, // Destination
-      { wch: 35 }, // Purpose
-      { wch: 35 }, // Notes
-      { wch: 30 }, // TicketUrl
-      { wch: 22 }, // AssignedTo
-      { wch: 12 }, // Response
-      { wch: 12 }, // DriverId
-      { wch: 20 }, // DriverName
-      { wch: 14 }, // MessengerId
-      { wch: 20 }, // MessengerName
-      { wch: 12 }, // VehicleId
-      { wch: 18 }, // VehicleName
-      { wch: 24 }, // CreatedAt
-      { wch: 24 }, // UpdatedAt
+      { wch: 5 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 12 }, { wch: 12 },
+      { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 14 }, { wch: 5 }, { wch: 45 },
+      { wch: 35 }, { wch: 35 }, { wch: 30 }, { wch: 22 }, { wch: 12 }, { wch: 12 },
+      { wch: 20 }, { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 18 }, { wch: 24 }, { wch: 24 },
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, 'CarBookings')
 
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
 
-    const nameDate = safeStr(date) || 'all'
-    const filename = `car-bookings_${nameDate}.xlsx`
+    const f = safeStr(dateFrom) || safeStr(date) || ''
+    const t = safeStr(dateTo) || safeStr(date) || ''
 
-    res.setHeader(
-      'Content-Type',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+    const filename =
+      (f || t)
+        ? `car-bookings_${f || t}_to_${t || f}.xlsx`
+        : `car-bookings_all.xlsx`
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
     return res.status(200).send(buf)
   } catch (err) {
@@ -255,10 +249,7 @@ async function exportAdminExcel(req, res, next) {
   }
 }
 
-/* ✅ RESERVED-ONLY availability filter
-   - Cars are "reserved" only when a driver or vehicle is assigned.
-   - Messenger is "reserved" only when messengerId is assigned (can be on Messenger OR Car category).
-*/
+/* ✅ RESERVED-ONLY availability filter */
 function buildReservedQuery({ tripDate, category, excludeId = null }) {
   const base = {
     tripDate,
@@ -278,7 +269,6 @@ function buildReservedQuery({ tripDate, category, excludeId = null }) {
     }
   }
 
-  // Messenger (counts messenger assigned on Messenger bookings OR Car bookings)
   return {
     ...base,
     $or: [
@@ -293,7 +283,6 @@ async function employeeCancelBooking(req, res, next) {
     const io = req.io
     const { id } = req.params
 
-    // Get employeeId from token/header/body/query (flexible)
     const employeeId =
       (req.user?.employeeId) ||
       (req.headers['x-employee-id']) ||
@@ -307,20 +296,17 @@ async function employeeCancelBooking(req, res, next) {
     const doc = await CarBooking.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
-    // Only owner can cancel
     if (String(doc.employeeId || '').trim() !== me) {
       throw createError(403, 'Not allowed: not your booking.')
     }
 
-    // Match your frontend rules
     const st = String(doc.status || '').toUpperCase()
     if (['ON_ROAD', 'ARRIVING', 'COMEBACK', 'COMPLETED', 'CANCELLED'].includes(st)) {
       throw createError(400, `Cannot cancel when status is ${st}.`)
     }
 
-    // Block past-date cancel (Phnom Penh date)
     if (doc.tripDate && isValidDate(doc.tripDate)) {
-      const todayPP = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' }) // YYYY-MM-DD
+      const todayPP = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' })
       if (String(doc.tripDate) < String(todayPP)) {
         throw createError(400, 'Cannot cancel a past booking.')
       }
@@ -329,10 +315,8 @@ async function employeeCancelBooking(req, res, next) {
     doc.status = 'CANCELLED'
     await doc.save()
 
-    // Notify realtime
     broadcastCarBooking(io, doc, 'carBooking:status', shape.status(doc))
 
-    // Optional: notify telegram (safe even if not implemented in notify)
     try {
       await notify('REQUEST_CANCELLED', { bookingId: doc._id, by: me })
     } catch {}
@@ -371,7 +355,6 @@ const shape = {
     status: doc.status,
   }),
 
-  // ✅ UPDATED: accepts meta for reassignment removal (prevAssigneeId/action/prevRole)
   assigned: (doc, meta = {}) => ({
     bookingId: String(doc._id),
 
@@ -390,11 +373,10 @@ const shape = {
     status: doc.status,
     category: doc.category,
 
-    // ✅ extra info for FE to remove job from old driver/messenger
     prevAssigneeId: meta.prevAssigneeId || '',
     prevAssigneeName: meta.prevAssigneeName || '',
     prevRole: meta.prevRole || '',
-    action: meta.action || 'ASSIGN', // ASSIGN | REASSIGN | UNASSIGN
+    action: meta.action || 'ASSIGN',
   }),
 
   driverAck: (doc) => ({
@@ -442,7 +424,6 @@ async function checkAvailability(req, res, next) {
     const e = toMinutes(end)
     if (e <= s) throw createError(400, 'End must be after Start.')
 
-    // ✅ IMPORTANT: availability counts only RESERVED (assigned) resources
     const reservedQuery = buildReservedQuery({ tripDate: date, category })
     const docs = await CarBooking.find(reservedQuery).lean()
 
@@ -455,7 +436,6 @@ async function checkAvailability(req, res, next) {
   } catch (err) { next(err) }
 }
 
-/** PUBLIC schedule */
 async function listSchedulePublic(req, res, next) {
   try {
     const { date, category, status, driverId } = req.query
@@ -516,7 +496,6 @@ async function createBooking(req, res, next) {
       ticketUrl = `/uploads/${req.file.filename}`
     }
 
-    // ✅ capacity check uses RESERVED ONLY (assigned driver/vehicle/messenger)
     const reservedQuery = buildReservedQuery({ tripDate, category })
     const reserved = await CarBooking.find(reservedQuery).lean()
     const overlapping = reserved.filter((b) =>
@@ -576,7 +555,7 @@ async function listMyBookings(req, res, next) {
   } catch (err) { next(err) }
 }
 
-/* ───────── ADMIN: update status (Actions buttons + reopen + force complete) ───────── */
+/* ───────── ADMIN: update status ───────── */
 async function updateStatus(req, res, next) {
   try {
     const io = req.io
@@ -585,8 +564,8 @@ async function updateStatus(req, res, next) {
     const {
       status,
       forceReopen,
-      force,              // old flag
-      forceComplete,      // ✅ new flag from FE
+      force,
+      forceComplete,
     } = req.body || {}
 
     const nextStatus = String(status || '').toUpperCase()
@@ -597,7 +576,6 @@ async function updateStatus(req, res, next) {
 
     const from = String(doc.status || 'PENDING').toUpperCase()
 
-    // ✅ Admin Force Complete (accept BOTH flags)
     const isForceComplete =
       (forceComplete === true || force === true) &&
       nextStatus === 'COMPLETED' &&
@@ -621,7 +599,6 @@ async function updateStatus(req, res, next) {
         throw createError(400, 'You must assign a Driver/Messenger before marking COMPLETED.')
       }
 
-      // optional: normalize ack
       if (doc.assignment?.driverId && doc.assignment.driverAck === 'PENDING') {
         doc.assignment.driverAck = 'ACCEPTED'
         doc.assignment.driverAckAt = doc.assignment.driverAckAt || new Date()
@@ -660,11 +637,7 @@ async function updateStatus(req, res, next) {
   }
 }
 
-
-/* ───────── ADMIN assign / reassign / unassign ─────────
-   ✅ Messenger booking: only assign MESSENGER
-   ✅ Car booking: can assign DRIVER or MESSENGER (optional helper rider)
-*/
+/* ───────── ADMIN assign / reassign / unassign ───────── */
 async function assignBooking(req, res, next) {
   try {
     const io = req.io
@@ -694,18 +667,15 @@ async function assignBooking(req, res, next) {
 
     role = String(role || '').toUpperCase()
 
-    // ✅ Allowed roles depend on booking.category
     const allowedRoles =
       doc.category === 'Messenger'
         ? new Set(['MESSENGER'])
-        : new Set(['DRIVER', 'MESSENGER']) // Car booking supports both
+        : new Set(['DRIVER', 'MESSENGER'])
 
     if (!allowedRoles.has(role)) {
-      // default role if not provided
       role = doc.category === 'Messenger' ? 'MESSENGER' : 'DRIVER'
     }
 
-    // previous assignee (per role)
     const prevAssigneeId =
       role === 'MESSENGER'
         ? String(doc.assignment?.messengerId || '')
@@ -716,7 +686,6 @@ async function assignBooking(req, res, next) {
         ? String(doc.assignment?.messengerName || '')
         : String(doc.assignment?.driverName || '')
 
-    // incoming payload normalization
     const incomingId =
       role === 'MESSENGER'
         ? String(messengerId || driverId || '').trim().toLowerCase()
@@ -727,17 +696,14 @@ async function assignBooking(req, res, next) {
         ? String(messengerName || driverName || '').trim()
         : String(driverName || '').trim()
 
-    // ✅ UNASSIGN (when incomingId empty) — unassign ONLY the selected role
     if (!incomingId) {
       if (!doc.assignment) doc.assignment = {}
 
-      // meta
       doc.assignment.assignedById = assignedById || ''
       doc.assignment.assignedByName = assignedByName || ''
       doc.assignment.assignedAt = new Date()
       doc.assignment.notes = notes || ''
 
-      // reset acks (safe)
       doc.assignment.driverAck = 'PENDING'
       doc.assignment.messengerAck = 'PENDING'
       doc.assignment.driverAckAt = undefined
@@ -753,7 +719,6 @@ async function assignBooking(req, res, next) {
         doc.assignment.vehicleName = ''
       }
 
-      // recommended: bring back to pending if not terminal
       const st = String(doc.status || '').toUpperCase()
       if (!['COMPLETED', 'CANCELLED'].includes(st)) doc.status = 'PENDING'
 
@@ -783,20 +748,17 @@ async function assignBooking(req, res, next) {
       return res.json(doc)
     }
 
-    // Optional: prevent assign into completed/cancelled
     const currentStatus = String(doc.status || '').toUpperCase()
     if (['COMPLETED', 'CANCELLED'].includes(currentStatus)) {
       throw createError(400, `Cannot assign when status is ${currentStatus}.`)
     }
 
-    // resolve name (fallback from Users collection)
     let resolvedName = incomingName
     if (!resolvedName && User) {
       const u = await User.findOne({ loginId: incomingId }).lean()
       if (u?.name) resolvedName = u.name
     }
 
-    // per-assignee conflict check (COMPLETED/CANCELLED don't block)
     const s = toMinutes(doc.timeStart)
     const e = toMinutes(doc.timeEnd)
 
@@ -822,19 +784,16 @@ async function assignBooking(req, res, next) {
 
     if (!doc.assignment) doc.assignment = {}
 
-    // reset acks
     doc.assignment.driverAck = 'PENDING'
     doc.assignment.messengerAck = 'PENDING'
     doc.assignment.driverAckAt = undefined
     doc.assignment.messengerAckAt = undefined
 
-    // meta
     doc.assignment.assignedById = assignedById || ''
     doc.assignment.assignedByName = assignedByName || ''
     doc.assignment.assignedAt = new Date()
     doc.assignment.notes = notes || ''
 
-    // apply role assignment
     if (role === 'MESSENGER') {
       doc.assignment.messengerId = incomingId
       doc.assignment.messengerName = resolvedName || ''
@@ -845,7 +804,6 @@ async function assignBooking(req, res, next) {
       doc.assignment.vehicleName = vehicleName || ''
     }
 
-    // auto accept
     if (autoAccept) doc.status = 'ACCEPTED'
 
     await doc.save()
@@ -881,20 +839,27 @@ async function assignBooking(req, res, next) {
   }
 }
 
-
-
+/**
+ * ✅ ADMIN LIST (date range + filters)
+ * Query supports:
+ * - dateFrom/dateTo (preferred)
+ * - date (single day fallback)
+ * - status, category, q
+ */
 async function listAdmin(req, res, next) {
   try {
-    const { date, status } = req.query
-    const filter = {}
-    if (date) { if (!isValidDate(date)) throw createError(400, 'Invalid date.'); filter.tripDate = date }
-    if (status && status !== 'ALL') filter.status = status
-    const list = await CarBooking.find(filter).sort({ tripDate: 1, timeStart: 1 }).lean()
+    const { date, dateFrom, dateTo, status, category, q } = req.query || {}
+    const filter = buildRangeFilter({ date, dateFrom, dateTo, status, category, q })
+
+    const list = await CarBooking.find(filter)
+      .sort({ tripDate: 1, timeStart: 1 })
+      .lean()
+
     res.json(list)
   } catch (err) { next(err) }
 }
 
-/* ───────── LIST FOR ASSIGNEE (driver or messenger – symmetric) ───────── */
+/* ───────── LIST FOR ASSIGNEE ───────── */
 async function listForAssignee(req, res, next) {
   try {
     const { loginId, role } = pickIdentityFrom(req)
@@ -930,7 +895,7 @@ async function listForAssignee(req, res, next) {
   }
 }
 
-/* ───────── DRIVER ACK (only ack, status unchanged) ───────── */
+/* ───────── DRIVER ACK ───────── */
 async function driverAcknowledge(req, res, next) {
   try {
     const io = req.io
@@ -1000,7 +965,7 @@ async function driverUpdateStatus(req, res, next) {
   }
 }
 
-/* ───────── UPDATE BOOKING (admin edit schedule / category / purpose) ───────── */
+/* ───────── UPDATE BOOKING ───────── */
 async function updateBooking(req, res, next) {
   try {
     const io = req.io
@@ -1036,7 +1001,6 @@ async function updateBooking(req, res, next) {
     const s = toMinutes(doc.timeStart)
     const e = toMinutes(doc.timeEnd)
 
-    // ✅ capacity check uses RESERVED ONLY (assigned)
     const reservedQuery = buildReservedQuery({
       tripDate: doc.tripDate,
       category: doc.category,
@@ -1056,7 +1020,6 @@ async function updateBooking(req, res, next) {
       )
     }
 
-    // extra: keep existing per-assignee conflict checks
     const ass = doc.assignment || {}
 
     if (ass.driverId) {
@@ -1117,7 +1080,7 @@ async function deleteBooking(req, res, next) {
   } catch (err) { next(err) }
 }
 
-/* ───────── MESSENGER ACK (only ack, status unchanged) ───────── */
+/* ───────── MESSENGER ACK ───────── */
 async function messengerAcknowledge(req, res, next) {
   try {
     const io = req.io
@@ -1143,7 +1106,7 @@ async function messengerAcknowledge(req, res, next) {
   }
 }
 
-/* ───────── MESSENGER STATUS (same logic as driver) ───────── */
+/* ───────── MESSENGER STATUS ───────── */
 async function messengerUpdateStatus(req, res, next) {
   try {
     const io = req.io
@@ -1184,7 +1147,6 @@ async function messengerUpdateStatus(req, res, next) {
   }
 }
 
-/* ───────── LIST messenger tasks (legacy helper) ───────── */
 async function listMessengerTasks(req, res) {
   try {
     const messengerId = req.query.messengerId || req.headers['x-login-id']
