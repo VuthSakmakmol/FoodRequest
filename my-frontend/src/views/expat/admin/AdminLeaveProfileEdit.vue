@@ -1,6 +1,6 @@
 <!-- src/views/expat/admin/AdminLeaveProfileEdit.vue -->
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
@@ -285,21 +285,13 @@ async function forceRecalcBalances() {
 function validateApprovers() {
   const mode = normApprovalMode(form.approvalMode)
 
-  // GM always required (for both modes)
-  if (!String(form.gmLoginId || '').trim()) {
-    return 'GM Login ID is required.'
-  }
-
-  // ✅ if Manager + GM, manager must be selected
+  if (!String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
   if (mode === 'MANAGER_AND_GM' && !String(form.managerEmployeeId || '').trim()) {
     return 'Approval Mode is Manager + GM, so Manager Employee ID is required.'
   }
-
-  // ✅ if GM + COO, COO must be selected
   if (mode === 'GM_AND_COO' && !String(form.cooLoginId || '').trim()) {
     return 'Approval Mode is GM + COO, so COO Login ID is required.'
   }
-
   return ''
 }
 
@@ -326,17 +318,12 @@ async function saveProfile() {
   try {
     const mode = normApprovalMode(form.approvalMode)
 
-    // 1) update profile
     await updateProfile(
       {
         joinDate: form.joinDate ? String(form.joinDate) : null,
-
         approvalMode: mode,
 
-        // ✅ when MANAGER_AND_GM, require managerEmployeeId
-        // when GM_AND_COO, allow manager optional (keep whatever admin sets)
         managerEmployeeId: form.managerEmployeeId ? String(form.managerEmployeeId).trim() : null,
-
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
         cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
 
@@ -346,7 +333,6 @@ async function saveProfile() {
       { recalc: joinDateChanged.value }
     )
 
-    // 2) recalc if join date changed
     if (joinDateChanged.value) {
       const ok = await forceRecalcBalances()
       if (!ok) {
@@ -446,7 +432,7 @@ async function submitRenew() {
   }
 }
 
-/* ───────── InfoRow (small card) ───────── */
+/* ───────── InfoRow (ui-card) ───────── */
 const InfoRow = defineComponent({
   name: 'InfoRow',
   props: {
@@ -456,28 +442,25 @@ const InfoRow = defineComponent({
   },
   setup(props) {
     return () =>
-      h(
-        'div',
-        {
-          class:
-            'rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 shadow-sm ' +
-            'dark:border-slate-800/70 dark:bg-slate-950/45',
-        },
-        [
-          h(
-            'div',
-            {
-              class:
-                'text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 ' +
-                (props.hint ? 'cursor-help' : ''),
-              title: props.hint || '',
-            },
-            props.label
-          ),
-          h('div', { class: 'mt-1 text-[13px] font-semibold text-slate-900 dark:text-slate-50' }, props.value),
-        ]
-      )
+      h('div', { class: 'ui-card !rounded-2xl px-3 py-2' }, [
+        h(
+          'div',
+          {
+            class: 'ui-label !text-[10px] !font-extrabold !tracking-[0.28em] uppercase ' + (props.hint ? 'cursor-help' : ''),
+            title: props.hint || '',
+          },
+          props.label
+        ),
+        h('div', { class: 'mt-1 text-[13px] font-semibold text-ui-fg' }, props.value),
+      ])
   },
+})
+
+/* ✅ lock background scroll for ANY modal */
+const anyModalOpen = computed(() => !!renew.open || !!contractsOpen.value)
+watch(anyModalOpen, (open) => {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('overflow-hidden', !!open)
 })
 
 /* ───────── lifecycle ───────── */
@@ -489,351 +472,244 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
 })
 </script>
 
 <template>
-  <div class="w-full px-1 py-1 sm:px-3">
-    <div
-      class="rounded-3xl border border-slate-200/70 bg-white/70 shadow-[0_18px_45px_rgba(15,23,42,0.10)]
-             backdrop-blur dark:border-slate-800/70 dark:bg-slate-950/55 overflow-hidden"
-    >
+  <div class="ui-page min-h-screen w-full">
+    <div class="w-full min-h-screen flex flex-col">
       <!-- Header -->
-      <header class="relative overflow-hidden px-4 py-4 sm:px-5">
-        <div
-          class="absolute inset-0"
-          style="background: linear-gradient(90deg, rgba(2,132,199,1), rgba(79,70,229,1), rgba(16,185,129,1));"
-        />
-        <div
-          class="absolute inset-0 opacity-60"
-          style="background:
-            radial-gradient(900px circle at 10% 0%, rgba(255,255,255,.22), transparent 45%),
-            radial-gradient(900px circle at 100% 20%, rgba(255,255,255,.18), transparent 45%);"
-        />
-        <div class="relative text-white">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0">
-              <p class="text-[10px] font-extrabold uppercase tracking-[0.25em] text-white/80">
-                Expat leave · Admin
-              </p>
-              <h1 class="mt-0.5 text-[16px] sm:text-[18px] font-extrabold tracking-tight truncate">
-                Leave Profile Edit
-              </h1>
-              <p class="mt-1 text-[12px] text-white/85">
-                Employee: <span class="font-mono font-semibold">{{ employeeId || '—' }}</span>
-                <span class="mx-2 text-white/50">•</span>
-                Manage join date, approvers, balances & contracts.
-              </p>
+      <div class="ui-hero rounded-none border-x-0 border-t-0 px-4 py-3">
+        <div class="flex flex-wrap items-end justify-between gap-4">
+          <div class="min-w-[260px]">
+            <div class="ui-hero-kicker">Expat Leave · Admin</div>
+            <div class="ui-hero-title">Leave Profile Edit</div>
+            <div class="ui-hero-subtitle">
+              Employee:
+              <span class="font-mono font-semibold">{{ employeeId || '—' }}</span>
+              <span class="mx-2 opacity-60">•</span>
+              Manage join date, approvers, balances & contracts.
             </div>
 
-            <div class="flex flex-wrap items-center justify-end gap-2">
-              <button type="button" class="btn-ghost" @click="goBack">
-                <i class="fa-solid fa-arrow-left text-[12px]" />
-                Back
-              </button>
-
-              <button
-                type="button"
-                class="btn-soft"
-                :disabled="loading || saving || !profile || !isDirty"
-                @click="resetForm"
-                :title="!isDirty ? 'No changes' : 'Reset changes'"
-              >
-                <i class="fa-solid fa-rotate-left text-[12px]" />
-                Reset
-              </button>
-
-              <button type="button" class="btn-white" :disabled="loading || !profile" @click="openRenewModal">
-                <i class="fa-solid fa-arrows-rotate text-[12px]" />
-                Renew
-              </button>
-
-              <button
-                type="button"
-                class="btn-primary"
-                :disabled="loading || saving || !profile || !isDirty"
-                @click="saveProfile"
-                :title="!isDirty ? 'No changes' : (joinDateChanged ? 'Save + Recalculate balances' : 'Save changes')"
-              >
-                <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
-                Save
-                <span
-                  v-if="joinDateChanged"
-                  class="ml-1 rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-extrabold"
-                >
-                  +recalc
-                </span>
-              </button>
-
-              <button type="button" class="btn-ghost" :disabled="loading" @click="fetchProfile()">
-                <i class="fa-solid fa-rotate text-[12px]" :class="loading ? 'fa-spin' : ''" />
-                Refresh
-              </button>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span v-if="isDirty" class="ui-badge ui-badge-indigo">Unsaved changes</span>
+              <span v-if="joinDateChanged" class="ui-badge">Join date changed → recalc</span>
             </div>
           </div>
-        </div>
-      </header>
 
-      <!-- Body -->
-      <div class="px-3 sm:px-4 py-4 space-y-3">
+          <div class="flex flex-wrap items-center justify-end gap-2">
+            <button type="button" class="ui-btn ui-btn-ghost" @click="goBack">
+              <i class="fa-solid fa-arrow-left text-[11px]" />
+              Back
+            </button>
+
+            <button
+              type="button"
+              class="ui-btn ui-btn-soft"
+              :disabled="loading || saving || !profile || !isDirty"
+              @click="resetForm"
+              :title="!isDirty ? 'No changes' : 'Reset changes'"
+            >
+              <i class="fa-solid fa-rotate-left text-[11px]" />
+              Reset
+            </button>
+
+            <button type="button" class="ui-btn ui-btn-soft" :disabled="loading || !profile" @click="openContractsModal">
+              <i class="fa-regular fa-folder-open text-[11px]" />
+              Logs
+            </button>
+
+            <button type="button" class="ui-btn ui-btn-soft" :disabled="loading || !profile" @click="openRenewModal">
+              <i class="fa-solid fa-arrows-rotate text-[11px]" />
+              Renew
+            </button>
+
+            <button
+              type="button"
+              class="ui-btn ui-btn-primary"
+              :disabled="loading || saving || !profile || !isDirty"
+              @click="saveProfile"
+              :title="!isDirty ? 'No changes' : (joinDateChanged ? 'Save + Recalculate balances' : 'Save changes')"
+            >
+              <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
+              Save
+              <span v-if="joinDateChanged" class="ml-1 ui-badge">+recalc</span>
+            </button>
+
+            <button type="button" class="ui-btn ui-btn-ghost" :disabled="loading" @click="fetchProfile()">
+              <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-3 space-y-3">
         <!-- Error -->
         <div
           v-if="error"
-          class="rounded-2xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-[13px] text-rose-800
-                 dark:border-rose-500/60 dark:bg-rose-950/35 dark:text-rose-100"
+          class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
         >
-          <div class="font-extrabold mb-1">Failed</div>
-          <div>{{ error }}</div>
+          <span class="font-semibold">Failed:</span> {{ error }}
         </div>
 
         <!-- Loading -->
         <div v-if="loading" class="space-y-2">
-          <div class="h-12 w-full animate-pulse rounded-2xl bg-slate-200/80 dark:bg-slate-800/60"></div>
-          <div class="h-40 w-full animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/50"></div>
-          <div class="h-40 w-full animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/50"></div>
+          <div class="ui-card !rounded-2xl h-12 animate-pulse bg-ui-bg-2/60" />
+          <div class="ui-card !rounded-2xl h-40 animate-pulse bg-ui-bg-2/60" />
+          <div class="ui-card !rounded-2xl h-40 animate-pulse bg-ui-bg-2/60" />
         </div>
 
         <template v-else>
-          <div v-if="!profile" class="py-8 text-center text-[13px] text-slate-500 dark:text-slate-400">
+          <div v-if="!profile" class="py-8 text-center text-[11px] text-ui-muted">
             Profile not loaded.
           </div>
 
           <template v-else>
-            <!-- Top summary cards -->
+            <!-- Top summary -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <InfoRow label="Employee ID" :value="profile.employeeId || '—'" hint="Read-only" />
               <InfoRow label="Name" :value="profile.name || '—'" hint="Read-only" />
               <InfoRow label="Department" :value="profile.department || '—'" hint="Read-only" />
             </div>
 
-            <!-- Main content -->
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <!-- Edit form -->
-              <section
-                class="lg:col-span-2 rounded-3xl border border-slate-200/70 bg-white/80 p-3 shadow-sm
-                       dark:border-slate-800/70 dark:bg-slate-950/45"
-              >
+              <!-- Settings -->
+              <section class="ui-card lg:col-span-2 p-3">
                 <div class="flex items-start justify-between gap-2">
                   <div>
-                    <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Profile Settings</div>
-                    <div class="text-[12px] text-slate-500 dark:text-slate-400">
+                    <div class="text-[12px] font-extrabold text-ui-fg">Profile settings</div>
+                    <div class="text-[11px] text-ui-muted">
                       Changing Join Date affects accrual. Approval mode controls workflow.
                     </div>
                   </div>
-
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-2 rounded-full border border-indigo-300/70 bg-indigo-50 px-3 py-1 text-[11px] font-extrabold text-indigo-800
-                           hover:bg-indigo-100 dark:border-indigo-700/50 dark:bg-indigo-950/30 dark:text-indigo-200 dark:hover:bg-indigo-950/45"
-                    @click="openContractsModal"
-                  >
-                    <i class="fa-regular fa-folder-open text-[12px]" />
-                    Logs
-                  </button>
                 </div>
 
                 <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <!-- Join Date -->
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="Controls AL accrual and service-year rules"
-                    >
-                      Join Date
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Controls AL accrual and service-year rules">
+                      Join date
                     </div>
-
                     <div class="mt-1">
-                      <input
-                        v-model="form.joinDate"
-                        type="date"
-                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <input v-model="form.joinDate" type="date" class="ui-date w-full" />
+                      <div class="mt-1 text-[11px] text-ui-muted">
                         Current: <span class="font-mono">{{ fmtYMD(profile.joinDate) }}</span>
-                        <span
-                          v-if="joinDateChanged"
-                          class="ml-2 inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-900
-                                 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100"
-                        >
-                          Changed → will recalc
-                        </span>
+                        <span v-if="joinDateChanged" class="ml-2 ui-badge">Changed → will recalc</span>
                       </div>
                     </div>
                   </div>
 
-                  <!-- Contract Start (read-only) -->
+                  <!-- Contract start (read-only) -->
                   <InfoRow
-                    label="Current Contract Start"
+                    label="Current contract start"
                     :value="fmtYMD(profile.contractDate)"
                     hint="To change contract date, use Renew"
                   />
 
-                  <!-- ✅ Approval Mode dropdown -->
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45 sm:col-span-2">
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="Approval chain for this employee profile"
-                    >
-                      Approval Mode
+                  <!-- Approval mode -->
+                  <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approval chain for this employee profile">
+                      Approval mode
                     </div>
 
                     <div class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <select
-                        v-model="form.approvalMode"
-                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      >
+                      <select v-model="form.approvalMode" class="ui-select w-full">
                         <option v-for="m in APPROVAL_MODES" :key="m.value" :value="m.value">
                           {{ m.label }}
                         </option>
                       </select>
 
-                      <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600
-                                  dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300">
-                        <div class="font-extrabold text-[11px] text-slate-700 dark:text-slate-200">Rule</div>
-                        <div class="mt-0.5">
+                      <div class="ui-card !rounded-2xl px-3 py-2 bg-ui-bg-2/60">
+                        <div class="text-[11px] font-extrabold text-ui-fg">Rule</div>
+                        <div class="mt-0.5 text-[11px] text-ui-muted">
                           <span v-if="needManager">Manager is required.</span>
                           <span v-else>COO is required.</span>
-                          <span class="ml-1 text-slate-400">GM is always required.</span>
+                          <span class="ml-1 opacity-70">GM is always required.</span>
                         </div>
                       </div>
                     </div>
 
-                    <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    <div class="mt-1 text-[11px] text-ui-muted">
                       Current: <span class="font-mono">{{ normApprovalMode(profile.approvalMode) }}</span>
                     </div>
                   </div>
 
-                  <!-- AL Carry -->
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="SP can make AL negative. Debt carries forward."
-                    >
-                      AL Carry (debt allowed)
+                  <!-- AL carry -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="SP can make AL negative. Debt carries forward.">
+                      AL carry (debt allowed)
                     </div>
-
                     <div class="mt-1">
-                      <input
-                        v-model.number="form.alCarry"
-                        type="number"
-                        step="0.5"
-                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        placeholder="0"
-                      />
-                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <input v-model.number="form.alCarry" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
+                      <div class="mt-1 text-[11px] text-ui-muted">
                         Current: <span class="font-mono">{{ fmt(profile.alCarry ?? 0) }}</span>
                       </div>
                     </div>
                   </div>
 
-                  <!-- Active toggle -->
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="If inactive, employee cannot request leave"
-                    >
+                  <!-- Active -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="If inactive, employee cannot request leave">
                       Active
                     </div>
-
-                    <div class="mt-2 flex items-center justify-between">
-                      <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">
+                    <div class="mt-2 flex items-center justify-between gap-3">
+                      <div class="text-[12px] font-extrabold text-ui-fg">
                         {{ form.isActive ? 'Yes' : 'No' }}
                       </div>
-
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-extrabold transition"
-                        :class="form.isActive
-                          ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700/50 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/45'
-                          : 'border-slate-300 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:bg-slate-900/80'"
-                        @click="form.isActive = !form.isActive"
-                      >
+                      <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="form.isActive = !form.isActive">
                         <i class="fa-solid" :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
                         Toggle
                       </button>
                     </div>
-
-                    <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    <div class="mt-1 text-[11px] text-ui-muted">
                       Current: <span class="font-mono">{{ profile.isActive === false ? 'No' : 'Yes' }}</span>
                     </div>
                   </div>
 
-                  <!-- ✅ Manager Employee ID (required only when MANAGER_AND_GM) -->
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      :title="needManager ? 'Required for Manager + GM' : 'Optional (will be skipped if empty)'"
-                    >
-                      Manager Employee ID
-                      <span v-if="needManager" class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-extrabold text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-                        required
-                      </span>
+                  <!-- Manager employeeId -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'">
+                      Manager employee ID
+                      <span v-if="needManager" class="ml-2 ui-badge">required</span>
                     </div>
-
                     <div class="mt-1">
                       <input
                         v-model="form.managerEmployeeId"
                         type="text"
                         placeholder="Example: 51820386"
-                        class="w-full rounded-xl border px-3 py-2 text-[13px] dark:text-slate-100
-                               dark:bg-slate-900"
-                        :class="needManager
-                          ? 'border-amber-300 bg-white focus:border-amber-500 dark:border-amber-800/70'
-                          : 'border-slate-300 bg-white dark:border-slate-700'"
+                        class="ui-input w-full"
                       />
-                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <div class="mt-1 text-[11px] text-ui-muted">
                         Current: <span class="font-mono">{{ profile.managerEmployeeId || profile.managerLoginId || '—' }}</span>
                       </div>
                     </div>
                   </div>
 
-                  <!-- GM Login ID -->
-                  <div class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45">
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="Approver loginId with role LEAVE_GM (required)"
-                    >
-                      GM Login ID <span class="ml-2 text-rose-600 font-extrabold">*</span>
+                  <!-- GM login -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM (required)">
+                      GM login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
                     </div>
-
                     <div class="mt-1">
-                      <input
-                        v-model="form.gmLoginId"
-                        type="text"
-                        placeholder="Example: leave_gm"
-                        class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                               dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <input v-model="form.gmLoginId" type="text" placeholder="Example: leave_gm" class="ui-input w-full" />
+                      <div class="mt-1 text-[11px] text-ui-muted">
                         Current: <span class="font-mono">{{ profile.gmLoginId || '—' }}</span>
                       </div>
                     </div>
                   </div>
 
-                  <!-- ✅ COO Login ID (only when GM_AND_COO) -->
-                  <div
-                    v-if="needCoo"
-                    class="rounded-2xl border border-slate-200/70 bg-white/80 px-3 py-2 dark:border-slate-800/70 dark:bg-slate-950/45 sm:col-span-2"
-                  >
-                    <div
-                      class="text-[10px] uppercase tracking-[0.28em] font-extrabold text-slate-500 dark:text-slate-400 cursor-help"
-                      title="Required when approval mode is GM + COO"
-                    >
-                      COO Login ID <span class="ml-2 text-rose-600 font-extrabold">*</span>
+                  <!-- COO login (only if needed) -->
+                  <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode is GM + COO">
+                      COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
                     </div>
-
                     <div class="mt-1">
-                      <input
-                        v-model="form.cooLoginId"
-                        type="text"
-                        placeholder="Example: leave_coo"
-                        class="w-full rounded-xl border border-amber-300 bg-white px-3 py-2 text-[13px]
-                               focus:border-amber-500 dark:border-amber-800/70 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                      <input v-model="form.cooLoginId" type="text" placeholder="Example: leave_coo" class="ui-input w-full" />
+                      <div class="mt-1 text-[11px] text-ui-muted">
                         Current: <span class="font-mono">{{ profile.cooLoginId || '—' }}</span>
                       </div>
                     </div>
@@ -842,134 +718,128 @@ onBeforeUnmount(() => {
 
                 <div
                   v-if="formError"
-                  class="mt-3 rounded-2xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-[13px] text-rose-800
-                         dark:border-rose-500/60 dark:bg-rose-950/35 dark:text-rose-100"
+                  class="mt-3 ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                         dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
                 >
-                  {{ formError }}
-                </div>
-
-                <div v-if="isDirty" class="mt-3 text-[12px] font-semibold text-indigo-700 dark:text-indigo-300">
-                  You have unsaved changes.
+                  <span class="font-semibold">Validation:</span> {{ formError }}
                 </div>
               </section>
 
-              <!-- Balances -->
-              <section class="rounded-3xl border border-slate-200/70 bg-white/80 p-3 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/45">
+              <!-- Balances (compact / shrink-to-content) -->
+              <section class="ui-card p-3">
                 <div class="flex items-start justify-between gap-2">
                   <div>
-                    <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Balances</div>
-                    <div class="text-[12px] text-slate-500 dark:text-slate-400">
+                    <div class="text-[12px] font-extrabold text-ui-fg">Balances</div>
+                    <div class="text-[11px] text-ui-muted">
                       As of <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
                     </div>
                   </div>
                 </div>
 
-                <div v-if="!normalizedBalances.length" class="mt-4 text-[13px] text-slate-500 dark:text-slate-400">
+                <div v-if="!normalizedBalances.length" class="mt-2 text-[11px] text-ui-muted">
                   No balances yet.
                 </div>
 
-                <div v-else class="mt-3 overflow-hidden rounded-2xl border border-slate-200/70 dark:border-slate-800/70">
-                  <table class="w-full text-[12px]">
-                    <thead class="bg-slate-50 text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
-                      <tr>
-                        <th class="px-3 py-2 text-left font-extrabold">Type</th>
-                        <th class="px-3 py-2 text-right font-extrabold">Used</th>
-                        <th class="px-3 py-2 text-right font-extrabold">Remain</th>
-                      </tr>
-                    </thead>
+                <div v-else class="mt-2">
+                  <!-- ✅ important: inline-block + table w-auto => table won't stretch full width -->
+                  <div class="inline-block max-w-full overflow-x-auto ui-scrollbar rounded-xl border border-ui-border/60">
+                    <table class="w-auto table-auto text-[11px] leading-tight">
+                      <thead class="bg-ui-bg-2/60">
+                        <tr class="text-ui-muted">
+                          <th class="px-[26px] py-[13px] text-left text-[10px] font-extrabold">Type</th>
+                          <th class="px-[26px] py-[13px] text-right text-[10px] font-extrabold">Used</th>
+                          <th class="px-[26px] py-[13px] text-right text-[10px] font-extrabold">Remain</th>
+                        </tr>
+                      </thead>
 
-                    <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
-                      <tr
-                        v-for="(b, idx) in normalizedBalances"
-                        :key="b.leaveTypeCode"
-                        class="text-slate-700 dark:text-slate-100"
-                        :class="idx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/40' : 'bg-slate-50/70 dark:bg-slate-900/35'"
-                      >
-                        <td class="px-3 py-2 font-extrabold">{{ b.leaveTypeCode }}</td>
-                        <td class="px-3 py-2 text-right font-mono">{{ fmt(b.used) }}</td>
-                        <td class="px-3 py-2 text-right font-mono">
-                          <span
-                            class="inline-flex rounded-full px-2 py-0.5 font-extrabold"
-                            :class="num(b.remaining) < 0
-                              ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
-                              : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'"
-                          >
-                            {{ fmt(b.remaining) }}
-                          </span>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
+                      <tbody>
+                        <tr
+                          v-for="b in normalizedBalances"
+                          :key="b.leaveTypeCode"
+                          class="border-t border-ui-border/60"
+                        >
+                          <td class="px-[26px] py-[13px] font-extrabold text-ui-fg">
+                            {{ b.leaveTypeCode }}
+                          </td>
+
+                          <td class="px-[26px] py-[13px] text-right font-mono text-ui-fg">
+                            {{ fmt(b.used) }}
+                          </td>
+
+                          <td class="px-[26px] py-[13px] text-right font-mono">
+                            <span
+                              class="inline-flex items-center rounded-full px-[6px] py-[1px] text-[10px] font-extrabold"
+                              :class="num(b.remaining) < 0
+                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
+                                : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'"
+                            >
+                              {{ fmt(b.remaining) }}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
 
-                <div class="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+                <div class="mt-2 text-[10px] text-ui-muted">
                   Tip: If Join Date changed, Save will try to recalc balances.
                 </div>
               </section>
             </div>
 
-            <!-- Contract History -->
-            <section class="rounded-3xl border border-slate-200/70 bg-white/80 p-3 shadow-sm dark:border-slate-800/70 dark:bg-slate-950/45">
+            <!-- Contract history -->
+            <section class="ui-card p-3">
               <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
                 <div>
-                  <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Contract History</div>
-                  <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                    Newest first. Full view also available in Logs.
-                  </div>
+                  <div class="text-[12px] font-extrabold text-ui-fg">Contract history</div>
+                  <div class="text-[11px] text-ui-muted">Newest first. Full view also available in Logs.</div>
                 </div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                  {{ contractHistory.length }} log(s)
-                </div>
+                <div class="text-[11px] text-ui-muted">{{ contractHistory.length }} log(s)</div>
               </div>
 
-              <div v-if="!contractHistory.length" class="mt-4 py-6 text-center text-[13px] text-slate-500 dark:text-slate-400">
+              <div v-if="!contractHistory.length" class="mt-4 py-6 text-center text-[11px] text-ui-muted">
                 No contract history.
               </div>
 
-              <div v-else class="mt-3 overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-slate-800/70">
-                <table class="min-w-[980px] w-full text-[12px]">
-                  <thead class="bg-slate-50 text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
+              <div v-else class="mt-3 ui-table-wrap ui-scrollbar">
+                <table class="ui-table min-w-[980px]">
+                  <thead>
                     <tr>
-                      <th class="px-3 py-2 text-left font-extrabold">#</th>
-                      <th class="px-3 py-2 text-left font-extrabold">Start</th>
-                      <th class="px-3 py-2 text-left font-extrabold">End</th>
-                      <th class="px-3 py-2 text-right font-extrabold">AL Carry</th>
-                      <th class="px-3 py-2 text-left font-extrabold">Snapshot</th>
-                      <th class="px-3 py-2 text-left font-extrabold">Note</th>
+                      <th class="ui-th">#</th>
+                      <th class="ui-th">Start</th>
+                      <th class="ui-th">End</th>
+                      <th class="ui-th text-right">AL Carry</th>
+                      <th class="ui-th">Snapshot</th>
+                      <th class="ui-th">Note</th>
                     </tr>
                   </thead>
 
-                  <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
-                    <tr
-                      v-for="(c, idx) in contractHistory"
-                      :key="c._id || c.createdAt || idx"
-                      :class="idx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/40' : 'bg-slate-50/70 dark:bg-slate-900/35'"
-                      class="text-slate-700 dark:text-slate-100"
-                    >
-                      <td class="px-3 py-2 font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
-                      <td class="px-3 py-2 font-mono">{{ c.startDate || '—' }}</td>
-                      <td class="px-3 py-2 font-mono">{{ c.endDate || '—' }}</td>
-                      <td class="px-3 py-2 text-right font-mono">{{ fmt(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
+                  <tbody>
+                    <tr v-for="(c, idx) in contractHistory" :key="c._id || c.createdAt || idx" class="ui-tr-hover">
+                      <td class="ui-td font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
+                      <td class="ui-td font-mono">{{ c.startDate || '—' }}</td>
+                      <td class="ui-td font-mono">{{ c.endDate || '—' }}</td>
+                      <td class="ui-td text-right font-mono">{{ fmt(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
 
-                      <td class="px-3 py-2">
-                        <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                      <td class="ui-td">
+                        <div class="text-[11px] text-ui-muted">
                           <div v-if="Array.isArray(c.balancesSnapshot)">
                             <span
                               v-for="b in c.balancesSnapshot"
                               :key="String(b.leaveTypeCode) + String(c.createdAt)"
-                              class="mr-2 mb-1 inline-flex rounded-full border border-slate-300/80 bg-white/70 px-2 py-0.5 text-[10px]
-                                     dark:border-slate-700/60 dark:bg-slate-950/40"
+                              class="mr-2 mb-1 inline-flex ui-badge"
                             >
                               {{ String(b.leaveTypeCode).toUpperCase() }}:
                               U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
                             </span>
                           </div>
-                          <div v-else class="text-slate-400">—</div>
+                          <div v-else class="opacity-60">—</div>
                         </div>
                       </td>
 
-                      <td class="px-3 py-2">
-                        <div class="max-w-[260px] truncate text-[11px] text-slate-600 dark:text-slate-300">
+                      <td class="ui-td">
+                        <div class="max-w-[260px] truncate text-[11px] text-ui-muted">
                           {{ c.note || '—' }}
                         </div>
                       </td>
@@ -981,229 +851,165 @@ onBeforeUnmount(() => {
           </template>
         </template>
       </div>
-    </div>
 
-    <!-- Renew Contract Modal -->
-    <transition name="modal-fade">
-      <div v-if="renew.open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-2">
-        <div class="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
-          <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
-            <div class="flex items-start justify-between gap-2">
-              <div>
-                <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Renew Contract</div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                  {{ profile?.employeeId }} · {{ profile?.name || '—' }}
+      <!-- Renew modal -->
+      <transition name="modal-fade">
+        <div v-if="renew.open" class="ui-modal-backdrop" @click.self="closeRenewModal">
+          <div class="ui-modal max-h-[calc(100vh-3rem)] w-full max-w-2xl flex flex-col overflow-hidden">
+            <div class="ui-hero rounded-b-none px-4 py-3">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-[14px] font-extrabold text-ui-fg">Renew contract</div>
+                  <div class="text-[11px] text-ui-muted">
+                    {{ profile?.employeeId }} · {{ profile?.name || '—' }}
+                  </div>
                 </div>
+                <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="renew.submitting" @click="closeRenewModal">
+                  <i class="fa-solid fa-xmark text-xs" />
+                </button>
               </div>
-              <button
-                type="button"
-                class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60
-                       dark:text-slate-300 dark:hover:bg-slate-800/80"
-                :disabled="renew.submitting"
-                @click="closeRenewModal"
-              >
-                <i class="fa-solid fa-xmark text-xs" />
-              </button>
             </div>
-          </div>
 
-          <div class="px-4 py-3 space-y-3">
-            <div class="grid gap-3 sm:grid-cols-2">
-              <div class="space-y-1">
-                <label class="block text-[11px] font-extrabold text-slate-600 dark:text-slate-300">
-                  New Contract Start Date
-                </label>
-                <input
-                  v-model="renew.newContractDate"
-                  type="date"
-                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                         dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                />
-              </div>
+            <div class="flex-1 overflow-y-auto ui-scrollbar px-4 py-3 space-y-3">
+              <div class="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div class="ui-label">New contract start date</div>
+                  <input v-model="renew.newContractDate" type="date" class="ui-date w-full" />
+                </div>
 
-              <div class="space-y-1">
-                <label class="block text-[11px] font-extrabold text-slate-600 dark:text-slate-300">
-                  Clear unused AL?
-                </label>
-
-                <div class="rounded-2xl border border-slate-200/70 bg-white/80 p-3 dark:border-slate-700/70 dark:bg-slate-950/40">
-                  <div class="flex items-start justify-between gap-3">
-                    <div>
-                      <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">
-                        {{ renew.clearOldLeave ? 'Yes (clear AL to 0)' : 'No (carry AL forward)' }}
+                <div>
+                  <div class="ui-label">Clear unused AL?</div>
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="text-[12px] font-extrabold text-ui-fg">
+                          {{ renew.clearOldLeave ? 'Yes (clear AL to 0)' : 'No (carry AL forward)' }}
+                        </div>
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          ON: positive AL cleared, negative debt remains. OFF: carry everything.
+                        </div>
                       </div>
-                      <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                        ON: positive AL cleared, negative debt remains. OFF: carry everything.
-                      </div>
+
+                      <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="renew.clearOldLeave = !renew.clearOldLeave">
+                        <i class="fa-solid" :class="renew.clearOldLeave ? 'fa-toggle-on' : 'fa-toggle-off'" />
+                      </button>
                     </div>
-
-                    <button
-                      type="button"
-                      class="inline-flex items-center rounded-full border border-slate-300 px-2 py-1 text-[11px] font-extrabold text-slate-700
-                             dark:border-slate-600 dark:text-slate-200"
-                      @click="renew.clearOldLeave = !renew.clearOldLeave"
-                    >
-                      <i class="fa-solid" :class="renew.clearOldLeave ? 'fa-toggle-on' : 'fa-toggle-off'" />
-                    </button>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div class="space-y-1">
-              <label class="block text-[11px] font-extrabold text-slate-600 dark:text-slate-300">Note (optional)</label>
-              <textarea
-                v-model="renew.note"
-                rows="3"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px]
-                       dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                placeholder="Example: renewed contract for 3 months"
-              />
-            </div>
-
-            <div
-              v-if="renew.error"
-              class="rounded-2xl border border-rose-400/60 bg-rose-50 px-4 py-3 text-[13px] text-rose-800
-                     dark:border-rose-500/60 dark:bg-rose-950/35 dark:text-rose-100"
-            >
-              {{ renew.error }}
-            </div>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button
-              type="button"
-              class="rounded-full px-4 py-2 text-[12px] font-extrabold text-slate-600 hover:bg-slate-200/70
-                     dark:text-slate-200 dark:hover:bg-slate-800 disabled:opacity-60"
-              :disabled="renew.submitting"
-              @click="closeRenewModal"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-2 text-[12px] font-extrabold text-white shadow-sm
-                     hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="renew.submitting"
-              @click="submitRenew"
-            >
-              <i class="fa-solid" :class="renew.submitting ? 'fa-circle-notch fa-spin' : 'fa-arrows-rotate'" />
-              <span>{{ renew.submitting ? 'Saving...' : 'Renew' }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Contract Logs Modal -->
-    <transition name="modal-fade">
-      <div v-if="contractsOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-2">
-        <div
-          class="max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl
-                 dark:border-slate-700 dark:bg-slate-950"
-        >
-          <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
-            <div class="flex items-start justify-between gap-2">
               <div>
-                <div class="text-[13px] font-extrabold text-slate-900 dark:text-slate-50">Contract Logs</div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                  {{ profile?.employeeId }} · {{ profile?.name || '—' }}
-                </div>
+                <div class="ui-label">Note (optional)</div>
+                <textarea v-model="renew.note" rows="3" class="ui-input w-full" placeholder="Example: renewed contract for 3 months" />
               </div>
-              <button
-                type="button"
-                class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60
-                       dark:text-slate-300 dark:hover:bg-slate-800/80"
-                @click="contractsOpen = false"
+
+              <div
+                v-if="renew.error"
+                class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                       dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
               >
-                <i class="fa-solid fa-xmark text-xs" />
+                <span class="font-semibold">Failed:</span> {{ renew.error }}
+              </div>
+            </div>
+
+            <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
+              <button type="button" class="ui-btn ui-btn-ghost" :disabled="renew.submitting" @click="closeRenewModal">
+                Cancel
+              </button>
+
+              <button type="button" class="ui-btn ui-btn-primary" :disabled="renew.submitting" @click="submitRenew">
+                <i class="fa-solid" :class="renew.submitting ? 'fa-circle-notch fa-spin' : 'fa-arrows-rotate'" />
+                {{ renew.submitting ? 'Saving…' : 'Renew' }}
               </button>
             </div>
           </div>
+        </div>
+      </transition>
 
-          <div class="px-4 py-3 space-y-3 overflow-auto">
-            <p v-if="!contractHistory.length" class="text-[13px] text-slate-500 dark:text-slate-400">
-              No contract logs yet.
-            </p>
+      <!-- Contract logs modal -->
+      <transition name="modal-fade">
+        <div v-if="contractsOpen" class="ui-modal-backdrop" @click.self="contractsOpen = false">
+          <div class="ui-modal max-h-[calc(100vh-3rem)] w-full max-w-5xl flex flex-col overflow-hidden">
+            <div class="ui-hero rounded-b-none px-4 py-3">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-[14px] font-extrabold text-ui-fg">Contract logs</div>
+                  <div class="text-[11px] text-ui-muted">{{ profile?.employeeId }} · {{ profile?.name || '—' }}</div>
+                </div>
+                <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" @click="contractsOpen = false">
+                  <i class="fa-solid fa-xmark text-xs" />
+                </button>
+              </div>
+            </div>
 
-            <div v-else class="overflow-x-auto rounded-2xl border border-slate-200/70 dark:border-slate-800/70">
-              <table class="min-w-[980px] w-full text-[12px]">
-                <thead class="bg-slate-50 text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
-                  <tr>
-                    <th class="px-3 py-2 text-left font-extrabold">#</th>
-                    <th class="px-3 py-2 text-left font-extrabold">Start</th>
-                    <th class="px-3 py-2 text-left font-extrabold">End</th>
-                    <th class="px-3 py-2 text-right font-extrabold">AL Carry</th>
-                    <th class="px-3 py-2 text-left font-extrabold">Snapshot</th>
-                    <th class="px-3 py-2 text-left font-extrabold">Note</th>
-                    <th class="px-3 py-2 text-left font-extrabold">By</th>
-                    <th class="px-3 py-2 text-left font-extrabold">At</th>
-                  </tr>
-                </thead>
+            <div class="flex-1 overflow-y-auto ui-scrollbar px-4 py-3">
+              <p v-if="!contractHistory.length" class="text-[11px] text-ui-muted">No contract logs yet.</p>
 
-                <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
-                  <tr
-                    v-for="(c, idx) in contractHistory"
-                    :key="c._id || c.createdAt || idx"
-                    :class="idx % 2 === 0 ? 'bg-white/70 dark:bg-slate-950/40' : 'bg-slate-50/70 dark:bg-slate-900/35'"
-                  >
-                    <td class="px-3 py-2 font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
-                    <td class="px-3 py-2 font-mono">{{ c.startDate || '—' }}</td>
-                    <td class="px-3 py-2 font-mono">{{ c.endDate || '—' }}</td>
-                    <td class="px-3 py-2 text-right font-mono">{{ fmt(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
+              <div v-else class="ui-table-wrap ui-scrollbar">
+                <table class="ui-table min-w-[980px]">
+                  <thead>
+                    <tr>
+                      <th class="ui-th">#</th>
+                      <th class="ui-th">Start</th>
+                      <th class="ui-th">End</th>
+                      <th class="ui-th text-right">AL Carry</th>
+                      <th class="ui-th">Snapshot</th>
+                      <th class="ui-th">Note</th>
+                      <th class="ui-th">By</th>
+                      <th class="ui-th">At</th>
+                    </tr>
+                  </thead>
 
-                    <td class="px-3 py-2">
-                      <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                        <div v-if="Array.isArray(c.balancesSnapshot)">
-                          <span
-                            v-for="b in c.balancesSnapshot"
-                            :key="String(b.leaveTypeCode) + String(c.createdAt)"
-                            class="mr-2 mb-1 inline-flex rounded-full border border-slate-300/80 bg-white/70 px-2 py-0.5 text-[10px]
-                                   dark:border-slate-700/60 dark:bg-slate-950/40"
-                          >
-                            {{ String(b.leaveTypeCode).toUpperCase() }}:
-                            U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
-                          </span>
+                  <tbody>
+                    <tr v-for="(c, idx) in contractHistory" :key="c._id || c.createdAt || idx" class="ui-tr-hover">
+                      <td class="ui-td font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
+                      <td class="ui-td font-mono">{{ c.startDate || '—' }}</td>
+                      <td class="ui-td font-mono">{{ c.endDate || '—' }}</td>
+                      <td class="ui-td text-right font-mono">{{ fmt(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
+
+                      <td class="ui-td">
+                        <div class="text-[11px] text-ui-muted">
+                          <div v-if="Array.isArray(c.balancesSnapshot)">
+                            <span
+                              v-for="b in c.balancesSnapshot"
+                              :key="String(b.leaveTypeCode) + String(c.createdAt)"
+                              class="mr-2 mb-1 inline-flex ui-badge"
+                            >
+                              {{ String(b.leaveTypeCode).toUpperCase() }}:
+                              U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
+                            </span>
+                          </div>
+                          <div v-else class="opacity-60">—</div>
                         </div>
-                        <div v-else class="text-slate-400">—</div>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td class="px-3 py-2">
-                      <div class="max-w-[260px] truncate text-[11px] text-slate-600 dark:text-slate-300">
-                        {{ c.note || '—' }}
-                      </div>
-                    </td>
+                      <td class="ui-td">
+                        <div class="max-w-[260px] truncate text-[11px] text-ui-muted">{{ c.note || '—' }}</div>
+                      </td>
 
-                    <td class="px-3 py-2 font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
-                    <td class="px-3 py-2 font-mono text-[11px]">
-                      {{ c.createdAt ? dayjs(c.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                      <td class="ui-td font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
+                      <td class="ui-td font-mono text-[11px]">
+                        {{ c.createdAt ? dayjs(c.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
+              <button type="button" class="ui-btn ui-btn-ghost" @click="contractsOpen = false">
+                Close
+              </button>
             </div>
           </div>
-
-          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button
-              type="button"
-              class="rounded-full px-4 py-2 text-[12px] font-extrabold text-slate-600 hover:bg-slate-200/70
-                     dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="contractsOpen = false"
-            >
-              Close
-            </button>
-          </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* Modal transition */
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
@@ -1212,23 +1018,5 @@ onBeforeUnmount(() => {
 .modal-fade-leave-to {
   opacity: 0;
   transform: translateY(6px) scale(0.98);
-}
-
-/* Header buttons */
-.btn-ghost {
-  @apply inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2 text-[12px] font-extrabold text-white
-         transition hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed;
-}
-.btn-soft {
-  @apply inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2 text-[12px] font-extrabold text-white
-         transition hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed;
-}
-.btn-white {
-  @apply inline-flex items-center gap-2 rounded-full bg-white/95 px-4 py-2 text-[12px] font-extrabold text-slate-900
-         transition hover:bg-white disabled:opacity-60 disabled:cursor-not-allowed;
-}
-.btn-primary {
-  @apply inline-flex items-center gap-2 rounded-full bg-emerald-400/95 px-4 py-2 text-[12px] font-extrabold text-slate-950
-         transition hover:bg-emerald-300 disabled:opacity-60 disabled:cursor-not-allowed;
 }
 </style>

@@ -325,7 +325,7 @@ onBeforeUnmount(() => {
     <UserLeaveProfile :key="profileTick" />
 
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+      <div class="rounded-t-2xl ui-hero-gradient">
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 class="text-sm font-semibold">Request Leave</h2>

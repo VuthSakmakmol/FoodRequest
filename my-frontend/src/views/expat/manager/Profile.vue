@@ -408,7 +408,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
     <!-- Header -->
-    <div class="rounded-t-2xl bg-gradient-to-r from-indigo-600 via-sky-500 to-cyan-500 px-4 py-3 text-white">
+    <div class="rounded-t-2xl ui-hero-gradient">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-[220px]">
           <p class="text-[10px] uppercase tracking-[0.35em] font-semibold text-white/90">

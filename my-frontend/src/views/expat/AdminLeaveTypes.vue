@@ -4,6 +4,8 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 
+defineOptions({ name: 'AdminLeaveTypes' })
+
 const { showToast } = useToast()
 
 /* ───────── responsive flag ───────── */
@@ -48,18 +50,14 @@ const processedTypes = computed(() => {
   const q = search.value.trim().toLowerCase()
   let result = items
   if (q) {
-    result = result.filter(t =>
-      (t.code || '').toLowerCase().includes(q) ||
-      (t.name || '').toLowerCase().includes(q)
+    result = result.filter((t) =>
+      (t.code || '').toLowerCase().includes(q) || (t.name || '').toLowerCase().includes(q)
     )
   }
 
   // active filter
-  if (activeFilter.value === 'ACTIVE') {
-    result = result.filter(t => safeBool(t.isActive))
-  } else if (activeFilter.value === 'INACTIVE') {
-    result = result.filter(t => !safeBool(t.isActive))
-  }
+  if (activeFilter.value === 'ACTIVE') result = result.filter((t) => safeBool(t.isActive))
+  if (activeFilter.value === 'INACTIVE') result = result.filter((t) => !safeBool(t.isActive))
 
   return result
 })
@@ -91,11 +89,7 @@ async function fetchLeaveTypes() {
   } catch (e) {
     console.error('fetchLeaveTypes error', e)
     loadError.value = e?.response?.data?.message || 'Unable to load leave types.'
-    showToast({
-      type: 'error',
-      title: 'Failed to load leave types',
-      message: loadError.value,
-    })
+    showToast({ type: 'error', title: 'Failed to load leave types', message: loadError.value })
   } finally {
     loadingTypes.value = false
   }
@@ -114,34 +108,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- ✅ Natural colorful background (light + dark) -->
-  <section
-    class="w-full"
-  >
-    <div
-      class="rounded-3xl border border-slate-200/70 bg-white/70 shadow-[0_18px_45px_rgba(15,23,42,0.10)]
-             backdrop-blur
-             dark:border-slate-800/70 dark:bg-slate-950/55"
-    >
-      <!-- ✅ Gradient header (more life, still professional) -->
-      <header class="relative overflow-hidden rounded-t-3xl px-4 py-3 text-white">
-        <div
-          class="absolute inset-0"
-          style="background: linear-gradient(90deg, rgba(2,132,199,1), rgba(79,70,229,1), rgba(16,185,129,1));"
-        />
-        <div
-          class="absolute inset-0 opacity-60"
-          style="background:
-            radial-gradient(900px circle at 10% 0%, rgba(255,255,255,.22), transparent 45%),
-            radial-gradient(900px circle at 100% 20%, rgba(255,255,255,.18), transparent 45%);"
-        />
+  <section class="w-full">
+    <div class="ui-card overflow-hidden !rounded-2xl">
+      <!-- ✅ Tailwind-safe header (no inline styles) -->
+      <header class="ui-hero-gradient">
         <div class="relative">
           <!-- Desktop -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="min-w-[220px]">
               <div class="flex items-center gap-2">
-                <h1 class="text-[15px] font-extrabold tracking-tight">Leave Types</h1>
-                <span class="rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-bold">
+                <h1 class="text-[15px] font-semibold tracking-tight">Leave Types</h1>
+                <span class="rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-semibold">
                   Read-only
                 </span>
               </div>
@@ -167,41 +144,29 @@ onBeforeUnmount(() => {
 
               <!-- Status segmented -->
               <div class="flex items-center gap-2">
-                <span class="text-[11px] font-bold text-white/90">Status</span>
+                <span class="text-[11px] font-semibold text-white/90">Status</span>
 
                 <div class="flex rounded-full border border-white/25 bg-white/10 p-1">
                   <button
                     type="button"
-                    class="rounded-full px-3 py-1 text-[11px] font-bold transition"
-                    :class="activeFilter === 'ALL'
-                      ? 'bg-white text-slate-900 shadow'
-                      : 'text-white/90 hover:bg-white/10'"
+                    class="rounded-full px-3 py-1 text-[11px] font-semibold transition"
+                    :class="activeFilter === 'ALL' ? 'bg-white text-slate-900 shadow' : 'text-white/90 hover:bg-white/10'"
                     @click="activeFilter = 'ALL'"
-                  >
-                    All
-                  </button>
+                  >All</button>
 
                   <button
                     type="button"
-                    class="rounded-full px-3 py-1 text-[11px] font-bold transition"
-                    :class="activeFilter === 'ACTIVE'
-                      ? 'bg-white text-slate-900 shadow'
-                      : 'text-white/90 hover:bg-white/10'"
+                    class="rounded-full px-3 py-1 text-[11px] font-semibold transition"
+                    :class="activeFilter === 'ACTIVE' ? 'bg-white text-slate-900 shadow' : 'text-white/90 hover:bg-white/10'"
                     @click="activeFilter = 'ACTIVE'"
-                  >
-                    Active
-                  </button>
+                  >Active</button>
 
                   <button
                     type="button"
-                    class="rounded-full px-3 py-1 text-[11px] font-bold transition"
-                    :class="activeFilter === 'INACTIVE'
-                      ? 'bg-white text-slate-900 shadow'
-                      : 'text-white/90 hover:bg-white/10'"
+                    class="rounded-full px-3 py-1 text-[11px] font-semibold transition"
+                    :class="activeFilter === 'INACTIVE' ? 'bg-white text-slate-900 shadow' : 'text-white/90 hover:bg-white/10'"
                     @click="activeFilter = 'INACTIVE'"
-                  >
-                    Inactive
-                  </button>
+                  >Inactive</button>
                 </div>
               </div>
 
@@ -209,7 +174,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2
-                       text-[11px] font-extrabold text-white transition hover:bg-white/15
+                       text-[11px] font-semibold text-white transition hover:bg-white/15
                        disabled:cursor-not-allowed disabled:opacity-60"
                 :disabled="loadingTypes"
                 @click="fetchLeaveTypes()"
@@ -223,12 +188,12 @@ onBeforeUnmount(() => {
           <!-- Mobile -->
           <div v-else class="space-y-2">
             <div>
-              <p class="text-[10px] font-extrabold uppercase tracking-[0.25em] text-white/75">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.25em] text-white/75">
                 Expat Holiday
               </p>
               <div class="mt-0.5 flex items-center gap-2">
-                <h1 class="text-[15px] font-extrabold tracking-tight">Leave Types</h1>
-                <span class="rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-bold">
+                <h1 class="text-[15px] font-semibold tracking-tight">Leave Types</h1>
+                <span class="rounded-full border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-semibold">
                   Read-only
                 </span>
               </div>
@@ -251,45 +216,35 @@ onBeforeUnmount(() => {
 
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
-                  <span class="text-[11px] font-bold text-white/90">Status</span>
+                  <span class="text-[11px] font-semibold text-white/90">Status</span>
                   <div class="flex rounded-full border border-white/25 bg-white/10 p-1">
                     <button
                       type="button"
-                      class="rounded-full px-3 py-1 text-[11px] font-bold transition"
-                      :class="activeFilter === 'ALL'
-                        ? 'bg-white text-slate-900 shadow'
-                        : 'text-white/90 hover:bg-white/10'"
+                      class="rounded-full px-3 py-1 text-[11px] font-semibold transition"
+                      :class="activeFilter === 'ALL' ? 'bg-white text-slate-900 shadow' : 'text-white/90 hover:bg-white/10'"
                       @click="activeFilter = 'ALL'"
-                    >
-                      All
-                    </button>
+                    >All</button>
+
                     <button
                       type="button"
-                      class="rounded-full px-3 py-1 text-[11px] font-bold transition"
-                      :class="activeFilter === 'ACTIVE'
-                        ? 'bg-white text-slate-900 shadow'
-                        : 'text-white/90 hover:bg-white/10'"
+                      class="rounded-full px-3 py-1 text-[11px] font-semibold transition"
+                      :class="activeFilter === 'ACTIVE' ? 'bg-white text-slate-900 shadow' : 'text-white/90 hover:bg-white/10'"
                       @click="activeFilter = 'ACTIVE'"
-                    >
-                      Active
-                    </button>
+                    >Active</button>
+
                     <button
                       type="button"
-                      class="rounded-full px-3 py-1 text-[11px] font-bold transition"
-                      :class="activeFilter === 'INACTIVE'
-                        ? 'bg-white text-slate-900 shadow'
-                        : 'text-white/90 hover:bg-white/10'"
+                      class="rounded-full px-3 py-1 text-[11px] font-semibold transition"
+                      :class="activeFilter === 'INACTIVE' ? 'bg-white text-slate-900 shadow' : 'text-white/90 hover:bg-white/10'"
                       @click="activeFilter = 'INACTIVE'"
-                    >
-                      Inactive
-                    </button>
+                    >Inactive</button>
                   </div>
                 </div>
 
                 <button
                   type="button"
                   class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-4 py-2
-                         text-[11px] font-extrabold text-white transition hover:bg-white/15
+                         text-[11px] font-semibold text-white transition hover:bg-white/15
                          disabled:cursor-not-allowed disabled:opacity-60"
                   :disabled="loadingTypes"
                   @click="fetchLeaveTypes()"
@@ -305,7 +260,6 @@ onBeforeUnmount(() => {
 
       <!-- Body -->
       <div class="px-2 pb-3 pt-3 sm:px-4">
-        <!-- Error banner -->
         <div
           v-if="loadError"
           class="mb-3 rounded-2xl border border-rose-400/60 bg-rose-50 px-3 py-2 text-[12px] text-rose-800
@@ -314,15 +268,13 @@ onBeforeUnmount(() => {
           {{ loadError }}
         </div>
 
-        <!-- Loading skeleton -->
         <div v-if="loadingTypes" class="space-y-2">
           <div class="h-10 w-full animate-pulse rounded-2xl bg-slate-200/80 dark:bg-slate-800/60"></div>
           <div v-for="i in 5" :key="'sk-' + i" class="h-14 w-full animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-800/50"></div>
         </div>
 
-        <!-- Content -->
         <div v-else class="space-y-3">
-          <!-- MOBILE cards -->
+          <!-- Mobile cards -->
           <div v-if="isMobile" class="space-y-2">
             <p v-if="!pagedTypes.length" class="py-8 text-center text-[12px] text-slate-500 dark:text-slate-400">
               No leave types found.
@@ -338,12 +290,12 @@ onBeforeUnmount(() => {
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-extrabold text-white dark:bg-white dark:text-slate-900">
+                    <span class="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-white dark:text-slate-900">
                       {{ t.code }}
                     </span>
 
                     <span
-                      class="rounded-full px-2 py-0.5 text-[10px] font-extrabold"
+                      class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                       :class="(t.isActive ?? true)
                         ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
                         : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
@@ -352,7 +304,7 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
 
-                  <div class="mt-1 text-[14px] font-extrabold text-slate-900 dark:text-slate-50">
+                  <div class="mt-1 text-[14px] font-semibold text-slate-900 dark:text-slate-50">
                     {{ t.name || '—' }}
                   </div>
                   <div class="mt-0.5 text-[12px] text-slate-600 dark:text-slate-300">
@@ -363,19 +315,19 @@ onBeforeUnmount(() => {
                 <div class="text-right text-[12px] text-slate-600 dark:text-slate-300">
                   <div>
                     Entitlement:
-                    <span class="font-extrabold text-slate-900 dark:text-slate-50">
+                    <span class="font-semibold text-slate-900 dark:text-slate-50">
                       {{ Number(t.yearlyEntitlement || 0).toLocaleString() }} days
                     </span>
                   </div>
                   <div class="mt-0.5">
                     Order:
-                    <span class="font-extrabold text-slate-900 dark:text-slate-50">
+                    <span class="font-semibold text-slate-900 dark:text-slate-50">
                       {{ Number(t.order ?? 0) }}
                     </span>
                   </div>
                   <div class="mt-1">
                     <span
-                      class="rounded-full px-2 py-0.5 text-[10px] font-extrabold"
+                      class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                       :class="t.requiresBalance
                         ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
                         : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
@@ -388,11 +340,13 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- DESKTOP table -->
-          <div v-else class="overflow-x-auto rounded-3xl border border-slate-200/70 bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/55">
-            <!-- ✅ table header strip -->
+          <!-- Desktop table -->
+          <div
+            v-else
+            class="overflow-x-auto rounded-3xl border border-slate-200/70 bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/55"
+          >
             <div class="border-b border-slate-200/70 px-3 py-2 dark:border-slate-800/70">
-              <div class="flex items-center gap-2 text-[12px] font-extrabold text-slate-700 dark:text-slate-200">
+              <div class="flex items-center gap-2 text-[12px] font-semibold text-slate-700 dark:text-slate-200">
                 <span class="h-2 w-2 rounded-full bg-sky-500"></span>
                 <span class="h-2 w-2 rounded-full bg-indigo-500"></span>
                 <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
@@ -409,38 +363,34 @@ onBeforeUnmount(() => {
                 <col style="width: 120px" />
               </colgroup>
 
-              <!-- ✅ colorful head + clear columns -->
               <thead class="text-[11px] uppercase tracking-wide text-white">
                 <tr class="bg-gradient-to-r from-sky-600 via-indigo-600 to-emerald-600">
-                  <th class="px-3 py-3 text-left font-extrabold">Code</th>
-                  <th class="px-3 py-3 text-left font-extrabold">Name</th>
-                  <th class="px-3 py-3 text-left font-extrabold">Requires Balance</th>
-                  <th class="px-3 py-3 text-right font-extrabold">Yearly Entitlement</th>
-                  <th class="px-3 py-3 text-center font-extrabold">Active</th>
+                  <th class="px-3 py-3 text-left font-semibold">Code</th>
+                  <th class="px-3 py-3 text-left font-semibold">Name</th>
+                  <th class="px-3 py-3 text-left font-semibold">Requires Balance</th>
+                  <th class="px-3 py-3 text-right font-semibold">Yearly Entitlement</th>
+                  <th class="px-3 py-3 text-center font-semibold">Active</th>
                 </tr>
               </thead>
 
-              <!-- ✅ zebra rows + row split (easy to look) -->
               <tbody class="divide-y divide-slate-200/70 dark:divide-slate-800/70">
                 <tr
                   v-for="(t, idx) in pagedTypes"
                   :key="t._id || t.code"
                   class="transition"
                   :class="[
-                    idx % 2 === 0
-                      ? 'bg-white/80 dark:bg-slate-950/25'
-                      : 'bg-sky-50/60 dark:bg-slate-900/40',
+                    idx % 2 === 0 ? 'bg-white/80 dark:bg-slate-950/25' : 'bg-sky-50/60 dark:bg-slate-900/40',
                     'hover:bg-emerald-50/70 dark:hover:bg-emerald-900/20'
                   ]"
                 >
                   <td class="px-3 py-3">
-                    <span class="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-extrabold text-white dark:bg-white dark:text-slate-900">
+                    <span class="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold text-white dark:bg-white dark:text-slate-900">
                       {{ t.code }}
                     </span>
                   </td>
 
                   <td class="px-3 py-3">
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50">
+                    <div class="font-semibold text-slate-900 dark:text-slate-50">
                       {{ t.name || '—' }}
                     </div>
                     <div class="mt-0.5 text-[12px] text-slate-600 dark:text-slate-300">
@@ -450,7 +400,7 @@ onBeforeUnmount(() => {
 
                   <td class="px-3 py-3">
                     <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
                       :class="t.requiresBalance
                         ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200'
                         : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
@@ -459,13 +409,13 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <td class="px-3 py-3 text-right tabular-nums font-extrabold text-slate-900 dark:text-slate-50">
+                  <td class="px-3 py-3 text-right tabular-nums font-semibold text-slate-900 dark:text-slate-50">
                     {{ Number(t.yearlyEntitlement || 0).toLocaleString() }}
                   </td>
 
                   <td class="px-3 py-3 text-center">
                     <span
-                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-extrabold"
+                      class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
                       :class="(t.isActive ?? true)
                         ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200'
                         : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'"
@@ -488,7 +438,7 @@ onBeforeUnmount(() => {
           <div class="mt-2 rounded-3xl border border-slate-200/70 bg-white/75 px-3 py-3 dark:border-slate-800/70 dark:bg-slate-950/55">
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
-                <span class="font-extrabold">Rows per page</span>
+                <span class="font-semibold">Rows per page</span>
                 <select
                   v-model="perPage"
                   class="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold
@@ -501,51 +451,43 @@ onBeforeUnmount(() => {
               <div class="flex items-center justify-end gap-1">
                 <button
                   type="button"
-                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-800
                          hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
                          dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                   :disabled="page <= 1"
                   @click="page = 1"
-                >
-                  «
-                </button>
+                >«</button>
 
                 <button
                   type="button"
-                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-800
                          hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
                          dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                   :disabled="page <= 1"
                   @click="page = Math.max(1, page - 1)"
-                >
-                  Prev
-                </button>
+                >Prev</button>
 
-                <span class="px-2 text-[12px] font-extrabold text-slate-600 dark:text-slate-300">
+                <span class="px-2 text-[12px] font-semibold text-slate-600 dark:text-slate-300">
                   Page {{ page }} / {{ pageCount }}
                 </span>
 
                 <button
                   type="button"
-                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-800
                          hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
                          dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                   :disabled="page >= pageCount"
                   @click="page = Math.min(pageCount, page + 1)"
-                >
-                  Next
-                </button>
+                >Next</button>
 
                 <button
                   type="button"
-                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-extrabold text-slate-800
+                  class="rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-800
                          hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-40
                          dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                   :disabled="page >= pageCount"
                   @click="page = pageCount"
-                >
-                  »
-                </button>
+                >»</button>
               </div>
             </div>
 

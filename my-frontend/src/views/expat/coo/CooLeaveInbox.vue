@@ -368,7 +368,7 @@ onBeforeUnmount(() => {
   <div class="px-1 py-1 sm:px-3">
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <!-- Header -->
-      <div class="rounded-t-2xl bg-gradient-to-r from-orange-600 via-amber-500 to-yellow-500 px-4 py-3 text-white">
+      <div class="rounded-t-2xl ui-hero-gradient">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-col gap-1 min-w-[220px]">

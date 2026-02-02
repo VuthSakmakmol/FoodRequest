@@ -160,6 +160,27 @@
     @apply w-full max-w-none px-0;
   }
 
+  /* ✅ NEW: Reusable gradient header */
+  .ui-hero-gradient {
+    @apply rounded-none border-x-0 border-t-0 border
+           border-slate-200 dark:border-slate-800
+           bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500
+           px-4 py-3 text-white;
+  }
+
+  /* ✅ NEW: Reusable tab pill styles */
+  .ui-tabpill {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] font-extrabold
+           transition border shadow-sm;
+    border-color: rgba(255, 255, 255, 0.28);
+  }
+  .ui-tabpill-active { @apply bg-white text-emerald-700; }
+  .ui-tabpill-inactive {
+    @apply text-white;
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .ui-tabpill-inactive:hover { background: rgba(255, 255, 255, 0.18); }
+
   /* Hero/header */
   .ui-hero {
     @apply relative overflow-hidden border;
@@ -180,7 +201,6 @@
 
   .ui-hero-kicker {
     @apply text-[10px] font-extrabold uppercase tracking-[0.28em];
-    color: rgb(var(--ui-muted) / 0.95);
   }
   .ui-hero-title {
     @apply text-[18px] sm:text-[22px] font-extrabold tracking-tight;
@@ -188,7 +208,7 @@
   }
   .ui-hero-subtitle {
     @apply mt-1 text-[12px] sm:text-[13px];
-    color: rgb(var(--ui-muted) / 0.98);
+    
   }
 
   /* Card */
@@ -334,14 +354,21 @@
   .ui-badge {
     @apply inline-flex items-center gap-1.5 border px-2 py-0.5 text-[10px] font-extrabold;
     border-radius: 999px;
-    border-color: rgb(var(--ui-border) / 0.75);
-    background: rgb(var(--ui-border) / 0.16);
-    color: rgb(var(--ui-fg) / 0.82);
+
+    border-color: rgb(var(--ui-primary) / 0.75);
+    background: rgb(var(--ui-primary) / 0.22);
+    color: rgb(var(--ui-primary));
   }
+
+
   .ui-badge-success { border-color: rgb(var(--ui-success) / 0.35); background: rgb(var(--ui-success) / 0.12); color: rgb(var(--ui-success)); }
   .ui-badge-warning { border-color: rgb(var(--ui-warning) / 0.35); background: rgb(var(--ui-warning) / 0.12); color: rgb(var(--ui-warning)); }
   .ui-badge-danger  { border-color: rgb(var(--ui-danger)  / 0.35); background: rgb(var(--ui-danger)  / 0.12); color: rgb(var(--ui-danger)); }
-  .ui-badge-info    { border-color: rgb(var(--ui-primary) / 0.35); background: rgb(var(--ui-primary) / 0.12); color: rgb(var(--ui-primary)); }
+  .ui-badge-info {
+    border-color: rgb(var(--ui-primary) / 0.75);
+    background: #ffffff; /* white background */
+    color: rgb(var(--ui-primary));
+  }
   .ui-badge-indigo  { border-color: rgb(var(--ui-accent)  / 0.35); background: rgb(var(--ui-accent)  / 0.12); color: rgb(var(--ui-accent)); }
 
   /* Table */
@@ -369,8 +396,6 @@
     border-bottom: 1px solid rgb(var(--ui-border) / 0.55);
   }
 
-
-
   .ui-tr-hover:hover { background: rgb(var(--ui-border) / 0.12); }
 
   /* Pagination */
@@ -391,7 +416,7 @@
   .ui-skeleton { @apply animate-pulse rounded-xl; background: rgb(var(--ui-border) / 0.22); }
   .ui-divider { @apply border-t; border-color: rgb(var(--ui-border) / 0.65); }
 
-  /* Optional: Modal base (helps keep dialogs consistent) */
+  /* Optional: Modal base */
   .ui-modal-backdrop {
     @apply fixed inset-0 z-[60] flex items-center justify-center p-4;
     background: rgba(2, 6, 23, 0.45);

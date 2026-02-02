@@ -57,7 +57,7 @@ function compactBalances(balances) {
     const b = m.get(k)
     if (!b) continue
     const used = num(b.used)
-    const remaining = num(b.remaining) // backend truth (can be negative)
+    const remaining = num(b.remaining)
     out.push({ k, used, remaining, pair: `${used}/${remaining}` })
   }
   return out
@@ -486,76 +486,90 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
+  if (typeof document === 'undefined') return
+  document.body.classList.remove('overflow-hidden')
 })
 </script>
 
 <template>
   <!-- ✅ Full screen edge-to-edge shell -->
   <div class="ui-page min-h-screen w-full">
-    <!-- ✅ Edge container -->
     <div class="w-full min-h-screen flex flex-col">
-
-      <!-- ✅ Header stays top, FULL width, no rounded -->
-      <div class="ui-hero rounded-none border-x-0 border-t-0 px-4 py-3">
+      <!-- ✅ FIX: Use colorful header everywhere -->
+      <div class="ui-hero-gradient rounded-t-2xl border-x-0 border-t-0">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="min-w-[240px]">
-            <div class="ui-hero-kicker">Expat Leave</div>
-            <div class="ui-hero-title">Expat Profiles</div>
-            <div class="ui-hero-subtitle">Profiles grouped by manager.</div>
+            <div class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/85">Expat Leave</div>
+            <div class="text-[18px] sm:text-[22px] font-extrabold tracking-tight">Expat Profiles</div>
+            <div class="text-[12px] sm:text-[13px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge">Employees: <b>{{ filteredCount }}</b></span>
-              <span class="ui-badge ui-badge-indigo">Managers: <b>{{ managerCount }}</b></span>
-              <span class="ui-badge">Page: <b>{{ page }}/{{ totalPages }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
             </div>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
             <div class="min-w-[260px] max-w-sm">
-              <div class="ui-label">Search</div>
-              <div class="relative">
-                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
+              <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Search</div>
+              <div class="relative mt-1">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"></i>
                 <input
                   v-model="q"
                   type="text"
                   placeholder="Employee / manager / department..."
-                  class="ui-input pl-8"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none
+                         focus:ring-2 focus:ring-white/25"
                 />
               </div>
             </div>
 
-            <div class="flex items-center gap-2">
-              <label class="inline-flex items-center gap-2 ui-badge">
+            <div class="flex items-center gap-2 pt-5">
+              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
                 <input
                   v-model="includeInactive"
                   type="checkbox"
-                  class="h-4 w-4 rounded border-ui-border/70 bg-transparent"
+                  class="h-4 w-4 rounded border-white/30 bg-transparent"
                 />
                 <span>Include inactive</span>
               </label>
             </div>
 
             <div class="min-w-[140px]">
-              <div class="ui-label">Per page</div>
-              <select v-model.number="pageSize" class="ui-select">
+              <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Per page</div>
+              <select v-model.number="pageSize" class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none">
                 <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
               </select>
             </div>
 
             <div class="flex items-center gap-2">
-              <button type="button" class="ui-btn ui-btn-soft" @click="fetchGroups" :disabled="loading" title="Refresh">
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
+                @click="fetchGroups"
+                :disabled="loading"
+                title="Refresh"
+              >
                 <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
                 Refresh
               </button>
 
-              <button type="button" class="ui-btn ui-btn-primary" @click="openCreate">
+              <button
+                type="button"
+                class="rounded-xl bg-white px-3 py-2 text-[12px] font-extrabold text-emerald-700 hover:bg-emerald-50"
+                @click="openCreate"
+              >
                 <i class="fa-solid fa-plus text-[11px]"></i>
                 New
               </button>
 
-              <button type="button" class="ui-btn ui-btn-ghost" @click="clearFilters" title="Clear filters">
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
+                @click="clearFilters"
+                title="Clear filters"
+              >
                 <i class="fa-solid fa-broom text-[11px]"></i>
                 Clear
               </button>
@@ -566,43 +580,58 @@ onBeforeUnmount(() => {
         <!-- Mobile -->
         <div v-else class="space-y-2">
           <div>
-            <div class="ui-hero-kicker">Expat Leave</div>
-            <div class="ui-hero-title">Expat Profiles</div>
-            <div class="ui-hero-subtitle">Profiles grouped by manager.</div>
+            <div class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/85">Expat Leave</div>
+            <div class="text-[18px] font-extrabold tracking-tight">Expat Profiles</div>
+            <div class="text-[12px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge">Employees: <b>{{ filteredCount }}</b></span>
-              <span class="ui-badge ui-badge-indigo">Managers: <b>{{ managerCount }}</b></span>
-              <span class="ui-badge">Page: <b>{{ page }}/{{ totalPages }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Page: <b>{{ page }}/{{ totalPages }}</b></span>
             </div>
           </div>
 
           <div class="space-y-2">
             <div>
-              <div class="ui-label">Search</div>
-              <div class="relative">
-                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
-                <input v-model="q" type="text" placeholder="Employee / manager / dept..." class="ui-input pl-8" />
+              <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Search</div>
+              <div class="relative mt-1">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"></i>
+                <input
+                  v-model="q"
+                  type="text"
+                  placeholder="Employee / manager / dept..."
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none
+                         focus:ring-2 focus:ring-white/25"
+                />
               </div>
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <label class="inline-flex items-center gap-2 ui-badge">
-                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-ui-border/70 bg-transparent" />
+              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
+                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
 
               <div class="flex items-center gap-2">
-                <select v-model.number="pageSize" class="ui-select !w-auto">
+                <select v-model.number="pageSize" class="w-auto rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none">
                   <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}/page</option>
                 </select>
 
-                <button type="button" class="ui-btn ui-btn-soft" @click="fetchGroups" :disabled="loading">
+                <button
+                  type="button"
+                  class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
+                  @click="fetchGroups"
+                  :disabled="loading"
+                >
                   <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
                   Refresh
                 </button>
 
-                <button type="button" class="ui-btn ui-btn-primary" @click="openCreate">
+                <button
+                  type="button"
+                  class="rounded-xl bg-white px-3 py-2 text-[12px] font-extrabold text-emerald-700 hover:bg-emerald-50"
+                  @click="openCreate"
+                >
                   <i class="fa-solid fa-plus text-[11px]"></i>
                   New
                 </button>
@@ -610,7 +639,11 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex justify-end">
-              <button type="button" class="ui-btn ui-btn-ghost" @click="clearFilters">
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
+                @click="clearFilters"
+              >
                 <i class="fa-solid fa-broom text-[11px]"></i>
                 Clear
               </button>
@@ -619,20 +652,30 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ✅ CONTENT AREA: fills remaining screen + scrolls -->
+      <!-- ✅ CONTENT AREA -->
       <div class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-3">
         <!-- Error -->
-        <div v-if="error" class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100">
+        <div
+          v-if="error"
+          class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+        >
           <span class="font-semibold">Failed:</span> {{ error }}
         </div>
 
         <!-- Loading -->
-        <div v-if="loading && !pagedManagers.length" class="mt-2 ui-card !rounded-2xl border border-ui-border/70 bg-ui-bg-2/60 px-3 py-2 text-[11px] text-ui-muted">
+        <div
+          v-if="loading && !pagedManagers.length"
+          class="mt-2 ui-card !rounded-2xl border border-ui-border/70 bg-ui-bg-2/60 px-3 py-2 text-[11px] text-ui-muted"
+        >
           Loading profiles...
         </div>
 
         <!-- Pagination bar -->
-        <div v-if="!loading && totalRows" class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2">
+        <div
+          v-if="!loading && totalRows"
+          class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
+        >
           <div>
             Showing <span class="font-semibold text-ui-fg">{{ pageFrom }}</span>–
             <span class="font-semibold text-ui-fg">{{ pageTo }}</span>
@@ -668,9 +711,7 @@ onBeforeUnmount(() => {
                       ({{ safeTxt(g.manager?.employeeId) }})
                     </span>
                   </div>
-                  <div class="truncate text-[11px] text-ui-muted">
-                    {{ safeTxt(g.manager?.department) }}
-                  </div>
+                  <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
 
                 <div class="ui-badge">{{ g.employees?.length || 0 }}</div>
@@ -767,16 +808,15 @@ onBeforeUnmount(() => {
 
             <div class="ui-table-wrap ui-scrollbar">
               <table class="ui-table">
-                <!-- ✅ Control widths: bigger balances, smaller status/actions -->
                 <colgroup>
-                  <col style="width: 20%" /> <!-- Employee -->
-                  <col style="width: 10%" /> <!-- Department -->
-                  <col style="width: 10%" /> <!-- Join -->
-                  <col style="width: 10%" /> <!-- Contract -->
-                  <col style="width: 10%" /> <!-- Mode -->
-                  <col style="width: 32%" /> <!-- ✅ Balances bigger -->
-                  <col style="width: 7%" />  <!-- ✅ Status smaller -->
-                  <col style="width: 7%" />  <!-- ✅ Actions smaller -->
+                  <col style="width: 20%" />
+                  <col style="width: 17%" />
+                  <col style="width: 10%" />
+                  <col style="width: 10%" />
+                  <col style="width: 13%" />
+                  <col style="width: 40%" />
+                  <col style="width: 7%" />
+                  <col style="width: 10%" />
                 </colgroup>
 
                 <thead>
@@ -799,7 +839,6 @@ onBeforeUnmount(() => {
                     class="ui-tr-hover cursor-pointer"
                     @click="goProfile(e.employeeId)"
                   >
-                    <!-- Employee -->
                     <td class="ui-td">
                       <div class="flex flex-col items-center text-center gap-0.5">
                         <div class="font-mono text-[11px] text-ui-fg">{{ safeTxt(e.employeeId) }}</div>
@@ -808,21 +847,18 @@ onBeforeUnmount(() => {
                       </div>
                     </td>
 
-                    <!-- Department -->
                     <td class="ui-td">
                       <div class="flex items-center justify-center text-center">
                         {{ safeTxt(e.department) }}
                       </div>
                     </td>
 
-                    <!-- Join -->
                     <td class="ui-td whitespace-nowrap">
                       <div class="flex items-center justify-center">
                         {{ safeTxt(e.joinDate) }}
                       </div>
                     </td>
 
-                    <!-- Contract -->
                     <td class="ui-td whitespace-nowrap">
                       <div class="flex flex-col items-center text-center">
                         <div class="font-extrabold">{{ safeTxt(e.contractDate) }}</div>
@@ -830,14 +866,12 @@ onBeforeUnmount(() => {
                       </div>
                     </td>
 
-                    <!-- Mode -->
                     <td class="ui-td">
                       <div class="flex items-center justify-center">
                         <span :class="modeChipClasses(e.approvalMode)">{{ modeLabel(e.approvalMode) }}</span>
                       </div>
                     </td>
 
-                    <!-- ✅ Balances: force 2 rows (3 chips per row) -->
                     <td class="ui-td">
                       <div class="grid grid-cols-5 gap-2 justify-items-center">
                         <span
@@ -858,7 +892,6 @@ onBeforeUnmount(() => {
                       </div>
                     </td>
 
-                    <!-- ✅ Status smaller -->
                     <td class="ui-td !px-2">
                       <div class="flex items-center justify-center">
                         <span :class="statusChipClasses(!!e.isActive)">
@@ -867,7 +900,6 @@ onBeforeUnmount(() => {
                       </div>
                     </td>
 
-                    <!-- ✅ Actions smaller -->
                     <td class="ui-td !px-2" @click.stop>
                       <div class="flex items-center justify-center">
                         <button type="button" class="ui-btn ui-btn-primary ui-btn-xs" @click="goEdit(e.employeeId)">
@@ -884,7 +916,10 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Bottom pagination repeat -->
-        <div v-if="!loading && totalRows" class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2">
+        <div
+          v-if="!loading && totalRows"
+          class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
+        >
           <div>
             Showing <span class="font-semibold text-ui-fg">{{ pageFrom }}</span>–
             <span class="font-semibold text-ui-fg">{{ pageTo }}</span>
@@ -903,11 +938,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ✅ Standard Create modal (unchanged) -->
+      <!-- ✅ Create modal (kept from your file) -->
       <transition name="modal-fade">
         <div v-if="createOpen" class="ui-modal-backdrop" @click.self="closeCreate">
           <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
-            <!-- Header -->
+            <!-- Header (keep soft hero inside modal) -->
             <div class="ui-hero rounded-b-none px-4 py-3">
               <div class="flex items-start justify-between gap-2">
                 <div>
@@ -1059,11 +1094,19 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div v-if="createError" class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100">
+              <div
+                v-if="createError"
+                class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                       dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+              >
                 <span class="font-semibold">Failed:</span> {{ createError }}
               </div>
 
-              <div v-if="approversError && !createError" class="ui-card !rounded-2xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[11px] text-indigo-700 dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200">
+              <div
+                v-if="approversError && !createError"
+                class="ui-card !rounded-2xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[11px] text-indigo-700
+                       dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200"
+              >
                 {{ approversError }}
               </div>
             </div>
@@ -1088,7 +1131,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </transition>
-
     </div>
   </div>
 </template>

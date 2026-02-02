@@ -2,11 +2,10 @@
   ✅ Fixed mode: GM_COO
   ✅ Same UI + behavior as AdminManagerAndGmReport.vue
   ✅ Vector Print-to-PDF (iframe print)
-  ✅ Small text + clean borders + forced logo size
   ✅ Signature resolver (numeric => employees first, loginId => users first) → no 404 spam
   ✅ FIX: signatures show even when content endpoint requires auth (Blob URLs)
   ✅ UPDATE: Removed Date From/To filter
-  ✅ UPDATE: Keep As of filter
+  ✅ UPDATE: Keep As of filter (Tailwind)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -18,6 +17,18 @@ import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 defineOptions({ name: 'AdminGmAndCooReport' })
 
 const { showToast } = useToast()
+
+/* ───────── Tailwind mini UI helpers ───────── */
+const ui = {
+  input:
+    'w-full rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] outline-none ' +
+    'placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200 ' +
+    'dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100 dark:placeholder:text-slate-500 ' +
+    'dark:focus:border-slate-600 dark:focus:ring-slate-800/70',
+  th: 'px-2.5 py-2 text-left text-[11px] font-extrabold whitespace-nowrap',
+  td: 'px-2.5 py-2.5 align-middle',
+  table: 'min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100 table-fixed',
+}
 
 /* ───────── constants ───────── */
 const MODE = 'GM_COO'
@@ -34,7 +45,7 @@ function updateIsMobile() {
 const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
-const managerLoginId = ref('') // kept to match UI; optional
+const managerLoginId = ref('') // optional
 const asOf = ref(dayjs().format('YYYY-MM-DD')) // ✅ keep this
 
 /* ───────── State ───────── */
@@ -89,7 +100,7 @@ async function fetchReport(silent = false) {
       q: safeText(q.value) || undefined,
       includeInactive: includeInactive.value ? '1' : undefined,
       department: safeText(department.value) || undefined,
-      managerLoginId: safeText(managerLoginId.value) || undefined, // optional if backend supports
+      managerLoginId: safeText(managerLoginId.value) || undefined,
       asOf: safeText(asOf.value) || undefined,
       limit: 500,
     }
@@ -342,13 +353,9 @@ async function openPreview(emp) {
 
   try {
     const employeeId = safeText(emp?.employeeId)
-
-    // ✅ No date range filter. (Optionally send asOf if backend supports.)
     const params = { asOf: safeText(asOf.value) || undefined }
-
     const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`, { params })
     previewData.value = res?.data || null
-
     await loadSignaturesForPreview()
   } catch (e) {
     console.error('openPreview error', e)
@@ -614,23 +621,22 @@ onBeforeUnmount(() => {
       <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-12">
         <div class="md:col-span-3">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search</label>
-          <input v-model="q" type="text" placeholder="Employee ID, name, dept..." class="input-mini" />
+          <input v-model="q" type="text" placeholder="Employee ID, name, dept..." :class="ui.input" />
         </div>
 
-        <!-- ✅ Date From/To removed -->
-        <!-- <div class="md:col-span-2">
+        <div class="md:col-span-2">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
-          <input v-model="asOf" type="date" class="input-mini" />
-        </div> -->
+          <input v-model="asOf" type="date" :class="ui.input" />
+        </div>
 
         <div class="md:col-span-3">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
-          <input v-model="department" type="text" placeholder="HR, IT..." class="input-mini" />
+          <input v-model="department" type="text" placeholder="HR, IT..." :class="ui.input" />
         </div>
 
         <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Manager Login ID</label>
-          <input v-model="managerLoginId" type="text" placeholder="(optional filter)" class="input-mini" />
+          <input v-model="managerLoginId" type="text" placeholder="(optional filter)" :class="ui.input" />
         </div>
 
         <div class="md:col-span-12 flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -668,7 +674,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="overflow-x-auto">
-        <table class="table-fixed min-w-full border-collapse text-[12px] text-slate-700 dark:text-slate-100">
+        <table :class="ui.table">
           <colgroup>
             <col style="width: 120px;" />
             <col style="width: 240px;" />
@@ -685,14 +691,14 @@ onBeforeUnmount(() => {
                    dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
           >
             <tr>
-              <th class="table-th">Employee ID</th>
-              <th class="table-th">Name</th>
-              <th class="table-th">Department</th>
-              <th class="table-th">Join Date</th>
-              <th class="table-th">Contract</th>
-              <th class="table-th">GM</th>
-              <th class="table-th">COO</th>
-              <th class="table-th text-right">Action</th>
+              <th :class="ui.th">Employee ID</th>
+              <th :class="ui.th">Name</th>
+              <th :class="ui.th">Department</th>
+              <th :class="ui.th">Join Date</th>
+              <th :class="ui.th">Contract</th>
+              <th :class="ui.th">GM</th>
+              <th :class="ui.th">COO</th>
+              <th :class="[ui.th, 'text-right']">Action</th>
             </tr>
           </thead>
 
@@ -702,8 +708,8 @@ onBeforeUnmount(() => {
               :key="emp.employeeId"
               class="border-b border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70"
             >
-              <td class="table-td font-mono">{{ emp.employeeId || '—' }}</td>
-              <td class="table-td truncate">
+              <td :class="ui.td" class="font-mono">{{ emp.employeeId || '—' }}</td>
+              <td :class="ui.td" class="truncate">
                 <span class="font-medium text-slate-900 dark:text-slate-50">{{ emp.name || '—' }}</span>
                 <span
                   v-if="emp.isActive === false"
@@ -712,12 +718,12 @@ onBeforeUnmount(() => {
                   Inactive
                 </span>
               </td>
-              <td class="table-td truncate">{{ emp.department || '—' }}</td>
-              <td class="table-td whitespace-nowrap font-mono">{{ fmtYMD(emp.joinDate) || '—' }}</td>
-              <td class="table-td whitespace-nowrap font-mono">{{ fmtYMD(emp.contractDate) || '—' }}</td>
-              <td class="table-td font-mono text-[11px]">{{ emp.gmLoginId || '—' }}</td>
-              <td class="table-td font-mono text-[11px]">{{ emp.cooLoginId || '—' }}</td>
-              <td class="table-td text-right">
+              <td :class="ui.td" class="truncate">{{ emp.department || '—' }}</td>
+              <td :class="ui.td" class="whitespace-nowrap font-mono">{{ fmtYMD(emp.joinDate) || '—' }}</td>
+              <td :class="ui.td" class="whitespace-nowrap font-mono">{{ fmtYMD(emp.contractDate) || '—' }}</td>
+              <td :class="ui.td" class="font-mono text-[11px]">{{ emp.gmLoginId || '—' }}</td>
+              <td :class="ui.td" class="font-mono text-[11px]">{{ emp.cooLoginId || '—' }}</td>
+              <td :class="ui.td" class="text-right">
                 <button
                   type="button"
                   class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800
@@ -967,36 +973,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.input-mini {
-  width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid rgb(203 213 225);
-  background: white;
-  padding: 6px 10px;
-  font-size: 12px;
-  outline: none;
-}
-:global(.dark) .input-mini {
-  border-color: rgb(51 65 85);
-  background: rgb(2 6 23 / 0.6);
-  color: rgb(226 232 240);
-}
-
-.table-th {
-  padding: 8px 10px;
-  text-align: left;
-  font-size: 11px;
-  font-weight: 800;
-  white-space: nowrap;
-}
-.table-td {
-  padding: 10px 10px;
-  vertical-align: middle;
-}
-.table-fixed {
-  table-layout: fixed;
-}
-
+/* printable sheet */
 .print-sheet {
   width: 210mm;
   min-height: 297mm;
@@ -1066,6 +1043,7 @@ onBeforeUnmount(() => {
   align-items: center;
 }
 
+/* table */
 .sheet-table {
   width: 100%;
   border-collapse: collapse;
@@ -1100,6 +1078,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+/* signature */
 .sig-cell {
   display: flex;
   flex-direction: column;

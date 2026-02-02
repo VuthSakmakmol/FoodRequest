@@ -340,7 +340,7 @@ onBeforeUnmount(() => {
   <div class="px-1 py-1 sm:px-3">
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
       <!-- Header -->
-      <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+      <div class="rounded-t-2xl ui-hero-gradient">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-col gap-1 min-w-[240px]">
@@ -673,7 +673,7 @@ onBeforeUnmount(() => {
                 <th class="table-th">Requested at</th>
                 <th class="table-th">Employee</th>
                 <th class="table-th">Type</th>
-                <th class="table-th">Date range</th>
+                <th class="table-th">Leave Date</th>
                 <th class="table-th text-right">Days</th>
                 <th class="table-th">Request reason</th>
                 <th class="table-th text-center">Status</th>

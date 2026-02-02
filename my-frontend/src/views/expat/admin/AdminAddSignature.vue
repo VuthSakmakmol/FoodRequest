@@ -327,9 +327,9 @@ const apprHasServer = computed(() => !!(approverServer.value.exists && approverS
 </script>
 
 <template>
-  <div class="ui-page w-full px-3 py-3">
+  <div class="w-full px-3 py-3">
     <!-- Hero -->
-    <div class="ui-hero p-5">
+    <div class="ui-hero-gradient rounded-t-2xl p-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="ui-hero-kicker">Expat Leave · Admin</div>
