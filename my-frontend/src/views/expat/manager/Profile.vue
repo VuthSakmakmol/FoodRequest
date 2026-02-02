@@ -578,7 +578,6 @@ onBeforeUnmount(() => {
                 <th class="table-th">Contract date</th>
                 <!-- ✅ NEW -->
                 <th class="table-th">Contract end</th>
-                <th class="table-th">Days left</th>
                 <th class="table-th text-right">Action</th>
               </tr>
             </thead>
@@ -597,16 +596,6 @@ onBeforeUnmount(() => {
 
                 <!-- ✅ NEW -->
                 <td class="table-td">{{ contractEndYmdFrom(r) || '—' }}</td>
-                <td class="table-td">
-                  <span
-                    class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
-                    :class="daysLeftClass(daysLeftFromEndYmd(contractEndYmdFrom(r)))"
-                  >
-                    <i class="fa-regular fa-clock mr-1 text-[10px]" />
-                    {{ daysLeftLabel(daysLeftFromEndYmd(contractEndYmdFrom(r))) }}
-                  </span>
-                </td>
-
                 <td class="table-td text-right">
                   <button
                     class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
@@ -673,18 +662,6 @@ onBeforeUnmount(() => {
             </div>
 
             <!-- ✅ NEW -->
-            <div class="flex items-center justify-between sm:block">
-              <div class="font-semibold text-slate-800 dark:text-slate-100">Days left</div>
-              <div>
-                <span
-                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
-                  :class="daysLeftClass(detailDaysLeft)"
-                >
-                  <i class="fa-regular fa-clock mr-1 text-[10px]" />
-                  {{ daysLeftLabel(detailDaysLeft) }}
-                </span>
-              </div>
-            </div>
 
             <div v-if="lastUpdatedAt" class="sm:col-span-5 text-[10px] text-slate-500 dark:text-slate-400">
               Last updated: {{ dayjs(lastUpdatedAt).format('YYYY-MM-DD HH:mm') }}
@@ -751,18 +728,6 @@ onBeforeUnmount(() => {
                     <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
                       {{ fmtYMD(c.startDate) }} → {{ fmtYMD(c.endDate) }}
                     </div>
-                    <div class="mt-1 flex flex-wrap items-center gap-2">
-                      <span
-                        class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                        :class="daysLeftClass(contractDaysLeft(c))"
-                      >
-                        <i class="fa-regular fa-clock mr-1 text-[10px]" />
-                        {{ daysLeftLabel(contractDaysLeft(c)) }}
-                      </span>
-                      <span v-if="c.note" class="text-[10px] text-slate-500 dark:text-slate-400">
-                        • {{ c.note }}
-                      </span>
-                    </div>
                   </div>
 
                   <button
@@ -808,7 +773,6 @@ onBeforeUnmount(() => {
                     <th class="table-th">#</th>
                     <th class="table-th">Start</th>
                     <th class="table-th">End</th>
-                    <th class="table-th">Days left</th>
                     <th class="table-th">Leave used (this contract)</th>
                     <th class="table-th text-right">Action</th>
                   </tr>
@@ -820,16 +784,6 @@ onBeforeUnmount(() => {
                       <td class="table-td font-semibold">{{ idx + 1 }}</td>
                       <td class="table-td">{{ fmtYMD(c.startDate) }}</td>
                       <td class="table-td">{{ fmtYMD(c.endDate) }}</td>
-                      <td class="table-td">
-                        <span
-                          class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold tabular-nums"
-                          :class="daysLeftClass(contractDaysLeft(c))"
-                        >
-                          <i class="fa-regular fa-clock mr-1 text-[10px]" />
-                          {{ daysLeftLabel(contractDaysLeft(c)) }}
-                        </span>
-                      </td>
-
                       <td class="table-td">
                         <div v-if="contractUsedChips(c).length" class="flex flex-wrap gap-2">
                           <span
