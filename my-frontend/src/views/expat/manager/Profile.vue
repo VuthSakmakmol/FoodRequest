@@ -27,6 +27,7 @@ function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
 
+
 /* ───────── mode (List vs Detail) ───────── */
 const targetEmployeeId = computed(() => String(route.query?.employeeId || '').trim())
 const isDetailMode = computed(() => !!targetEmployeeId.value)

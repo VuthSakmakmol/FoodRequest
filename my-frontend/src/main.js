@@ -12,28 +12,11 @@ import { library } from '@fortawesome/fontawesome-svg-core'
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome'
 
 // Pick any icons you need here
-import {
-  faCar,
-  faUtensils,
-  faHome,
-  faUser,
-  faBell,
-} from '@fortawesome/free-solid-svg-icons'
-import {
-  faFacebook,
-  faYoutube,
-} from '@fortawesome/free-brands-svg-icons'
+import { faCar, faUtensils, faHome, faUser, faBell } from '@fortawesome/free-solid-svg-icons'
+import { faFacebook, faYoutube } from '@fortawesome/free-brands-svg-icons'
 
 // Add icons to the library
-library.add(
-  faCar,
-  faUtensils,
-  faHome,
-  faUser,
-  faBell,
-  faFacebook,
-  faYoutube,
-)
+library.add(faCar, faUtensils, faHome, faUser, faBell, faFacebook, faYoutube)
 
 // ✅ Pinia / auth store
 import { useAuth } from '@/store/auth'

@@ -29,10 +29,12 @@
     --ui-border: 226 232 240;   /* slate-200 */
     --ui-ring: 56 189 248;      /* sky-400 */
 
-    /* Brand */
+    /* Brand (keep BLUE, no orange) */
     --ui-primary: 2 132 199;    /* sky-600 */
     --ui-primary-2: 14 165 233; /* sky-500 */
     --ui-accent: 99 102 241;    /* indigo-500 */
+
+    /* States */
     --ui-success: 16 185 129;   /* emerald-500 */
     --ui-warning: 245 158 11;   /* amber-500 */
     --ui-danger: 244 63 94;     /* rose-500 */
@@ -40,6 +42,9 @@
     /* Shadows */
     --ui-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
     --ui-shadow-2: 0 18px 38px rgba(15, 23, 42, 0.14);
+
+    /* ✅ Help native controls pick correct theme (light) */
+    color-scheme: light;
   }
 
   .dark {
@@ -55,6 +60,9 @@
 
     --ui-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
     --ui-shadow-2: 0 18px 38px rgba(0, 0, 0, 0.45);
+
+    /* ✅ Help native controls pick correct theme (dark) */
+    color-scheme: dark;
   }
 
   html,
@@ -79,9 +87,34 @@
     background: rgba(var(--ui-primary), 0.20);
   }
 
-  /* Smooth */
+  /* Smooth tap */
   * {
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     ✅ DATE INPUT ICON FIX (GLOBAL)
+     Works in Chrome / Edge / Safari
+     NOTE: put here (global) so scoped styles don't break it.
+     ───────────────────────────────────────────────────────────── */
+  input[type="date"] {
+    color-scheme: light;
+  }
+  .dark input[type="date"] {
+    color-scheme: dark;
+  }
+
+  /* calendar icon on dark background */
+  .dark input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.2);
+    opacity: 1;
+    cursor: pointer;
+  }
+
+  /* optional: consistent cursor/opacity */
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0.9;
+    cursor: pointer;
   }
 }
 
@@ -196,6 +229,23 @@
   .ui-input::placeholder,
   .ui-textarea::placeholder {
     color: rgba(var(--ui-muted), 0.95);
+  }
+
+  /* ✅ Date input BLUE background like your screenshot */
+  .ui-date {
+    @apply w-full rounded-xl border px-3 py-2 text-[12px] outline-none transition;
+    /* light */
+    @apply border-sky-500 bg-sky-100 text-slate-900;
+    @apply focus:ring-2 focus:ring-sky-400/40 focus:border-sky-500;
+    /* dark */
+    @apply dark:border-sky-500 dark:bg-sky-900/30 dark:text-slate-100;
+  }
+
+  /* Keep calendar icon visible on dark for .ui-date as well */
+  .dark .ui-date::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.15);
+    opacity: 0.92;
+    cursor: pointer;
   }
 
   /* Search input (with icon container) */

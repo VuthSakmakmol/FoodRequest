@@ -73,11 +73,13 @@ function statusChipClasses(active) {
  * ✅ approvalMode (2 modes only)
  * - MANAGER_AND_GM
  * - GM_AND_COO
+ *
+ * IMPORTANT: no orange in dark mode → keep blue palette
  */
 function modeChipClasses(mode) {
   const m = up(mode)
   return m === 'GM_AND_COO'
-    ? 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
+    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700/80'
     : 'bg-sky-100 text-sky-700 border border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80'
 }
 function modeLabel(mode) {
@@ -271,7 +273,8 @@ async function fetchDefaultApprovers() {
     }
   } catch (e) {
     console.warn('fetchDefaultApprovers failed; using seed fallbacks', e)
-    approversError.value = e?.response?.data?.message || e?.message || 'Failed to load approvers (using seed defaults).'
+    approversError.value =
+      e?.response?.data?.message || e?.message || 'Failed to load approvers (using seed defaults).'
   } finally {
     approversLoading.value = false
   }
@@ -296,7 +299,7 @@ function newRow() {
 
 const form = ref({
   approvalMode: 'MANAGER_AND_GM', // ✅ default mode
-  manager: null, // optional
+  manager: null, // required in MANAGER_AND_GM
   rows: [newRow()],
 
   singleEmployee: null,
@@ -354,6 +357,19 @@ function mustYmd(v) {
 }
 
 const needsCoo = computed(() => up(form.value.approvalMode) === 'GM_AND_COO')
+const requiresManager = computed(() => up(form.value.approvalMode) === 'MANAGER_AND_GM')
+
+/* hide manager when GM+COO to avoid confusion + avoid sending */
+watch(
+  () => form.value.approvalMode,
+  (v) => {
+    const mode = up(v)
+    if (mode === 'GM_AND_COO') {
+      form.value.manager = null
+      form.value.singleManager = null
+    }
+  }
+)
 
 const approverReady = computed(() => {
   const gmOk = !!String(defaultGm.value?.loginId || '').trim()
@@ -376,7 +392,18 @@ async function submitCreate() {
     const cooLoginId = String(defaultCoo.value?.loginId || '').trim()
 
     if (!gmLoginId) throw new Error('GM approver is missing (seed or /admin/leave/approvers).')
-    if (mode === 'GM_AND_COO' && !cooLoginId) throw new Error('COO approver is missing (seed or /admin/leave/approvers).')
+    if (mode === 'GM_AND_COO' && !cooLoginId)
+      throw new Error('COO approver is missing (seed or /admin/leave/approvers).')
+
+    // ✅ require manager when MANAGER_AND_GM
+    if (mode === 'MANAGER_AND_GM') {
+      const chosen =
+        createTab.value === 'bulk'
+          ? form.value.manager
+          : (form.value.singleManager || form.value.manager)
+      const managerEmpId = pickEmployeeId(chosen)
+      if (!managerEmpId) throw new Error('Manager is required for Manager + GM mode.')
+    }
 
     if (createTab.value === 'bulk') {
       const rows = form.value.rows || []
@@ -385,10 +412,12 @@ async function submitCreate() {
       const employees = rows.map((r, i) => {
         const employeeId = pickEmployeeId(r.employee)
         if (!employeeId) throw new Error(`Employee #${i + 1} is required.`)
-        if (!mustYmd(r.joinDate)) throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
+        if (!mustYmd(r.joinDate))
+          throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
         const contractDate = r.contractDate || r.joinDate
-        if (!mustYmd(contractDate)) throw new Error(`Contract date (Employee #${i + 1}) must be YYYY-MM-DD.`)
+        if (!mustYmd(contractDate))
+          throw new Error(`Contract date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
         return {
           employeeId,
@@ -399,13 +428,13 @@ async function submitCreate() {
         }
       })
 
-      const managerEmpId = pickEmployeeId(form.value.manager)
-      const managerLoginId = pickLoginId(form.value.manager)
+      const managerEmpId = mode === 'MANAGER_AND_GM' ? pickEmployeeId(form.value.manager) : ''
+      const managerLoginId = mode === 'MANAGER_AND_GM' ? pickLoginId(form.value.manager) : ''
 
       const payload = {
         approvalMode: mode,
 
-        // optional manager
+        // ✅ manager required only for MANAGER_AND_GM
         managerEmployeeId: managerEmpId,
         managerLoginId,
 
@@ -437,8 +466,9 @@ async function submitCreate() {
     const contractDate = form.value.singleContractDate || form.value.singleJoinDate
     if (!mustYmd(contractDate)) throw new Error('Contract date must be YYYY-MM-DD.')
 
-    const singleManagerEmpId = pickEmployeeId(form.value.singleManager || form.value.manager)
-    const singleManagerLoginId = pickLoginId(form.value.singleManager || form.value.manager)
+    const chosenManager = form.value.singleManager || form.value.manager
+    const singleManagerEmpId = mode === 'MANAGER_AND_GM' ? pickEmployeeId(chosenManager) : ''
+    const singleManagerLoginId = mode === 'MANAGER_AND_GM' ? pickLoginId(chosenManager) : ''
 
     const payload = {
       approvalMode: mode,
@@ -449,6 +479,7 @@ async function submitCreate() {
       alCarry: Number(form.value.singleAlCarry || 0),
       isActive: form.value.singleActive !== false,
 
+      // ✅ manager required only for MANAGER_AND_GM
       managerEmployeeId: singleManagerEmpId,
       managerLoginId: singleManagerLoginId,
 
@@ -493,7 +524,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="px-1 py-1 sm:px-3">
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Header -->
+      <!-- Header (keep your blue theme) -->
       <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
@@ -808,11 +839,17 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="text-right space-y-1 text-[11px]">
-                    <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(!!e.isActive)">
+                    <span
+                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                      :class="statusChipClasses(!!e.isActive)"
+                    >
                       {{ e.isActive ? 'Active' : 'Inactive' }}
                     </span>
                     <div>
-                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="modeChipClasses(e.approvalMode)">
+                      <span
+                        class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                        :class="modeChipClasses(e.approvalMode)"
+                      >
                         {{ modeLabel(e.approvalMode) }}
                       </span>
                     </div>
@@ -1043,7 +1080,8 @@ onBeforeUnmount(() => {
                 <div class="text-sm font-semibold">New leave profile</div>
                 <div class="text-[11px] text-white/85">
                   Approval chain:
-                  <span class="font-semibold">Manager</span> →
+                  <span class="font-semibold" v-if="requiresManager">Manager</span>
+                  <span class="font-semibold" v-if="requiresManager"> → </span>
                   <span class="font-semibold">GM</span>
                   <span v-if="needsCoo"> → <span class="font-semibold">COO</span></span>
                 </div>
@@ -1095,60 +1133,19 @@ onBeforeUnmount(() => {
               </p>
             </div>
 
-            <!-- ✅ Auto approvers (readonly, no search) -->
-            <div class="rounded-2xl border border-slate-200 bg-white/95 p-3 dark:border-slate-700 dark:bg-slate-950/40">
-              <div class="flex flex-wrap items-center justify-between gap-2">
-                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Approvers (auto from seed)</div>
-
-                <div class="flex items-center gap-2 text-[11px]">
-                  <span
-                    class="inline-flex items-center rounded-full border px-2 py-0.5 font-semibold"
-                    :class="approverReady ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200' : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
-                  >
-                    {{ approversLoading ? 'Loading…' : approverReady ? 'Ready' : 'Missing approver' }}
-                  </span>
-                </div>
-              </div>
-
-              <div v-if="approversError" class="mt-2 text-[11px] text-amber-700 dark:text-amber-300">
-                {{ approversError }}
-              </div>
-
-              <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
-                  <div class="text-slate-500 dark:text-slate-400">GM</div>
-                  <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
-                    {{ safeTxt(defaultGm.name) }}
-                    <span class="ml-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">({{ safeTxt(defaultGm.loginId) }})</span>
-                  </div>
-                </div>
-
-                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
-                  <div class="text-slate-500 dark:text-slate-400">
-                    COO <span v-if="needsCoo" class="text-rose-600">*</span>
-                  </div>
-                  <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
-                    {{ needsCoo ? safeTxt(defaultCoo.name) : 'Not required' }}
-                    <span v-if="needsCoo" class="ml-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                      ({{ safeTxt(defaultCoo.loginId) }})
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <p class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                No need to select GM/COO — system uses the seeded users.
-              </p>
-            </div>
-
-            <!-- Manager (optional) -->
-            <div>
-              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Direct manager (optional)</label>
+            <!-- ✅ Manager required only when Manager + GM -->
+            <div v-if="requiresManager">
+              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                Direct manager <span class="text-rose-600">*</span>
+              </label>
               <EmployeeSearch v-if="createTab === 'bulk'" v-model="form.manager" placeholder="Search manager…" />
               <EmployeeSearch v-else v-model="form.singleManager" placeholder="Search manager…" />
               <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                If set, request goes to Manager first, then GM (then COO when GM + COO mode).
+                Required in <span class="font-semibold">Manager + GM</span> mode.
               </p>
+            </div>
+            <div v-else class="text-[11px] text-slate-500 dark:text-slate-400">
+              Manager is not needed in <span class="font-semibold">GM + COO</span> mode.
             </div>
 
             <!-- Bulk -->
@@ -1196,9 +1193,10 @@ onBeforeUnmount(() => {
                     <input
                       v-model="r.joinDate"
                       type="date"
-                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      class="ui-date"
                       @change="syncContractFromJoin(r)"
                     />
+
                   </div>
 
                   <div>
@@ -1206,7 +1204,7 @@ onBeforeUnmount(() => {
                     <input
                       v-model="r.contractDate"
                       type="date"
-                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                      class="ui-date"
                     />
                   </div>
 
@@ -1254,7 +1252,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="form.singleJoinDate"
                     type="date"
-                    class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                    class="date-input w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
                            dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                     @change="syncSingleContract"
                   />
@@ -1265,7 +1263,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="form.singleContractDate"
                     type="date"
-                    class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
+                    class="date-input w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
                            dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
                   />
                 </div>
@@ -1290,6 +1288,15 @@ onBeforeUnmount(() => {
                      text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
             >
               <span class="font-semibold">Failed:</span> {{ createError }}
+            </div>
+
+            <!-- Optional: approver warn (silent, not blocking) -->
+            <div
+              v-if="approversError && !createError"
+              class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px]
+                     text-indigo-700 dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200"
+            >
+              {{ approversError }}
             </div>
           </div>
 
@@ -1322,6 +1329,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* ─────────────────────────────────────────────────────────────
+  Table helpers (kept scoped, safe)
+───────────────────────────────────────────────────────────── */
 .table-th {
   padding: 8px 10px;
   text-align: left;
@@ -1333,6 +1343,9 @@ onBeforeUnmount(() => {
   vertical-align: top;
 }
 
+/* ─────────────────────────────────────────────────────────────
+  Modal transition (kept scoped, safe)
+───────────────────────────────────────────────────────────── */
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
