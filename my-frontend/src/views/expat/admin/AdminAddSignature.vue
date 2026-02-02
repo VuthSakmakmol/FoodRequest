@@ -1,18 +1,22 @@
-<!-- src/views/expat/admin/AdminAddSignature.vue -->
+<!-- src/views/expat/admin/AdminAddSignature.vue
+  ✅ Employee-first (default)
+  ✅ Approver section behind a toggle
+  ✅ Soft SKY borders everywhere (no bold black lines)
+  ✅ Reduced font weight (no “extra bold”)
+  ✅ Uses your existing api + axios upload (no manual Content-Type)
+  ✅ Uses your standard ui-* classes + only light extra sky accents
+-->
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import axios from 'axios'
-import api from '@/utils/api' // still use for normal GET (search + preview meta)
+import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 
 defineOptions({ name: 'AdminAddSignature' })
 
 const { showToast } = useToast()
 
-/* -----------------------------
-  Config
------------------------------ */
-const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '') // e.g. http://localhost:4333/api
+const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
 const ROLES = [
   { label: 'Leave Admin', id: 'leave_admin' },
@@ -20,25 +24,30 @@ const ROLES = [
   { label: 'Leave COO', id: 'leave_coo' },
 ]
 
-/* -----------------------------
-  State
------------------------------ */
+// toggle approver section
+const showApprover = ref(false)
+
+// approver role
 const roleId = ref('leave_admin')
 
+// employee search
 const empQuery = ref('')
 const empResults = ref([])
 const empSelected = ref(null)
 
+// approver file + preview
 const approverFile = ref(null)
 const approverLocalUrl = ref('')
 const approverServer = ref({ exists: false, url: '', loading: false })
 const approverUploading = ref(false)
 
+// employee file + preview
 const empFile = ref(null)
 const empLocalUrl = ref('')
 const empServer = ref({ exists: false, url: '', loading: false })
 const empUploading = ref(false)
 
+// search ui
 const searchLoading = ref(false)
 const searchError = ref('')
 
@@ -56,12 +65,13 @@ function pickFile(ev) {
   return ev?.target?.files?.[0] || null
 }
 function revoke(url) {
-  try { if (url) URL.revokeObjectURL(url) } catch {}
+  try {
+    if (url) URL.revokeObjectURL(url)
+  } catch {}
 }
 function absUrl(urlOrPath) {
   if (!urlOrPath) return ''
   if (/^https?:\/\//i.test(urlOrPath)) return urlOrPath
-  // backend returns "/api/...." or "/uploads/...."
   const origin = API_BASE.replace(/\/api$/, '')
   return `${origin}${urlOrPath.startsWith('/') ? '' : '/'}${urlOrPath}`
 }
@@ -87,8 +97,11 @@ async function runSearch() {
   searchLoading.value = true
   try {
     const { data } = await api.get('/public/employees', { params: { q } })
-    const rows = Array.isArray(data) ? data : (data?.items || data?.rows || [])
-    empResults.value = rows.slice(0, 8).map(normalizeEmployee)
+    const rows = Array.isArray(data) ? data : data?.items || data?.rows || []
+    empResults.value = rows
+      .slice(0, 8)
+      .map(normalizeEmployee)
+      .filter(Boolean)
   } catch (e) {
     searchError.value = errMsg(e, 'Search failed')
   } finally {
@@ -120,7 +133,7 @@ function selectEmployee(row) {
 }
 
 /* -----------------------------
-  Preview fetch (meta)
+  Preview fetch
 ----------------------------- */
 async function refreshApproverPreview() {
   const loginId = String(roleId.value || '').trim()
@@ -161,16 +174,19 @@ async function refreshEmployeePreview() {
 
 watch(roleId, async () => {
   clearApproverFile()
-  await refreshApproverPreview()
+  if (showApprover.value) await refreshApproverPreview()
 })
 
-watch(() => empSelected.value?.employeeId, async () => {
-  clearEmpFile()
-  await refreshEmployeePreview()
-})
+watch(
+  () => empSelected.value?.employeeId,
+  async () => {
+    clearEmpFile()
+    await refreshEmployeePreview()
+  }
+)
 
-onMounted(async () => {
-  await refreshApproverPreview()
+watch(showApprover, async (on) => {
+  if (on) await refreshApproverPreview()
 })
 
 onBeforeUnmount(() => {
@@ -228,14 +244,21 @@ function clearEmpFile() {
   empLocalUrl.value = ''
 }
 
+function clearEmployeeSelection() {
+  empSelected.value = null
+  empResults.value = []
+  empQuery.value = ''
+  clearEmpFile()
+  empServer.value = { exists: false, url: '', loading: false }
+}
+
 /* -----------------------------
-  Upload (IMPORTANT)
-  Use plain axios to avoid any api interceptor issues.
-  Do NOT set Content-Type manually.
+  Upload
 ----------------------------- */
 async function uploadApprover() {
   const loginId = String(roleId.value || '').trim()
   if (!loginId) return
+
   if (!approverFile.value) {
     showToast({ type: 'warning', title: 'No file', message: 'Choose a file first.' })
     return
@@ -246,16 +269,9 @@ async function uploadApprover() {
     const fd = new FormData()
     fd.append('signature', approverFile.value)
 
-    await axios.post(
-      `${API_BASE}/admin/signatures/users/${encodeURIComponent(loginId)}`,
-      fd,
-      {
-        headers: {
-          Authorization: token() ? `Bearer ${token()}` : undefined,
-          // ✅ don't set Content-Type (let browser add boundary)
-        },
-      }
-    )
+    await axios.post(`${API_BASE}/admin/signatures/users/${encodeURIComponent(loginId)}`, fd, {
+      headers: { Authorization: token() ? `Bearer ${token()}` : undefined },
+    })
 
     showToast({ type: 'success', title: 'Uploaded', message: `Saved signature for ${loginId}.` })
     clearApproverFile()
@@ -283,15 +299,9 @@ async function uploadEmployee() {
     const fd = new FormData()
     fd.append('signature', empFile.value)
 
-    await axios.post(
-      `${API_BASE}/admin/signatures/employees/${encodeURIComponent(empId)}`,
-      fd,
-      {
-        headers: {
-          Authorization: token() ? `Bearer ${token()}` : undefined,
-        },
-      }
-    )
+    await axios.post(`${API_BASE}/admin/signatures/employees/${encodeURIComponent(empId)}`, fd, {
+      headers: { Authorization: token() ? `Bearer ${token()}` : undefined },
+    })
 
     showToast({ type: 'success', title: 'Uploaded', message: `Saved signature for employee ${empId}.` })
     clearEmpFile()
@@ -303,202 +313,265 @@ async function uploadEmployee() {
   }
 }
 
+/* -----------------------------
+  Computed
+----------------------------- */
 const selectedLabel = computed(() => {
   if (!empSelected.value) return 'No employee selected'
   const e = empSelected.value
   return `${e.name || 'Employee'} • ${e.employeeId}${e.dept ? ' • ' + e.dept : ''}`
 })
+
+const empHasServer = computed(() => !!(empServer.value.exists && empServer.value.url))
+const apprHasServer = computed(() => !!(approverServer.value.exists && approverServer.value.url))
 </script>
 
 <template>
-  <div class="w-full font-brand text-slate-900 dark:text-white">
-    <!-- Header -->
-    <div
-      class="relative overflow-hidden rounded-2xl border border-white/60 bg-gradient-to-r from-amber-50 via-white to-emerald-50 p-6 shadow-sm
-             dark:border-white/10 dark:from-amber-900/25 dark:via-slate-900/30 dark:to-emerald-900/20"
-    >
-      <div class="absolute -right-20 -top-16 h-56 w-56 rounded-full bg-amber-400/15 blur-3xl" />
-      <div class="absolute -left-24 -bottom-20 h-72 w-72 rounded-full bg-emerald-400/10 blur-3xl" />
-      <div class="relative">
-        <h1 class="text-2xl font-extrabold tracking-tight">Signatures</h1>
-        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-          Upload and preview approver & employee signatures.
-        </p>
+  <div class="ui-page w-full px-3 py-3">
+    <!-- Hero -->
+    <div class="ui-hero p-5">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="ui-hero-kicker">Expat Leave · Admin</div>
+          <div class="ui-hero-title mt-1">Signature Manager</div>
+          <div class="ui-hero-subtitle">Upload and preview employee & approver signatures in one place.</div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="ui-badge ui-badge-info">
+            <i class="fa-solid fa-user-check text-[10px]" />
+            Employee first
+          </span>
+
+          <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="showApprover = !showApprover">
+            <i class="fa-solid" :class="showApprover ? 'fa-toggle-on' : 'fa-toggle-off'" />
+            {{ showApprover ? 'Approver ON' : 'Approver OFF' }}
+          </button>
+        </div>
       </div>
     </div>
 
-    <div class="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-12">
-      <!-- Left: actions -->
-      <div class="lg:col-span-5 space-y-5">
-        <!-- Approver upload -->
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-bold">Approver</h2>
-            <button class="btn-lite" type="button" @click="refreshApproverPreview">Refresh</button>
+    <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
+      <!-- Employee -->
+      <section class="ui-card p-4 lg:col-span-5">
+        <div class="flex items-start justify-between gap-2 pl-6">
+          <div>
+            <div class="ui-section-title">Employee</div>
+            <div class="ui-section-desc">Search → select employee → upload signature.</div>
           </div>
 
-          <div class="mt-4">
-            <label class="text-xs font-semibold text-slate-600 dark:text-slate-300">Role</label>
-            <select v-model="roleId" class="input mt-1">
-              <option v-for="r in ROLES" :key="r.id" :value="r.id">{{ r.label }}</option>
-            </select>
+          <button
+            type="button"
+            class="ui-btn ui-btn-ghost ui-btn-sm"
+            :disabled="!empSelected"
+            @click="refreshEmployeePreview"
+            :title="empSelected ? 'Refresh employee preview' : 'Select employee first'"
+          >
+            <i class="fa-solid fa-rotate" />
+            Refresh
+          </button>
+        </div>
+
+        <div class="mt-4 ui-field pl-6">
+          <label class="ui-label">Search employee</label>
+          <input v-model="empQuery" class="ui-input" placeholder="Type employee ID or name…" />
+          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            Tip: type at least 2–3 characters.
           </div>
 
-          <div class="mt-4">
-            <input type="file" accept="image/png,image/jpeg,image/webp" class="file" @change="onPickApprover" />
+          <div v-if="searchLoading" class="mt-2 text-[12px] text-slate-500">Searching…</div>
+          <div v-if="searchError" class="mt-2 text-[12px] text-rose-600">{{ searchError }}</div>
+        </div>
+
+        <!-- Results -->
+        <div v-if="empResults.length" class="mt-3 space-y-2 pl-6">
+          <button
+            v-for="e in empResults"
+            :key="e.employeeId"
+            type="button"
+            class="w-full rounded-2xl border px-4 py-3 text-left transition
+                   border-sky-200/50 bg-white/70 hover:bg-sky-50
+                   dark:border-slate-800/70 dark:bg-slate-950/40 dark:hover:bg-slate-900/35"
+            @click="selectEmployee(e)"
+          >
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="truncate text-[13px] font-semibold text-slate-900 dark:text-slate-50">
+                  {{ e.name || 'Unknown' }}
+                </div>
+                <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  ID: <span class="font-mono font-semibold">{{ e.employeeId }}</span>
+                  <span v-if="e.dept" class="mx-2 text-slate-300">•</span>
+                  <span v-if="e.dept" class="truncate">{{ e.dept }}</span>
+                </div>
+              </div>
+
+              <span class="ui-badge ui-badge-success">
+                <i class="fa-solid fa-check text-[10px]" />
+                Select
+              </span>
+            </div>
+          </button>
+        </div>
+
+        <!-- Selected -->
+        <div
+          class="mt-4 rounded-2xl border p-3 pl-6
+                 border-sky-200/50 bg-white/70
+                 dark:border-slate-800/70 dark:bg-slate-950/35"
+        >
+          <div class="text-[10px] uppercase tracking-[0.28em] font-semibold text-slate-500 dark:text-slate-400">
+            Selected
+          </div>
+          <div class="mt-1 text-[13px] font-semibold text-slate-900 dark:text-slate-50">
+            {{ selectedLabel }}
           </div>
 
-          <div class="mt-4 flex gap-2">
-            <button class="btn-primary" :disabled="approverUploading || !approverFile" @click="uploadApprover">
-              {{ approverUploading ? 'Uploading…' : 'Upload' }}
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <span class="ui-badge" :class="empHasServer ? 'ui-badge-success' : 'ui-badge-warning'">
+              <i class="fa-solid" :class="empHasServer ? 'fa-shield-check' : 'fa-circle-exclamation'" />
+              {{ empServer.loading ? 'Loading…' : (empHasServer ? 'Saved on server' : 'Not set') }}
+            </span>
+
+            <button v-if="empSelected" type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="clearEmployeeSelection">
+              <i class="fa-solid fa-xmark" />
+              Clear selection
             </button>
-            <button class="btn-lite" type="button" :disabled="approverUploading" @click="clearApproverFile">Clear</button>
           </div>
         </div>
 
-        <!-- Employee search + upload -->
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-bold">Employee</h2>
-            <button class="btn-lite" type="button" :disabled="!empSelected" @click="refreshEmployeePreview">Refresh</button>
-          </div>
+        <!-- File + actions -->
+        <div class="mt-4 pl-6">
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            class="block w-full text-[12px]
+                   file:mr-3 file:rounded-xl file:border-0 file:bg-sky-50 file:px-4 file:py-2
+                   file:text-[12px] file:font-semibold file:text-slate-800 hover:file:bg-sky-100
+                   dark:file:bg-white/10 dark:file:text-white dark:hover:file:bg-white/15"
+            :disabled="!empSelected"
+            @change="onPickEmp"
+          />
 
-          <div class="mt-4">
-            <label class="text-xs font-semibold text-slate-600 dark:text-slate-300">Search</label>
-            <input v-model="empQuery" class="input mt-1" placeholder="Type employee ID or name…" />
-            <div v-if="searchLoading" class="mt-2 text-xs text-slate-500">Searching…</div>
-            <div v-if="searchError" class="mt-2 text-xs text-rose-600">{{ searchError }}</div>
-          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button class="ui-btn ui-btn-primary" :disabled="empUploading || !empFile || !empSelected" @click="uploadEmployee">
+              <i class="fa-solid" :class="empUploading ? 'fa-circle-notch fa-spin' : 'fa-cloud-arrow-up'" />
+              {{ empUploading ? 'Uploading…' : 'Upload' }}
+            </button>
 
-          <div v-if="empResults.length" class="mt-3 space-y-2">
-            <button
-              v-for="e in empResults"
-              :key="e.employeeId"
-              class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left text-sm hover:bg-slate-100
-                     dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
-              @click="selectEmployee(e)"
-              type="button"
-            >
-              <div class="font-semibold">{{ e.name || 'Unknown' }}</div>
-              <div class="mt-0.5 text-xs text-slate-600 dark:text-slate-300">ID: {{ e.employeeId }}</div>
+            <button class="ui-btn ui-btn-soft" type="button" :disabled="empUploading" @click="clearEmpFile">
+              <i class="fa-solid fa-eraser" />
+              Clear file
             </button>
           </div>
+        </div>
+      </section>
 
-          <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm dark:border-white/10 dark:bg-white/5">
-            <div class="text-xs font-semibold text-slate-600 dark:text-slate-300">Selected</div>
-            <div class="mt-1 font-semibold">{{ selectedLabel }}</div>
+      <!-- Employee Preview -->
+      <section class="ui-card p-4 lg:col-span-7">
+        <div class="flex items-start justify-between gap-2 pl-6">
+          <div>
+            <div class="ui-section-title">Employee Preview</div>
+            <div class="ui-section-desc">Local preview vs server preview.</div>
           </div>
 
-          <div class="mt-4">
+          <span class="ui-badge" :class="empHasServer ? 'ui-badge-info' : 'ui-badge-warning'">
+            <i class="fa-solid" :class="empHasServer ? 'fa-server' : 'fa-inbox'" />
+            {{ empServer.loading ? 'Loading…' : (empHasServer ? 'Server OK' : 'Server empty') }}
+          </span>
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 pl-6">
+          <div class="rounded-2xl border p-3 border-sky-200/50 bg-white/60 dark:border-slate-800/70 dark:bg-slate-950/35">
+            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Local</div>
+            <div class="mt-2 ui-frame">
+              <img v-if="empLocalUrl" :src="empLocalUrl" class="h-48 w-full object-contain" />
+              <div v-else class="flex h-48 items-center justify-center text-[12px] text-slate-400">Choose a file</div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border p-3 border-sky-200/50 bg-white/60 dark:border-slate-800/70 dark:bg-slate-950/35">
+            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Server</div>
+            <div class="mt-2 ui-frame">
+              <img v-if="empHasServer" :src="empServer.url" class="h-48 w-full object-contain" />
+              <div v-else class="flex h-48 items-center justify-center text-[12px] text-slate-400">Upload to see</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Approver (toggle) -->
+      <section v-if="showApprover" class="ui-card p-4 lg:col-span-12">
+        <div class="flex flex-wrap items-start justify-between gap-3 pl-6">
+          <div>
+            <div class="ui-section-title">Approver</div>
+            <div class="ui-section-desc">Choose role → upload signature → preview.</div>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button class="ui-btn ui-btn-ghost ui-btn-sm" type="button" @click="refreshApproverPreview">
+              <i class="fa-solid fa-rotate" />
+              Refresh
+            </button>
+
+            <span class="ui-badge" :class="apprHasServer ? 'ui-badge-info' : 'ui-badge-warning'">
+              <i class="fa-solid" :class="apprHasServer ? 'fa-shield-check' : 'fa-circle-exclamation'" />
+              {{ approverServer.loading ? 'Loading…' : (apprHasServer ? 'Saved on server' : 'Not set') }}
+            </span>
+          </div>
+        </div>
+
+        <div class="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12 pl-6">
+          <div class="lg:col-span-5 space-y-3">
+            <div class="ui-field">
+              <label class="ui-label">Role</label>
+              <select v-model="roleId" class="ui-select">
+                <option v-for="r in ROLES" :key="r.id" :value="r.id">{{ r.label }}</option>
+              </select>
+            </div>
+
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
-              class="file"
-              :disabled="!empSelected"
-              @change="onPickEmp"
+              class="block w-full text-[12px]
+                     file:mr-3 file:rounded-xl file:border-0 file:bg-sky-50 file:px-4 file:py-2
+                     file:text-[12px] file:font-semibold file:text-slate-800 hover:file:bg-sky-100
+                     dark:file:bg-white/10 dark:file:text-white dark:hover:file:bg-white/15"
+              @change="onPickApprover"
             />
-          </div>
 
-          <div class="mt-4 flex gap-2">
-            <button class="btn-primary" :disabled="empUploading || !empFile || !empSelected" @click="uploadEmployee">
-              {{ empUploading ? 'Uploading…' : 'Upload' }}
-            </button>
-            <button class="btn-lite" type="button" :disabled="empUploading" @click="clearEmpFile">Clear</button>
-          </div>
-        </div>
-      </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="ui-btn ui-btn-primary" :disabled="approverUploading || !approverFile" @click="uploadApprover">
+                <i class="fa-solid" :class="approverUploading ? 'fa-circle-notch fa-spin' : 'fa-cloud-arrow-up'" />
+                {{ approverUploading ? 'Uploading…' : 'Upload' }}
+              </button>
 
-      <!-- Right: previews -->
-      <div class="lg:col-span-7 space-y-5">
-        <!-- Approver preview -->
-        <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/5">
-          <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
-            <div>
-              <div class="text-base font-bold">Approver Preview</div>
-              <div class="text-xs text-slate-500 dark:text-slate-300">{{ roleId }}</div>
-            </div>
-            <div class="text-xs" :class="approverServer.exists ? 'text-emerald-600' : 'text-slate-500'">
-              {{ approverServer.loading ? 'Loading…' : (approverServer.exists ? 'Saved' : 'Not set') }}
+              <button class="ui-btn ui-btn-soft" type="button" :disabled="approverUploading" @click="clearApproverFile">
+                <i class="fa-solid fa-eraser" />
+                Clear file
+              </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
-            <div class="box">
-              <div class="title">Local</div>
-              <div class="frame">
-                <img v-if="approverLocalUrl" :src="approverLocalUrl" class="img" />
-                <div v-else class="empty">Choose a file</div>
+          <div class="lg:col-span-7 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div class="rounded-2xl border p-3 border-sky-200/50 bg-white/60 dark:border-slate-800/70 dark:bg-slate-950/35">
+              <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Local</div>
+              <div class="mt-2 ui-frame">
+                <img v-if="approverLocalUrl" :src="approverLocalUrl" class="h-48 w-full object-contain" />
+                <div v-else class="flex h-48 items-center justify-center text-[12px] text-slate-400">Choose a file</div>
               </div>
             </div>
 
-            <div class="box">
-              <div class="title">Server</div>
-              <div class="frame">
-                <img v-if="approverServer.exists && approverServer.url" :src="approverServer.url" class="img" />
-                <div v-else class="empty">Upload to see</div>
+            <div class="rounded-2xl border p-3 border-sky-200/50 bg-white/60 dark:border-slate-800/70 dark:bg-slate-950/35">
+              <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-200">Server</div>
+              <div class="mt-2 ui-frame">
+                <img v-if="apprHasServer" :src="approverServer.url" class="h-48 w-full object-contain" />
+                <div v-else class="flex h-48 items-center justify-center text-[12px] text-slate-400">Upload to see</div>
               </div>
             </div>
           </div>
         </div>
-
-        <!-- Employee preview -->
-        <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-white/10 dark:bg-white/5">
-          <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
-            <div>
-              <div class="text-base font-bold">Employee Preview</div>
-              <div class="text-xs text-slate-500 dark:text-slate-300">{{ empSelected?.employeeId || '—' }}</div>
-            </div>
-            <div class="text-xs" :class="empServer.exists ? 'text-emerald-600' : 'text-slate-500'">
-              {{ empServer.loading ? 'Loading…' : (empServer.exists ? 'Saved' : 'Not set') }}
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
-            <div class="box">
-              <div class="title">Local</div>
-              <div class="frame">
-                <img v-if="empLocalUrl" :src="empLocalUrl" class="img" />
-                <div v-else class="empty">Choose a file</div>
-              </div>
-            </div>
-
-            <div class="box">
-              <div class="title">Server</div>
-              <div class="frame">
-                <img v-if="empServer.exists && empServer.url" :src="empServer.url" class="img" />
-                <div v-else class="empty">Upload to see</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </div>
+      </section>
     </div>
   </div>
 </template>
-
-<style scoped>
-.input {
-  @apply w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none
-  focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200
-  dark:border-white/10 dark:bg-white/5 dark:focus:ring-emerald-500/20;
-}
-.file {
-  @apply block w-full text-sm file:mr-3 file:rounded-xl file:border-0 file:bg-slate-100 file:px-4 file:py-2
-  file:text-sm file:font-semibold file:text-slate-800 hover:file:bg-slate-200
-  dark:file:bg-white/10 dark:file:text-white dark:hover:file:bg-white/15;
-}
-.btn-primary {
-  @apply inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white
-  shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60;
-}
-.btn-lite {
-  @apply rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50
-  dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:bg-white/10;
-}
-.box { @apply rounded-2xl border border-slate-200 p-4 dark:border-white/10; }
-.title { @apply text-sm font-bold; }
-.frame { @apply mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 dark:border-white/10 dark:bg-white/5; }
-.img { @apply h-44 w-full object-contain; }
-.empty { @apply flex h-44 items-center justify-center text-sm text-slate-400; }
-</style>

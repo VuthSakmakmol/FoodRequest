@@ -1,358 +1,421 @@
 /* src/assets/tailwind.css */
 
-/* ✅ Google Font (Kantumruy Pro) */
-@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap');
+/* ✅ Fonts (choose your priority order) */
+@import url("https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────────
-   Base: Tokens + Global defaults (Light/Dark)
-   - Use rgb(var(--token)) pattern so we can reuse everywhere.
-   - Dark mode uses .dark on <html>.
+   Base Tokens (Light/Dark)
+   - Dark mode uses `.dark` on <html>
+   - Colors are stored as "R G B" for alpha usage with rgb(var(--x) / 0.5)
    ───────────────────────────────────────────────────────────── */
 @layer base {
   :root {
     /* Typography */
-    --ui-font: "Kantumruy Pro", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-      Roboto, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    --ui-font: "Kantumruy Pro", "Be Vietnam Pro", "Manrope", ui-sans-serif, system-ui,
+      -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Apple Color Emoji",
+      "Segoe UI Emoji";
+
+    /* Radii */
+    --ui-r-xs: 10px;
+    --ui-r-sm: 12px;
+    --ui-r-md: 16px;
+    --ui-r-lg: 20px;
+    --ui-r-xl: 24px;
 
     /* Core surfaces */
-    --ui-bg: 248 250 252;       /* slate-50 */
-    --ui-bg-2: 240 249 255;     /* sky-50 */
-    --ui-fg: 15 23 42;          /* slate-900 */
-    --ui-muted: 100 116 139;    /* slate-500 */
+    --ui-bg: 248 250 252;        /* slate-50 */
+    --ui-bg-2: 240 249 255;      /* sky-50 */
+    --ui-fg: 15 23 42;           /* slate-900 */
+    --ui-muted: 100 116 139;     /* slate-500 */
 
-    --ui-card: 255 255 255;     /* white */
-    --ui-card-2: 248 250 252;   /* slate-50 */
-    --ui-border: 226 232 240;   /* slate-200 */
-    --ui-ring: 56 189 248;      /* sky-400 */
+    --ui-card: 255 255 255;      /* white */
+    --ui-card-2: 248 250 252;    /* slate-50 */
 
-    /* Brand (keep BLUE, no orange) */
-    --ui-primary: 2 132 199;    /* sky-600 */
-    --ui-primary-2: 14 165 233; /* sky-500 */
-    --ui-accent: 99 102 241;    /* indigo-500 */
+    /* ✅ Soft sky border */
+    --ui-border: 186 230 253;    /* sky-200 */
+    --ui-border-2: 125 211 252;  /* sky-300 */
+
+    /* Focus ring */
+    --ui-ring: 56 189 248;       /* sky-400 */
+
+    /* Brand */
+    --ui-primary: 2 132 199;     /* sky-600 */
+    --ui-primary-2: 14 165 233;  /* sky-500 */
+    --ui-accent: 99 102 241;     /* indigo-500 */
 
     /* States */
-    --ui-success: 16 185 129;   /* emerald-500 */
-    --ui-warning: 245 158 11;   /* amber-500 */
-    --ui-danger: 244 63 94;     /* rose-500 */
+    --ui-success: 16 185 129;    /* emerald-500 */
+    --ui-warning: 245 158 11;    /* amber-500 */
+    --ui-danger: 244 63 94;      /* rose-500 */
 
     /* Shadows */
     --ui-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
     --ui-shadow-2: 0 18px 38px rgba(15, 23, 42, 0.14);
 
-    /* ✅ Help native controls pick correct theme (light) */
     color-scheme: light;
   }
 
   .dark {
-    --ui-bg: 2 6 23;            /* slate-950 */
-    --ui-bg-2: 15 23 42;        /* slate-900 */
-    --ui-fg: 248 250 252;       /* slate-50 */
-    --ui-muted: 148 163 184;    /* slate-400 */
+    --ui-bg: 2 6 23;             /* slate-950 */
+    --ui-bg-2: 15 23 42;         /* slate-900 */
+    --ui-fg: 248 250 252;        /* slate-50 */
+    --ui-muted: 148 163 184;     /* slate-400 */
 
-    --ui-card: 2 6 23;          /* slate-950 */
-    --ui-card-2: 15 23 42;      /* slate-900 */
-    --ui-border: 30 41 59;      /* slate-800 */
-    --ui-ring: 56 189 248;      /* sky-400 */
+    --ui-card: 2 6 23;           /* slate-950 */
+    --ui-card-2: 15 23 42;       /* slate-900 */
+
+    /* sky-ish border but subtle */
+    --ui-border: 30 58 138;      /* blue-900-ish */
+    --ui-border-2: 51 65 85;     /* slate-700 */
+
+    --ui-ring: 56 189 248;       /* sky-400 */
 
     --ui-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
     --ui-shadow-2: 0 18px 38px rgba(0, 0, 0, 0.45);
 
-    /* ✅ Help native controls pick correct theme (dark) */
     color-scheme: dark;
   }
 
+  /* ✅ FULLSCREEN / EDGE-TO-EDGE GLOBAL FIX */
   html,
-  body {
-    font-family: var(--ui-font);
+  body,
+  #app {
+    height: 100%;
+    width: 100%;
+  }
+
+  html {
+    overflow-x: hidden;
   }
 
   body {
+    margin: 0;
+    min-height: 100vh;
     background: rgb(var(--ui-bg));
     color: rgb(var(--ui-fg));
+    font-family: var(--ui-font);
+    overflow-x: hidden;
   }
 
-  /* Better focus ring */
+  /* ✅ Better layout consistency */
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
   :focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px rgba(var(--ui-ring), 0.35);
-    border-radius: 10px;
+    box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.35);
+    border-radius: var(--ui-r-sm);
   }
 
-  /* Selection */
   ::selection {
-    background: rgba(var(--ui-primary), 0.20);
+    background: rgb(var(--ui-primary) / 0.20);
   }
 
-  /* Smooth tap */
   * {
     -webkit-tap-highlight-color: transparent;
   }
 
-  /* ─────────────────────────────────────────────────────────────
-     ✅ DATE INPUT ICON FIX (GLOBAL)
-     Works in Chrome / Edge / Safari
-     NOTE: put here (global) so scoped styles don't break it.
-     ───────────────────────────────────────────────────────────── */
-  input[type="date"] {
-    color-scheme: light;
-  }
-  .dark input[type="date"] {
-    color-scheme: dark;
-  }
+  /* ✅ DATE INPUT ICON FIX (GLOBAL) */
+  input[type="date"] { color-scheme: light; }
+  .dark input[type="date"] { color-scheme: dark; }
 
-  /* calendar icon on dark background */
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0.9;
+    cursor: pointer;
+  }
   .dark input[type="date"]::-webkit-calendar-picker-indicator {
     filter: invert(1) brightness(1.2);
     opacity: 1;
     cursor: pointer;
   }
-
-  /* optional: consistent cursor/opacity */
-  input[type="date"]::-webkit-calendar-picker-indicator {
-    opacity: 0.9;
-    cursor: pointer;
-  }
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Components: Standard UI building blocks
-   - Use these classes across the whole app for consistent look
+   Components: Standard UI building blocks (ui-*)
    ───────────────────────────────────────────────────────────── */
 @layer components {
-  /* Page background (subtle “premium” gradient) */
+  /* Layout helpers */
   .ui-page {
     background:
-      radial-gradient(900px circle at 8% 0%, rgba(var(--ui-primary), 0.10), transparent 45%),
-      radial-gradient(900px circle at 100% 18%, rgba(var(--ui-accent), 0.10), transparent 45%),
+      radial-gradient(900px circle at 8% 0%, rgb(var(--ui-primary) / 0.10), transparent 45%),
+      radial-gradient(900px circle at 100% 18%, rgb(var(--ui-accent) / 0.10), transparent 45%),
       rgb(var(--ui-bg));
     color: rgb(var(--ui-fg));
   }
 
-  /* Card */
-  .ui-card {
-    @apply rounded-2xl border;
-    border-color: rgb(var(--ui-border));
-    background: rgba(var(--ui-card), 0.92);
+  /* Default container (kept) */
+  .ui-container {
+    @apply w-full max-w-none px-2 sm:px-4 lg:px-6;
+  }
+
+  /* ✅ NEW: Edge-to-edge container (no padding) */
+  .ui-container-edge {
+    @apply w-full max-w-none px-0;
+  }
+
+  /* Hero/header */
+  .ui-hero {
+    @apply relative overflow-hidden border;
+    border-radius: var(--ui-r-xl);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background:
+      radial-gradient(900px circle at 10% 0%, rgba(255,255,255,.25), transparent 45%),
+      radial-gradient(900px circle at 100% 20%, rgba(255,255,255,.18), transparent 45%),
+      linear-gradient(90deg,
+        rgb(var(--ui-primary) / 0.18),
+        rgb(var(--ui-accent) / 0.14),
+        rgb(var(--ui-success) / 0.12)
+      ),
+      rgb(var(--ui-card) / 0.85);
     box-shadow: var(--ui-shadow);
     backdrop-filter: blur(10px);
   }
 
-  .ui-card-header {
-    @apply rounded-t-2xl px-4 py-3;
-    background:
-      radial-gradient(900px circle at 10% 0%, rgba(var(--ui-primary), 0.22), transparent 48%),
-      radial-gradient(900px circle at 100% 20%, rgba(var(--ui-accent), 0.18), transparent 48%),
-      linear-gradient(90deg, rgba(var(--ui-primary), 0.25), rgba(var(--ui-accent), 0.18));
-    color: rgb(var(--ui-fg));
+  .ui-hero-kicker {
+    @apply text-[10px] font-extrabold uppercase tracking-[0.28em];
+    color: rgb(var(--ui-muted) / 0.95);
+  }
+  .ui-hero-title {
+    @apply text-[18px] sm:text-[22px] font-extrabold tracking-tight;
+    color: rgb(var(--ui-fg) / 0.98);
+  }
+  .ui-hero-subtitle {
+    @apply mt-1 text-[12px] sm:text-[13px];
+    color: rgb(var(--ui-muted) / 0.98);
   }
 
-  .ui-card-body {
-    @apply px-3 sm:px-4 py-3;
+  /* Card */
+  .ui-card {
+    @apply border;
+    border-radius: var(--ui-r-xl);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.88);
+    box-shadow: var(--ui-shadow);
+    backdrop-filter: blur(10px);
   }
 
-  /* Buttons (base) */
+  .ui-card-accent { @apply relative; }
+  .ui-card-accent::before {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 14px;
+    bottom: 14px;
+    width: 3px;
+    border-radius: 999px;
+    background: rgb(var(--ui-primary) / 0.35);
+  }
+  .ui-card-accent-success::before { background: rgb(var(--ui-success) / 0.55); }
+  .ui-card-accent-indigo::before  { background: rgb(var(--ui-accent) / 0.55); }
+
+  /* Section titles */
+  .ui-section-title {
+    @apply text-[14px] font-extrabold;
+    color: rgb(var(--ui-fg) / 0.95);
+  }
+  .ui-section-desc {
+    @apply mt-0.5 text-[12px];
+    color: rgb(var(--ui-muted) / 0.98);
+  }
+
+  /* Buttons */
   .ui-btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3.5 py-2 text-[12px] font-semibold
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 text-[12px] font-extrabold
            transition disabled:opacity-60 disabled:cursor-not-allowed;
+    border-radius: var(--ui-r-sm);
   }
+  .ui-btn-sm { @apply px-3 py-1.5 text-[11px]; border-radius: var(--ui-r-sm); }
+  .ui-btn-xs { @apply px-2.5 py-1 text-[11px]; border-radius: var(--ui-r-xs); }
 
-  .ui-btn-sm {
-    @apply px-3 py-1.5 text-[11px] rounded-xl;
-  }
-
-  .ui-btn-xs {
-    @apply px-2.5 py-1 text-[11px] rounded-lg;
-  }
-
-  /* Button variants */
   .ui-btn-primary {
     @apply text-white;
-    background: linear-gradient(90deg, rgba(var(--ui-primary), 1), rgba(var(--ui-primary-2), 1));
-    box-shadow: 0 10px 24px rgba(var(--ui-primary), 0.22);
+    background: linear-gradient(90deg, rgb(var(--ui-primary)), rgb(var(--ui-primary-2)));
+    box-shadow: 0 10px 24px rgb(var(--ui-primary) / 0.18);
   }
-  .ui-btn-primary:hover {
-    filter: brightness(1.03);
+  .ui-btn-primary:hover { filter: brightness(1.03); }
+
+  .ui-btn-indigo {
+    @apply text-white;
+    background: linear-gradient(90deg, rgb(var(--ui-accent)), rgb(var(--ui-primary) / 0.95));
+    box-shadow: 0 10px 24px rgb(var(--ui-accent) / 0.16);
   }
+  .ui-btn-indigo:hover { filter: brightness(1.03); }
 
   .ui-btn-soft {
     @apply border;
-    border-color: rgba(var(--ui-border), 0.9);
-    background: rgba(var(--ui-card), 0.70);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.70);
   }
-  .ui-btn-soft:hover {
-    background: rgba(var(--ui-card), 0.92);
-  }
+  .ui-btn-soft:hover { background: rgb(var(--ui-card) / 0.88); }
 
   .ui-btn-ghost {
     @apply border border-transparent;
     background: transparent;
   }
-  .ui-btn-ghost:hover {
-    background: rgba(var(--ui-border), 0.35);
-  }
+  .ui-btn-ghost:hover { background: rgb(var(--ui-border) / 0.18); }
 
   .ui-btn-danger {
     @apply text-white;
-    background: linear-gradient(90deg, rgba(var(--ui-danger), 1), rgba(var(--ui-warning), 0.75));
+    background: linear-gradient(90deg, rgb(var(--ui-danger)), rgb(var(--ui-warning) / 0.75));
   }
 
   /* Inputs */
-  .ui-field {
-    @apply space-y-1;
-  }
+  .ui-field { @apply space-y-1; }
 
   .ui-label {
-    @apply block text-[11px] font-semibold;
-    color: rgba(var(--ui-fg), 0.75);
+    @apply block text-[11px] font-extrabold uppercase tracking-[0.20em];
+    color: rgb(var(--ui-muted) / 0.95);
   }
 
   .ui-input,
   .ui-select,
   .ui-textarea {
-    @apply w-full rounded-xl border px-3 py-2 text-[12px] outline-none transition;
-    border-color: rgba(var(--ui-border), 0.95);
-    background: rgba(var(--ui-card), 0.85);
-    color: rgb(var(--ui-fg));
+    @apply w-full border px-3 py-2 text-[12px] outline-none transition;
+    border-radius: var(--ui-r-sm);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.86);
+    color: rgb(var(--ui-fg) / 0.98);
   }
 
   .ui-input:focus,
   .ui-select:focus,
   .ui-textarea:focus {
-    border-color: rgba(var(--ui-ring), 0.85);
-    box-shadow: 0 0 0 3px rgba(var(--ui-ring), 0.20);
+    border-color: rgb(var(--ui-ring) / 0.80);
+    box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.18);
   }
 
   .ui-input::placeholder,
   .ui-textarea::placeholder {
-    color: rgba(var(--ui-muted), 0.95);
+    color: rgb(var(--ui-muted) / 0.95);
   }
 
-  /* ✅ Date input BLUE background like your screenshot */
+  /* ✅ Date input (blue pill style) */
   .ui-date {
-    @apply w-full rounded-xl border px-3 py-2 text-[12px] outline-none transition;
-    /* light */
-    @apply border-sky-500 bg-sky-100 text-slate-900;
-    @apply focus:ring-2 focus:ring-sky-400/40 focus:border-sky-500;
-    /* dark */
-    @apply dark:border-sky-500 dark:bg-sky-900/30 dark:text-slate-100;
+    @apply w-full border px-3 py-2 text-[12px] outline-none transition;
+    border-radius: var(--ui-r-sm);
+    background: linear-gradient(90deg, rgb(var(--ui-primary) / 0.95), rgb(var(--ui-primary-2) / 0.95));
+    border-color: rgba(255, 255, 255, 0.28);
+    color: rgba(255, 255, 255, 0.95);
   }
-
-  /* Keep calendar icon visible on dark for .ui-date as well */
-  .dark .ui-date::-webkit-calendar-picker-indicator {
-    filter: invert(1) brightness(1.15);
-    opacity: 0.92;
+  .ui-date:focus {
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.22);
+  }
+  .ui-date::-webkit-calendar-picker-indicator {
+    opacity: 1;
     cursor: pointer;
+    filter: invert(1) brightness(1.15);
+  }
+  .dark .ui-date {
+    background: linear-gradient(90deg, rgb(var(--ui-primary) / 0.40), rgb(var(--ui-accent) / 0.35));
+    border-color: rgb(var(--ui-border-2) / 0.70);
+    color: rgb(var(--ui-fg) / 0.95);
+  }
+  .dark .ui-date::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(1.2);
   }
 
-  /* Search input (with icon container) */
-  .ui-search {
-    @apply flex items-center gap-2 rounded-xl border px-3 py-2 text-[12px];
-    border-color: rgba(var(--ui-border), 0.95);
-    background: rgba(var(--ui-card), 0.75);
+  /* Frames */
+  .ui-frame {
+    @apply overflow-hidden border;
+    border-radius: var(--ui-r-lg);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-bg-2) / 0.65);
   }
 
-  /* Badges / chips */
+  /* Badges */
   .ui-badge {
-    @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold border;
-    border-color: rgba(var(--ui-border), 0.9);
-    background: rgba(var(--ui-border), 0.25);
-    color: rgba(var(--ui-fg), 0.85);
+    @apply inline-flex items-center gap-1.5 border px-2 py-0.5 text-[10px] font-extrabold;
+    border-radius: 999px;
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-border) / 0.16);
+    color: rgb(var(--ui-fg) / 0.82);
   }
-
-  .ui-badge-success {
-    border-color: rgba(var(--ui-success), 0.35);
-    background: rgba(var(--ui-success), 0.12);
-    color: rgba(var(--ui-success), 1);
-  }
-
-  .ui-badge-warning {
-    border-color: rgba(var(--ui-warning), 0.35);
-    background: rgba(var(--ui-warning), 0.12);
-    color: rgba(var(--ui-warning), 1);
-  }
-
-  .ui-badge-danger {
-    border-color: rgba(var(--ui-danger), 0.35);
-    background: rgba(var(--ui-danger), 0.12);
-    color: rgba(var(--ui-danger), 1);
-  }
-
-  .ui-badge-info {
-    border-color: rgba(var(--ui-primary), 0.35);
-    background: rgba(var(--ui-primary), 0.12);
-    color: rgba(var(--ui-primary), 1);
-  }
+  .ui-badge-success { border-color: rgb(var(--ui-success) / 0.35); background: rgb(var(--ui-success) / 0.12); color: rgb(var(--ui-success)); }
+  .ui-badge-warning { border-color: rgb(var(--ui-warning) / 0.35); background: rgb(var(--ui-warning) / 0.12); color: rgb(var(--ui-warning)); }
+  .ui-badge-danger  { border-color: rgb(var(--ui-danger)  / 0.35); background: rgb(var(--ui-danger)  / 0.12); color: rgb(var(--ui-danger)); }
+  .ui-badge-info    { border-color: rgb(var(--ui-primary) / 0.35); background: rgb(var(--ui-primary) / 0.12); color: rgb(var(--ui-primary)); }
+  .ui-badge-indigo  { border-color: rgb(var(--ui-accent)  / 0.35); background: rgb(var(--ui-accent)  / 0.12); color: rgb(var(--ui-accent)); }
 
   /* Table */
   .ui-table-wrap {
-    @apply overflow-x-auto rounded-2xl border;
-    border-color: rgba(var(--ui-border), 0.95);
-    background: rgba(var(--ui-card), 0.75);
+    @apply overflow-x-auto border;
+    border-radius: var(--ui-r-lg);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.75);
   }
 
   .ui-table {
-    @apply w-full min-w-[980px] table-fixed border-collapse text-[12px];
-    color: rgba(var(--ui-fg), 0.92);
+    @apply w-full min-w-[980px] table-fixed border-collapse text-[12px] text-center;
+    color: rgb(var(--ui-fg) / 0.92);
   }
 
   .ui-th {
-    @apply px-3 py-2 text-[11px] font-extrabold uppercase tracking-wide;
-    background: rgba(var(--ui-border), 0.25);
-    color: rgba(var(--ui-muted), 1);
-    border-bottom: 1px solid rgba(var(--ui-border), 0.95);
+    @apply px-3 py-2 text-[11px] font-extrabold uppercase tracking-wide text-center align-middle;
+    background: rgb(var(--ui-border) / 0.16);
+    color: rgb(var(--ui-muted));
+    border-bottom: 1px solid rgb(var(--ui-border) / 0.65);
   }
 
   .ui-td {
-    @apply px-3 py-2 align-middle;
-    border-bottom: 1px solid rgba(var(--ui-border), 0.85);
+    @apply px-3 py-2 align-middle text-center;
+    border-bottom: 1px solid rgb(var(--ui-border) / 0.55);
   }
 
-  .ui-tr-hover:hover {
-    background: rgba(var(--ui-border), 0.20);
-  }
+
+
+  .ui-tr-hover:hover { background: rgb(var(--ui-border) / 0.12); }
 
   /* Pagination */
   .ui-pagebtn {
-    @apply rounded-full border px-3 py-1 text-[11px] font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed;
-    border-color: rgba(var(--ui-muted), 0.55);
-    background: rgba(var(--ui-card), 0.85);
-    color: rgba(var(--ui-fg), 0.92);
+    @apply border px-3 py-1 text-[11px] font-extrabold transition
+           disabled:opacity-40 disabled:cursor-not-allowed;
+    border-radius: 999px;
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.85);
+    color: rgb(var(--ui-fg) / 0.92);
   }
   .ui-pagebtn:hover:not(:disabled) {
-    background: rgba(var(--ui-primary), 0.10);
-    border-color: rgba(var(--ui-primary), 0.40);
+    background: rgb(var(--ui-primary) / 0.10);
+    border-color: rgb(var(--ui-primary) / 0.30);
   }
 
-  /* Skeleton */
-  .ui-skeleton {
-    @apply animate-pulse rounded-xl;
-    background: rgba(var(--ui-border), 0.35);
-  }
+  /* Skeleton + Divider */
+  .ui-skeleton { @apply animate-pulse rounded-xl; background: rgb(var(--ui-border) / 0.22); }
+  .ui-divider { @apply border-t; border-color: rgb(var(--ui-border) / 0.65); }
 
-  /* Divider */
-  .ui-divider {
-    @apply border-t;
-    border-color: rgba(var(--ui-border), 0.95);
+  /* Optional: Modal base (helps keep dialogs consistent) */
+  .ui-modal-backdrop {
+    @apply fixed inset-0 z-[60] flex items-center justify-center p-4;
+    background: rgba(2, 6, 23, 0.45);
+    backdrop-filter: blur(6px);
+  }
+  .ui-modal {
+    @apply w-full max-w-3xl border;
+    border-radius: var(--ui-r-xl);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.92);
+    box-shadow: var(--ui-shadow-2);
   }
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Utilities: Nice scrollbars (optional)
+   Utilities: Scrollbars
    ───────────────────────────────────────────────────────────── */
 @layer utilities {
-  .ui-scrollbar::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
+  .ui-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
   .ui-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(var(--ui-muted), 0.35);
+    background: rgb(var(--ui-muted) / 0.35);
     border-radius: 999px;
   }
   .ui-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(var(--ui-muted), 0.48);
+    background: rgb(var(--ui-muted) / 0.48);
   }
 }

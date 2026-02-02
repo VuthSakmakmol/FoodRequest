@@ -64,23 +64,17 @@ function compactBalances(balances) {
 }
 
 function statusChipClasses(active) {
-  return active
-    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/80'
-    : 'bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/80'
+  return active ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
 }
 
 /**
  * ✅ approvalMode (2 modes only)
  * - MANAGER_AND_GM
  * - GM_AND_COO
- *
- * IMPORTANT: no orange in dark mode → keep blue palette
  */
 function modeChipClasses(mode) {
   const m = up(mode)
-  return m === 'GM_AND_COO'
-    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700/80'
-    : 'bg-sky-100 text-sky-700 border border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80'
+  return m === 'GM_AND_COO' ? 'ui-badge ui-badge-indigo' : 'ui-badge ui-badge-info'
 }
 function modeLabel(mode) {
   const m = up(mode)
@@ -88,9 +82,7 @@ function modeLabel(mode) {
 }
 
 function pairChipClasses(remaining) {
-  return remaining >= 0
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-    : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'
+  return remaining >= 0 ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
 }
 
 /* ───────── navigation ───────── */
@@ -239,13 +231,6 @@ function normName(x) {
   return String(x?.name || x?.displayName || x?.fullName || '').trim()
 }
 
-/**
- * Backend should return approvers seeded in DB.
- * We try to fetch /admin/leave/approvers, then pick:
- * - LEAVE_GM
- * - LEAVE_COO
- * If it fails / missing, fallback to loginIds from seed: leave_gm / leave_coo.
- */
 async function fetchDefaultApprovers() {
   approversLoading.value = true
   approversError.value = ''
@@ -298,8 +283,8 @@ function newRow() {
 }
 
 const form = ref({
-  approvalMode: 'MANAGER_AND_GM', // ✅ default mode
-  manager: null, // required in MANAGER_AND_GM
+  approvalMode: 'MANAGER_AND_GM',
+  manager: null,
   rows: [newRow()],
 
   singleEmployee: null,
@@ -326,8 +311,6 @@ function openCreate() {
     singleManager: null,
   }
   createOpen.value = true
-
-  // ensure defaults ready (no UI selection needed)
   fetchDefaultApprovers()
 }
 function closeCreate() {
@@ -359,7 +342,6 @@ function mustYmd(v) {
 const needsCoo = computed(() => up(form.value.approvalMode) === 'GM_AND_COO')
 const requiresManager = computed(() => up(form.value.approvalMode) === 'MANAGER_AND_GM')
 
-/* hide manager when GM+COO to avoid confusion + avoid sending */
 watch(
   () => form.value.approvalMode,
   (v) => {
@@ -387,7 +369,6 @@ async function submitCreate() {
       throw new Error('Invalid approval mode.')
     }
 
-    // ✅ auto approvers (seeded)
     const gmLoginId = String(defaultGm.value?.loginId || '').trim()
     const cooLoginId = String(defaultCoo.value?.loginId || '').trim()
 
@@ -395,7 +376,6 @@ async function submitCreate() {
     if (mode === 'GM_AND_COO' && !cooLoginId)
       throw new Error('COO approver is missing (seed or /admin/leave/approvers).')
 
-    // ✅ require manager when MANAGER_AND_GM
     if (mode === 'MANAGER_AND_GM') {
       const chosen =
         createTab.value === 'bulk'
@@ -433,15 +413,10 @@ async function submitCreate() {
 
       const payload = {
         approvalMode: mode,
-
-        // ✅ manager required only for MANAGER_AND_GM
         managerEmployeeId: managerEmpId,
         managerLoginId,
-
-        // ✅ auto from seed
         gmLoginId,
         cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
-
         employees,
       }
 
@@ -458,7 +433,6 @@ async function submitCreate() {
       return
     }
 
-    // ───────── single ─────────
     const employeeId = pickEmployeeId(form.value.singleEmployee)
     if (!employeeId) throw new Error('Employee is required.')
     if (!mustYmd(form.value.singleJoinDate)) throw new Error('Join date must be YYYY-MM-DD.')
@@ -472,18 +446,13 @@ async function submitCreate() {
 
     const payload = {
       approvalMode: mode,
-
       employeeId,
       joinDate: form.value.singleJoinDate,
       contractDate,
       alCarry: Number(form.value.singleAlCarry || 0),
       isActive: form.value.singleActive !== false,
-
-      // ✅ manager required only for MANAGER_AND_GM
       managerEmployeeId: singleManagerEmpId,
       managerLoginId: singleManagerLoginId,
-
-      // ✅ auto from seed
       gmLoginId,
       cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
     }
@@ -522,94 +491,71 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="px-1 py-1 sm:px-3">
-    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Header (keep your blue theme) -->
-      <div class="rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
+  <!-- ✅ Full screen edge-to-edge shell -->
+  <div class="ui-page min-h-screen w-full">
+    <!-- ✅ Edge container -->
+    <div class="w-full min-h-screen flex flex-col">
+
+      <!-- ✅ Header stays top, FULL width, no rounded -->
+      <div class="ui-hero rounded-none border-x-0 border-t-0 px-4 py-3">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex flex-col gap-1 min-w-[240px]">
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
-            <p class="text-sm font-semibold">Expat Profiles</p>
-            <p class="text-[11px] text-sky-50/90">Profiles grouped by manager.</p>
+          <div class="min-w-[240px]">
+            <div class="ui-hero-kicker">Expat Leave</div>
+            <div class="ui-hero-title">Expat Profiles</div>
+            <div class="ui-hero-subtitle">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Employees: {{ filteredCount }}
-              </span>
-              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Managers: {{ managerCount }}
-              </span>
-              <span class="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/90">
-                Page: {{ page }}/{{ totalPages }}
-              </span>
+              <span class="ui-badge">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge ui-badge-indigo">Managers: <b>{{ managerCount }}</b></span>
+              <span class="ui-badge">Page: <b>{{ page }}/{{ totalPages }}</b></span>
             </div>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-            <!-- Search -->
             <div class="min-w-[260px] max-w-sm">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
-              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-xs">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
+              <div class="ui-label">Search</div>
+              <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
                 <input
                   v-model="q"
                   type="text"
                   placeholder="Employee / manager / department..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
+                  class="ui-input pl-8"
                 />
               </div>
             </div>
 
-            <!-- Include inactive -->
-            <div class="flex items-center gap-2 text-[11px]">
-              <label class="inline-flex items-center gap-2 rounded-full bg-sky-900/30 px-3 py-1.5">
-                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-sky-100/60 bg-transparent" />
-                <span class="text-sky-50/90">Include inactive</span>
+            <div class="flex items-center gap-2">
+              <label class="inline-flex items-center gap-2 ui-badge">
+                <input
+                  v-model="includeInactive"
+                  type="checkbox"
+                  class="h-4 w-4 rounded border-ui-border/70 bg-transparent"
+                />
+                <span>Include inactive</span>
               </label>
             </div>
 
-            <!-- Page size -->
-            <div class="min-w-[120px]">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">Per page</label>
-              <select
-                v-model.number="pageSize"
-                class="w-full rounded-xl border border-sky-100/60 bg-sky-900/30 px-2.5 py-1.5 text-[11px] text-white outline-none"
-              >
-                <option v-for="n in PAGE_SIZES" :key="n" :value="n" class="text-slate-900">
-                  {{ n }}
-                </option>
+            <div class="min-w-[140px]">
+              <div class="ui-label">Per page</div>
+              <select v-model.number="pageSize" class="ui-select">
+                <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
               </select>
             </div>
 
-            <!-- Actions -->
             <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
-                @click="fetchGroups"
-                :disabled="loading"
-                title="Refresh"
-              >
+              <button type="button" class="ui-btn ui-btn-soft" @click="fetchGroups" :disabled="loading" title="Refresh">
                 <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
                 Refresh
               </button>
 
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
-                @click="openCreate"
-              >
+              <button type="button" class="ui-btn ui-btn-primary" @click="openCreate">
                 <i class="fa-solid fa-plus text-[11px]"></i>
                 New
               </button>
 
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
-                @click="clearFilters"
-                title="Clear filters"
-              >
+              <button type="button" class="ui-btn ui-btn-ghost" @click="clearFilters" title="Clear filters">
                 <i class="fa-solid fa-broom text-[11px]"></i>
                 Clear
               </button>
@@ -620,68 +566,43 @@ onBeforeUnmount(() => {
         <!-- Mobile -->
         <div v-else class="space-y-2">
           <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
-            <p class="text-sm font-semibold">Expat Profiles</p>
-            <p class="text-[11px] text-sky-50/90">Profiles grouped by manager.</p>
+            <div class="ui-hero-kicker">Expat Leave</div>
+            <div class="ui-hero-title">Expat Profiles</div>
+            <div class="ui-hero-subtitle">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Employees: {{ filteredCount }}
-              </span>
-              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Managers: {{ managerCount }}
-              </span>
-              <span class="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/90">
-                Page: {{ page }}/{{ totalPages }}
-              </span>
+              <span class="ui-badge">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge ui-badge-indigo">Managers: <b>{{ managerCount }}</b></span>
+              <span class="ui-badge">Page: <b>{{ page }}/{{ totalPages }}</b></span>
             </div>
           </div>
 
           <div class="space-y-2">
-            <div class="space-y-1">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
-              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-[11px]">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
-                <input
-                  v-model="q"
-                  type="text"
-                  placeholder="Employee / manager / dept..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
-                />
+            <div>
+              <div class="ui-label">Search</div>
+              <div class="relative">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
+                <input v-model="q" type="text" placeholder="Employee / manager / dept..." class="ui-input pl-8" />
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <label class="inline-flex items-center gap-2 rounded-full bg-sky-900/30 px-3 py-1.5">
-                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-sky-100/60 bg-transparent" />
-                <span class="text-sky-50/90">Include inactive</span>
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <label class="inline-flex items-center gap-2 ui-badge">
+                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-ui-border/70 bg-transparent" />
+                <span>Include inactive</span>
               </label>
 
               <div class="flex items-center gap-2">
-                <select
-                  v-model.number="pageSize"
-                  class="rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white"
-                >
-                  <option v-for="n in PAGE_SIZES" :key="n" :value="n" class="text-slate-900">
-                    {{ n }}/page
-                  </option>
+                <select v-model.number="pageSize" class="ui-select !w-auto">
+                  <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}/page</option>
                 </select>
 
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
-                  @click="fetchGroups"
-                  :disabled="loading"
-                >
+                <button type="button" class="ui-btn ui-btn-soft" @click="fetchGroups" :disabled="loading">
                   <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
                   Refresh
                 </button>
 
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
-                  @click="openCreate"
-                >
+                <button type="button" class="ui-btn ui-btn-primary" @click="openCreate">
                   <i class="fa-solid fa-plus text-[11px]"></i>
                   New
                 </button>
@@ -689,11 +610,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex justify-end">
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white border border-white/25 hover:bg-white/15 transition"
-                @click="clearFilters"
-              >
+              <button type="button" class="ui-btn ui-btn-ghost" @click="clearFilters">
                 <i class="fa-solid fa-broom text-[11px]"></i>
                 Clear
               </button>
@@ -702,114 +619,61 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Body -->
-      <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
+      <!-- ✅ CONTENT AREA: fills remaining screen + scrolls -->
+      <div class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-3">
         <!-- Error -->
-        <div
-          v-if="error"
-          class="mb-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px]
-                 text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
-        >
+        <div v-if="error" class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100">
           <span class="font-semibold">Failed:</span> {{ error }}
         </div>
 
         <!-- Loading -->
-        <div
-          v-if="loading && !pagedManagers.length"
-          class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px]
-                 text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
-        >
+        <div v-if="loading && !pagedManagers.length" class="mt-2 ui-card !rounded-2xl border border-ui-border/70 bg-ui-bg-2/60 px-3 py-2 text-[11px] text-ui-muted">
           Loading profiles...
         </div>
 
         <!-- Pagination bar -->
-        <div
-          v-if="!loading && totalRows"
-          class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2
-                 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300"
-        >
+        <div v-if="!loading && totalRows" class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2">
           <div>
-            Showing <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageFrom }}</span>–
-            <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageTo }}</span>
-            of <span class="font-semibold text-slate-900 dark:text-slate-50">{{ totalRows }}</span>
+            Showing <span class="font-semibold text-ui-fg">{{ pageFrom }}</span>–
+            <span class="font-semibold text-ui-fg">{{ pageTo }}</span>
+            of <span class="font-semibold text-ui-fg">{{ totalRows }}</span>
           </div>
 
           <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
-                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-              :disabled="page <= 1"
-              @click="prevPage"
-            >
-              <i class="fa-solid fa-chevron-left text-[10px]" />
-              Prev
+            <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="prevPage">
+              <i class="fa-solid fa-chevron-left text-[10px]" /> Prev
             </button>
-
-            <div class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700
-                        dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
-              Page {{ page }} / {{ totalPages }}
-            </div>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
-                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-              :disabled="page >= totalPages"
-              @click="nextPage"
-            >
-              Next
-              <i class="fa-solid fa-chevron-right text-[10px]" />
+            <div class="ui-badge">Page <b>{{ page }}</b> / <b>{{ totalPages }}</b></div>
+            <button type="button" class="ui-pagebtn" :disabled="page >= totalPages" @click="nextPage">
+              Next <i class="fa-solid fa-chevron-right text-[10px]" />
             </button>
           </div>
         </div>
 
         <!-- Empty -->
-        <div
-          v-if="!loading && !error && pagedManagers.length === 0"
-          class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400"
-        >
+        <div v-if="!loading && !error && pagedManagers.length === 0" class="py-8 text-center text-[11px] text-ui-muted">
           No profiles found.
         </div>
 
         <!-- Mobile cards -->
-        <div v-if="isMobile && pagedManagers.length" class="space-y-3">
-          <section
-            v-for="(g, idx) in pagedManagers"
-            :key="idx"
-            class="rounded-2xl border border-slate-200 bg-white/95
-                   shadow-[0_10px_24px_rgba(15,23,42,0.10)]
-                   dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
-          >
-            <!-- Manager header -->
-            <div class="border-b border-slate-200 bg-indigo-50 px-3 py-2 dark:border-slate-700 dark:bg-indigo-950/30">
+        <div v-if="isMobile && pagedManagers.length" class="mt-3 space-y-3">
+          <section v-for="(g, idx) in pagedManagers" :key="idx" class="ui-card overflow-hidden">
+            <div class="border-b border-ui-border/60 bg-ui-bg-2/60 px-3 py-2">
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
-                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                    <span
-                      class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
-                             dark:bg-indigo-500/15 dark:text-indigo-200"
-                    >
-                      MANAGER
-                    </span>
+                  <div class="truncate text-[12px] font-extrabold text-ui-fg">
+                    <span class="ui-badge ui-badge-indigo mr-2">MANAGER</span>
                     {{ safeTxt(g.manager?.name) }}
-                    <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    <span class="ml-1 font-mono text-[11px] text-ui-muted">
                       ({{ safeTxt(g.manager?.employeeId) }})
                     </span>
                   </div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  <div class="truncate text-[11px] text-ui-muted">
                     {{ safeTxt(g.manager?.department) }}
                   </div>
                 </div>
 
-                <div
-                  class="shrink-0 rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 border border-slate-200
-                         dark:bg-slate-950 dark:text-slate-200 dark:border-slate-800"
-                >
-                  {{ g.employees?.length || 0 }}
-                </div>
+                <div class="ui-badge">{{ g.employees?.length || 0 }}</div>
               </div>
             </div>
 
@@ -819,52 +683,34 @@ onBeforeUnmount(() => {
                 :key="e.employeeId"
                 role="button"
                 tabindex="0"
-                class="cursor-pointer rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
-                       shadow-[0_10px_24px_rgba(15,23,42,0.10)]
-                       dark:border-slate-700 dark:bg-slate-950/40"
+                class="ui-card !rounded-2xl p-3 cursor-pointer"
                 @click="goProfile(e.employeeId)"
                 @keydown.enter.prevent="goProfile(e.employeeId)"
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0 space-y-1">
-                    <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
-                      {{ safeTxt(e.employeeId) }}
-                    </div>
-                    <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                      {{ safeTxt(e.name) }}
-                    </div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                      {{ safeTxt(e.department) }}
-                    </div>
+                    <div class="font-mono text-[11px] text-ui-fg">{{ safeTxt(e.employeeId) }}</div>
+                    <div class="truncate text-[12px] font-extrabold text-ui-fg">{{ safeTxt(e.name) }}</div>
+                    <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(e.department) }}</div>
                   </div>
 
                   <div class="text-right space-y-1 text-[11px]">
-                    <span
-                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
-                      :class="statusChipClasses(!!e.isActive)"
-                    >
-                      {{ e.isActive ? 'Active' : 'Inactive' }}
-                    </span>
+                    <span :class="statusChipClasses(!!e.isActive)">{{ e.isActive ? 'Active' : 'Inactive' }}</span>
                     <div>
-                      <span
-                        class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                        :class="modeChipClasses(e.approvalMode)"
-                      >
-                        {{ modeLabel(e.approvalMode) }}
-                      </span>
+                      <span :class="modeChipClasses(e.approvalMode)">{{ modeLabel(e.approvalMode) }}</span>
                     </div>
                   </div>
                 </div>
 
                 <div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                  <div class="rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
-                    <div class="text-slate-500 dark:text-slate-400">Join</div>
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ safeTxt(e.joinDate) }}</div>
+                  <div class="ui-card !rounded-2xl px-2 py-1">
+                    <div class="text-ui-muted">Join</div>
+                    <div class="font-extrabold text-ui-fg">{{ safeTxt(e.joinDate) }}</div>
                   </div>
-                  <div class="rounded-xl border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-950">
-                    <div class="text-slate-500 dark:text-slate-400">Contract</div>
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ safeTxt(e.contractDate) }}</div>
-                    <div class="text-[10px] text-slate-500 dark:text-slate-400">end: {{ safeTxt(e.contractEndDate) }}</div>
+                  <div class="ui-card !rounded-2xl px-2 py-1">
+                    <div class="text-ui-muted">Contract</div>
+                    <div class="font-extrabold text-ui-fg">{{ safeTxt(e.contractDate) }}</div>
+                    <div class="text-[10px] text-ui-muted">end: {{ safeTxt(e.contractEndDate) }}</div>
                   </div>
                 </div>
 
@@ -872,24 +718,20 @@ onBeforeUnmount(() => {
                   <span
                     v-for="b in compactBalances(e.balances)"
                     :key="b.k"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-semibold border"
+                    class="ui-badge"
                     :class="pairChipClasses(b.remaining)"
                   >
                     {{ b.k }}: {{ b.pair }}
                   </span>
-                  <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">None</span>
+                  <span v-if="!e.balances?.length" class="text-[11px] text-ui-muted">None</span>
                 </div>
 
-                <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <div class="mt-2 text-[11px] text-ui-muted">
                   Manager login: {{ safeTxt(e.managerLoginId) }}
                 </div>
 
                 <div class="mt-2 flex flex-wrap justify-end gap-2" @click.stop>
-                  <button
-                    type="button"
-                    class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                    @click.stop="goEdit(e.employeeId)"
-                  >
+                  <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" @click.stop="goEdit(e.employeeId)">
                     <i class="fa-solid fa-pen-to-square text-[10px]" />
                     Edit
                   </button>
@@ -900,111 +742,135 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Desktop table -->
-        <div v-else-if="!isMobile && pagedManagers.length" class="space-y-3">
-          <section
-            v-for="(g, idx) in pagedManagers"
-            :key="idx"
-            class="rounded-2xl border border-slate-200 bg-white/95
-                   shadow-[0_10px_24px_rgba(15,23,42,0.08)]
-                   dark:border-slate-700 dark:bg-slate-900/95 overflow-hidden"
-          >
-            <div class="border-b border-slate-200 bg-indigo-50 px-3 py-2 dark:border-slate-700 dark:bg-indigo-950/30">
+        <div v-else-if="!isMobile && pagedManagers.length" class="mt-3 space-y-3">
+          <section v-for="(g, idx) in pagedManagers" :key="idx" class="ui-card overflow-hidden">
+            <div class="border-b border-ui-border/60 bg-ui-bg-2/60 px-3 py-2">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
-                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50 truncate">
-                    <span
-                      class="mr-2 inline-flex items-center rounded-full bg-indigo-600/10 px-2 py-0.5 text-[10px] font-extrabold tracking-wide text-indigo-700
-                             dark:bg-indigo-500/15 dark:text-indigo-200"
-                    >
-                      MANAGER
-                    </span>
+                  <div class="truncate text-[12px] font-extrabold text-ui-fg">
+                    <span class="ui-badge ui-badge-indigo mr-2">MANAGER</span>
                     {{ safeTxt(g.manager?.name) }}
-                    <span class="ml-1 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                    <span class="ml-1 font-mono text-[11px] text-ui-muted">
                       ({{ safeTxt(g.manager?.employeeId) }})
                     </span>
                   </div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  <div class="truncate text-[11px] text-ui-muted">
                     {{ safeTxt(g.manager?.department) }}
                   </div>
                 </div>
-                <div class="text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+
+                <div class="text-[11px] font-extrabold text-ui-muted">
                   {{ g.employees?.length || 0 }} employees
                 </div>
               </div>
             </div>
 
-            <div class="overflow-x-auto">
-              <table class="min-w-[1100px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
-                <thead
-                  class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
-                         dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
-                >
+            <div class="ui-table-wrap ui-scrollbar">
+              <table class="ui-table">
+                <!-- ✅ Control widths: bigger balances, smaller status/actions -->
+                <colgroup>
+                  <col style="width: 20%" /> <!-- Employee -->
+                  <col style="width: 10%" /> <!-- Department -->
+                  <col style="width: 10%" /> <!-- Join -->
+                  <col style="width: 10%" /> <!-- Contract -->
+                  <col style="width: 10%" /> <!-- Mode -->
+                  <col style="width: 32%" /> <!-- ✅ Balances bigger -->
+                  <col style="width: 7%" />  <!-- ✅ Status smaller -->
+                  <col style="width: 7%" />  <!-- ✅ Actions smaller -->
+                </colgroup>
+
+                <thead>
                   <tr>
-                    <th class="table-th">Employee</th>
-                    <th class="table-th">Department</th>
-                    <th class="table-th">Join</th>
-                    <th class="table-th">Contract</th>
-                    <th class="table-th">Mode</th>
-                    <th class="table-th">Balances (U/R)</th>
-                    <th class="table-th text-center">Status</th>
-                    <th class="table-th text-right">Actions</th>
+                    <th class="ui-th text-center">Employee</th>
+                    <th class="ui-th text-center">Department</th>
+                    <th class="ui-th text-center">Join</th>
+                    <th class="ui-th text-center">Contract</th>
+                    <th class="ui-th text-center">Mode</th>
+                    <th class="ui-th text-center">Balances (U/R)</th>
+                    <th class="ui-th text-center">Status</th>
+                    <th class="ui-th text-center">Actions</th>
                   </tr>
                 </thead>
 
-                <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
+                <tbody>
                   <tr
                     v-for="e in g.employees"
                     :key="e.employeeId"
-                    class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70 cursor-pointer"
+                    class="ui-tr-hover cursor-pointer"
                     @click="goProfile(e.employeeId)"
                   >
-                    <td class="table-td align-top">
-                      <div class="text-xs font-mono text-slate-900 dark:text-slate-50">{{ safeTxt(e.employeeId) }}</div>
-                      <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">{{ safeTxt(e.name) }}</div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">Manager: {{ safeTxt(e.managerLoginId) }}</div>
+                    <!-- Employee -->
+                    <td class="ui-td">
+                      <div class="flex flex-col items-center text-center gap-0.5">
+                        <div class="font-mono text-[11px] text-ui-fg">{{ safeTxt(e.employeeId) }}</div>
+                        <div class="text-[12px] font-extrabold text-ui-fg">{{ safeTxt(e.name) }}</div>
+                        <div class="text-[11px] text-ui-muted">Manager: {{ safeTxt(e.managerLoginId) }}</div>
+                      </div>
                     </td>
 
-                    <td class="table-td align-top">{{ safeTxt(e.department) }}</td>
-                    <td class="table-td align-top whitespace-nowrap">{{ safeTxt(e.joinDate) }}</td>
-
-                    <td class="table-td align-top whitespace-nowrap">
-                      <div class="font-semibold">{{ safeTxt(e.contractDate) }}</div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">end: {{ safeTxt(e.contractEndDate) }}</div>
+                    <!-- Department -->
+                    <td class="ui-td">
+                      <div class="flex items-center justify-center text-center">
+                        {{ safeTxt(e.department) }}
+                      </div>
                     </td>
 
-                    <td class="table-td align-top">
-                      <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="modeChipClasses(e.approvalMode)">
-                        {{ modeLabel(e.approvalMode) }}
-                      </span>
+                    <!-- Join -->
+                    <td class="ui-td whitespace-nowrap">
+                      <div class="flex items-center justify-center">
+                        {{ safeTxt(e.joinDate) }}
+                      </div>
                     </td>
 
-                    <td class="table-td align-top">
-                      <div class="flex flex-wrap gap-2">
+                    <!-- Contract -->
+                    <td class="ui-td whitespace-nowrap">
+                      <div class="flex flex-col items-center text-center">
+                        <div class="font-extrabold">{{ safeTxt(e.contractDate) }}</div>
+                        <div class="text-[11px] text-ui-muted">end: {{ safeTxt(e.contractEndDate) }}</div>
+                      </div>
+                    </td>
+
+                    <!-- Mode -->
+                    <td class="ui-td">
+                      <div class="flex items-center justify-center">
+                        <span :class="modeChipClasses(e.approvalMode)">{{ modeLabel(e.approvalMode) }}</span>
+                      </div>
+                    </td>
+
+                    <!-- ✅ Balances: force 2 rows (3 chips per row) -->
+                    <td class="ui-td">
+                      <div class="grid grid-cols-5 gap-2 justify-items-center">
                         <span
                           v-for="b in compactBalances(e.balances)"
                           :key="b.k"
-                          class="rounded-full px-2 py-0.5 text-[11px] font-semibold border"
+                          class="ui-badge whitespace-nowrap"
                           :class="pairChipClasses(b.remaining)"
                         >
                           {{ b.k }}: {{ b.pair }}
                         </span>
-                        <span v-if="!e.balances?.length" class="text-[11px] text-slate-500 dark:text-slate-400">None</span>
+
+                        <span
+                          v-if="!e.balances?.length"
+                          class="text-[11px] text-ui-muted col-span-3 text-center"
+                        >
+                          None
+                        </span>
                       </div>
                     </td>
 
-                    <td class="table-td align-top text-center">
-                      <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(!!e.isActive)">
-                        {{ e.isActive ? 'Active' : 'Inactive' }}
-                      </span>
+                    <!-- ✅ Status smaller -->
+                    <td class="ui-td !px-2">
+                      <div class="flex items-center justify-center">
+                        <span :class="statusChipClasses(!!e.isActive)">
+                          {{ e.isActive ? 'Active' : 'Inactive' }}
+                        </span>
+                      </div>
                     </td>
 
-                    <td class="table-td align-top text-right" @click.stop>
-                      <div class="inline-flex flex-wrap justify-end gap-2">
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
-                          @click="goEdit(e.employeeId)"
-                        >
+                    <!-- ✅ Actions smaller -->
+                    <td class="ui-td !px-2" @click.stop>
+                      <div class="flex items-center justify-center">
+                        <button type="button" class="ui-btn ui-btn-primary ui-btn-xs" @click="goEdit(e.employeeId)">
                           <i class="fa-solid fa-pen-to-square text-[10px]" />
                           Edit
                         </button>
@@ -1018,334 +884,216 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Bottom pagination repeat -->
-        <div
-          v-if="!loading && totalRows"
-          class="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2
-                 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300"
-        >
+        <div v-if="!loading && totalRows" class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2">
           <div>
-            Showing <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageFrom }}</span>–
-            <span class="font-semibold text-slate-900 dark:text-slate-50">{{ pageTo }}</span>
-            of <span class="font-semibold text-slate-900 dark:text-slate-50">{{ totalRows }}</span>
+            Showing <span class="font-semibold text-ui-fg">{{ pageFrom }}</span>–
+            <span class="font-semibold text-ui-fg">{{ pageTo }}</span>
+            of <span class="font-semibold text-ui-fg">{{ totalRows }}</span>
           </div>
 
           <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
-                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-              :disabled="page <= 1"
-              @click="prevPage"
-            >
-              <i class="fa-solid fa-chevron-left text-[10px]" />
-              Prev
+            <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="prevPage">
+              <i class="fa-solid fa-chevron-left text-[10px]" /> Prev
             </button>
-
-            <div
-              class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700
-                     dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
-            >
-              Page {{ page }} / {{ totalPages }}
-            </div>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                     text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60
-                     dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-              :disabled="page >= totalPages"
-              @click="nextPage"
-            >
-              Next
-              <i class="fa-solid fa-chevron-right text-[10px]" />
+            <div class="ui-badge">Page <b>{{ page }}</b> / <b>{{ totalPages }}</b></div>
+            <button type="button" class="ui-pagebtn" :disabled="page >= totalPages" @click="nextPage">
+              Next <i class="fa-solid fa-chevron-right text-[10px]" />
             </button>
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- ✅ Create modal -->
-    <transition name="modal-fade">
-      <div v-if="createOpen" class="fixed inset-0 z-40 overflow-y-auto bg-slate-900/50 px-2 py-6" @click.self="closeCreate">
-        <div
-          class="mx-auto w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl
-                 dark:border-slate-700 dark:bg-slate-950
-                 max-h-[calc(100vh-3rem)] flex flex-col"
-        >
-          <!-- Header -->
-          <div class="shrink-0 rounded-t-2xl bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-500 px-4 py-3 text-white">
-            <div class="flex items-start justify-between gap-2">
-              <div>
-                <div class="text-sm font-semibold">New leave profile</div>
-                <div class="text-[11px] text-white/85">
-                  Approval chain:
-                  <span class="font-semibold" v-if="requiresManager">Manager</span>
-                  <span class="font-semibold" v-if="requiresManager"> → </span>
-                  <span class="font-semibold">GM</span>
-                  <span v-if="needsCoo"> → <span class="font-semibold">COO</span></span>
+      <!-- ✅ Standard Create modal (unchanged) -->
+      <transition name="modal-fade">
+        <div v-if="createOpen" class="ui-modal-backdrop" @click.self="closeCreate">
+          <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
+            <!-- Header -->
+            <div class="ui-hero rounded-b-none px-4 py-3">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-[14px] font-extrabold text-ui-fg">New leave profile</div>
+                  <div class="text-[11px] text-ui-muted">
+                    Approval chain:
+                    <span class="font-semibold" v-if="requiresManager">Manager</span>
+                    <span class="font-semibold" v-if="requiresManager"> → </span>
+                    <span class="font-semibold">GM</span>
+                    <span v-if="needsCoo"> → <span class="font-semibold">COO</span></span>
+                  </div>
                 </div>
+
+                <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" @click="closeCreate">
+                  <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
               </div>
 
-              <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15 hover:bg-white/20" @click="closeCreate">
-                <i class="fa-solid fa-xmark text-xs"></i>
-              </button>
-            </div>
-
-            <!-- Tabs -->
-            <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-              <div class="flex rounded-full bg-sky-900/30 p-0.5">
+              <div class="mt-3 inline-flex rounded-full border border-ui-border/60 bg-ui-card/60 p-0.5">
                 <button
                   type="button"
-                  class="rounded-full px-3 py-1 font-medium"
-                  :class="createTab === 'bulk' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                  class="ui-btn ui-btn-xs"
+                  :class="createTab === 'bulk' ? 'ui-btn-primary' : 'ui-btn-ghost'"
                   @click="createTab = 'bulk'"
                 >
                   Manager + multiple
                 </button>
                 <button
                   type="button"
-                  class="rounded-full px-3 py-1 font-medium"
-                  :class="createTab === 'single' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
+                  class="ui-btn ui-btn-xs"
+                  :class="createTab === 'single' ? 'ui-btn-primary' : 'ui-btn-ghost'"
                   @click="createTab = 'single'"
                 >
                   Single
                 </button>
               </div>
             </div>
-          </div>
 
-          <!-- Body -->
-          <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3 overscroll-contain">
-            <div>
-              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Approval mode</label>
-              <select
-                v-model="form.approvalMode"
-                class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-              >
-                <option value="MANAGER_AND_GM">Manager + GM</option>
-                <option value="GM_AND_COO">GM + COO</option>
-              </select>
-
-              <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                GM must approve first. If Manager exists, GM cannot see until Manager approves.
-              </p>
-            </div>
-
-            <!-- ✅ Manager required only when Manager + GM -->
-            <div v-if="requiresManager">
-              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                Direct manager <span class="text-rose-600">*</span>
-              </label>
-              <EmployeeSearch v-if="createTab === 'bulk'" v-model="form.manager" placeholder="Search manager…" />
-              <EmployeeSearch v-else v-model="form.singleManager" placeholder="Search manager…" />
-              <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                Required in <span class="font-semibold">Manager + GM</span> mode.
-              </p>
-            </div>
-            <div v-else class="text-[11px] text-slate-500 dark:text-slate-400">
-              Manager is not needed in <span class="font-semibold">GM + COO</span> mode.
-            </div>
-
-            <!-- Bulk -->
-            <div v-if="createTab === 'bulk'" class="space-y-2">
-              <div class="flex items-center justify-between gap-2">
-                <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
+            <!-- Body -->
+            <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3 overscroll-contain ui-scrollbar">
+              <div>
+                <div class="ui-label">Approval mode</div>
+                <select v-model="form.approvalMode" class="ui-select">
+                  <option value="MANAGER_AND_GM">Manager + GM</option>
+                  <option value="GM_AND_COO">GM + COO</option>
+                </select>
+                <p class="mt-1 text-[11px] text-ui-muted">
+                  GM must approve first. If Manager exists, GM cannot see until Manager approves.
+                </p>
               </div>
 
-              <div
-                v-for="(r, i) in form.rows"
-                :key="r.key"
-                class="rounded-2xl border border-slate-200 bg-white/95 p-3 dark:border-slate-700 dark:bg-slate-950/40"
-              >
-                <div class="flex items-start justify-between gap-2">
-                  <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">
-                    Employee #{{ i + 1 }}
-                  </div>
-                  <button
-                    type="button"
-                    class="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white hover:bg-slate-50
-                           disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:hover:bg-slate-900"
-                    @click="removeRow(i)"
-                    :disabled="form.rows.length === 1"
-                    title="Remove"
-                  >
-                    <i class="fa-solid fa-trash text-[11px]"></i>
+              <div v-if="requiresManager">
+                <div class="ui-label">Direct manager <span class="text-rose-600">*</span></div>
+                <EmployeeSearch v-if="createTab === 'bulk'" v-model="form.manager" placeholder="Search manager…" />
+                <EmployeeSearch v-else v-model="form.singleManager" placeholder="Search manager…" />
+                <p class="mt-1 text-[11px] text-ui-muted">
+                  Required in <span class="font-semibold">Manager + GM</span> mode.
+                </p>
+              </div>
+              <div v-else class="text-[11px] text-ui-muted">
+                Manager is not needed in <span class="font-semibold">GM + COO</span> mode.
+              </div>
+
+              <!-- Bulk -->
+              <div v-if="createTab === 'bulk'" class="space-y-2">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="ui-section-title">Employees</div>
+
+                  <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="addRow">
+                    <i class="fa-solid fa-plus text-[10px]" />
+                    Add row
                   </button>
                 </div>
 
-                <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div class="sm:col-span-2">
-                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Employee *</label>
-                    <EmployeeSearch v-model="r.employee" placeholder="Search employee…" />
+                <div v-for="(r, i) in form.rows" :key="r.key" class="ui-card !rounded-2xl p-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="text-[12px] font-extrabold text-ui-fg">Employee #{{ i + 1 }}</div>
+                    <button
+                      type="button"
+                      class="ui-btn ui-btn-ghost ui-btn-sm"
+                      @click="removeRow(i)"
+                      :disabled="form.rows.length === 1"
+                      title="Remove"
+                    >
+                      <i class="fa-solid fa-trash text-[11px]"></i>
+                    </button>
                   </div>
 
-                  <div class="flex items-center">
-                    <label class="inline-flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200">
-                      <input v-model="r.isActive" type="checkbox" class="h-4 w-4 rounded border-slate-300 dark:border-slate-700" />
+                  <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div class="sm:col-span-2">
+                      <div class="ui-label">Employee *</div>
+                      <EmployeeSearch v-model="r.employee" placeholder="Search employee…" />
+                    </div>
+
+                    <div class="flex items-center pt-5 sm:pt-6">
+                      <label class="inline-flex items-center gap-2 text-[11px] text-ui-fg">
+                        <input v-model="r.isActive" type="checkbox" class="h-4 w-4 rounded border-ui-border/70 bg-transparent" />
+                        Active
+                      </label>
+                    </div>
+
+                    <div>
+                      <div class="ui-label">Join date *</div>
+                      <input v-model="r.joinDate" type="date" class="ui-date" @change="syncContractFromJoin(r)" />
+                    </div>
+
+                    <div>
+                      <div class="ui-label">Contract date</div>
+                      <input v-model="r.contractDate" type="date" class="ui-date" />
+                    </div>
+
+                    <div>
+                      <div class="ui-label">AL carry</div>
+                      <input v-model.number="r.alCarry" type="number" placeholder="0" class="ui-input" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Single -->
+              <div v-else class="ui-card !rounded-2xl p-3">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div class="sm:col-span-2">
+                    <div class="ui-label">Employee *</div>
+                    <EmployeeSearch v-model="form.singleEmployee" placeholder="Search employee…" />
+                  </div>
+
+                  <div class="flex items-center pt-5 sm:pt-6">
+                    <label class="inline-flex items-center gap-2 text-[11px] text-ui-fg">
+                      <input v-model="form.singleActive" type="checkbox" class="h-4 w-4 rounded border-ui-border/70 bg-transparent" />
                       Active
                     </label>
                   </div>
 
                   <div>
-                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join date *</label>
-                    <input
-                      v-model="r.joinDate"
-                      type="date"
-                      class="ui-date"
-                      @change="syncContractFromJoin(r)"
-                    />
-
+                    <div class="ui-label">Join date *</div>
+                    <input v-model="form.singleJoinDate" type="date" class="ui-date" @change="syncSingleContract" />
                   </div>
 
                   <div>
-                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract date</label>
-                    <input
-                      v-model="r.contractDate"
-                      type="date"
-                      class="ui-date"
-                    />
+                    <div class="ui-label">Contract date</div>
+                    <input v-model="form.singleContractDate" type="date" class="ui-date" />
                   </div>
 
                   <div>
-                    <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL carry</label>
-                    <input
-                      v-model.number="r.alCarry"
-                      type="number"
-                      placeholder="0"
-                      class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    />
+                    <div class="ui-label">AL carry</div>
+                    <input v-model.number="form.singleAlCarry" type="number" placeholder="0" class="ui-input" />
                   </div>
                 </div>
               </div>
+
+              <div v-if="createError" class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100">
+                <span class="font-semibold">Failed:</span> {{ createError }}
+              </div>
+
+              <div v-if="approversError && !createError" class="ui-card !rounded-2xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[11px] text-indigo-700 dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200">
+                {{ approversError }}
+              </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
+              <button type="button" class="ui-btn ui-btn-ghost" @click="closeCreate" :disabled="saving">
+                Cancel
+              </button>
 
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1.5
-                       text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                @click="addRow"
+                class="ui-btn ui-btn-primary"
+                @click="submitCreate"
+                :disabled="saving || !approverReady"
+                :title="!approverReady ? 'Missing GM/COO approver (seed or /admin/leave/approvers)' : ''"
               >
-                <i class="fa-solid fa-plus text-[10px]" />
-                Add row
+                <i class="fa-solid fa-check text-[11px]" />
+                {{ saving ? 'Creating…' : 'Create' }}
               </button>
             </div>
-
-            <!-- Single -->
-            <div v-else class="rounded-2xl border border-slate-200 bg-white/95 p-3 dark:border-slate-700 dark:bg-slate-950/40">
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div class="sm:col-span-2">
-                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Employee *</label>
-                  <EmployeeSearch v-model="form.singleEmployee" placeholder="Search employee…" />
-                </div>
-
-                <div class="flex items-center">
-                  <label class="inline-flex items-center gap-2 text-[11px] text-slate-700 dark:text-slate-200">
-                    <input v-model="form.singleActive" type="checkbox" class="h-4 w-4 rounded border-slate-300 dark:border-slate-700" />
-                    Active
-                  </label>
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Join date *</label>
-                  <input
-                    v-model="form.singleJoinDate"
-                    type="date"
-                    class="date-input w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                    @change="syncSingleContract"
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">Contract date</label>
-                  <input
-                    v-model="form.singleContractDate"
-                    type="date"
-                    class="date-input w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">AL carry</label>
-                  <input
-                    v-model.number="form.singleAlCarry"
-                    type="number"
-                    placeholder="0"
-                    class="w-full rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-[12px]
-                           dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <!-- Error -->
-            <div
-              v-if="createError"
-              class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px]
-                     text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
-            >
-              <span class="font-semibold">Failed:</span> {{ createError }}
-            </div>
-
-            <!-- Optional: approver warn (silent, not blocking) -->
-            <div
-              v-if="approversError && !createError"
-              class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px]
-                     text-indigo-700 dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200"
-            >
-              {{ approversError }}
-            </div>
-          </div>
-
-          <!-- Footer -->
-          <div class="shrink-0 flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button
-              type="button"
-              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="closeCreate"
-              :disabled="saving"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-60"
-              @click="submitCreate"
-              :disabled="saving || !approverReady"
-              :title="!approverReady ? 'Missing GM/COO approver (seed or /admin/leave/approvers)' : ''"
-            >
-              <i class="fa-solid fa-check text-[10px]" />
-              {{ saving ? 'Creating…' : 'Create' }}
-            </button>
           </div>
         </div>
-      </div>
-    </transition>
+      </transition>
+
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* ─────────────────────────────────────────────────────────────
-  Table helpers (kept scoped, safe)
-───────────────────────────────────────────────────────────── */
-.table-th {
-  padding: 8px 10px;
-  text-align: left;
-  font-size: 11px;
-  font-weight: 700;
-}
-.table-td {
-  padding: 8px 10px;
-  vertical-align: top;
-}
-
-/* ─────────────────────────────────────────────────────────────
-  Modal transition (kept scoped, safe)
-───────────────────────────────────────────────────────────── */
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
