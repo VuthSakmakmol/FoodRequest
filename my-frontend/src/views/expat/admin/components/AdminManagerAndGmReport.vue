@@ -1,6 +1,10 @@
 <!-- src/views/expat/admin/components/AdminManagerAndGmReport.vue
   ✅ Fixed mode: MANAGER_GM
-  ✅ Date range filter REMOVED (always shows full record / all-time)
+  ✅ Date range filter REMOVED (preview always contract-based)
+  ✅ Contract selector shows ALL contracts (from record meta.contracts)
+  ✅ Default contract = current/latest
+  ✅ Uses contractId to fetch record (backend supports ?contractId=)
+  ✅ NO duplicate "(Current)" (label stays clean; UI adds once)
   ✅ Vector Print-to-PDF (iframe print)
   ✅ Smart signature resolver + auth-protected signatures -> Blob URLs
   ✅ Uses api util + useToast (no alerts)
@@ -27,7 +31,7 @@ function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── Filters (date range removed) ───────── */
+/* ───────── Filters ───────── */
 const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
@@ -56,6 +60,12 @@ function num(v) {
   const n = Number(v ?? 0)
   return Number.isFinite(n) ? n : 0
 }
+
+/**
+ * Normalize approval mode to the 2 report buckets:
+ * - MANAGER_GM
+ * - GM_COO
+ */
 function normalizeApprovalMode(emp) {
   const raw =
     safeText(emp?.approvalMode) ||
@@ -65,7 +75,7 @@ function normalizeApprovalMode(emp) {
   const m = raw.toUpperCase()
 
   const hasCoo = !!safeText(emp?.cooLoginId || emp?.meta?.cooLoginId)
-  if (m.includes('COO') || m.includes('GM_AND_COO') || m.includes('GM+COO') || hasCoo) return 'GM_COO'
+  if (m.includes('COO') || m.includes('GM_COO') || m.includes('GM+COO') || m.includes('GM_AND_COO') || hasCoo) return 'GM_COO'
   return 'MANAGER_GM'
 }
 
@@ -163,25 +173,134 @@ const previewEmp = ref(null)
 const previewData = ref(null)
 const previewRef = ref(null)
 
+/* ───────── Contracts in preview ───────── */
+const contractOptions = ref([]) // [{ id, idx, from, to, label, isCurrent }]
+const selectedContractId = ref('')
+
+function ymd(v) {
+  const s = safeText(v)
+  if (!s) return ''
+  const d = dayjs(s)
+  return d.isValid() ? d.format('YYYY-MM-DD') : s
+}
+
+/** strip "(Current)" if backend ever includes it in label */
+function stripCurrentSuffix(label) {
+  const s = safeText(label)
+  if (!s) return ''
+  return s.replace(/\s*\(current\)\s*/gi, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+/**
+ * normalizeContracts:
+ * ✅ label is ALWAYS clean (no "(Current)")
+ * ✅ we add "(Current)" ONLY in template
+ */
+function normalizeContracts(rawContracts, empFallback) {
+  const arr = Array.isArray(rawContracts) ? rawContracts : []
+
+  const mapped = arr
+    .map((c, i) => {
+      const from = ymd(c.startDate || c.contractDate || c.from)
+      const to = ymd(c.endDate || c.contractEndDate || c.to)
+      const id = safeText(c.contractId || c._id || c.id || `${from || 'na'}:${to || 'na'}:${i + 1}`)
+      const idx = Number(c.contractNo) || Number(c.contractNumber) || (i + 1)
+
+      // ✅ keep label CLEAN
+      const labelRaw =
+        safeText(c.label) ||
+        `Contract ${idx}${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`
+      const label = stripCurrentSuffix(labelRaw)
+
+      const isCurrent = !!c.isCurrent
+      return { id, idx, from, to, label, isCurrent }
+    })
+    .filter((x) => x.from || x.to)
+
+  // fallback if no contracts array
+  if (!mapped.length) {
+    const from = ymd(empFallback?.contractDate)
+    const to = ymd(empFallback?.contractEndDate)
+    if (from || to) {
+      mapped.push({
+        id: `single:${from || 'na'}:${to || 'na'}`,
+        idx: 1,
+        from,
+        to,
+        label: stripCurrentSuffix(`Contract 1${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`),
+        isCurrent: true,
+      })
+    }
+  }
+
+  // sort by from asc
+  mapped.sort((a, b) => (a.from || '').localeCompare(b.from || ''))
+
+  // mark current if missing
+  const today = dayjs().format('YYYY-MM-DD')
+  const anyCurrentFlag = mapped.some((x) => x.isCurrent)
+  if (!anyCurrentFlag) {
+    for (const c of mapped) {
+      const from = c.from || ''
+      const to = c.to || ''
+      const isCur = !!from && (!to ? from <= today : from <= today && today <= to)
+      if (isCur) c.isCurrent = true
+    }
+    if (!mapped.some((x) => x.isCurrent) && mapped.length) mapped[mapped.length - 1].isCurrent = true
+  }
+
+  // final ensure label clean
+  return mapped.map((c, i) => {
+    const idx = c.idx || (i + 1)
+    const label = stripCurrentSuffix(c.label) || stripCurrentSuffix(`Contract ${idx}${c.from ? `: ${c.from}` : ''}${c.to ? ` → ${c.to}` : ''}`)
+    return { ...c, idx, label }
+  })
+}
+
+function pickDefaultContractId(list) {
+  if (!list.length) return ''
+  const cur = list.find((x) => x.isCurrent)
+  return (cur?.id || list[list.length - 1]?.id || '')
+}
+
+const selectedContract = computed(() => {
+  const id = safeText(selectedContractId.value)
+  return contractOptions.value.find((x) => x.id === id) || null
+})
+
+function contractDisplayLabel(c) {
+  if (!c) return ''
+  // ✅ add (Current) once only here
+  return c.isCurrent ? `${c.label} (Current)` : c.label
+}
+
+/**
+ * Load contracts:
+ * ✅ BEST: call record endpoint once (no contract filter) and read meta.contracts
+ */
+async function loadContractsForEmployee(employeeId) {
+  const emp = previewEmp.value
+  try {
+    const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`, {
+      params: { asOf: safeText(asOf.value) || undefined, ts: Date.now() },
+    })
+    const metaContracts = res?.data?.meta?.contracts || res?.data?.meta?.contractHistory || []
+    const list = normalizeContracts(metaContracts, emp)
+
+    contractOptions.value = list
+    selectedContractId.value = pickDefaultContractId(list)
+  } catch (e) {
+    // fallback to emp.contracts or fields
+    const raw = Array.isArray(emp?.contracts) ? emp.contracts : []
+    const list = normalizeContracts(raw, emp)
+    contractOptions.value = list
+    selectedContractId.value = pickDefaultContractId(list)
+  }
+}
+
 /* ───────── signature url caches (META endpoints) ───────── */
 const userSigCache = new Map() // key -> meta url
 const employeeSigCache = new Map() // employeeId -> meta url
-
-async function getUserSignatureUrl(loginId) {
-  const id = safeText(loginId)
-  if (!id) return ''
-  const key = `user:${id}`
-  if (userSigCache.has(key)) return userSigCache.get(key) || ''
-  try {
-    const res = await api.get(`/admin/signatures/users/${encodeURIComponent(id)}`)
-    const url = res?.data?.signatureUrl || res?.data?.url || ''
-    userSigCache.set(key, url || '')
-    return url || ''
-  } catch {
-    userSigCache.set(key, '')
-    return ''
-  }
-}
 
 async function getEmployeeSignatureUrl(employeeId) {
   const id = safeText(employeeId)
@@ -203,10 +322,6 @@ function isLikelyEmployeeId(v) {
   return /^\d{4,}$/.test(s)
 }
 
-/* ✅ Smart resolver:
-   - numeric => employees first
-   - otherwise => users first
-*/
 async function resolveSignatureUrl(idLike) {
   const id = safeText(idLike)
   if (!id) return ''
@@ -235,7 +350,7 @@ async function resolveSignatureUrl(idLike) {
   }
 }
 
-/* ───────── SIGNATURE FIX: convert protected URLs -> blob URLs ───────── */
+/* ───────── SIGNATURE FIX: protected URLs -> blob URLs ───────── */
 function getToken() {
   try {
     return localStorage.getItem('token') || ''
@@ -254,7 +369,6 @@ async function toAuthedBlobUrl(rawUrl) {
   const u = safeText(rawUrl)
   if (!u) return ''
 
-  // absolute url builder
   const abs = (() => {
     if (/^https?:\/\//i.test(u)) return u
     const apiBase = safeText(import.meta.env.VITE_API_URL || '')
@@ -267,10 +381,14 @@ async function toAuthedBlobUrl(rawUrl) {
   const token = getToken()
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
 
-  const res = await fetch(abs, { headers })
-  if (!res.ok) return ''
-  const blob = await res.blob()
-  return URL.createObjectURL(blob)
+  try {
+    const res = await fetch(abs, { headers })
+    if (!res.ok) return ''
+    const blob = await res.blob()
+    return URL.createObjectURL(blob)
+  } catch {
+    return ''
+  }
 }
 
 /* attached signatures for current preview (BLOB URLS) */
@@ -300,13 +418,11 @@ async function loadSignaturesForPreview() {
   const managerId = safeText(previewData.value?.meta?.managerLoginId || previewEmp.value?.managerLoginId)
   const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
 
-  // meta urls
   const requesterRaw = await getEmployeeSignatureUrl(empId)
   const leaveAdminRaw = await resolveSignatureUrl(leaveAdminLoginId)
   const managerRaw = await resolveSignatureUrl(managerId)
   const gmRaw = await resolveSignatureUrl(gmId)
 
-  // ✅ convert to blob urls (so <img> works with auth)
   const [requesterUrl, leaveAdminUrl, managerUrl, gmUrl] = await Promise.all([
     toAuthedBlobUrl(requesterRaw),
     toAuthedBlobUrl(leaveAdminRaw),
@@ -322,21 +438,55 @@ async function loadSignaturesForPreview() {
   }
 }
 
+/* ───────── Fetch record for selected contract (uses contractId) ───────── */
+async function fetchRecordForSelectedContract(employeeId) {
+  const c = selectedContract.value
+  const params = { ts: Date.now() } // avoid caching
+
+  // ✅ If backend supports contractId, prefer it (correct even if dates overlap)
+  if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
+    params.contractId = c.id
+  } else {
+    // fallback to date range
+    if (c?.from && c?.to) {
+      params.from = c.from
+      params.to = c.to
+    } else if (c?.from && !c?.to) {
+      params.from = c.from
+      params.to = safeText(asOf.value) || dayjs().format('YYYY-MM-DD')
+    }
+  }
+
+  if (safeText(asOf.value)) params.asOf = safeText(asOf.value)
+
+  const res = await api.get(
+    `/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`,
+    { params }
+  )
+  previewData.value = res?.data || null
+}
+
+/* ───────── Modal open/close ───────── */
 async function openPreview(emp) {
   previewEmp.value = emp
   previewOpen.value = true
   previewLoading.value = true
   previewError.value = ''
   previewData.value = null
+  contractOptions.value = []
+  selectedContractId.value = ''
   clearSig()
 
   try {
     const employeeId = safeText(emp?.employeeId)
 
-    // ✅ Date filter removed: do NOT send from/to
-    const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`)
-    previewData.value = res?.data || null
+    // 1) Load contracts list (ALL) and default
+    await loadContractsForEmployee(employeeId)
 
+    // 2) Fetch record for default contract
+    await fetchRecordForSelectedContract(employeeId)
+
+    // 3) Load signatures
     await loadSignaturesForPreview()
   } catch (e) {
     console.error('openPreview error', e)
@@ -346,12 +496,39 @@ async function openPreview(emp) {
   }
 }
 
+async function refetchPreviewByContract() {
+  try {
+    const employeeId = safeText(previewEmp.value?.employeeId)
+    if (!employeeId) return
+    previewLoading.value = true
+    previewError.value = ''
+    previewData.value = null
+    clearSig()
+
+    await fetchRecordForSelectedContract(employeeId)
+    await loadSignaturesForPreview()
+  } catch (e) {
+    console.error('refetchPreviewByContract error', e)
+    previewError.value = e?.response?.data?.message || 'Failed to load leave record.'
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+watch(selectedContractId, async () => {
+  if (!previewOpen.value) return
+  if (!previewEmp.value) return
+  await refetchPreviewByContract()
+})
+
 function closePreview() {
   previewOpen.value = false
   previewLoading.value = false
   previewError.value = ''
   previewData.value = null
   previewEmp.value = null
+  contractOptions.value = []
+  selectedContractId.value = ''
   clearSig()
 }
 
@@ -463,11 +640,13 @@ async function downloadPdf() {
   }
 }
 
-/* Excel export for the record rows */
+/* Excel export for the record rows (selected contract) */
 async function exportRecordExcel() {
   try {
     const XLSX = await import('xlsx')
     const emp = previewData.value?.meta || {}
+    const c = selectedContract.value
+
     const rows = (previewData.value?.rows || []).map((r) => ({
       Date: r.date,
       From: r.from,
@@ -491,7 +670,9 @@ async function exportRecordExcel() {
     XLSX.utils.book_append_sheet(wb, ws, 'LeaveRecord')
 
     const empId = safeText(emp.employeeId || previewEmp.value?.employeeId)
-    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_all.xlsx`)
+    const contractNo = c?.idx ? `c${c.idx}` : 'contract'
+    const stamp = `${c?.from || 'na'}_${c?.to || 'na'}`
+    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_${contractNo}_${stamp}.xlsx`)
 
     showToast({ type: 'success', title: 'Exported', message: 'Record exported.' })
   } catch (e) {
@@ -571,7 +752,7 @@ onBeforeUnmount(() => {
             Shows only employees in <span class="font-semibold">Manager + GM</span> approval mode.
           </div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Leave record preview shows <span class="font-semibold">ALL rows</span> (no date filter).
+            Preview uses <span class="font-semibold">selected contract</span> (default current/latest).
           </div>
         </div>
 
@@ -605,11 +786,6 @@ onBeforeUnmount(() => {
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search</label>
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." class="input-mini" />
         </div>
-
-        <!-- <div class="md:col-span-3">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
-          <input v-model="asOf" type="date" class="input-mini" />
-        </div> -->
 
         <div class="md:col-span-3">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
@@ -650,7 +826,7 @@ onBeforeUnmount(() => {
           <div>
             <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
             <div class="text-[11px] text-slate-500 dark:text-slate-400">
-              Preview generates the Leave Record template with auto-attached signatures (no date filter).
+              Preview generates Leave Record with signatures for the selected contract.
             </div>
           </div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees</div>
@@ -758,12 +934,35 @@ onBeforeUnmount(() => {
         <div class="mx-auto w-full max-w-6xl overflow-hidden rounded-2xl bg-white shadow-xl dark:bg-slate-950">
           <!-- Top bar -->
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-            <div>
+            <div class="min-w-[240px]">
               <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
                 Leave Record — <span class="font-mono">{{ previewEmp?.employeeId }}</span>
               </div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-300">Mode: <span class="font-semibold">Manager + GM</span></div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-300">Showing: <span class="font-semibold">All rows</span></div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-300">
+                Mode: <span class="font-semibold">Manager + GM</span>
+              </div>
+
+              <div class="mt-1 flex flex-wrap items-center gap-2">
+                <div class="text-[11px] text-slate-500 dark:text-slate-300">Contract:</div>
+
+                <select
+                  v-model="selectedContractId"
+                  class="h-8 rounded-xl border border-slate-300 bg-white px-2 text-[11px] outline-none
+                         focus:border-slate-400 focus:ring-2 focus:ring-slate-200
+                         dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100 dark:focus:border-slate-600 dark:focus:ring-slate-800/70"
+                >
+                  <option v-for="c in contractOptions" :key="c.id" :value="c.id">
+                    {{ contractDisplayLabel(c) }}
+                  </option>
+                  <option v-if="!contractOptions.length" value="">(No contract info)</option>
+                </select>
+
+                <div v-if="selectedContract" class="text-[11px] text-slate-500 dark:text-slate-300">
+                  <span class="font-mono">{{ selectedContract.from || '—' }}</span>
+                  <span class="mx-1">→</span>
+                  <span class="font-mono">{{ selectedContract.to || '—' }}</span>
+                </div>
+              </div>
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
@@ -819,7 +1018,16 @@ onBeforeUnmount(() => {
               <div ref="previewRef" class="print-sheet">
                 <!-- Header -->
                 <div class="sheet-header">
-                  <div class="sheet-title">Leave Record - Foreigner</div>
+                  <div>
+                    <div class="sheet-title">Leave Record - Foreigner</div>
+                    <div class="text-[10px] text-slate-700">
+                      Contract:
+                      <span class="mono">{{ selectedContract?.from || '—' }}</span>
+                      <span class="mx-1">→</span>
+                      <span class="mono">{{ selectedContract?.to || '—' }}</span>
+                    </div>
+                  </div>
+
                   <div class="sheet-brand">
                     <img src="/brand/trax-logo.png" alt="TRAX" class="sheet-logo" />
                   </div>

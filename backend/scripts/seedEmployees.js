@@ -2077,6 +2077,15 @@ function loadEmployees() {
     "telegramChatId": "",
     "isActive": true
   },
+  // New
+                      {
+    "employeeId": "52520945",
+    "name": "Kem Chanthea",
+    "department": "Quality Assurance",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
   
   
 ]

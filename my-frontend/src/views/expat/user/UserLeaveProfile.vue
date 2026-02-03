@@ -1,7 +1,8 @@
 <!-- src/views/expat/user/UserLeaveProfile.vue
   ✅ Employee/User self leave profile (read-only)
   ✅ Tailwind gradient header + mobile cards + desktop table
-  ✅ Shows contract end + days left + contract history (if backend provides)
+  ✅ Contract history reads LeaveProfile.contracts[] (closeSnapshot.balances)
+  ✅ Active contract uses live profile.balances
   ✅ Realtime refresh via socket rooms (user:<loginId> + employee:<employeeId>)
   ✅ No SweetAlert / no window alert (uses useToast)
 -->
@@ -45,6 +46,11 @@ function fmtYMD(v) {
   const d = dayjs(v)
   return d.isValid() ? d.format('YYYY-MM-DD') : '—'
 }
+function fmtDT(v) {
+  if (!v) return '—'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—'
+}
 
 /**
  * ✅ IMPORTANT:
@@ -61,8 +67,8 @@ const balances = computed(() => {
       used: num(b?.used),
       remaining:
         b?.remaining != null
-          ? num(b.remaining) // ✅ backend truth (can be negative)
-          : num(b?.yearlyEntitlement) - num(b?.used), // fallback (no clamp)
+          ? num(b.remaining)
+          : num(b?.yearlyEntitlement) - num(b?.used),
     }))
     .filter((x) => x.leaveTypeCode)
 
@@ -141,28 +147,70 @@ function normalizeBalancesLike(arr) {
     .filter((x) => x.leaveTypeCode)
 }
 
-function normalizeContracts(raw) {
+/**
+ * ✅ YOUR DB SHAPE (from your screenshot)
+ * contracts[] item example:
+ * {
+ *   contractNo: 1,
+ *   startDate: "2026-02-02",
+ *   endDate: "2027-02-01",
+ *   openedAt: "...",
+ *   closedAt: "...",
+ *   note: "...",
+ *   closeSnapshot: {
+ *     balancesAsOf / asOf,
+ *     balances: [ { leaveTypeCode, yearlyEntitlement, used, remaining }, ... ]
+ *   }
+ * }
+ */
+function normalizeContracts(raw, liveBalances = []) {
   const list = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
+
   const mapped = list.map((c, idx) => {
-    const id = String(c?._id || c?.id || c?.contractId || `${idx}`)
-    const start =
-      c?.startDate || c?.contractDate || c?.newContractDate || c?.fromDate || c?.from || c?.start || null
+    const id = String(c?._id || c?.id || c?.contractId || c?.contractNo || `${idx}`)
+    const start = c?.startDate || c?.contractDate || c?.fromDate || c?.from || c?.start || null
     const end = c?.endDate || c?.contractEndDate || c?.toDate || c?.to || c?.end || null
     const note = String(c?.note || c?.remark || '')
-    const b = c?.balances || c?.balanceSnapshot || c?.leaveBalances || c?.leaveUsed || c?.summaryBalances || null
+    const openedAt = c?.openedAt || c?.createdAt || null
+    const closedAt = c?.closedAt || null
+
+    // ✅ snapshot balances for CLOSED contract
+    const snapBalances =
+      c?.closeSnapshot?.balances ||
+      c?.closeSnapshot?.balance ||
+      c?.closeSnapshot?.leaveBalances ||
+      null
+
+    const snapAsOf =
+      c?.closeSnapshot?.balancesAsOf ||
+      c?.closeSnapshot?.asOf ||
+      ''
+
+    const isActive = !closedAt
+
+    // ✅ For ACTIVE contract: show live current balances from profile (not historical)
+    const balancesForUI = isActive ? normalizeBalancesLike(liveBalances) : normalizeBalancesLike(snapBalances)
 
     return {
       id,
+      contractNo: c?.contractNo ?? idx + 1,
       startDate: start,
       endDate: end,
+      openedAt,
+      closedAt,
       note,
-      createdAt: c?.createdAt || c?.created_at || null,
-      balances: normalizeBalancesLike(b),
+      snapshotAsOf: snapAsOf || '',
+      isActive,
+      balances: balancesForUI,
       raw: c,
     }
   })
 
+  // sort by contractNo if present, otherwise by startDate
   mapped.sort((a, b) => {
+    const na = Number(a.contractNo || 0)
+    const nb = Number(b.contractNo || 0)
+    if (na && nb && na !== nb) return na - nb
     const da = a.startDate ? dayjs(a.startDate).valueOf() : 0
     const db = b.startDate ? dayjs(b.startDate).valueOf() : 0
     return da - db
@@ -189,30 +237,23 @@ function toggleContract(id) {
 }
 
 async function fetchContracts(silent = false) {
-  // 1) embedded inside profile
-  const embedded =
-    profile.value?.contracts ||
-    profile.value?.contractHistory ||
-    profile.value?.contractHistories ||
-    profile.value?.contractPeriods ||
-    null
-
-  if (embedded && (Array.isArray(embedded) ? embedded.length : Array.isArray(embedded?.contracts))) {
-    contracts.value = normalizeContracts(embedded)
-    contractsError.value = ''
-    return
-  }
-
-  // 2) try endpoint (if exists)
   try {
     contractsLoading.value = true
     contractsError.value = ''
 
+    // ✅ Use embedded contracts from profile (best)
+    const embedded = profile.value?.contracts || null
+    if (embedded && Array.isArray(embedded) && embedded.length) {
+      contracts.value = normalizeContracts(embedded, profile.value?.balances || [])
+      return
+    }
+
+    // (optional) fallback endpoint if you later add it
     const res = await api.get('/leave/profile/contracts', {
       params: { employeeId: String(profile.value?.employeeId || loginId.value || '').trim() },
     })
 
-    contracts.value = normalizeContracts(res?.data || [])
+    contracts.value = normalizeContracts(res?.data || [], profile.value?.balances || [])
   } catch (e) {
     const status = e?.response?.status
     const msg = e?.response?.data?.message || e?.message || ''
@@ -236,9 +277,6 @@ async function fetchMyProfile(silent = false) {
     loading.value = true
     error.value = ''
 
-    // Accept both backend styles:
-    // - /leave/profile/my (auth-based)
-    // - /leave/profile/my?employeeId=xxxx (some older impls)
     const res = await api.get('/leave/profile/my', {
       params: loginId.value ? { employeeId: loginId.value } : {},
     })
@@ -418,7 +456,8 @@ onBeforeUnmount(() => {
             <div>
               <div class="text-xs font-semibold text-slate-900 dark:text-slate-50">Contract History</div>
               <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                If your backend includes contract balance snapshots, you will see “leave used per type”.
+                Closed contracts show snapshot usage from <span class="font-semibold">closeSnapshot.balances</span>.
+                Active contract shows live balances.
               </div>
             </div>
 
@@ -456,7 +495,7 @@ onBeforeUnmount(() => {
           <!-- Mobile contract cards -->
           <div v-else-if="isMobile" class="mt-3 space-y-2">
             <article
-              v-for="(c, idx) in contracts"
+              v-for="c in contracts"
               :key="c.id"
               class="rounded-2xl border border-slate-200 bg-white p-3 text-xs
                      shadow-[0_10px_24px_rgba(15,23,42,0.08)]
@@ -464,9 +503,26 @@ onBeforeUnmount(() => {
             >
               <div class="flex items-start justify-between gap-2">
                 <div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400">Contract #{{ idx + 1 }}</div>
+                  <div class="flex items-center gap-2">
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                      Contract #{{ c.contractNo }}
+                    </div>
+                    <span
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                      :class="c.isActive
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+                        : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100'"
+                    >
+                      {{ c.isActive ? 'Active' : 'Closed' }}
+                    </span>
+                  </div>
+
                   <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
                     {{ fmtYMD(c.startDate) }} → {{ fmtYMD(c.endDate) }}
+                  </div>
+
+                  <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Opened: {{ fmtDT(c.openedAt) }} · Closed: {{ c.isActive ? '—' : fmtDT(c.closedAt) }}
                   </div>
                 </div>
 
@@ -486,11 +542,11 @@ onBeforeUnmount(() => {
                 class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40"
               >
                 <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-                  Leave used (this contract)
+                  Leave used ({{ c.isActive ? 'live' : 'snapshot' }})
                 </div>
 
                 <div v-if="!contractUsedChips(c).length" class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  No per-contract leave snapshot provided by backend.
+                  No leave balances available for this contract.
                 </div>
 
                 <div v-else class="mt-2 flex flex-wrap gap-2">
@@ -507,13 +563,17 @@ onBeforeUnmount(() => {
                 <div v-if="c.note" class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
                   Note: <span class="text-slate-800 dark:text-slate-100 font-semibold">{{ c.note }}</span>
                 </div>
+
+                <div v-if="!c.isActive && c.snapshotAsOf" class="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                  Snapshot as of: {{ c.snapshotAsOf }}
+                </div>
               </div>
             </article>
           </div>
 
           <!-- Desktop contract table -->
           <div v-else class="mt-3 overflow-x-auto">
-            <table class="min-w-[980px] w-full text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+            <table class="min-w-[1100px] w-full text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
               <thead
                 class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
                        dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
@@ -522,18 +582,36 @@ onBeforeUnmount(() => {
                   <th class="table-th">#</th>
                   <th class="table-th">Start</th>
                   <th class="table-th">End</th>
-                  <th class="table-th">Leave used (this contract)</th>
+                  <th class="table-th">Status</th>
+                  <th class="table-th">Opened</th>
+                  <th class="table-th">Closed</th>
+                  <th class="table-th">Leave used</th>
                   <th class="table-th">Note</th>
                   <th class="table-th text-right">Action</th>
                 </tr>
               </thead>
 
               <tbody>
-                <template v-for="(c, idx) in contracts" :key="c.id">
+                <template v-for="c in contracts" :key="c.id">
                   <tr class="border-b border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70">
-                    <td class="table-td font-semibold">{{ idx + 1 }}</td>
+                    <td class="table-td font-semibold">{{ c.contractNo }}</td>
                     <td class="table-td">{{ fmtYMD(c.startDate) }}</td>
                     <td class="table-td">{{ fmtYMD(c.endDate) }}</td>
+
+                    <td class="table-td">
+                      <span
+                        class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
+                        :class="c.isActive
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+                          : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100'"
+                      >
+                        {{ c.isActive ? 'Active' : 'Closed' }}
+                      </span>
+                    </td>
+
+                    <td class="table-td text-[11px] text-slate-600 dark:text-slate-300">{{ fmtDT(c.openedAt) }}</td>
+                    <td class="table-td text-[11px] text-slate-600 dark:text-slate-300">{{ c.isActive ? '—' : fmtDT(c.closedAt) }}</td>
+
                     <td class="table-td">
                       <div v-if="contractUsedChips(c).length" class="flex flex-wrap gap-2">
                         <span
@@ -547,6 +625,7 @@ onBeforeUnmount(() => {
                       </div>
                       <span v-else class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
                     </td>
+
                     <td class="table-td text-[11px] text-slate-600 dark:text-slate-300">
                       {{ c.note || '—' }}
                     </td>
@@ -565,13 +644,20 @@ onBeforeUnmount(() => {
                   </tr>
 
                   <tr v-if="expandedContractId === c.id" class="border-b border-slate-200 dark:border-slate-700">
-                    <td class="table-td" colspan="6">
+                    <td class="table-td" colspan="9">
                       <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
                         <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Contract detail</div>
-                        <div class="mt-2 grid gap-2 sm:grid-cols-3 text-[11px] text-slate-600 dark:text-slate-300">
+                        <div class="mt-2 grid gap-2 sm:grid-cols-4 text-[11px] text-slate-600 dark:text-slate-300">
                           <div><span class="font-semibold text-slate-800 dark:text-slate-100">Start:</span> {{ fmtYMD(c.startDate) }}</div>
                           <div><span class="font-semibold text-slate-800 dark:text-slate-100">End:</span> {{ fmtYMD(c.endDate) }}</div>
-                          <div><span class="font-semibold text-slate-800 dark:text-slate-100">Note:</span> {{ c.note || '—' }}</div>
+                          <div><span class="font-semibold text-slate-800 dark:text-slate-100">Opened:</span> {{ fmtDT(c.openedAt) }}</div>
+                          <div><span class="font-semibold text-slate-800 dark:text-slate-100">Closed:</span> {{ c.isActive ? '—' : fmtDT(c.closedAt) }}</div>
+                        </div>
+                        <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
+                          <span class="font-semibold text-slate-800 dark:text-slate-100">Note:</span> {{ c.note || '—' }}
+                        </div>
+                        <div v-if="!c.isActive && c.snapshotAsOf" class="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
+                          Snapshot as of: {{ c.snapshotAsOf }}
                         </div>
                       </div>
                     </td>
