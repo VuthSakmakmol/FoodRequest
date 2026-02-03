@@ -84,6 +84,26 @@ function loadEmployees() {
   // Fallback inline list — keep short; add more later
   
   return [
+    // Expat Employee ===================================
+  {
+    "employeeId": "51210018",
+    "name": "Ninart Kongjaroen",
+    "department": "Management Office",
+    "contactNumber": "070 825 643",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210020",
+    "name": "Pollawut Patumpattanakit",
+    "department": "Management Office",
+    "contactNumber": "096 470 7019",
+    "telegramChatId": "",
+    "isActive": true
+  },
+
+
+  //======================================================
   {
     "employeeId": "51220044",
     "name": "Sam Saret",
@@ -668,22 +688,7 @@ function loadEmployees() {
     "telegramChatId": "",
     "isActive": true
   },
-  {
-    "employeeId": "51210018",
-    "name": "Ninart Kongjaroen",
-    "department": "Management Office",
-    "contactNumber": "070 825 643",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210020",
-    "name": "Pollawut Patumpattanakit",
-    "department": "Management Office",
-    "contactNumber": "096 470 7019",
-    "telegramChatId": "",
-    "isActive": true
-  },
+ //........................................................
   {
     "employeeId": "51210027",
     "name": "Chantip Jithaisong",
