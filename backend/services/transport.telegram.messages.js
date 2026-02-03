@@ -130,6 +130,8 @@ const STATUS_KH = {
  * Purpose mapping EN -> KH (for assignee only)
  * ────────────────────────────── */
 const PURPOSE_KH = {
+  'Bring Local Staff': 'ជូនបុគ្គលិក',
+  'Pick up Local Staff': 'ទៅទទួលបុគ្គលិក',
   'Pick Up K Joe (GM)' : 'ទៅយកឃុនជោ',
   'Bring K Joe (GM)' : 'ជូនឃុនជោ',
   'Bring & Pick up': 'នាំទៅ និង ចាំទទួល',

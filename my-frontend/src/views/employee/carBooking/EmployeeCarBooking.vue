@@ -56,6 +56,8 @@ const LOCATIONS = [
   'S E C Mega factory  CO., LTD',
 ]
 const PURPOSES = [
+  'Bring Local Staff',
+  'Pick up Local Staff',
   'Pick Up K Joe (GM)',
   'Bring K Joe (GM)',
   'Bring Guest',

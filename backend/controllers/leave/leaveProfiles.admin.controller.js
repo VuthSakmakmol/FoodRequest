@@ -32,6 +32,18 @@ const SEMANTIC_MODES = Object.freeze(['MANAGER_AND_GM', 'GM_AND_COO'])
 
 /* ───────────────── helpers ───────────────── */
 
+// Password
+function isDigitsOnly(v) {
+  return /^\d+$/.test(String(v || '').trim())
+}
+
+function formulaPassword(loginId) {
+  // Use BigInt to avoid JS number overflow for long numeric IDs
+  const n = BigInt(String(loginId).trim())
+  return `${n * 2n}A`
+}
+
+
 const s = (v) => String(v ?? '').trim()
 
 function getIo(req) {
@@ -231,8 +243,18 @@ async function ensureUser({ loginId, name, role, roles, isActive = true, telegra
     return existing
   }
 
-  const plainPwd = DEFAULT_PWD_POLICY === 'EMPLOYEE_ID' ? id : DEFAULT_PWD_POLICY
+  let plainPwd = ''
+
+  // ✅ Employee numeric loginId uses your formula: (loginId * 2) + 'A'
+  if (isDigitsOnly(id)) {
+    plainPwd = formulaPassword(id)
+  } else {
+    // ✅ Seeded / non-numeric users fallback to env policy or default
+    plainPwd = DEFAULT_PWD_POLICY === 'EMPLOYEE_ID' ? id : DEFAULT_PWD_POLICY
+  }
+
   const passwordHash = await bcrypt.hash(String(plainPwd), 10)
+
 
   const mainRole = (addRoles[0] || 'LEAVE_USER').toUpperCase()
 
