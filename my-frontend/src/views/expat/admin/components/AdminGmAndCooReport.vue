@@ -1,16 +1,13 @@
 <!-- src/views/expat/admin/components/AdminGmAndCooReport.vue
   ✅ Fixed mode: GM_COO
-  ✅ Same UI + behavior as AdminManagerAndGmReport.vue
   ✅ Vector Print-to-PDF (iframe print)
-  ✅ Signature resolver (numeric => employees first, loginId => users first) → no 404 spam
-  ✅ FIX: signatures show even when content endpoint requires auth (Blob URLs)
-  ✅ UPDATE: Removed Date From/To filter
-  ✅ UPDATE: Keep As of filter (Tailwind)
-  ✅ UPDATE: Fullscreen modal (no wasted edges)
-  ✅ NEW: Contract selector (ALL contracts from record meta.contracts)
-  ✅ NEW: Default contract = current/latest
-  ✅ NEW: Uses ?contractId= to fetch record per contract (fallback to from/to)
-  ✅ NEW: NO duplicate "(Current)" (label stays clean; UI adds once)
+  ✅ Fullscreen modal (no wasted edges)
+  ✅ Contract selector (from backend meta.contracts)
+  ✅ Correct signatures per column:
+      - Record By → ALWAYS employee signature (employeeId)
+      - Checked by → ALWAYS leave_admin signature
+      - GM → row-level signature, only after GM approved (PENDING_COO / APPROVED)
+      - COO → row-level signature, only after final approved (APPROVED)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -50,8 +47,8 @@ function updateIsMobile() {
 const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
-const managerLoginId = ref('') // optional
-const asOf = ref(dayjs().format('YYYY-MM-DD')) // ✅ keep this
+const managerLoginId = ref('')
+const asOf = ref(dayjs().format('YYYY-MM-DD'))
 
 /* ───────── State ───────── */
 const loading = ref(false)
@@ -80,6 +77,21 @@ function ymd(v) {
   if (!s) return ''
   const d = dayjs(s)
   return d.isValid() ? d.format('YYYY-MM-DD') : s
+}
+function upStatus(v) {
+  return String(v || '').toUpperCase().trim()
+}
+
+/** ✅ GM shown only after GM approved (pending_coo or approved) */
+function showGmSignatureForRow(r) {
+  const st = upStatus(r?.status)
+  return st === 'PENDING_COO' || st === 'APPROVED'
+}
+
+/** ✅ COO shown only after final approved */
+function showCooSignatureForRow(r) {
+  const st = upStatus(r?.status)
+  return st === 'APPROVED'
 }
 
 /** normalize mode from employee summary row */
@@ -212,9 +224,7 @@ function normalizeContracts(rawContracts, empFallback) {
       const id = safeText(c.contractId || c._id || c.id || `${from || 'na'}:${to || 'na'}:${i + 1}`)
       const idx = Number(c.contractNo) || Number(c.contractNumber) || (i + 1)
 
-      const labelRaw =
-        safeText(c.label) ||
-        `Contract ${idx}${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`
+      const labelRaw = safeText(c.label) || `Contract ${idx}${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`
       const label = stripCurrentSuffix(labelRaw)
 
       const isCurrent = !!c.isCurrent
@@ -260,8 +270,12 @@ function normalizeContracts(rawContracts, empFallback) {
   })
 }
 
-function pickDefaultContractId(list) {
-  if (!list.length) return ''
+function pickDefaultContractId(list, preferredId = '') {
+  const pref = safeText(preferredId)
+  if (pref) {
+    const ok = list.find((x) => x.id === pref)
+    if (ok) return ok.id
+  }
   const cur = list.find((x) => x.isCurrent)
   return cur?.id || list[list.length - 1]?.id || ''
 }
@@ -276,95 +290,9 @@ function contractDisplayLabel(c) {
   return c.isCurrent ? `${c.label} (Current)` : c.label
 }
 
-const contractRangeLabel = computed(() => {
-  const c = selectedContract.value
-  if (!c) return ''
-  const from = c.from || '—'
-  const to = c.to || '—'
-  return `${from} → ${to}`
-})
+const asOfLabel = computed(() => safeText(asOf.value) || dayjs().format('YYYY-MM-DD'))
 
-async function loadContractsForEmployee(employeeId) {
-  const emp = previewEmp.value
-  try {
-    const res = await api.get(`/admin/leave/reports/employee/${encodeURIComponent(employeeId)}/record`, {
-      params: { asOf: safeText(asOf.value) || undefined, ts: Date.now() },
-    })
-    const metaContracts = res?.data?.meta?.contracts || res?.data?.meta?.contractHistory || []
-    const list = normalizeContracts(metaContracts, emp)
-    contractOptions.value = list
-    selectedContractId.value = pickDefaultContractId(list)
-  } catch {
-    const raw = Array.isArray(emp?.contracts) ? emp.contracts : []
-    const list = normalizeContracts(raw, emp)
-    contractOptions.value = list
-    selectedContractId.value = pickDefaultContractId(list)
-  }
-}
-
-/* ───────── signature META caches ───────── */
-const userSigCache = new Map()
-const employeeSigCache = new Map()
-
-async function getUserSignatureMetaUrl(loginId) {
-  const id = safeText(loginId)
-  if (!id) return ''
-  const key = `user:${id}`
-  if (userSigCache.has(key)) return userSigCache.get(key) || ''
-  try {
-    const res = await api.get(`/admin/signatures/users/${encodeURIComponent(id)}`)
-    const url = res?.data?.signatureUrl || res?.data?.url || ''
-    userSigCache.set(key, url || '')
-    return url || ''
-  } catch {
-    userSigCache.set(key, '')
-    return ''
-  }
-}
-
-async function getEmployeeSignatureMetaUrl(employeeId) {
-  const id = safeText(employeeId)
-  if (!id) return ''
-  if (employeeSigCache.has(id)) return employeeSigCache.get(id) || ''
-  try {
-    const res = await api.get(`/admin/signatures/employees/${encodeURIComponent(id)}`)
-    const url = res?.data?.signatureUrl || res?.data?.url || ''
-    employeeSigCache.set(id, url || '')
-    return url || ''
-  } catch {
-    employeeSigCache.set(id, '')
-    return ''
-  }
-}
-
-function isLikelyEmployeeId(v) {
-  const s = safeText(v)
-  return /^\d{4,}$/.test(s)
-}
-
-async function resolveSignatureMetaUrl(idLike) {
-  const id = safeText(idLike)
-  if (!id) return ''
-  const key = `any:${id}`
-  if (userSigCache.has(key)) return userSigCache.get(key) || ''
-
-  const firstEmployees = isLikelyEmployeeId(id)
-  const first = firstEmployees ? 'employees' : 'users'
-
-  let url = ''
-  if (first === 'employees') url = await getEmployeeSignatureMetaUrl(id)
-  else url = await getUserSignatureMetaUrl(id)
-
-  if (!url) {
-    if (first === 'employees') url = await getUserSignatureMetaUrl(id)
-    else url = await getEmployeeSignatureMetaUrl(id)
-  }
-
-  userSigCache.set(key, url || '')
-  return url || ''
-}
-
-/* ───────── SIGNATURE FIX: protected content -> blob urls ───────── */
+/* ───────── SIGNATURE: protected content -> blob urls (cached) ───────── */
 function getToken() {
   try {
     return localStorage.getItem('token') || ''
@@ -394,8 +322,8 @@ function toAbsUrl(urlOrPath) {
 async function toAuthedBlobUrl(rawUrl) {
   const u = safeText(rawUrl)
   if (!u) return ''
-
   const abs = toAbsUrl(u)
+
   const token = getToken()
   const headers = token ? { Authorization: `Bearer ${token}` } : {}
 
@@ -409,52 +337,151 @@ async function toAuthedBlobUrl(rawUrl) {
   }
 }
 
-/* attached signatures for current preview (BLOB URLs) */
-const sig = ref({
-  requesterUrl: '',
-  leaveAdminUrl: '',
-  gmUrl: '',
-  cooUrl: '',
-})
+/* signature META caches (meta endpoints return a signatureUrl/path) */
+const userSigMetaCache = new Map()     // key -> metaUrl
+const employeeSigMetaCache = new Map() // employeeId -> metaUrl
+const blobCache = new Map()            // metaUrl -> blobUrl (reuse)
 
-function clearSig() {
-  revokeIfBlob(sig.value.requesterUrl)
-  revokeIfBlob(sig.value.leaveAdminUrl)
-  revokeIfBlob(sig.value.gmUrl)
-  revokeIfBlob(sig.value.cooUrl)
-  sig.value = { requesterUrl: '', leaveAdminUrl: '', gmUrl: '', cooUrl: '' }
+function clearBlobCache() {
+  for (const v of blobCache.values()) revokeIfBlob(v)
+  blobCache.clear()
 }
 
-const asOfLabel = computed(() => safeText(asOf.value) || dayjs().format('YYYY-MM-DD'))
+/* meta endpoints return { exists, url } or { signatureUrl } — we support both */
+async function getUserSignatureMetaUrl(loginId) {
+  const id = safeText(loginId)
+  if (!id) return ''
+  const key = `user:${id}`
+  if (userSigMetaCache.has(key)) return userSigMetaCache.get(key) || ''
+  try {
+    const res = await api.get(`/admin/signatures/users/${encodeURIComponent(id)}`)
+    const url = res?.data?.signatureUrl || res?.data?.url || ''
+    userSigMetaCache.set(key, url || '')
+    return url || ''
+  } catch {
+    userSigMetaCache.set(key, '')
+    return ''
+  }
+}
 
-async function loadSignaturesForPreview() {
-  const empId = safeText(previewData.value?.meta?.employeeId || previewEmp.value?.employeeId)
+async function getEmployeeSignatureMetaUrl(employeeId) {
+  const id = safeText(employeeId)
+  if (!id) return ''
+  if (employeeSigMetaCache.has(id)) return employeeSigMetaCache.get(id) || ''
+  try {
+    const res = await api.get(`/admin/signatures/employees/${encodeURIComponent(id)}`)
+    const url = res?.data?.signatureUrl || res?.data?.url || ''
+    employeeSigMetaCache.set(id, url || '')
+    return url || ''
+  } catch {
+    employeeSigMetaCache.set(id, '')
+    return ''
+  }
+}
 
-  const leaveAdminLoginId =
-    safeText(previewData.value?.meta?.leaveAdminLoginId) ||
-    safeText(report.value?.meta?.leaveAdminLoginId) ||
-    LEAVE_ADMIN_LOGIN
+function isLikelyEmployeeId(v) {
+  const s = safeText(v)
+  return /^\d{4,}$/.test(s)
+}
 
-  const gmId = safeText(previewData.value?.meta?.gmLoginId || previewEmp.value?.gmLoginId)
-  const cooId = safeText(previewData.value?.meta?.cooLoginId || previewEmp.value?.cooLoginId)
+/** numeric => employees first, else users first (then fallback) */
+async function resolveSignatureMetaUrl(idLike) {
+  const id = safeText(idLike)
+  if (!id) return ''
 
-  const requesterMeta = await getEmployeeSignatureMetaUrl(empId)
-  const leaveAdminMeta = await resolveSignatureMetaUrl(leaveAdminLoginId)
-  const gmMeta = await resolveSignatureMetaUrl(gmId)
-  const cooMeta = await resolveSignatureMetaUrl(cooId)
+  const key = `any:${id}`
+  if (userSigMetaCache.has(key)) return userSigMetaCache.get(key) || ''
 
-  const [requesterUrl, leaveAdminUrl, gmUrl, cooUrl] = await Promise.all([
-    toAuthedBlobUrl(requesterMeta),
-    toAuthedBlobUrl(leaveAdminMeta),
-    toAuthedBlobUrl(gmMeta),
-    toAuthedBlobUrl(cooMeta),
-  ])
+  const firstEmployees = isLikelyEmployeeId(id)
 
-  sig.value = {
-    requesterUrl: requesterUrl || '',
-    leaveAdminUrl: leaveAdminUrl || '',
-    gmUrl: gmUrl || '',
-    cooUrl: cooUrl || '',
+  let url = ''
+  if (firstEmployees) url = await getEmployeeSignatureMetaUrl(id)
+  else url = await getUserSignatureMetaUrl(id)
+
+  if (!url) {
+    if (firstEmployees) url = await getUserSignatureMetaUrl(id)
+    else url = await getEmployeeSignatureMetaUrl(id)
+  }
+
+  userSigMetaCache.set(key, url || '')
+  return url || ''
+}
+
+async function metaUrlToBlob(metaUrl) {
+  const m = safeText(metaUrl)
+  if (!m) return ''
+  if (blobCache.has(m)) return blobCache.get(m) || ''
+  const b = await toAuthedBlobUrl(m)
+  blobCache.set(m, b || '')
+  return b || ''
+}
+
+/* ───────── Row signatures (per cell) ───────── */
+/**
+ * IMPORTANT: Use ref(Map) but update by replacing Map (reactive) to avoid “missing images”.
+ */
+const rowSig = ref(new Map()) // key -> { recordBy, checkedBy, gm, coo }
+
+function rowKey(r) {
+  return `${safeText(r?.date)}|${safeText(r?.from)}|${safeText(r?.to)}|${safeText(r?.leaveTypeCode)}|${safeText(
+    r?.status
+  )}|${safeText(r?.remark)}`
+}
+
+function clearRowSig() {
+  rowSig.value = new Map()
+}
+
+function setRowSig(k, v) {
+  const m = new Map(rowSig.value)
+  m.set(k, v)
+  rowSig.value = m
+}
+
+async function ensureRowSignatures(rows = []) {
+  const list = Array.isArray(rows) ? rows : []
+  const jobs = []
+
+  for (const r of list) {
+    const k = rowKey(r)
+    if (rowSig.value.has(k)) continue
+
+    // ✅ FORCE THE RULES (frontend safety):
+    const recordById = safeText(r.recordByLoginId) // employeeId like 51210038
+    const checkedById = LEAVE_ADMIN_LOGIN          // always leave_admin
+    const gmId = safeText(r.approvedGMLoginId)
+    const cooId = safeText(r.approvedCOOLoginId)
+
+    jobs.push(
+      (async () => {
+        const [recMeta, chkMeta, gmMeta, cooMeta] = await Promise.all([
+          resolveSignatureMetaUrl(recordById),
+          resolveSignatureMetaUrl(checkedById),
+          resolveSignatureMetaUrl(gmId),
+          resolveSignatureMetaUrl(cooId),
+        ])
+
+        const [recBlob, chkBlob, gmBlob, cooBlob] = await Promise.all([
+          metaUrlToBlob(recMeta),
+          metaUrlToBlob(chkMeta),
+          metaUrlToBlob(gmMeta),
+          metaUrlToBlob(cooMeta),
+        ])
+
+        setRowSig(k, {
+          recordBy: recBlob || '',
+          checkedBy: chkBlob || '',
+          gm: gmBlob || '',
+          coo: cooBlob || '',
+        })
+      })()
+    )
+  }
+
+  // batch to avoid overload
+  const BATCH = 12
+  for (let i = 0; i < jobs.length; i += BATCH) {
+    await Promise.all(jobs.slice(i, i + BATCH))
   }
 }
 
@@ -465,11 +492,9 @@ async function fetchRecordForSelectedContract(employeeId) {
 
   if (safeText(asOf.value)) params.asOf = safeText(asOf.value)
 
-  // ✅ prefer contractId if it's Mongo ObjectId
   if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
     params.contractId = c.id
   } else {
-    // fallback to date range if available
     if (c?.from && c?.to) {
       params.from = c.from
       params.to = c.to
@@ -490,28 +515,34 @@ async function openPreview(emp) {
   previewLoading.value = true
   previewError.value = ''
   previewData.value = null
-  clearSig()
 
   contractOptions.value = []
   selectedContractId.value = ''
   contractWatchReady.value = false
 
+  clearRowSig()
+
   try {
     const employeeId = safeText(emp?.employeeId)
+    if (!employeeId) throw new Error('Missing employeeId')
 
-    // 1) load ALL contracts + default current/latest
-    await loadContractsForEmployee(employeeId)
-
-    // 2) fetch record for selected contract
+    // 1) fetch once to get meta.contracts + meta.selectedContractId
     await fetchRecordForSelectedContract(employeeId)
 
-    // 3) load signatures (based on previewData.meta / emp)
-    await loadSignaturesForPreview()
+    const metaContracts = previewData.value?.meta?.contracts || []
+    const preferredContractId = safeText(previewData.value?.meta?.selectedContractId)
 
+    // 2) build contracts + set selected
+    const list = normalizeContracts(metaContracts, emp)
+    contractOptions.value = list
+    selectedContractId.value = pickDefaultContractId(list, preferredContractId)
+
+    // 3) now refetch with the selected contract
     contractWatchReady.value = true
+    await refetchPreviewByContract()
   } catch (e) {
     console.error('openPreview error', e)
-    previewError.value = e?.response?.data?.message || 'Failed to load leave record.'
+    previewError.value = e?.response?.data?.message || e?.message || 'Failed to load leave record.'
   } finally {
     previewLoading.value = false
   }
@@ -521,13 +552,16 @@ async function refetchPreviewByContract() {
   try {
     const employeeId = safeText(previewEmp.value?.employeeId)
     if (!employeeId) return
+
     previewLoading.value = true
     previewError.value = ''
     previewData.value = null
-    clearSig()
+    clearRowSig()
 
     await fetchRecordForSelectedContract(employeeId)
-    await loadSignaturesForPreview()
+
+    // build row signature blobs
+    await ensureRowSignatures(previewData.value?.rows || [])
   } catch (e) {
     console.error('refetchPreviewByContract error', e)
     previewError.value = e?.response?.data?.message || 'Failed to load leave record.'
@@ -552,7 +586,9 @@ function closePreview() {
   contractOptions.value = []
   selectedContractId.value = ''
   contractWatchReady.value = false
-  clearSig()
+
+  clearRowSig()
+  clearBlobCache()
 }
 
 /* ✅ BEST PDF: Vector Print-to-PDF */
@@ -673,6 +709,10 @@ async function exportRecordExcel() {
       UL: r.UL_day,
       SL: r.SL_day,
       ML: r.ML_day,
+      RecordBy: r.recordByLoginId,
+      CheckedBy: LEAVE_ADMIN_LOGIN,
+      GM: r.approvedGMLoginId,
+      COO: r.approvedCOOLoginId,
       Remark: r.remark,
       Status: r.status,
       LeaveType: r.leaveTypeCode,
@@ -750,7 +790,8 @@ onBeforeUnmount(() => {
   if (tmr) clearTimeout(tmr)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
-  clearSig()
+  clearRowSig()
+  clearBlobCache()
 })
 </script>
 
@@ -843,9 +884,13 @@ onBeforeUnmount(() => {
         <div class="flex items-center justify-between gap-2">
           <div>
             <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400">Preview generates Leave Record with signatures for the selected contract.</div>
+            <div class="text-[11px] text-slate-500 dark:text-slate-400">
+              Preview generates Leave Record with signatures for the selected contract.
+            </div>
           </div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">
+            Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees
+          </div>
         </div>
       </div>
 
@@ -947,7 +992,6 @@ onBeforeUnmount(() => {
     <div v-if="previewOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="closePreview" />
 
-      <!-- full viewport container -->
       <div class="absolute inset-0 p-0">
         <div class="h-full w-full bg-white dark:bg-slate-950 flex flex-col">
           <!-- Top bar -->
@@ -1137,27 +1181,51 @@ onBeforeUnmount(() => {
                         <td class="mono center">{{ r.SL_day ?? '' }}</td>
                         <td class="mono center">{{ r.ML_day ?? '' }}</td>
 
+                        <!-- Record By signature (employee) -->
                         <td class="small">
                           <div class="sig-cell">
-                            <img v-if="sig.requesterUrl" :src="sig.requesterUrl" alt="Requester sign" class="sig-img" />
+                            <img
+                              v-if="rowSig.get(rowKey(r))?.recordBy"
+                              :src="rowSig.get(rowKey(r))?.recordBy"
+                              alt="Record by sign"
+                              class="sig-img"
+                            />
                           </div>
                         </td>
 
+                        <!-- Checked By signature (leave_admin) -->
                         <td class="small">
                           <div class="sig-cell">
-                            <img v-if="sig.leaveAdminUrl" :src="sig.leaveAdminUrl" alt="Leave Admin sign" class="sig-img" />
+                            <img
+                              v-if="rowSig.get(rowKey(r))?.checkedBy"
+                              :src="rowSig.get(rowKey(r))?.checkedBy"
+                              alt="Checked by sign"
+                              class="sig-img"
+                            />
                           </div>
                         </td>
 
+                        <!-- GM signature (only after GM approved) -->
                         <td class="small">
                           <div class="sig-cell">
-                            <img v-if="sig.gmUrl" :src="sig.gmUrl" alt="GM sign" class="sig-img" />
+                            <img
+                              v-if="rowSig.get(rowKey(r))?.gm && showGmSignatureForRow(r)"
+                              :src="rowSig.get(rowKey(r))?.gm"
+                              alt="GM sign"
+                              class="sig-img"
+                            />
                           </div>
                         </td>
 
+                        <!-- COO signature (only after COO approved) -->
                         <td class="small">
                           <div class="sig-cell">
-                            <img v-if="sig.cooUrl" :src="sig.cooUrl" alt="COO sign" class="sig-img" />
+                            <img
+                              v-if="rowSig.get(rowKey(r))?.coo && showCooSignatureForRow(r)"
+                              :src="rowSig.get(rowKey(r))?.coo"
+                              alt="COO sign"
+                              class="sig-img"
+                            />
                           </div>
                         </td>
 

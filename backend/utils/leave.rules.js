@@ -92,16 +92,23 @@ function serviceYearsFromJoin(joinYMD, asOfDate = new Date()) {
 }
 
 /**
- * ✅ NEW AL RULE:
- * - Year 1–3 => 18
- * - Year 4   => 19
- * - Year 5   => 20
- * - ...
+ * ✅ AL cap increases by +1 for every 3 years of service:
+ * - 0–3 years => 18
+ * - 4–6 years => 19
+ * - 7–9 years => 20
+ * - 10–12 years => 21
+ * - 13-15 years => 22
+ * - 16-18 years => 23
  */
 function computeALByServiceYears(joinYMD, asOfDate = new Date()) {
   const yrs = serviceYearsFromJoin(joinYMD, asOfDate)
-  return 18 + Math.max(0, yrs - 3)
+
+  // bump starts at year 4, then every +3 years
+  const bumps = Math.floor(Math.max(0, yrs - 1) / 3)
+
+  return 18 + bumps
 }
+
 
 /**
  * ✅ Contract-year window:
