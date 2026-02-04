@@ -9,6 +9,7 @@
       - GM → row-level signature, only after GM approved (PENDING_COO / APPROVED)
       - COO → row-level signature, only after final approved (APPROVED)
   ✅ CHANGE: Removed As Of date input from UI
+  ✅ CHANGE: Summary fetch does NOT pass asOf (shows all employees/requests)
   ✅ CHANGE: Preview auto uses asOf = selected contract end date (contract.to)
 -->
 <script setup>
@@ -50,13 +51,6 @@ const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
 const managerLoginId = ref('')
-
-/**
- * We KEEP asOf in code (needed for calculations),
- * but we remove the UI input so users cannot set it to today by mistake.
- * Default: today for summary (employee list)
- */
-const asOf = ref(dayjs().format('YYYY-MM-DD'))
 
 /* ───────── State ───────── */
 const loading = ref(false)
@@ -123,6 +117,11 @@ function balOf(emp, code) {
 }
 
 /* ───────── API: summary ───────── */
+/**
+ * ✅ IMPORTANT:
+ * Do NOT send asOf here.
+ * That prevents “as of today” filtering, and ensures list shows all.
+ */
 async function fetchReport(silent = false) {
   loading.value = true
   error.value = ''
@@ -132,10 +131,6 @@ async function fetchReport(silent = false) {
       includeInactive: includeInactive.value ? '1' : undefined,
       department: safeText(department.value) || undefined,
       managerLoginId: safeText(managerLoginId.value) || undefined,
-
-      // keep asOf for balance calc in summary if backend supports it
-      asOf: safeText(asOf.value) || undefined,
-
       limit: 500,
     }
     const res = await api.get('/admin/leave/reports/summary', { params })
@@ -197,8 +192,7 @@ async function exportEmployeesExcel() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'GM_COO')
 
-    const stamp = safeText(asOf.value) || 'as_of'
-    XLSX.writeFile(wb, `leave_report_gm_coo_${stamp}.xlsx`)
+    XLSX.writeFile(wb, `leave_report_gm_coo_all.xlsx`)
     showToast({ type: 'success', title: 'Exported', message: 'Employees exported.' })
   } catch (e) {
     console.error('exportEmployeesExcel error', e)
@@ -302,8 +296,8 @@ function contractDisplayLabel(c) {
 }
 
 /**
- * ✅ Preview As Of label:
- * show contract end date (preferred), fallback to today
+ * ✅ Preview uses asOf = selected contract end date (contract.to)
+ * This ensures preview shows all requests in that contract, not only to today.
  */
 const previewAsOf = computed(() => {
   const c = selectedContract.value
@@ -357,7 +351,7 @@ async function toAuthedBlobUrl(rawUrl) {
   }
 }
 
-/* signature META caches (meta endpoints return a signatureUrl/path) */
+/* signature META caches */
 const userSigMetaCache = new Map()
 const employeeSigMetaCache = new Map()
 const blobCache = new Map()
@@ -367,7 +361,6 @@ function clearBlobCache() {
   blobCache.clear()
 }
 
-/* meta endpoints return { exists, url } or { signatureUrl } — we support both */
 async function getUserSignatureMetaUrl(loginId) {
   const id = safeText(loginId)
   if (!id) return ''
@@ -455,6 +448,12 @@ function setRowSig(k, v) {
   rowSig.value = m
 }
 
+/**
+ * ✅ IMPORTANT for GM+COO:
+ * - Record By => employee signature ALWAYS (employeeId)
+ * - Checked By => leave_admin ALWAYS
+ * - GM/COO => row-level signature based on status
+ */
 async function ensureRowSignatures(rows = []) {
   const list = Array.isArray(rows) ? rows : []
   const jobs = []
@@ -463,19 +462,21 @@ async function ensureRowSignatures(rows = []) {
     const k = rowKey(r)
     if (rowSig.value.has(k)) continue
 
-    const recordById = safeText(r.recordByLoginId)
+    const recordByEmployeeId = safeText(r.recordByEmployeeId || r.employeeId || r.requesterEmployeeId)
     const checkedById = LEAVE_ADMIN_LOGIN
     const gmId = safeText(r.approvedGMLoginId)
     const cooId = safeText(r.approvedCOOLoginId)
 
     jobs.push(
       (async () => {
-        const [recMeta, chkMeta, gmMeta, cooMeta] = await Promise.all([
-          resolveSignatureMetaUrl(recordById),
-          resolveSignatureMetaUrl(checkedById),
-          resolveSignatureMetaUrl(gmId),
-          resolveSignatureMetaUrl(cooId),
-        ])
+        // RecordBy must be employee signature
+        const recMeta = await getEmployeeSignatureMetaUrl(recordByEmployeeId)
+
+        // CheckedBy must be leave_admin user signature
+        const chkMeta = await resolveSignatureMetaUrl(checkedById)
+
+        // GM/COO can be users (loginId)
+        const [gmMeta, cooMeta] = await Promise.all([resolveSignatureMetaUrl(gmId), resolveSignatureMetaUrl(cooId)])
 
         const [recBlob, chkBlob, gmBlob, cooBlob] = await Promise.all([
           metaUrlToBlob(recMeta),
@@ -500,22 +501,20 @@ async function ensureRowSignatures(rows = []) {
   }
 }
 
-/* ───────── Fetch record for selected contract (uses contractId) ───────── */
+/* ───────── Fetch record for selected contract ───────── */
 async function fetchRecordForSelectedContract(employeeId) {
   const c = selectedContract.value
   const params = { ts: Date.now() }
 
-  /**
-   * ✅ KEY CHANGE:
-   * Preview should compute balances "as of end of contract", not today.
-   * If no contract end date, fallback to today.
-   */
+  // ✅ Preview asOf = contract end date
   const asOfForPreview = previewAsOf.value
   if (safeText(asOfForPreview)) params.asOf = safeText(asOfForPreview)
 
+  // Prefer contractId if it looks like Mongo ObjectId
   if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
     params.contractId = c.id
   } else {
+    // fallback range mode
     if (c?.from && c?.to) {
       params.from = c.from
       params.to = c.to
@@ -542,6 +541,7 @@ async function openPreview(emp) {
   contractWatchReady.value = false
 
   clearRowSig()
+  clearBlobCache()
 
   try {
     const employeeId = safeText(emp?.employeeId)
@@ -558,7 +558,7 @@ async function openPreview(emp) {
     contractOptions.value = list
     selectedContractId.value = pickDefaultContractId(list, preferredContractId)
 
-    // 3) now refetch with the selected contract (this time previewAsOf works)
+    // 3) refetch using selected contract (now previewAsOf is correct) + build signatures
     contractWatchReady.value = true
     await refetchPreviewByContract()
   } catch (e) {
@@ -580,7 +580,6 @@ async function refetchPreviewByContract() {
     clearRowSig()
 
     await fetchRecordForSelectedContract(employeeId)
-
     await ensureRowSignatures(previewData.value?.rows || [])
   } catch (e) {
     console.error('refetchPreviewByContract error', e)
@@ -729,7 +728,7 @@ async function exportRecordExcel() {
       UL: r.UL_day,
       SL: r.SL_day,
       ML: r.ML_day,
-      RecordBy: r.recordByLoginId,
+      RecordByEmployeeId: r.recordByEmployeeId || '',
       CheckedBy: LEAVE_ADMIN_LOGIN,
       GM: r.approvedGMLoginId,
       COO: r.approvedCOOLoginId,
@@ -826,7 +825,7 @@ onBeforeUnmount(() => {
             Shows only employees in <span class="font-semibold">GM + COO</span> approval mode.
           </div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Preview uses <span class="font-semibold">selected contract</span> (default current/latest) and calculates balances as of
+            Preview uses <span class="font-semibold">selected contract</span> (default current/latest) and calculates as of
             <span class="font-semibold">contract end date</span>.
           </div>
         </div>
@@ -862,7 +861,7 @@ onBeforeUnmount(() => {
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." :class="ui.input" />
         </div>
 
-        <!-- ✅ REMOVED: As Of / Preview Date input -->
+        <!-- ✅ REMOVED: As Of input -->
 
         <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
@@ -1013,7 +1012,10 @@ onBeforeUnmount(() => {
       <div class="absolute inset-0 p-0">
         <div class="h-full w-full bg-white dark:bg-slate-950 flex flex-col">
           <!-- Top bar -->
-          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+          <div
+            class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3
+                   dark:border-slate-800 dark:bg-slate-900"
+          >
             <div class="min-w-[260px]">
               <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
                 Leave Record — <span class="font-mono">{{ previewEmp?.employeeId }}</span>
@@ -1059,16 +1061,6 @@ onBeforeUnmount(() => {
               </button>
 
               <button
-                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900 disabled:opacity-60"
-                :disabled="previewLoading || !previewData"
-                @click="exportRecordExcel"
-              >
-                <i class="fa-solid fa-file-excel text-[11px]" />
-                Excel
-              </button>
-
-              <button
                 class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800
                        dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
                 @click="closePreview"
@@ -1079,7 +1071,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Body (scrollable) -->
+          <!-- Body -->
           <div class="flex-1 overflow-y-auto bg-slate-100/70 p-3 sm:p-4 dark:bg-slate-900">
             <div
               v-if="previewError"
@@ -1095,7 +1087,7 @@ onBeforeUnmount(() => {
               <div class="h-14 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
             </div>
 
-            <!-- Printable area -->
+            <!-- Printable -->
             <div v-else class="w-full">
               <div class="mx-auto w-fit rounded-xl bg-white p-2 sm:p-3 shadow-sm dark:bg-white">
                 <div ref="previewRef" class="print-sheet">
@@ -1223,7 +1215,7 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <!-- GM signature (only after GM approved) -->
+                        <!-- GM signature -->
                         <td class="small">
                           <div class="sig-cell">
                             <img
@@ -1235,7 +1227,7 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <!-- COO signature (only after COO approved) -->
+                        <!-- COO signature -->
                         <td class="small">
                           <div class="sig-cell">
                             <img

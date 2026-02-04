@@ -70,7 +70,7 @@ function nowYMD(tz = DEFAULT_TZ) {
 function phnomPenhMidnightDate(ymd) {
   const s = String(ymd || '').trim()
   if (!isValidYMD(s)) return new Date()
-  const [y, m, d] = s.split('-').map((x) => Number(x))
+  const [y, m, d] = s.split('-').map(Number)
   const utcMidnight = Date.UTC(y, (m || 1) - 1, d || 1, 0, 0, 0)
   const ppMidnightUtc = utcMidnight - PP_OFFSET_MINUTES * 60 * 1000
   return new Date(ppMidnightUtc)
@@ -113,8 +113,8 @@ function overlapsRange(docStart, docEnd, from, to) {
 /** Map system leaveTypeCode to PDF column codes */
 function mapToPdfCode(systemCode) {
   const c = String(systemCode || '').toUpperCase().trim()
-  if (c === 'MC') return 'SL' // Medical Certificate → Sick Leave column on paper
-  if (c === 'MA') return 'ML' // Maternity Leave code in system → ML column on paper
+  if (c === 'MC') return 'SL'
+  if (c === 'MA') return 'ML'
   return c
 }
 
@@ -148,115 +148,46 @@ function pickContract(profile, { contractId, contractNo }) {
   const list = Array.isArray(profile?.contracts) ? profile.contracts : []
   if (!list.length) return null
 
-  const id = safeText(contractId)
-  const no = safeText(contractNo)
-
-  if (id) {
-    const found = list.find((c) => safeText(c?._id) === id)
-    return found || null
-  }
-
-  if (no) {
-    const n = Number(no)
-    if (Number.isFinite(n)) {
-      const found = list.find((c) => Number(c?.contractNo) === n)
-      return found || null
-    }
-  }
-
+  if (contractId) return list.find((c) => String(c._id) === String(contractId)) || null
+  if (contractNo) return list.find((c) => Number(c.contractNo) === Number(contractNo)) || null
   return null
 }
 
 function getCurrentContract(profile) {
   const list = Array.isArray(profile?.contracts) ? profile.contracts : []
   if (!list.length) return null
-
-  const toNo = (v) => {
-    const n = Number(v)
-    return Number.isFinite(n) ? n : 0
-  }
-  const toKeyDate = (v) => safeText(v) || '' // YYYY-MM-DD sorts fine as string
-
-  // 1) If there are open contracts (no closedAt), pick the LATEST one only
-  const open = list.filter((c) => !c?.closedAt)
-
-  const pickLatest = (arr) =>
-    arr
-      .slice()
-      .sort((a, b) => {
-        const n = toNo(a?.contractNo) - toNo(b?.contractNo)
-        if (n !== 0) return n
-        const sd = toKeyDate(a?.startDate).localeCompare(toKeyDate(b?.startDate))
-        if (sd !== 0) return sd
-        return safeText(a?._id).localeCompare(safeText(b?._id))
-      })
-      .pop()
-
-  if (open.length) return pickLatest(open)
-
-  // 2) If none are open (all closed), still pick the latest contract (last history)
-  return pickLatest(list)
+  const open = list.filter((c) => !c.closedAt)
+  return (open.length ? open : list).sort((a, b) => Number(a.contractNo) - Number(b.contractNo)).pop()
 }
 
 function contractMeta(contract) {
   if (!contract) return null
   return {
-    contractId: safeText(contract?._id),
-    contractNo: contract?.contractNo ?? null,
-    startDate: safeText(contract?.startDate),
-    endDate: safeText(contract?.endDate),
-    closedAt: contract?.closedAt || null,
-    balancesAsOf:
-      safeText(contract?.closeSnapshot?.balancesAsOf) ||
-      safeText(contract?.closeSnapshot?.asOf) ||
-      '',
+    contractId: String(contract._id),
+    contractNo: contract.contractNo,
+    startDate: contract.startDate,
+    endDate: contract.endDate,
+    closedAt: contract.closedAt || null,
+    balancesAsOf: contract.closeSnapshot?.balancesAsOf || '',
   }
 }
 
-/**
- * ✅ list contracts for dropdown
- * IMPORTANT: keep label clean — frontend adds "(Current)" once
- */
 function listContractsMeta(profile) {
   const list = Array.isArray(profile?.contracts) ? profile.contracts : []
   const current = getCurrentContract(profile)
-  const currentId = safeText(current?._id)
-
-  return list
-    .slice()
-    .sort((a, b) => Number(a?.contractNo || 0) - Number(b?.contractNo || 0))
-    .map((c) => {
-      const isCurrent = currentId ? safeText(c?._id) === currentId : false
-      const start = safeText(c?.startDate)
-      const end = safeText(c?.endDate)
-      const no = c?.contractNo ?? ''
-
-      const label = `Contract ${no}: ${start}${end ? ` → ${end}` : ''}`
-
-      return {
-        contractId: safeText(c?._id),
-        contractNo: no,
-        startDate: start,
-        endDate: end,
-        closedAt: c?.closedAt || null,
-        isCurrent,
-        label,
-      }
-    })
+  return list.map((c) => ({
+    contractId: String(c._id),
+    contractNo: c.contractNo,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    closedAt: c.closedAt || null,
+    isCurrent: current && String(current._id) === String(c._id),
+    label: `Contract ${c.contractNo}: ${c.startDate}${c.endDate ? ` → ${c.endDate}` : ''}`,
+  }))
 }
 
 // ───────────────── controller ─────────────────
 
-/**
- * GET /api/admin/leave/reports/employee/:employeeId/record
- * Query:
- *  - from=YYYY-MM-DD (optional)
- *  - to=YYYY-MM-DD   (optional)
- *  - asOf=YYYY-MM-DD (optional)  → cut off records after this date (snapshot)
- *  - statuses=APPROVED,PENDING_MANAGER,PENDING_GM  (optional)
- *  - contractId=<mongoId> (optional)  ✅ per-contract
- *  - contractNo=1         (optional)  ✅ per-contract
- */
 exports.getEmployeeLeaveRecord = async (req, res) => {
   try {
     if (!isAdminViewer(req)) return res.status(403).json({ message: 'Forbidden' })
@@ -275,70 +206,25 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
 
     const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : ''
 
-    // ✅ default include approved + pending so preview always has rows
     const statuses = safeText(req.query.statuses)
-      ? safeText(req.query.statuses)
-          .split(',')
-          .map((s) => s.trim().toUpperCase())
-          .filter(Boolean)
+      ? safeText(req.query.statuses).split(',').map((s) => s.trim().toUpperCase())
       : ['APPROVED', 'PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO']
 
     const contractId = safeText(req.query.contractId)
     const contractNo = safeText(req.query.contractNo)
 
-    // profile (support string + old numeric)
     const profile =
       (await LeaveProfile.findOne({ employeeId }).lean()) ||
       (await LeaveProfile.findOne({ employeeId: Number(employeeId) }).lean())
-
     if (!profile) return res.status(404).json({ message: 'Leave profile not found.' })
 
-    const employeeIdStr = String(employeeId || '').trim()
-
-    // ✅ Checked by MUST be leave_admin always (you wanted it fixed)
-    // If you ever store leaveAdminLoginId on profile, we support it; else default.
     const leaveAdminId = safeText(profile.leaveAdminLoginId || 'leave_admin')
 
-    const contractsList = listContractsMeta(profile)
-
-    // ✅ default = CURRENT contract, unless user requests old one
     const requested = pickContract(profile, { contractId, contractNo })
     const current = getCurrentContract(profile)
     const selectedContract = requested || current
+    if (!selectedContract) return res.status(400).json({ message: 'No contract found.' })
 
-    if ((contractId || contractNo) && !selectedContract) {
-      return res.status(404).json({ message: 'Contract not found on this profile.' })
-    }
-    if (!selectedContract) {
-      return res.status(400).json({ message: 'This profile has no contracts history.' })
-    }
-
-    const contractStart = safeText(selectedContract.startDate)
-    const contractEnd = safeText(selectedContract.endDate)
-
-    if (!isValidYMD(contractStart) || !isValidYMD(contractEnd)) {
-      return res.status(400).json({ message: 'Selected contract has invalid start/end date.' })
-    }
-    if (contractStart > contractEnd) {
-      return res.status(400).json({ message: 'Selected contract startDate is after endDate.' })
-    }
-
-    // directory (employee)
-    const dirEmp =
-      (await EmployeeDirectory.findOne(
-        { employeeId: String(employeeId) },
-        { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1 }
-      ).lean()) ||
-      (await EmployeeDirectory.findOne(
-        { employeeId: Number(employeeId) },
-        { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1 }
-      ).lean())
-
-    const empName = displayName(dirEmp, profile?.name)
-    const dept = safeText(dirEmp?.departmentName || dirEmp?.department || profile?.department || '')
-    const section = safeText(dirEmp?.section || 'Foreigner')
-
-    // requests for this employee (sorted chronologically)
     let docs = await LeaveRequest.find({
       employeeId: buildEmpIdIn(employeeId),
       status: { $in: statuses },
@@ -346,161 +232,46 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       .sort({ startDate: 1, createdAt: 1 })
       .lean()
 
-    // filter by overlap range (if provided)
-    if (from && to) docs = (docs || []).filter((r) => overlapsRange(r.startDate, r.endDate, from, to))
+    docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, selectedContract.startDate, selectedContract.endDate))
+    if (from && to) docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, from, to))
+    if (asOf) docs = docs.filter((r) => toYMD(r.startDate) <= asOf)
 
-    // ✅ ALWAYS filter by selected contract range
-    docs = (docs || []).filter((r) => overlapsRange(r.startDate, r.endDate, contractStart, contractEnd))
-
-    // ✅ apply "asOf" snapshot (cut off after asOf)
-    if (asOf) {
-      docs = (docs || []).filter((r) => {
-        const s = toYMD(r.startDate) || ''
-        return s ? s <= asOf : false
-      })
-    }
-
-    // resolve names
-    const idsToResolve = new Set()
-
-    // approver ids
-    idsToResolve.add(String(profile.managerLoginId || '').trim())
-    idsToResolve.add(String(profile.gmLoginId || '').trim())
-    idsToResolve.add(String(profile.cooLoginId || '').trim())
-
-    // ✅ our forced actors:
-    idsToResolve.add(employeeIdStr) // recordBy = employee
-    idsToResolve.add(leaveAdminId)  // checkedBy = leave_admin
-
-    // also include whatever rows have for approved fields (keep)
-    for (const r of docs || []) {
-      idsToResolve.add(String(r.managerLoginId || '').trim())
-      idsToResolve.add(String(r.gmLoginId || '').trim())
-      idsToResolve.add(String(r.cooLoginId || '').trim())
-    }
-
-    const dirMap = await loadDirMap([...idsToResolve])
-
-    const managerId = safeText(profile.managerLoginId)
-    const gmId = safeText(profile.gmLoginId)
-    const cooId = safeText(profile.cooLoginId)
-
-    const approvers = {
-      manager: { loginId: managerId, name: displayName(dirMap.get(managerId), managerId), signatureUrl: '' },
-      gm: { loginId: gmId, name: displayName(dirMap.get(gmId), gmId), signatureUrl: '' },
-      coo: { loginId: cooId, name: displayName(dirMap.get(cooId), cooId), signatureUrl: '' },
-      leaveAdmin: { loginId: leaveAdminId, name: leaveAdminId, signatureUrl: '' },
-    }
-
-    // Build rows for PDF table
-    const approvedHistAll = (docs || []).filter((r) => String(r.status || '').toUpperCase() === 'APPROVED')
-
-    const approvedIndexById = new Map()
-    for (let i = 0; i < approvedHistAll.length; i++) approvedIndexById.set(String(approvedHistAll[i]._id || ''), i)
+    const approved = docs.filter((r) => r.status === 'APPROVED')
+    const approvedIndex = new Map(approved.map((r, i) => [String(r._id), i]))
 
     const rows = []
-    for (const r of docs || []) {
-      const systemCode = String(r.leaveTypeCode || '').toUpperCase()
-      const pdfCode = mapToPdfCode(systemCode)
-      const days = num(r.totalDays)
-      const st = String(r.status || '').toUpperCase()
-
+    for (const r of docs) {
       let alRemain = ''
-      if (st === 'APPROVED') {
-        const idxApproved = approvedIndexById.get(String(r._id || ''))
-        const hist = Number.isInteger(idxApproved) ? approvedHistAll.slice(0, idxApproved + 1) : approvedHistAll
-
-        const asOfRow = toYMD(r.endDate || r.startDate) || nowYMD()
-        const asOfDate = phnomPenhMidnightDate(asOfRow)
-
-        const snap = computeBalances(profile, hist, asOfDate)
-        const alRow = (snap?.balances || []).find((b) => String(b.leaveTypeCode || '').toUpperCase() === 'AL')
-        alRemain = num(alRow?.remaining)
+      if (r.status === 'APPROVED') {
+        const idx = approvedIndex.get(String(r._id))
+        const hist = idx >= 0 ? approved.slice(0, idx + 1) : approved
+        const snap = computeBalances(profile, hist, phnomPenhMidnightDate(toYMD(r.endDate)))
+        const al = snap.balances.find((b) => b.leaveTypeCode === 'AL')
+        alRemain = num(al?.remaining)
       }
 
-      const managerRowId = safeText(r.managerLoginId || profile.managerLoginId || '')
-      const gmRowId = safeText(r.gmLoginId || profile.gmLoginId || '')
-      const cooRowId = safeText(r.cooLoginId || profile.cooLoginId || '')
-
-      let remark = safeText(r.remark || r.note || '')
-      if (systemCode === 'SP') remark = remark ? `SP (Borrow from AL) • ${remark}` : 'SP (Borrow from AL)'
-      if (st !== 'APPROVED') remark = remark ? `[${st}] ${remark}` : `[${st}]`
-
-      // ✅ FORCE REQUIRED FLOW:
-      // Record By = employee requester (employeeId)
-      // Checked by = leave_admin
-      const recordById = employeeIdStr
-      const checkedById = leaveAdminId
-
       rows.push({
-        date: toYMD(r.createdAt || r.startDate),
+        date: toYMD(r.createdAt),
         from: toYMD(r.startDate),
         to: toYMD(r.endDate || r.startDate),
-
-        AL_day: shouldCountAsAL(systemCode) ? days : '',
-        AL_remain: shouldCountAsAL(systemCode) ? alRemain : '',
-
-        UL_day: pdfCode === 'UL' ? days : '',
-        SL_day: pdfCode === 'SL' ? days : '',
-        ML_day: pdfCode === 'ML' ? days : '',
-
-        // ✅ fixed display names
-        recordBy: empName,
-        recordByLoginId: recordById, // ✅ employeeId (numeric) => employee signature
-
-        checkedBy: leaveAdminId,
-        checkedByLoginId: checkedById, // ✅ leave_admin => user signature
-
-        approvedManager: displayName(dirMap.get(managerRowId), managerRowId),
-        approvedManagerLoginId: managerRowId,
-
-        approvedGM: displayName(dirMap.get(gmRowId), gmRowId),
-        approvedGMLoginId: gmRowId,
-
-        approvedCOO: displayName(dirMap.get(cooRowId), cooRowId),
-        approvedCOOLoginId: cooRowId,
-
-        remark,
-        status: st,
-        leaveTypeCode: systemCode,
+        AL_day: shouldCountAsAL(r.leaveTypeCode) ? num(r.totalDays) : '',
+        AL_remain: shouldCountAsAL(r.leaveTypeCode) ? alRemain : '',
+        leaveTypeCode: mapToPdfCode(r.leaveTypeCode),
+        status: r.status,
       })
     }
 
-    return res.json({
+    res.json({
       meta: {
         employeeId,
-        name: empName,
-        department: dept,
-        section,
-        joinDate: toYMD(profile.joinDate),
-
-        managerLoginId: safeText(profile.managerLoginId),
-        gmLoginId: safeText(profile.gmLoginId),
-        cooLoginId: safeText(profile.cooLoginId),
-
-        // ✅ used by frontend for checked by safety
-        leaveAdminLoginId: leaveAdminId,
-
-        // ✅ selected contract
         contract: contractMeta(selectedContract),
-
-        // ✅ ALL contracts for dropdown
-        contracts: contractsList,
-        selectedContractId: safeText(selectedContract?._id),
-        selectedContractNo: selectedContract?.contractNo ?? null,
-
-        leaveTypeLegend: { AL: 'Annual Leave', SL: 'Sick Leave', ML: 'Maternity Leave', UL: 'Unpaid Leave' },
-
-        range: { from: from || null, to: to || null },
+        contracts: listContractsMeta(profile),
         asOf: asOf || null,
-        statusesUsed: statuses,
       },
-
-      approvers,
       rows,
     })
   } catch (e) {
     console.error('getEmployeeLeaveRecord error', e)
-    return res.status(500).json({ message: e.message || 'Failed to load employee leave record' })
+    res.status(500).json({ message: e.message || 'Failed to load employee leave record' })
   }
 }

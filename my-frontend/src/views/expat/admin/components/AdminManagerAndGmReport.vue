@@ -3,11 +3,9 @@
   ✅ Contract-based preview (no date range filter)
   ✅ Contract selector shows ALL contracts (from record meta.contracts)
   ✅ Default contract = current/latest
-  ✅ Uses *As of* EXACTLY like AdminGmAndCooReport.vue:
-      - As Of exists (for balance calculations)
-      - NO “filter as today” behavior (report shows all requests; no “as-of hides rows”)
-      - Preview fetch always uses the single As Of date (params.asOf)
-  ✅ Uses contractId to fetch record (backend supports ?contractId=)
+  ✅ REMOVED "As of" from FILTER UI
+  ✅ Summary endpoint fetch does NOT pass asOf (shows all)
+  ✅ Preview uses internal asOf = selected contract end date (to avoid hiding rows)
   ✅ Vector Print-to-PDF (iframe print)
   ✅ Signature resolver + auth-protected signatures -> Blob URLs
   ✅ Per-row signatures:
@@ -55,18 +53,6 @@ const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
 const managerLoginId = ref('')
-
-/**
- * ✅ As-Of exists, but NOT used to "hide requests".
- * It is used for balance calculation + preview fetch calculation only.
- */
-const asOf = ref(dayjs().format('YYYY-MM-DD'))
-const asOfYMD = computed(() => {
-  const s = String(asOf.value || '').trim()
-  if (!s) return dayjs().format('YYYY-MM-DD')
-  const d = dayjs(s)
-  return d.isValid() ? d.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD')
-})
 
 /* ───────── State ───────── */
 const loading = ref(false)
@@ -129,10 +115,8 @@ function balOf(emp, code) {
 /* ───────── API: summary ───────── */
 /**
  * ✅ IMPORTANT:
- * - We do NOT pass "asOf" to filter requests.
- * - (If backend uses asOf for balances only, okay.)
- * - If your backend summary endpoint filters rows by asOf, REMOVE asOf from params below.
- *   (Keep it only for preview fetch.)
+ * - Do NOT pass asOf here (to avoid “as of today” filtering behavior).
+ * - Summary should show all requests & balances logic can be handled server-side if needed.
  */
 async function fetchReport(silent = false) {
   loading.value = true
@@ -143,10 +127,6 @@ async function fetchReport(silent = false) {
       includeInactive: includeInactive.value ? '1' : undefined,
       department: safeText(department.value) || undefined,
       managerLoginId: safeText(managerLoginId.value) || undefined,
-
-      // As-of is for calculations (not to hide requests)
-      asOf: asOfYMD.value || undefined,
-
       limit: 500,
     }
     const res = await api.get('/admin/leave/reports/summary', { params })
@@ -207,8 +187,7 @@ async function exportEmployeesExcel() {
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Manager_GM')
 
-    const stamp = asOfYMD.value || 'as_of'
-    XLSX.writeFile(wb, `leave_report_manager_gm_${stamp}.xlsx`)
+    XLSX.writeFile(wb, `leave_report_manager_gm_all.xlsx`)
     showToast({ type: 'success', title: 'Exported', message: 'Employees exported.' })
   } catch (e) {
     console.error('exportEmployeesExcel error', e)
@@ -310,6 +289,16 @@ function contractDisplayLabel(c) {
   if (!c) return ''
   return c.isCurrent ? `${c.label} (Current)` : c.label
 }
+
+/**
+ * ✅ Internal asOf used ONLY for preview fetch (NOT a filter UI)
+ * We set it to contract end date so it NEVER hides rows.
+ */
+const previewAsOfYMD = computed(() => {
+  const c = selectedContract.value
+  const end = ymd(c?.to) || ymd(previewData.value?.meta?.contract?.endDate)
+  return end || dayjs().format('YYYY-MM-DD')
+})
 
 /* ───────── SIGNATURE: protected content -> blob urls (cached) ───────── */
 function getToken() {
@@ -473,9 +462,7 @@ async function ensureRowSignatures(rows = []) {
     const k = rowKey(r)
     if (rowSig.value.has(k)) continue
 
-    // ✅ Record By => requester employee signature (employeeId)
     const recordById = safeText(r.recordByLoginId)
-
     const checkedById = LEAVE_ADMIN_LOGIN
     const managerId = safeText(r.approvedManagerLoginId)
     const gmId = safeText(r.approvedGMLoginId)
@@ -512,17 +499,13 @@ async function ensureRowSignatures(rows = []) {
   }
 }
 
-/* ───────── Fetch record for selected contract (uses contractId + As-Of like GM+COO) ───────── */
+/* ───────── Fetch record for selected contract ───────── */
 async function fetchRecordForSelectedContract(employeeId) {
   const c = selectedContract.value
   const params = { ts: Date.now() }
 
-  /**
-   * ✅ EXACTLY like AdminGmAndCooReport:
-   * - One As-Of date controls preview fetch (always send params.asOf)
-   * - Not "filter as today", this is calculation cutoff.
-   */
-  params.asOf = safeText(asOfYMD.value) || dayjs().format('YYYY-MM-DD')
+  // ✅ Do NOT hide rows: set asOf to contract end date (or fallback today)
+  params.asOf = previewAsOfYMD.value
 
   // Prefer contractId if it looks like Mongo ObjectId
   if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
@@ -605,14 +588,6 @@ async function refetchPreviewByContract() {
 }
 
 watch(selectedContractId, async () => {
-  if (!previewOpen.value) return
-  if (!previewEmp.value) return
-  if (!contractWatchReady.value) return
-  await refetchPreviewByContract()
-})
-
-/** ✅ As-of changes refresh preview too */
-watch(asOfYMD, async () => {
   if (!previewOpen.value) return
   if (!previewEmp.value) return
   if (!contractWatchReady.value) return
@@ -766,7 +741,7 @@ async function exportRecordExcel() {
 
     const empId = safeText(emp.employeeId || previewEmp.value?.employeeId)
     const contractNo = c?.idx ? `c${c.idx}` : 'contract'
-    const stamp = `${safeText(asOfYMD.value) || 'as_of'}`
+    const stamp = `${previewAsOfYMD.value || 'as_of'}`
     XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_${contractNo}_${stamp}.xlsx`)
 
     showToast({ type: 'success', title: 'Exported', message: 'Record exported.' })
@@ -785,7 +760,7 @@ watch(q, () => {
     fetchReport(true)
   }, 300)
 })
-watch([includeInactive, department, managerLoginId, asOfYMD], () => {
+watch([includeInactive, department, managerLoginId], () => {
   page.value = 1
   fetchReport(true)
 })
@@ -841,8 +816,6 @@ onBeforeUnmount(() => {
     <!-- Filters -->
     <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
       <div class="flex flex-wrap items-end justify-between gap-2">
-
-
         <div class="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -874,18 +847,14 @@ onBeforeUnmount(() => {
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." :class="ui.input" />
         </div>
 
-        <!-- ✅ Keep As-Of (controls preview), but no other date filter -->
-        <div class="md:col-span-2">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
-          <input v-model="asOf" type="date" :class="ui.input" />
-        </div>
+        <!-- ✅ REMOVED As-of input -->
 
-        <div class="md:col-span-3">
+        <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
           <input v-model="department" type="text" placeholder="HR, IT..." :class="ui.input" />
         </div>
 
-        <div class="md:col-span-3">
+        <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Manager Login ID</label>
           <input v-model="managerLoginId" type="text" placeholder="(optional filter)" :class="ui.input" />
         </div>
@@ -1034,9 +1003,12 @@ onBeforeUnmount(() => {
               <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
                 Leave Record — <span class="font-mono">{{ previewEmp?.employeeId }}</span>
               </div>
+
+              <!-- (optional) show internal asOf info only -->
               <div class="text-[11px] text-slate-500 dark:text-slate-300">
-                As of: <span class="font-mono">{{ asOfYMD }}</span>
+                As of: <span class="font-mono">{{ previewAsOfYMD }}</span>
               </div>
+
               <div class="text-[11px] text-slate-500 dark:text-slate-300">
                 Mode: <span class="font-semibold">Manager + GM</span>
               </div>
@@ -1129,7 +1101,7 @@ onBeforeUnmount(() => {
                       </div>
                       <div class="text-[10px] text-slate-700">
                         As of:
-                        <span class="mono">{{ asOfYMD }}</span>
+                        <span class="mono">{{ previewAsOfYMD }}</span>
                       </div>
                     </div>
                     <div class="sheet-brand">

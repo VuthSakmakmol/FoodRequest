@@ -121,7 +121,7 @@ function findBalanceRow(snapshot, code) {
 }
 
 /**
- * ✅ Pending usage reservation
+ * ✅ Pending usage reservation (counts pending usage within current contract/join-year window)
  */
 function computePendingUsage(pendingDocs = [], yearMeta) {
   const start = String(yearMeta?.startDate || '')
@@ -243,6 +243,7 @@ exports.getLeaveReportSummary = async (req, res) => {
       return res.status(400).json({ message: 'dateFrom cannot be after dateTo.' })
     }
 
+    // ✅ asOf default = today
     const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : nowYMD()
     const asOfDate = phnomPenhMidnightDate(asOf)
 
@@ -295,7 +296,9 @@ exports.getLeaveReportSummary = async (req, res) => {
     })
 
     if (approvalModeFilter) {
-      filteredProfiles = filteredProfiles.filter((p) => safeText(p.approvalMode).toUpperCase() === approvalModeFilter)
+      filteredProfiles = filteredProfiles.filter(
+        (p) => safeText(p.approvalMode).toUpperCase() === approvalModeFilter
+      )
     }
 
     if (departmentQ) {
@@ -317,7 +320,7 @@ exports.getLeaveReportSummary = async (req, res) => {
     const employeeIds = filteredProfiles.map((p) => String(p.employeeId)).filter(Boolean)
     const empIdQuery = buildEmployeeIdInQuery(employeeIds)
 
-    // approved + pending
+    // approved + pending (used for balance snapshots)
     const approvedAll = await LeaveRequest.find({
       employeeId: empIdQuery,
       status: 'APPROVED',
@@ -332,9 +335,11 @@ exports.getLeaveReportSummary = async (req, res) => {
       .sort({ startDate: 1, createdAt: 1 })
       .lean()
 
-    // summary docs
+    // summary docs (for stats tables)
     let reqSummaryDocs = await LeaveRequest.find({ employeeId: empIdQuery }).sort({ createdAt: -1 }).lean()
-    if (dateFrom && dateTo) reqSummaryDocs = reqSummaryDocs.filter((d) => overlapsRange(d.startDate, d.endDate, dateFrom, dateTo))
+    if (dateFrom && dateTo) {
+      reqSummaryDocs = reqSummaryDocs.filter((d) => overlapsRange(d.startDate, d.endDate, dateFrom, dateTo))
+    }
 
     let replaceDocs = await ReplaceDayRequest.find({ employeeId: empIdQuery }).sort({ createdAt: -1 }).lean()
     if (dateFrom && dateTo) {
@@ -394,7 +399,13 @@ exports.getLeaveReportSummary = async (req, res) => {
 
       for (const b of balances) {
         if (!totalsMap.has(b.leaveTypeCode)) {
-          totalsMap.set(b.leaveTypeCode, { leaveTypeCode: b.leaveTypeCode, entitlement: 0, used: 0, remaining: 0, strictRemaining: 0 })
+          totalsMap.set(b.leaveTypeCode, {
+            leaveTypeCode: b.leaveTypeCode,
+            entitlement: 0,
+            used: 0,
+            remaining: 0,
+            strictRemaining: 0,
+          })
         }
         const t = totalsMap.get(b.leaveTypeCode)
         t.entitlement += num(b.yearlyEntitlement)
