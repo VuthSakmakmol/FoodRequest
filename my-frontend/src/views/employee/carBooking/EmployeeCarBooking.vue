@@ -28,7 +28,7 @@ const LOCATIONS = [
   'KN  (OFFICE)',
   'CIMB Bank',
   'Sixplus Factory',
-  'XOTEX',
+  'XOTEX( YTI) Factory',
   'IFB ( OFFICE )',
   'DHL',
   'HORIZON',

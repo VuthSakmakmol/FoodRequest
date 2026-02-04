@@ -38,12 +38,27 @@ const BalanceSchema = new mongoose.Schema(
   { _id: false }
 )
 
+// ✅ Carry schema (positive or negative allowed)
+const CarrySchema = new mongoose.Schema(
+  {
+    AL: { type: Number, default: 0 },
+    SP: { type: Number, default: 0 },
+    MC: { type: Number, default: 0 },
+    MA: { type: Number, default: 0 },
+    UL: { type: Number, default: 0 },
+  },
+  { _id: false }
+)
+
 const ContractSnapshotSchema = new mongoose.Schema(
   {
     asOf: { type: String, default: '' }, // YYYY-MM-DD
     balances: { type: [BalanceSchema], default: [] },
     contractDate: { type: String, default: '' },
     contractEndDate: { type: String, default: '' },
+
+    // ✅ store carry at close time
+    carry: { type: CarrySchema, default: () => ({}) },
   },
   { _id: false }
 )
@@ -52,7 +67,7 @@ const ContractHistorySchema = new mongoose.Schema(
   {
     contractNo: { type: Number, required: true },
     startDate: { type: String, default: '' }, // YYYY-MM-DD
-    endDate: { type: String, default: '' },   // YYYY-MM-DD
+    endDate: { type: String, default: '' }, // YYYY-MM-DD
     openedAt: { type: Date, default: Date.now },
     closedAt: { type: Date, default: null },
     openedBy: { type: String, default: '' },
@@ -77,7 +92,7 @@ const LeaveProfileSchema = new mongoose.Schema(
     // COO read-only or final approver (depends on mode)
     cooLoginId: { type: String, default: '' },
 
-    // ✅ approval mode (frontend chooses ONLY this)
+    // ✅ approval mode
     approvalMode: {
       type: String,
       enum: ['GM_ONLY', 'GM_AND_COO'],
@@ -87,8 +102,8 @@ const LeaveProfileSchema = new mongoose.Schema(
     name: { type: String, default: '' },
     department: { type: String, default: '' },
 
-    joinDate: { type: String, default: '' },        // YYYY-MM-DD
-    contractDate: { type: String, default: '' },    // YYYY-MM-DD
+    joinDate: { type: String, default: '' }, // YYYY-MM-DD
+    contractDate: { type: String, default: '' }, // YYYY-MM-DD
     contractEndDate: { type: String, default: '' }, // auto = start + 1y - 1d
 
     isActive: { type: Boolean, default: true },
@@ -97,6 +112,12 @@ const LeaveProfileSchema = new mongoose.Schema(
     balancesAsOf: { type: String, default: '' },
 
     contracts: { type: [ContractHistorySchema], default: [] },
+
+    // ✅ NEW: multi-type carry
+    carry: { type: CarrySchema, default: () => ({}) },
+
+    // ✅ Legacy (keep for backward compat; optional)
+    alCarry: { type: Number, default: 0 },
 
     contractExpiryNotifiedFor: { type: String, default: '' },
     contractExpiryNotifiedAt: { type: Date, default: null },
@@ -113,6 +134,21 @@ LeaveProfileSchema.pre('validate', function (next) {
     if (isValidYMD(this.contractDate)) {
       const end = addDaysYMD(addYearsYMD(this.contractDate, 1), -1)
       this.contractEndDate = end
+    }
+
+    // ✅ keep carry initialized
+    if (!this.carry) this.carry = {}
+    ;['AL', 'SP', 'MC', 'MA', 'UL'].forEach((k) => {
+      if (typeof this.carry[k] !== 'number') this.carry[k] = Number(this.carry[k] || 0)
+    })
+
+    // ✅ migrate legacy alCarry → carry.AL (only if carry.AL missing/0)
+    if (typeof this.alCarry === 'number') {
+      if (typeof this.carry.AL !== 'number') this.carry.AL = 0
+      // if carry.AL is 0 but legacy alCarry is non-zero, copy it
+      if (Number(this.carry.AL || 0) === 0 && Number(this.alCarry || 0) !== 0) {
+        this.carry.AL = Number(this.alCarry || 0)
+      }
     }
 
     next()

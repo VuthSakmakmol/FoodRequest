@@ -271,13 +271,31 @@ const createTab = ref('bulk') // bulk | single
 const createError = ref('')
 const saving = ref(false)
 
+/* ✅ show/hide extra carry inputs */
+const showCarryAdvanced = ref(false)
+
+function emptyCarry() {
+  return { AL: 0, SP: 0, MC: 0, MA: 0, UL: 0 }
+}
+
+function normalizeCarry(c) {
+  const src = c || {}
+  return {
+    AL: Number(src.AL || 0),
+    SP: Number(src.SP || 0),
+    MC: Number(src.MC || 0),
+    MA: Number(src.MA || 0),
+    UL: Number(src.UL || 0),
+  }
+}
+
 function newRow() {
   return {
     key: Math.random().toString(16).slice(2),
     employee: null,
     joinDate: '',
     contractDate: '',
-    alCarry: 0,
+    carry: emptyCarry(),
     isActive: true,
   }
 }
@@ -290,7 +308,7 @@ const form = ref({
   singleEmployee: null,
   singleJoinDate: '',
   singleContractDate: '',
-  singleAlCarry: 0,
+  singleCarry: emptyCarry(),
   singleActive: true,
   singleManager: null,
 })
@@ -298,6 +316,7 @@ const form = ref({
 function openCreate() {
   createError.value = ''
   createTab.value = 'bulk'
+  showCarryAdvanced.value = false
   form.value = {
     approvalMode: 'MANAGER_AND_GM',
     manager: null,
@@ -306,7 +325,7 @@ function openCreate() {
     singleEmployee: null,
     singleJoinDate: '',
     singleContractDate: '',
-    singleAlCarry: 0,
+    singleCarry: emptyCarry(),
     singleActive: true,
     singleManager: null,
   }
@@ -380,11 +399,12 @@ async function submitCreate() {
       const chosen =
         createTab.value === 'bulk'
           ? form.value.manager
-          : (form.value.singleManager || form.value.manager)
+          : form.value.singleManager || form.value.manager
       const managerEmpId = pickEmployeeId(chosen)
       if (!managerEmpId) throw new Error('Manager is required for Manager + GM mode.')
     }
 
+    // BULK
     if (createTab.value === 'bulk') {
       const rows = form.value.rows || []
       if (!rows.length) throw new Error('Please add at least 1 employee.')
@@ -392,18 +412,20 @@ async function submitCreate() {
       const employees = rows.map((r, i) => {
         const employeeId = pickEmployeeId(r.employee)
         if (!employeeId) throw new Error(`Employee #${i + 1} is required.`)
-        if (!mustYmd(r.joinDate))
-          throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
+        if (!mustYmd(r.joinDate)) throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
         const contractDate = r.contractDate || r.joinDate
         if (!mustYmd(contractDate))
           throw new Error(`Contract date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
+        const carry = normalizeCarry(r.carry)
+
         return {
           employeeId,
           joinDate: r.joinDate,
           contractDate,
-          alCarry: Number(r.alCarry || 0),
+          carry, // ✅ new
+          alCarry: Number(carry.AL || 0), // ✅ legacy mirror (safe)
           isActive: r.isActive !== false,
         }
       })
@@ -433,6 +455,7 @@ async function submitCreate() {
       return
     }
 
+    // SINGLE
     const employeeId = pickEmployeeId(form.value.singleEmployee)
     if (!employeeId) throw new Error('Employee is required.')
     if (!mustYmd(form.value.singleJoinDate)) throw new Error('Join date must be YYYY-MM-DD.')
@@ -444,12 +467,15 @@ async function submitCreate() {
     const singleManagerEmpId = mode === 'MANAGER_AND_GM' ? pickEmployeeId(chosenManager) : ''
     const singleManagerLoginId = mode === 'MANAGER_AND_GM' ? pickLoginId(chosenManager) : ''
 
+    const carry = normalizeCarry(form.value.singleCarry)
+
     const payload = {
       approvalMode: mode,
       employeeId,
       joinDate: form.value.singleJoinDate,
       contractDate,
-      alCarry: Number(form.value.singleAlCarry || 0),
+      carry, // ✅ new
+      alCarry: Number(carry.AL || 0), // ✅ legacy mirror (safe)
       isActive: form.value.singleActive !== false,
       managerEmployeeId: singleManagerEmpId,
       managerLoginId: singleManagerLoginId,
@@ -495,7 +521,7 @@ onBeforeUnmount(() => {
   <!-- ✅ Full screen edge-to-edge shell -->
   <div class="ui-page min-h-screen w-full">
     <div class="w-full min-h-screen flex flex-col">
-      <!-- ✅ FIX: Use colorful header everywhere -->
+      <!-- ✅ HERO -->
       <div class="ui-hero-gradient rounded-t-2xl border-x-0 border-t-0">
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
@@ -505,8 +531,12 @@ onBeforeUnmount(() => {
             <div class="text-[12px] sm:text-[13px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white"
+                >Employees: <b>{{ filteredCount }}</b></span
+              >
+              <span class="ui-badge bg-white/15 border-white/25 text-white"
+                >Managers: <b>{{ managerCount }}</b></span
+              >
             </div>
           </div>
 
@@ -514,7 +544,9 @@ onBeforeUnmount(() => {
             <div class="min-w-[260px] max-w-sm">
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Search</div>
               <div class="relative mt-1">
-                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"></i>
+                <i
+                  class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"
+                ></i>
                 <input
                   v-model="q"
                   type="text"
@@ -526,19 +558,20 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex items-center gap-2 pt-5">
-              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
-                <input
-                  v-model="includeInactive"
-                  type="checkbox"
-                  class="h-4 w-4 rounded border-white/30 bg-transparent"
-                />
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white"
+              >
+                <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
             </div>
 
             <div class="min-w-[140px]">
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Per page</div>
-              <select v-model.number="pageSize" class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none">
+              <select
+                v-model.number="pageSize"
+                class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none"
+              >
                 <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
               </select>
             </div>
@@ -585,9 +618,15 @@ onBeforeUnmount(() => {
             <div class="text-[12px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Page: <b>{{ page }}/{{ totalPages }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white"
+                >Employees: <b>{{ filteredCount }}</b></span
+              >
+              <span class="ui-badge bg-white/15 border-white/25 text-white"
+                >Managers: <b>{{ managerCount }}</b></span
+              >
+              <span class="ui-badge bg-white/15 border-white/25 text-white"
+                >Page: <b>{{ page }}/{{ totalPages }}</b></span
+              >
             </div>
           </div>
 
@@ -595,7 +634,9 @@ onBeforeUnmount(() => {
             <div>
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Search</div>
               <div class="relative mt-1">
-                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"></i>
+                <i
+                  class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"
+                ></i>
                 <input
                   v-model="q"
                   type="text"
@@ -607,13 +648,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
+              <label
+                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold_toggle text-white"
+              >
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
 
               <div class="flex items-center gap-2">
-                <select v-model.number="pageSize" class="w-auto rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none">
+                <select
+                  v-model.number="pageSize"
+                  class="w-auto rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none"
+                >
                   <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}/page</option>
                 </select>
 
@@ -670,9 +716,6 @@ onBeforeUnmount(() => {
         >
           Loading profiles...
         </div>
-
-        <!-- Pagination bar -->
-        
 
         <!-- Empty -->
         <div v-if="!loading && !error && pagedManagers.length === 0" class="py-8 text-center text-[11px] text-ui-muted">
@@ -864,10 +907,7 @@ onBeforeUnmount(() => {
                           {{ b.k }}: {{ b.pair }}
                         </span>
 
-                        <span
-                          v-if="!e.balances?.length"
-                          class="text-[11px] text-ui-muted col-span-3 text-center"
-                        >
+                        <span v-if="!e.balances?.length" class="text-[11px] text-ui-muted col-span-3 text-center">
                           None
                         </span>
                       </div>
@@ -919,11 +959,11 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ✅ Create modal (kept from your file) -->
+      <!-- ✅ Create modal -->
       <transition name="modal-fade">
         <div v-if="createOpen" class="ui-modal-backdrop" @click.self="closeCreate">
           <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
-            <!-- Header (keep soft hero inside modal) -->
+            <!-- Header -->
             <div class="ui-hero rounded-b-none px-4 py-3">
               <div class="flex items-start justify-between gap-2">
                 <div>
@@ -1035,9 +1075,45 @@ onBeforeUnmount(() => {
                       <input v-model="r.contractDate" type="date" class="ui-date" />
                     </div>
 
-                    <div>
-                      <div class="ui-label">AL carry</div>
-                      <input v-model.number="r.alCarry" type="number" placeholder="0" class="ui-input" />
+                    <!-- ✅ Carry (AL always visible + optional advanced) -->
+                    <div class="sm:col-span-3">
+                      <div class="flex items-center justify-between">
+                        <div class="ui-label">Carry</div>
+                        <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
+                          <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                          {{ showCarryAdvanced ? 'Hide' : 'Advanced' }}
+                        </button>
+                      </div>
+
+                      <div class="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                        <div class="sm:col-span-2">
+                          <div class="ui-label">AL</div>
+                          <input v-model.number="r.carry.AL" type="number" placeholder="0" class="ui-input" />
+                        </div>
+
+                        <template v-if="showCarryAdvanced">
+                          <div>
+                            <div class="ui-label">SP</div>
+                            <input v-model.number="r.carry.SP" type="number" placeholder="0" class="ui-input" />
+                          </div>
+                          <div>
+                            <div class="ui-label">MC</div>
+                            <input v-model.number="r.carry.MC" type="number" placeholder="0" class="ui-input" />
+                          </div>
+                          <div>
+                            <div class="ui-label">MA</div>
+                            <input v-model.number="r.carry.MA" type="number" placeholder="0" class="ui-input" />
+                          </div>
+                          <div>
+                            <div class="ui-label">UL</div>
+                            <input v-model.number="r.carry.UL" type="number" placeholder="0" class="ui-input" />
+                          </div>
+                        </template>
+                      </div>
+
+                      <p class="mt-1 text-[11px] text-ui-muted">
+                        Carry supports positive or negative. AL carry affects entitlement immediately in your controller.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1068,9 +1144,45 @@ onBeforeUnmount(() => {
                     <input v-model="form.singleContractDate" type="date" class="ui-date" />
                   </div>
 
-                  <div>
-                    <div class="ui-label">AL carry</div>
-                    <input v-model.number="form.singleAlCarry" type="number" placeholder="0" class="ui-input" />
+                  <!-- ✅ Carry (AL always visible + optional advanced) -->
+                  <div class="sm:col-span-3">
+                    <div class="flex items-center justify-between">
+                      <div class="ui-label">Carry</div>
+                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
+                        <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
+                        {{ showCarryAdvanced ? 'Hide' : 'Advanced' }}
+                      </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                      <div class="sm:col-span-2">
+                        <div class="ui-label">AL carry</div>
+                        <input v-model.number="form.singleCarry.AL" type="number" placeholder="0" class="ui-input" />
+                      </div>
+
+                      <template v-if="showCarryAdvanced">
+                        <div>
+                          <div class="ui-label">SP</div>
+                          <input v-model.number="form.singleCarry.SP" type="number" placeholder="0" class="ui-input" />
+                        </div>
+                        <div>
+                          <div class="ui-label">MC</div>
+                          <input v-model.number="form.singleCarry.MC" type="number" placeholder="0" class="ui-input" />
+                        </div>
+                        <div>
+                          <div class="ui-label">MA</div>
+                          <input v-model.number="form.singleCarry.MA" type="number" placeholder="0" class="ui-input" />
+                        </div>
+                        <div>
+                          <div class="ui-label">UL</div>
+                          <input v-model.number="form.singleCarry.UL" type="number" placeholder="0" class="ui-input" />
+                        </div>
+                      </template>
+                    </div>
+
+                    <p class="mt-1 text-[11px] text-ui-muted">
+                      Advanced carry is optional. If hidden, only AL carry is used.
+                    </p>
                   </div>
                 </div>
               </div>

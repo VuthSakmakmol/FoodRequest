@@ -1,4 +1,8 @@
-<!-- src/views/expat/admin/AdminLeaveProfileEdit.vue -->
+<!-- src/views/expat/admin/AdminLeaveProfileEdit.vue
+  ✅ Adds multi-type carry support (carry.AL/SP/MC/MA/UL) with Advanced toggle
+  ✅ Keeps legacy alCarry for backward compatibility (mirrors carry.AL)
+  ✅ Uses your existing UI patterns (Tailwind + ui-* utilities, fullscreen)
+-->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -92,6 +96,31 @@ function normApprovalMode(v) {
   return 'MANAGER_AND_GM'
 }
 
+/* ───────── carry helpers (NEW) ───────── */
+const showCarryAdvanced = ref(false)
+
+function emptyCarry() {
+  return { AL: 0, SP: 0, MC: 0, MA: 0, UL: 0 }
+}
+function normalizeCarry(src) {
+  const c = src || {}
+  return {
+    AL: num(c.AL),
+    SP: num(c.SP),
+    MC: num(c.MC),
+    MA: num(c.MA),
+    UL: num(c.UL),
+  }
+}
+function readCarryFromProfile(p) {
+  // prefer new carry, fallback to legacy alCarry
+  const c = normalizeCarry(p?.carry)
+  if (num(c.AL) === 0 && typeof p?.alCarry === 'number' && num(p?.alCarry) !== 0) {
+    c.AL = num(p.alCarry)
+  }
+  return c
+}
+
 /* ───────── balances normalize ───────── */
 function normalizeBalances(rawBalances = []) {
   const map = new Map()
@@ -146,7 +175,12 @@ const form = reactive({
   gmLoginId: '',
   cooLoginId: '',
 
+  // ✅ NEW: multi-type carry
+  carry: emptyCarry(),
+
+  // ✅ Legacy mirror (keep for backward compat)
   alCarry: 0,
+
   isActive: true,
 })
 
@@ -165,11 +199,22 @@ function fillFormFromProfile(p) {
   form.gmLoginId = String(p?.gmLoginId || '')
   form.cooLoginId = String(p?.cooLoginId || '')
 
-  form.alCarry = num(p?.alCarry ?? 0)
-  form.isActive = p?.isActive === false ? false : true
+  // ✅ carry (NEW)
+  const c = readCarryFromProfile(p)
+  form.carry = { ...c }
+  form.alCarry = num(c.AL) // mirror
 
+  form.isActive = p?.isActive === false ? false : true
   originalJoinDate.value = toInputDate(p?.joinDate)
 }
+
+watch(
+  () => form.carry.AL,
+  (v) => {
+    // keep legacy mirror updated for old endpoints/logic
+    form.alCarry = num(v)
+  }
+)
 
 const joinDateChanged = computed(() => {
   const a = String(originalJoinDate.value || '')
@@ -190,7 +235,7 @@ const isDirty = computed(() => {
     managerEmployeeId: String(p.managerEmployeeId || p.managerLoginId || ''),
     gmLoginId: String(p.gmLoginId || ''),
     cooLoginId: String(p.cooLoginId || ''),
-    alCarry: num(p.alCarry ?? 0),
+    carry: readCarryFromProfile(p),
     isActive: p.isActive === false ? false : true,
   }
 
@@ -200,7 +245,7 @@ const isDirty = computed(() => {
     managerEmployeeId: String(form.managerEmployeeId || ''),
     gmLoginId: String(form.gmLoginId || ''),
     cooLoginId: String(form.cooLoginId || ''),
-    alCarry: num(form.alCarry),
+    carry: normalizeCarry(form.carry),
     isActive: !!form.isActive,
   }
 
@@ -317,6 +362,7 @@ async function saveProfile() {
   saving.value = true
   try {
     const mode = normApprovalMode(form.approvalMode)
+    const carry = normalizeCarry(form.carry)
 
     await updateProfile(
       {
@@ -327,7 +373,12 @@ async function saveProfile() {
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
         cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
 
-        alCarry: num(form.alCarry),
+        // ✅ NEW
+        carry,
+
+        // ✅ legacy mirror (safe)
+        alCarry: num(carry.AL),
+
         isActive: form.isActive !== false,
       },
       { recalc: joinDateChanged.value }
@@ -446,7 +497,9 @@ const InfoRow = defineComponent({
         h(
           'div',
           {
-            class: 'ui-label !text-[10px] !font-extrabold !tracking-[0.28em] uppercase ' + (props.hint ? 'cursor-help' : ''),
+            class:
+              'ui-label !text-[10px] !font-extrabold !tracking-[0.28em] uppercase ' +
+              (props.hint ? 'cursor-help' : ''),
             title: props.hint || '',
           },
           props.label
@@ -530,7 +583,7 @@ onBeforeUnmount(() => {
               class="ui-btn ui-btn-primary"
               :disabled="loading || saving || !profile || !isDirty"
               @click="saveProfile"
-              :title="!isDirty ? 'No changes' : (joinDateChanged ? 'Save + Recalculate balances' : 'Save changes')"
+              :title="!isDirty ? 'No changes' : joinDateChanged ? 'Save + Recalculate balances' : 'Save changes'"
             >
               <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
               Save
@@ -591,7 +644,10 @@ onBeforeUnmount(() => {
                 <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <!-- Join Date -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Controls AL accrual and service-year rules">
+                    <div
+                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                      title="Controls AL accrual and service-year rules"
+                    >
                       Join date
                     </div>
                     <div class="mt-1">
@@ -612,7 +668,10 @@ onBeforeUnmount(() => {
 
                   <!-- Approval mode -->
                   <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approval chain for this employee profile">
+                    <div
+                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                      title="Approval chain for this employee profile"
+                    >
                       Approval mode
                     </div>
 
@@ -638,22 +697,77 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- AL carry -->
-                  <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="SP can make AL negative. Debt carries forward.">
-                      AL carry (debt allowed)
-                    </div>
-                    <div class="mt-1">
-                      <input v-model.number="form.alCarry" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
-                      <div class="mt-1 text-[11px] text-ui-muted">
-                        Current: <span class="font-mono">{{ fmt(profile.alCarry ?? 0) }}</span>
+                  <!-- ✅ Carry (AL always visible + advanced for others) -->
+                  <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                    <div class="flex items-center justify-between">
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        title="Carry supports positive or negative. AL debt from SP should be stored here."
+                      >
+                        Carry (multi-type)
                       </div>
+
+                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
+                        <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'" />
+                        {{ showCarryAdvanced ? 'Hide' : 'Advanced' }}
+                      </button>
+                    </div>
+
+                    <div class="mt-1 grid grid-cols-1 sm:grid-cols-5 gap-2">
+                      <div class="sm:col-span-2">
+                        <div class="ui-label">AL</div>
+                        <input v-model.number="form.carry.AL" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).AL) }}</span>
+                        </div>
+                      </div>
+
+                      <template v-if="showCarryAdvanced">
+                        <div>
+                          <div class="ui-label">SP</div>
+                          <input v-model.number="form.carry.SP" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
+                          <div class="mt-1 text-[11px] text-ui-muted">
+                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).SP) }}</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div class="ui-label">MC</div>
+                          <input v-model.number="form.carry.MC" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
+                          <div class="mt-1 text-[11px] text-ui-muted">
+                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).MC) }}</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div class="ui-label">MA</div>
+                          <input v-model.number="form.carry.MA" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
+                          <div class="mt-1 text-[11px] text-ui-muted">
+                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).MA) }}</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div class="ui-label">UL</div>
+                          <input v-model.number="form.carry.UL" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
+                          <div class="mt-1 text-[11px] text-ui-muted">
+                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).UL) }}</span>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+
+                    <div class="mt-2 text-[11px] text-ui-muted">
+                      Legacy mirror: <span class="font-mono">alCarry={{ fmt(form.alCarry) }}</span> (auto from carry.AL)
                     </div>
                   </div>
 
                   <!-- Active -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="If inactive, employee cannot request leave">
+                    <div
+                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                      title="If inactive, employee cannot request leave"
+                    >
                       Active
                     </div>
                     <div class="mt-2 flex items-center justify-between gap-3">
@@ -672,17 +786,15 @@ onBeforeUnmount(() => {
 
                   <!-- Manager employeeId -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'">
+                    <div
+                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                      :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'"
+                    >
                       Manager employee ID
                       <span v-if="needManager" class="ml-2 ui-badge">required</span>
                     </div>
                     <div class="mt-1">
-                      <input
-                        v-model="form.managerEmployeeId"
-                        type="text"
-                        placeholder="Example: 51820386"
-                        class="ui-input w-full"
-                      />
+                      <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
                       <div class="mt-1 text-[11px] text-ui-muted">
                         Current: <span class="font-mono">{{ profile.managerEmployeeId || profile.managerLoginId || '—' }}</span>
                       </div>
@@ -691,7 +803,10 @@ onBeforeUnmount(() => {
 
                   <!-- GM login -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM (required)">
+                    <div
+                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                      title="Approver loginId with role LEAVE_GM (required)"
+                    >
                       GM login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
                     </div>
                     <div class="mt-1">
@@ -704,7 +819,10 @@ onBeforeUnmount(() => {
 
                   <!-- COO login (only if needed) -->
                   <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode is GM + COO">
+                    <div
+                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                      title="Required when approval mode is GM + COO"
+                    >
                       COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
                     </div>
                     <div class="mt-1">
@@ -725,7 +843,7 @@ onBeforeUnmount(() => {
                 </div>
               </section>
 
-              <!-- Balances (compact / shrink-to-content) -->
+              <!-- Balances -->
               <section class="ui-card p-3">
                 <div class="flex items-start justify-between gap-2">
                   <div>
@@ -741,7 +859,6 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-else class="mt-2">
-                  <!-- ✅ important: inline-block + table w-auto => table won't stretch full width -->
                   <div class="inline-block max-w-full overflow-x-auto ui-scrollbar rounded-xl border border-ui-border/60">
                     <table class="w-auto table-auto text-[11px] leading-tight">
                       <thead class="bg-ui-bg-2/60">
@@ -753,11 +870,7 @@ onBeforeUnmount(() => {
                       </thead>
 
                       <tbody>
-                        <tr
-                          v-for="b in normalizedBalances"
-                          :key="b.leaveTypeCode"
-                          class="border-t border-ui-border/60"
-                        >
+                        <tr v-for="b in normalizedBalances" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
                           <td class="px-[26px] py-[13px] font-extrabold text-ui-fg">
                             {{ b.leaveTypeCode }}
                           </td>
@@ -769,9 +882,11 @@ onBeforeUnmount(() => {
                           <td class="px-[26px] py-[13px] text-right font-mono">
                             <span
                               class="inline-flex items-center rounded-full px-[6px] py-[1px] text-[10px] font-extrabold"
-                              :class="num(b.remaining) < 0
-                                ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
-                                : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'"
+                              :class="
+                                num(b.remaining) < 0
+                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
+                                  : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
+                              "
                             >
                               {{ fmt(b.remaining) }}
                             </span>
@@ -809,25 +924,34 @@ onBeforeUnmount(() => {
                       <th class="ui-th">#</th>
                       <th class="ui-th">Start</th>
                       <th class="ui-th">End</th>
-                      <th class="ui-th text-right">AL Carry</th>
-                      <th class="ui-th">Snapshot</th>
+                      <th class="ui-th text-right">Carry snapshot</th>
+                      <th class="ui-th">Snapshot balances</th>
                       <th class="ui-th">Note</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     <tr v-for="(c, idx) in contractHistory" :key="c._id || c.createdAt || idx" class="ui-tr-hover">
-                      <td class="ui-td font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
+                      <td class="ui-td font-mono">{{ c.contractNo ?? idx + 1 }}</td>
                       <td class="ui-td font-mono">{{ c.startDate || '—' }}</td>
                       <td class="ui-td font-mono">{{ c.endDate || '—' }}</td>
-                      <td class="ui-td text-right font-mono">{{ fmt(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
+
+                      <td class="ui-td">
+                        <div class="flex flex-wrap justify-end gap-2 text-[11px]">
+                          <span class="ui-badge">AL: {{ fmt(c?.closeSnapshot?.carry?.AL ?? c?.carry?.AL ?? 0) }}</span>
+                          <span class="ui-badge">SP: {{ fmt(c?.closeSnapshot?.carry?.SP ?? c?.carry?.SP ?? 0) }}</span>
+                          <span class="ui-badge">MC: {{ fmt(c?.closeSnapshot?.carry?.MC ?? c?.carry?.MC ?? 0) }}</span>
+                          <span class="ui-badge">MA: {{ fmt(c?.closeSnapshot?.carry?.MA ?? c?.carry?.MA ?? 0) }}</span>
+                          <span class="ui-badge">UL: {{ fmt(c?.closeSnapshot?.carry?.UL ?? c?.carry?.UL ?? 0) }}</span>
+                        </div>
+                      </td>
 
                       <td class="ui-td">
                         <div class="text-[11px] text-ui-muted">
-                          <div v-if="Array.isArray(c.balancesSnapshot)">
+                          <div v-if="Array.isArray(c?.closeSnapshot?.balances)">
                             <span
-                              v-for="b in c.balancesSnapshot"
-                              :key="String(b.leaveTypeCode) + String(c.createdAt)"
+                              v-for="b in c.closeSnapshot.balances"
+                              :key="String(b.leaveTypeCode) + String(c.openedAt || c.createdAt || idx)"
                               class="mr-2 mb-1 inline-flex ui-badge"
                             >
                               {{ String(b.leaveTypeCode).toUpperCase() }}:
@@ -864,7 +988,12 @@ onBeforeUnmount(() => {
                     {{ profile?.employeeId }} · {{ profile?.name || '—' }}
                   </div>
                 </div>
-                <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="renew.submitting" @click="closeRenewModal">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-ghost ui-btn-sm"
+                  :disabled="renew.submitting"
+                  @click="closeRenewModal"
+                >
                   <i class="fa-solid fa-xmark text-xs" />
                 </button>
               </div>
@@ -952,8 +1081,8 @@ onBeforeUnmount(() => {
                       <th class="ui-th">#</th>
                       <th class="ui-th">Start</th>
                       <th class="ui-th">End</th>
-                      <th class="ui-th text-right">AL Carry</th>
-                      <th class="ui-th">Snapshot</th>
+                      <th class="ui-th text-right">Carry snapshot</th>
+                      <th class="ui-th">Snapshot balances</th>
                       <th class="ui-th">Note</th>
                       <th class="ui-th">By</th>
                       <th class="ui-th">At</th>
@@ -962,17 +1091,26 @@ onBeforeUnmount(() => {
 
                   <tbody>
                     <tr v-for="(c, idx) in contractHistory" :key="c._id || c.createdAt || idx" class="ui-tr-hover">
-                      <td class="ui-td font-mono">{{ c.contractNo ?? (idx + 1) }}</td>
+                      <td class="ui-td font-mono">{{ c.contractNo ?? idx + 1 }}</td>
                       <td class="ui-td font-mono">{{ c.startDate || '—' }}</td>
                       <td class="ui-td font-mono">{{ c.endDate || '—' }}</td>
-                      <td class="ui-td text-right font-mono">{{ fmt(c.alCarrySnapshot ?? c.alCarry ?? 0) }}</td>
+
+                      <td class="ui-td">
+                        <div class="flex flex-wrap justify-end gap-2 text-[11px]">
+                          <span class="ui-badge">AL: {{ fmt(c?.closeSnapshot?.carry?.AL ?? c?.carry?.AL ?? 0) }}</span>
+                          <span class="ui-badge">SP: {{ fmt(c?.closeSnapshot?.carry?.SP ?? c?.carry?.SP ?? 0) }}</span>
+                          <span class="ui-badge">MC: {{ fmt(c?.closeSnapshot?.carry?.MC ?? c?.carry?.MC ?? 0) }}</span>
+                          <span class="ui-badge">MA: {{ fmt(c?.closeSnapshot?.carry?.MA ?? c?.carry?.MA ?? 0) }}</span>
+                          <span class="ui-badge">UL: {{ fmt(c?.closeSnapshot?.carry?.UL ?? c?.carry?.UL ?? 0) }}</span>
+                        </div>
+                      </td>
 
                       <td class="ui-td">
                         <div class="text-[11px] text-ui-muted">
-                          <div v-if="Array.isArray(c.balancesSnapshot)">
+                          <div v-if="Array.isArray(c?.closeSnapshot?.balances)">
                             <span
-                              v-for="b in c.balancesSnapshot"
-                              :key="String(b.leaveTypeCode) + String(c.createdAt)"
+                              v-for="b in c.closeSnapshot.balances"
+                              :key="String(b.leaveTypeCode) + String(c.openedAt || c.createdAt || idx)"
                               class="mr-2 mb-1 inline-flex ui-badge"
                             >
                               {{ String(b.leaveTypeCode).toUpperCase() }}:
@@ -987,9 +1125,9 @@ onBeforeUnmount(() => {
                         <div class="max-w-[260px] truncate text-[11px] text-ui-muted">{{ c.note || '—' }}</div>
                       </td>
 
-                      <td class="ui-td font-mono text-[11px]">{{ c.createdBy || '—' }}</td>
+                      <td class="ui-td font-mono text-[11px]">{{ c.closedBy || c.openedBy || '—' }}</td>
                       <td class="ui-td font-mono text-[11px]">
-                        {{ c.createdAt ? dayjs(c.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                        {{ (c.closedAt || c.openedAt) ? dayjs(c.closedAt || c.openedAt).format('YYYY-MM-DD HH:mm') : '—' }}
                       </td>
                     </tr>
                   </tbody>

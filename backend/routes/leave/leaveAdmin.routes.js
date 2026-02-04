@@ -91,9 +91,10 @@ router.post('/profiles/manager', h(ctrl.createManagerWithEmployees, 'createManag
 router.post('/managers', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
 
 // Renew contract
-router.post(
-  '/profiles/:employeeId/contracts/renew',
-  h(ctrl.renewContract, 'renewContract')
-)
+router.post('/profiles/:employeeId/contracts/renew', h(ctrl.renewContract, 'renewContract'))
+
+router.get('/profiles/:employeeId/contracts', h(ctrl.getContractHistory, 'getContractHistory'))
+router.post('/profiles/:employeeId/recalculate', h(ctrl.recalculateBalances, 'recalculateBalances'))
+
 
 module.exports = router
