@@ -3,6 +3,8 @@
   ✅ Tailwind gradient header + mobile cards + desktop table
   ✅ Contract history reads LeaveProfile.contracts[] (closeSnapshot.balances)
   ✅ Active contract uses live profile.balances
+  ✅ Used includes negative carry debt (carry.AL=-2 => Used shows 2)
+  ✅ Contract chips include carry debt (active: profile.carry, closed: closeSnapshot.carry if present)
   ✅ Realtime refresh via socket rooms (user:<loginId> + employee:<employeeId>)
   ✅ No SweetAlert / no window alert (uses useToast)
 -->
@@ -52,25 +54,52 @@ function fmtDT(v) {
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—'
 }
 
+/* ───────── Carry / Used helpers ───────── */
+function normalizeCarryObj(c) {
+  const src = c && typeof c === 'object' ? c : {}
+  return {
+    AL: num(src.AL),
+    SP: num(src.SP),
+    MC: num(src.MC),
+    MA: num(src.MA),
+    UL: num(src.UL),
+  }
+}
+function usedWithCarryDebt(used, carryVal) {
+  // carry negative => debt => counts as "used"
+  const debt = carryVal < 0 ? Math.abs(carryVal) : 0
+  return num(used) + debt
+}
+
 /**
  * ✅ IMPORTANT:
  * Trust backend remaining (can be negative for AL debt / SP borrowing).
  * DO NOT clamp to 0.
+ *
+ * ✅ Also show usedDisplay = used + negative carry debt
  */
 const balances = computed(() => {
   const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
+  const carry = normalizeCarryObj(profile.value?.carry)
 
   const arr = raw
-    .map((b) => ({
-      leaveTypeCode: String(b?.leaveTypeCode || b?.code || '').toUpperCase(),
-      yearlyEntitlement: num(b?.yearlyEntitlement),
-      used: num(b?.used),
-      remaining:
-        b?.remaining != null
-          ? num(b.remaining)
-          : num(b?.yearlyEntitlement) - num(b?.used),
-    }))
-    .filter((x) => x.leaveTypeCode)
+    .map((b) => {
+      const code = String(b?.leaveTypeCode || b?.code || '').toUpperCase()
+      if (!code) return null
+
+      const yearlyEntitlement = num(b?.yearlyEntitlement)
+      const used = num(b?.used)
+      const remaining = b?.remaining != null ? num(b.remaining) : yearlyEntitlement - used
+
+      return {
+        leaveTypeCode: code,
+        yearlyEntitlement,
+        used,
+        usedDisplay: usedWithCarryDebt(used, carry[code]),
+        remaining,
+      }
+    })
+    .filter(Boolean)
 
   const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
   arr.sort((a, b) => {
@@ -159,12 +188,14 @@ function normalizeBalancesLike(arr) {
  *   note: "...",
  *   closeSnapshot: {
  *     balancesAsOf / asOf,
- *     balances: [ { leaveTypeCode, yearlyEntitlement, used, remaining }, ... ]
+ *     balances: [ { leaveTypeCode, yearlyEntitlement, used, remaining }, ... ],
+ *     carry: { AL: -2, ... } // optional
  *   }
  * }
  */
 function normalizeContracts(raw, liveBalances = []) {
   const list = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
+  const liveCarry = normalizeCarryObj(profile.value?.carry)
 
   const mapped = list.map((c, idx) => {
     const id = String(c?._id || c?.id || c?.contractId || c?.contractNo || `${idx}`)
@@ -174,7 +205,6 @@ function normalizeContracts(raw, liveBalances = []) {
     const openedAt = c?.openedAt || c?.createdAt || null
     const closedAt = c?.closedAt || null
 
-    // ✅ snapshot balances for CLOSED contract
     const snapBalances =
       c?.closeSnapshot?.balances ||
       c?.closeSnapshot?.balance ||
@@ -188,8 +218,13 @@ function normalizeContracts(raw, liveBalances = []) {
 
     const isActive = !closedAt
 
-    // ✅ For ACTIVE contract: show live current balances from profile (not historical)
+    // ✅ Active uses live balances; Closed uses snapshot balances
     const balancesForUI = isActive ? normalizeBalancesLike(liveBalances) : normalizeBalancesLike(snapBalances)
+
+    // ✅ Carry for chips/used display:
+    // Active uses profile.carry
+    // Closed uses closeSnapshot.carry if you have it, else {} (no debt display)
+    const carryForUI = isActive ? liveCarry : normalizeCarryObj(c?.closeSnapshot?.carry)
 
     return {
       id,
@@ -202,11 +237,11 @@ function normalizeContracts(raw, liveBalances = []) {
       snapshotAsOf: snapAsOf || '',
       isActive,
       balances: balancesForUI,
+      carry: carryForUI,
       raw: c,
     }
   })
 
-  // sort by contractNo if present, otherwise by startDate
   mapped.sort((a, b) => {
     const na = Number(a.contractNo || 0)
     const nb = Number(b.contractNo || 0)
@@ -229,7 +264,13 @@ function contractUsedChips(c) {
     if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
     return a.leaveTypeCode.localeCompare(b.leaveTypeCode)
   })
-  return arr.map((b) => `${b.leaveTypeCode}: ${num(b.used)}`)
+
+  const carry = normalizeCarryObj(c?.carry)
+  return arr.map((b) => {
+    const code = b.leaveTypeCode
+    const usedDisplay = usedWithCarryDebt(num(b.used), carry[code])
+    return `${code}: ${usedDisplay}`
+  })
 }
 
 function toggleContract(id) {
@@ -241,7 +282,6 @@ async function fetchContracts(silent = false) {
     contractsLoading.value = true
     contractsError.value = ''
 
-    // ✅ Use embedded contracts from profile (best)
     const embedded = profile.value?.contracts || null
     if (embedded && Array.isArray(embedded) && embedded.length) {
       contracts.value = normalizeContracts(embedded, profile.value?.balances || [])
@@ -700,7 +740,7 @@ onBeforeUnmount(() => {
               <div class="text-right text-[11px]">
                 <div class="text-slate-500 dark:text-slate-400">
                   Used:
-                  <span class="font-semibold text-slate-900 dark:text-slate-50">{{ b.used }}</span>
+                  <span class="font-semibold text-slate-900 dark:text-slate-50">{{ b.usedDisplay }}</span>
                 </div>
                 <div class="mt-0.5">
                   <span class="text-slate-500 dark:text-slate-400">Remaining:</span>
@@ -758,7 +798,7 @@ onBeforeUnmount(() => {
                 </td>
 
                 <td class="table-td text-right tabular-nums align-middle">{{ b.yearlyEntitlement }}</td>
-                <td class="table-td text-right tabular-nums align-middle">{{ b.used }}</td>
+                <td class="table-td text-right tabular-nums align-middle">{{ b.usedDisplay }}</td>
 
                 <td class="table-td text-right align-middle">
                   <div class="flex justify-end">

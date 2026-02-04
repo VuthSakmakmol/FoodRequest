@@ -48,20 +48,36 @@ function pickEmployeeId(emp) {
 }
 
 /* used/remaining chips (example: 1/17) */
-function compactBalances(balances) {
+/* used/entitlement chips (example: 2/16 when carry.AL = -2) */
+function compactBalances(balances, carry) {
   const arr = Array.isArray(balances) ? balances : []
+  const c = carry && typeof carry === 'object' ? carry : {}
   const order = ['AL', 'SP', 'MC', 'MA', 'UL']
+
   const m = new Map(arr.map((x) => [String(x.leaveTypeCode || '').toUpperCase(), x]))
   const out = []
+
   for (const k of order) {
     const b = m.get(k)
     if (!b) continue
-    const used = num(b.used)
-    const remaining = num(b.remaining)
-    out.push({ k, used, remaining, pair: `${used}/${remaining}` })
+
+    const ent = num(b.yearlyEntitlement) // ✅ after carry already applied by backend
+    let used = num(b.used)
+
+    // ✅ if carry is negative, show it as "used" (debt)
+    const carryVal = num(c[k])
+    if (carryVal < 0) used += Math.abs(carryVal)
+
+    out.push({
+      k,
+      used,
+      ent,
+      pair: `${used}/${ent}`, // ✅ show used/entitlement
+    })
   }
   return out
 }
+
 
 function statusChipClasses(active) {
   return active ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
@@ -781,7 +797,7 @@ onBeforeUnmount(() => {
 
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
-                    v-for="b in compactBalances(e.balances)"
+                    v-for="b in compactBalances(e.balances, e.carry)"
                     :key="b.k"
                     class="ui-badge"
                     :class="pairChipClasses(b.remaining)"
@@ -899,7 +915,7 @@ onBeforeUnmount(() => {
                     <td class="ui-td">
                       <div class="grid grid-cols-5 gap-2 justify-items-center">
                         <span
-                          v-for="b in compactBalances(e.balances)"
+                          v-for="b in compactBalances(e.balances, e.carry)"
                           :key="b.k"
                           class="ui-badge whitespace-nowrap"
                           :class="pairChipClasses(b.remaining)"
