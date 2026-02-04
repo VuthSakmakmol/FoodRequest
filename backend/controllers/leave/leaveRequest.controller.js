@@ -427,6 +427,9 @@ exports.createMyRequest = async (req, res, next) => {
     const remaining = (code) => Number(findBalanceRow(snapshot, code)?.remaining ?? 0)
     const code = String(lt.code || '').toUpperCase()
 
+    // ✅ NEW RULE:
+    // - AL remaining already includes SP usage in balances
+    // - Reserve AL against pending AL + pending SP (because SP consumes AL)
     if (code === 'AL') {
       const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
       if (strictAL <= 0) {
@@ -442,6 +445,10 @@ exports.createMyRequest = async (req, res, next) => {
       }
     }
 
+    // ✅ NEW RULE for SP:
+    // - SP is allowed (quota 7), BUT it always deducts from AL
+    // - NO borrowing: AL must be enough to cover SP days
+    // - If AL=0 => SP not allowed
     if (code === 'SP') {
       const strictSP = remaining('SP') - pend.pendingSP
       if (strictSP <= 0) {
@@ -456,12 +463,24 @@ exports.createMyRequest = async (req, res, next) => {
         })
       }
 
+      // SP consumes AL too (include pending reservations)
       const strictAL = remaining('AL') - (pend.pendingAL + pend.pendingSP)
-      if (strictAL >= requestedDays) {
+
+      if (strictAL <= 0) {
         return res.status(400).json({
-          message: `You still have enough AL (${strictAL}) for ${requestedDays} days. Please use AL. SP is only for borrowing when AL is insufficient.`,
+          message:
+            'You cannot use SP because your AL remaining is 0 (or fully reserved by pending requests).',
         })
       }
+
+      if (requestedDays > strictAL) {
+        return res.status(400).json({
+          message: `You cannot use SP because AL remaining is insufficient. Remaining AL ${strictAL}, requested SP ${requestedDays}.`,
+        })
+      }
+
+      // ✅ Do NOT block SP even when AL is enough.
+      // SP is allowed, but will reduce AL.
     }
 
     if (code === 'MC') {
@@ -776,102 +795,6 @@ exports.gmDecision = async (req, res, next) => {
       await recalcAndEmitProfile(req, doc.employeeId)
     }
 
-    return res.json(payload)
-  } catch (err) {
-    next(err)
-  }
-}
-
-/**
- * GET /leave/coo/inbox
- */
-exports.listCooInbox = async (req, res, next) => {
-  try {
-    const loginId = actorLoginId(req)
-    if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
-
-    const adminViewer = isAdminViewer(req)
-
-    // ✅ robust matcher for GM_AND_COO across legacy enums
-    const modeMatcher = approvalModeQueryFor('GM_AND_COO')
-
-    const criteria = adminViewer
-      ? { status: { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] }, approvalMode: modeMatcher }
-      : {
-          cooLoginId: loginId,
-          approvalMode: modeMatcher,
-          status: { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
-        }
-
-    const docs = await LeaveRequest.find(criteria).sort({ createdAt: -1 }).lean()
-    return res.json(await attachEmployeeInfo(docs))
-  } catch (err) {
-    next(err)
-  }
-}
-
-/**
- * POST /leave/coo/decision/:id
- */
-exports.cooDecision = async (req, res, next) => {
-  try {
-    const loginId = actorLoginId(req)
-    if (!loginId) return res.status(400).json({ message: 'Missing user identity' })
-
-    const { id } = req.params
-    const { action, comment = '' } = req.body || {}
-
-    const current = await LeaveRequest.findById(id)
-    if (!current) return res.status(404).json({ message: 'Request not found' })
-
-    const semanticMode = storedToSemantic(current.approvalMode)
-    if (semanticMode !== 'GM_AND_COO') {
-      return res.status(400).json({ message: 'This request is not GM + COO mode.' })
-    }
-
-    const adminViewer = isAdminViewer(req)
-    if (!adminViewer && s(current.cooLoginId) !== loginId) {
-      return res.status(403).json({ message: 'Not your request' })
-    }
-
-    if (!requireStatus(current, ['PENDING_COO'])) {
-      return res.status(400).json({
-        message: `Request is ${current.status}. COO cannot decide at this stage.`,
-      })
-    }
-
-    const act = s(action).toUpperCase()
-    let newStatus = ''
-    if (act === 'APPROVE') newStatus = 'APPROVED'
-    else if (act === 'REJECT') newStatus = 'REJECTED'
-    else return res.status(400).json({ message: 'Invalid action' })
-
-    // match by current approvalMode exactly (stored value) to avoid cross-mode update issues
-    const doc = await LeaveRequest.findOneAndUpdate(
-      { _id: id, status: 'PENDING_COO', approvalMode: current.approvalMode },
-      {
-        $set: {
-          status: newStatus,
-          cooComment: String(comment || ''),
-          cooDecisionAt: new Date(),
-        },
-      },
-      { new: true }
-    )
-
-    if (!doc) {
-      const latest = await LeaveRequest.findById(id).lean()
-      return res.status(409).json({
-        message: `Someone already handled this request (${latest?.status || 'UNKNOWN'}).`,
-      })
-    }
-
-    await safeNotify(notify.notifyCooDecision, doc)
-
-    const payload = await attachEmployeeInfoToOne(doc)
-    emitReq(req, payload, 'leave:req:updated')
-
-    await recalcAndEmitProfile(req, doc.employeeId)
     return res.json(payload)
   } catch (err) {
     next(err)

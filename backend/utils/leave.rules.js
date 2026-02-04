@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 // backend/utils/leave.rules.js
 const dayjs = require('dayjs')
 
@@ -74,9 +75,6 @@ function toYMD(d) {
 
 /**
  * ✅ Service years: full years from joinDate to asOfDate.
- * Example:
- * - join 2022-12-25, asOf 2025-12-24 => 2 years
- * - join 2022-12-25, asOf 2025-12-25 => 3 years
  */
 function serviceYearsFromJoin(joinYMD, asOfDate = new Date()) {
   const jd = joinYMD ? dayjs(joinYMD, 'YYYY-MM-DD', true) : null
@@ -92,13 +90,8 @@ function serviceYearsFromJoin(joinYMD, asOfDate = new Date()) {
 }
 
 /**
- * ✅ AL cap increases by +1 for every 3 years of service:
- * - 0–3 years => 18
- * - 4–6 years => 19
- * - 7–9 years => 20
- * - 10–12 years => 21
- * - 13-15 years => 22
- * - 16-18 years => 23
+ * ✅ AL cap increases by +1 for every 3 years of service
+ * Base = 18
  */
 function computeALByServiceYears(joinYMD, asOfDate = new Date()) {
   const yrs = serviceYearsFromJoin(joinYMD, asOfDate)
@@ -108,7 +101,6 @@ function computeALByServiceYears(joinYMD, asOfDate = new Date()) {
 
   return 18 + bumps
 }
-
 
 /**
  * ✅ Contract-year window:
@@ -224,12 +216,15 @@ function validateAndNormalizeRequest({
 
 /**
  * ✅ Compute balances for current contract-year.
- * - AL is fixed entitlement per service year rule (18, then +1 after 3 years each year)
- * - SP max 7 per contract-year
- * - SP borrows from AL -> AL remaining can go negative
+ *
+ * NEW RULE (AL & SP):
+ * - SP is allowed (max 7 per contract-year)
+ * - BUT every SP day ALWAYS deducts from AL remaining
+ * - NO borrowing: AL remaining can NOT go negative
+ * - If AL = 0 => SP remaining becomes 0
  *
  * IMPORTANT:
- * We count request usage if startDate is within the contract-year window (same as your prior style).
+ * We count request usage if startDate is within the contract-year window.
  */
 function computeBalances(profile, approvedRequests = [], now = new Date()) {
   const { startYMD, endYMD } = computeContractYearPeriod(profile, now)
@@ -255,23 +250,31 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
   const MC_ENT = 90
   const MA_ENT = 90
 
-  // ✅ SP borrows from AL
+  // ✅ NEW RULE: SP consumes AL, but AL cannot go negative
   const AL_USED_TOTAL = usedAL + usedSP
-  const alRemaining = Number(AL_ENT - AL_USED_TOTAL) // can go negative
+
+  const alRemainingRaw = Number(AL_ENT - AL_USED_TOTAL)
+  const alRemaining = Math.max(0, alRemainingRaw) // ✅ no borrowing
+
+  // ✅ SP remaining is limited by both:
+  //   1) SP entitlement remaining
+  //   2) AL remaining (because SP must be covered by AL)
+  const spEntRemaining = Number(SP_ENT - usedSP)
+  const spRemaining = Math.max(0, Math.min(spEntRemaining, alRemaining))
 
   return {
     balances: [
       {
         leaveTypeCode: 'AL',
         yearlyEntitlement: AL_ENT,
-        used: AL_USED_TOTAL, // ✅ includes SP usage
-        remaining: alRemaining, // ✅ can be negative
+        used: AL_USED_TOTAL,     // includes SP usage
+        remaining: alRemaining,  // never negative
       },
       {
         leaveTypeCode: 'SP',
         yearlyEntitlement: SP_ENT,
         used: usedSP,
-        remaining: SP_ENT - usedSP,
+        remaining: spRemaining,  // becomes 0 when AL remaining is 0
       },
       {
         leaveTypeCode: 'MC',
@@ -306,4 +309,5 @@ module.exports = {
   computeBalances,
   enumerateWorkingDates,
   isWorkingDay,
+  toYMD,
 }

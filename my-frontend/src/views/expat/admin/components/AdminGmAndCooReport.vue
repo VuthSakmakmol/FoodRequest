@@ -8,6 +8,8 @@
       - Checked by → ALWAYS leave_admin signature
       - GM → row-level signature, only after GM approved (PENDING_COO / APPROVED)
       - COO → row-level signature, only after final approved (APPROVED)
+  ✅ CHANGE: Removed As Of date input from UI
+  ✅ CHANGE: Preview auto uses asOf = selected contract end date (contract.to)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -48,6 +50,12 @@ const q = ref('')
 const includeInactive = ref(false)
 const department = ref('')
 const managerLoginId = ref('')
+
+/**
+ * We KEEP asOf in code (needed for calculations),
+ * but we remove the UI input so users cannot set it to today by mistake.
+ * Default: today for summary (employee list)
+ */
 const asOf = ref(dayjs().format('YYYY-MM-DD'))
 
 /* ───────── State ───────── */
@@ -124,7 +132,10 @@ async function fetchReport(silent = false) {
       includeInactive: includeInactive.value ? '1' : undefined,
       department: safeText(department.value) || undefined,
       managerLoginId: safeText(managerLoginId.value) || undefined,
+
+      // keep asOf for balance calc in summary if backend supports it
       asOf: safeText(asOf.value) || undefined,
+
       limit: 500,
     }
     const res = await api.get('/admin/leave/reports/summary', { params })
@@ -290,7 +301,16 @@ function contractDisplayLabel(c) {
   return c.isCurrent ? `${c.label} (Current)` : c.label
 }
 
-const asOfLabel = computed(() => safeText(asOf.value) || dayjs().format('YYYY-MM-DD'))
+/**
+ * ✅ Preview As Of label:
+ * show contract end date (preferred), fallback to today
+ */
+const previewAsOf = computed(() => {
+  const c = selectedContract.value
+  const end = ymd(c?.to)
+  return end || dayjs().format('YYYY-MM-DD')
+})
+const asOfLabel = computed(() => previewAsOf.value)
 
 /* ───────── SIGNATURE: protected content -> blob urls (cached) ───────── */
 function getToken() {
@@ -338,9 +358,9 @@ async function toAuthedBlobUrl(rawUrl) {
 }
 
 /* signature META caches (meta endpoints return a signatureUrl/path) */
-const userSigMetaCache = new Map()     // key -> metaUrl
-const employeeSigMetaCache = new Map() // employeeId -> metaUrl
-const blobCache = new Map()            // metaUrl -> blobUrl (reuse)
+const userSigMetaCache = new Map()
+const employeeSigMetaCache = new Map()
+const blobCache = new Map()
 
 function clearBlobCache() {
   for (const v of blobCache.values()) revokeIfBlob(v)
@@ -417,9 +437,6 @@ async function metaUrlToBlob(metaUrl) {
 }
 
 /* ───────── Row signatures (per cell) ───────── */
-/**
- * IMPORTANT: Use ref(Map) but update by replacing Map (reactive) to avoid “missing images”.
- */
 const rowSig = ref(new Map()) // key -> { recordBy, checkedBy, gm, coo }
 
 function rowKey(r) {
@@ -446,9 +463,8 @@ async function ensureRowSignatures(rows = []) {
     const k = rowKey(r)
     if (rowSig.value.has(k)) continue
 
-    // ✅ FORCE THE RULES (frontend safety):
-    const recordById = safeText(r.recordByLoginId) // employeeId like 51210038
-    const checkedById = LEAVE_ADMIN_LOGIN          // always leave_admin
+    const recordById = safeText(r.recordByLoginId)
+    const checkedById = LEAVE_ADMIN_LOGIN
     const gmId = safeText(r.approvedGMLoginId)
     const cooId = safeText(r.approvedCOOLoginId)
 
@@ -478,7 +494,6 @@ async function ensureRowSignatures(rows = []) {
     )
   }
 
-  // batch to avoid overload
   const BATCH = 12
   for (let i = 0; i < jobs.length; i += BATCH) {
     await Promise.all(jobs.slice(i, i + BATCH))
@@ -490,7 +505,13 @@ async function fetchRecordForSelectedContract(employeeId) {
   const c = selectedContract.value
   const params = { ts: Date.now() }
 
-  if (safeText(asOf.value)) params.asOf = safeText(asOf.value)
+  /**
+   * ✅ KEY CHANGE:
+   * Preview should compute balances "as of end of contract", not today.
+   * If no contract end date, fallback to today.
+   */
+  const asOfForPreview = previewAsOf.value
+  if (safeText(asOfForPreview)) params.asOf = safeText(asOfForPreview)
 
   if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
     params.contractId = c.id
@@ -500,7 +521,7 @@ async function fetchRecordForSelectedContract(employeeId) {
       params.to = c.to
     } else if (c?.from && !c?.to) {
       params.from = c.from
-      params.to = safeText(asOf.value) || dayjs().format('YYYY-MM-DD')
+      params.to = asOfForPreview
     }
   }
 
@@ -537,7 +558,7 @@ async function openPreview(emp) {
     contractOptions.value = list
     selectedContractId.value = pickDefaultContractId(list, preferredContractId)
 
-    // 3) now refetch with the selected contract
+    // 3) now refetch with the selected contract (this time previewAsOf works)
     contractWatchReady.value = true
     await refetchPreviewByContract()
   } catch (e) {
@@ -560,7 +581,6 @@ async function refetchPreviewByContract() {
 
     await fetchRecordForSelectedContract(employeeId)
 
-    // build row signature blobs
     await ensureRowSignatures(previewData.value?.rows || [])
   } catch (e) {
     console.error('refetchPreviewByContract error', e)
@@ -743,7 +763,7 @@ watch(q, () => {
     fetchReport(true)
   }, 300)
 })
-watch([includeInactive, department, managerLoginId, asOf], () => {
+watch([includeInactive, department, managerLoginId], () => {
   page.value = 1
   fetchReport(true)
 })
@@ -806,7 +826,8 @@ onBeforeUnmount(() => {
             Shows only employees in <span class="font-semibold">GM + COO</span> approval mode.
           </div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Preview uses <span class="font-semibold">selected contract</span> (default current/latest).
+            Preview uses <span class="font-semibold">selected contract</span> (default current/latest) and calculates balances as of
+            <span class="font-semibold">contract end date</span>.
           </div>
         </div>
 
@@ -836,17 +857,14 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-12">
-        <div class="md:col-span-3">
+        <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search</label>
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." :class="ui.input" />
         </div>
 
-        <div class="md:col-span-2">
-          <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">As of</label>
-          <input v-model="asOf" type="date" :class="ui.input" />
-        </div>
+        <!-- ✅ REMOVED: As Of / Preview Date input -->
 
-        <div class="md:col-span-3">
+        <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
           <input v-model="department" type="text" placeholder="HR, IT..." :class="ui.input" />
         </div>
@@ -1000,7 +1018,7 @@ onBeforeUnmount(() => {
               <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
                 Leave Record — <span class="font-mono">{{ previewEmp?.employeeId }}</span>
               </div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-300">As of: {{ asOfLabel }}</div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-300">As of (contract end): {{ asOfLabel }}</div>
               <div class="text-[11px] text-slate-500 dark:text-slate-300">
                 Mode: <span class="font-semibold">GM + COO</span>
               </div>

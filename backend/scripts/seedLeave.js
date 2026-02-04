@@ -17,7 +17,7 @@ if (!MONGO_URI) {
 const DEFAULT_USER_PWD =
   process.env.EXPAT_DEFAULT_PASSWORD ||
   process.env.USER_DEFAULT_PASSWORD ||
-  'ICannotRememberThis123'
+  'TraxApparel@123@'
 
 /* ──────────────────────────────
  * CONFIG – EDIT THIS

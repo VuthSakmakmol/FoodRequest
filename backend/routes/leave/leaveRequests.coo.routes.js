@@ -1,10 +1,12 @@
 const router = require('express').Router()
 
 const { requireAuth, requireRole } = require('../../middlewares/auth')
-const leaveCtrl = require('../../controllers/leave/leaveRequest.controller')
+const leaveCtrl = require('../../controllers/leave/leaveRequests.coo.controller')
+
 
 // All COO leave routes require auth
 router.use(requireAuth)
+
 
 /**
  * COO Inbox

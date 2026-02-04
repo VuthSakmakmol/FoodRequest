@@ -672,26 +672,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Pagination bar -->
-        <div
-          v-if="!loading && totalRows"
-          class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
-        >
-          <div>
-            Showing <span class="font-semibold text-ui-fg">{{ pageFrom }}</span>–
-            <span class="font-semibold text-ui-fg">{{ pageTo }}</span>
-            of <span class="font-semibold text-ui-fg">{{ totalRows }}</span>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="prevPage">
-              <i class="fa-solid fa-chevron-left text-[10px]" /> Prev
-            </button>
-            <div class="ui-badge">Page <b>{{ page }}</b> / <b>{{ totalPages }}</b></div>
-            <button type="button" class="ui-pagebtn" :disabled="page >= totalPages" @click="nextPage">
-              Next <i class="fa-solid fa-chevron-right text-[10px]" />
-            </button>
-          </div>
-        </div>
+        
 
         <!-- Empty -->
         <div v-if="!loading && !error && pagedManagers.length === 0" class="py-8 text-center text-[11px] text-ui-muted">
