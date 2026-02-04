@@ -61,22 +61,27 @@ function compactBalances(balances, carry) {
     const b = m.get(k)
     if (!b) continue
 
-    const ent = num(b.yearlyEntitlement) // ✅ after carry already applied by backend
+    const ent = num(b.yearlyEntitlement) // backend already applied carry to entitlement
     let used = num(b.used)
 
-    // ✅ if carry is negative, show it as "used" (debt)
+    // if carry is negative, show it as "used" (debt)
     const carryVal = num(c[k])
     if (carryVal < 0) used += Math.abs(carryVal)
+
+    const remaining = ent - used // ✅ compute remaining here
 
     out.push({
       k,
       used,
       ent,
-      pair: `${used}/${ent}`, // ✅ show used/entitlement
+      remaining,               // ✅ now exists
+      pair: `${used}/${ent}`,  // show used/entitlement
     })
   }
+
   return out
 }
+
 
 
 function statusChipClasses(active) {
@@ -98,8 +103,21 @@ function modeLabel(mode) {
 }
 
 function pairChipClasses(remaining) {
-  return remaining >= 0 ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
+  // 🔴 red only when negative (both light + dark)
+  if (Number(remaining) < 0) {
+    return 'ui-badge ui-badge-danger'
+  }
+
+  // ✅ neutral when >= 0 (light + dark)
+  return [
+    'ui-badge',
+    // light
+    'border-slate-200 bg-white text-slate-800',
+    // dark
+    'dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100',
+  ].join(' ')
 }
+
 
 /* ───────── navigation ───────── */
 function goProfile(employeeId) {
@@ -977,7 +995,7 @@ onBeforeUnmount(() => {
 
       <!-- ✅ Create modal -->
       <transition name="modal-fade">
-        <div v-if="createOpen" class="ui-modal-backdrop" @click.self="closeCreate">
+        <div v-if="createOpen" class="ui-modal-backdrop">
           <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
             <!-- Header -->
             <div class="ui-hero rounded-b-none px-4 py-3">

@@ -6,11 +6,11 @@ const LeaveRequest = require('../../models/leave/LeaveRequest')
 const { computeBalances } = require('../../utils/leave.rules')
 
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
-
-// Phnom Penh is UTC+7 (no DST)
-const PP_OFFSET_MINUTES = 7 * 60
+const PP_OFFSET_MINUTES = 7 * 60 // UTC+7
 
 /* ───────────────── helpers ───────────────── */
+
+const s = (v) => String(v ?? '').trim()
 
 const uniqUpper = (arr) =>
   [...new Set((arr || []).map((x) => String(x || '').toUpperCase().trim()))].filter(Boolean)
@@ -22,17 +22,57 @@ function getRoles(req) {
 }
 
 function actorLoginId(req) {
-  // ✅ supports old + new JWT payload shapes
-  return String(req.user?.loginId || req.user?.id || req.user?.sub || '').trim()
+  // supports old + new JWT payload shapes
+  return s(req.user?.loginId || req.user?.id || req.user?.sub || req.user?.employeeId || '')
 }
 
-function actorEmployeeId(req) {
-  // ✅ best: use employeeId if present, otherwise fallback to loginId pattern
-  return String(req.user?.employeeId || actorLoginId(req) || '').trim()
+function isDigitsOnly(v) {
+  return /^\d+$/.test(s(v))
 }
 
 /**
- * Phnom Penh "today" as YYYY-MM-DD (no dayjs needed)
+ * Prefer employeeId from token.
+ * If missing, fallback to loginId ONLY when it looks like employeeId (digits).
+ */
+function actorEmployeeId(req) {
+  const emp = s(req.user?.employeeId || '')
+  if (emp) return emp
+
+  const login = actorLoginId(req)
+  return isDigitsOnly(login) ? login : ''
+}
+
+function isValidYMD(v) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(v))
+}
+
+function assertYMD(v, label = 'date') {
+  const val = s(v)
+  if (!isValidYMD(val)) throw new Error(`Invalid ${label}. Expected YYYY-MM-DD, got "${v}"`)
+  return val
+}
+
+/** Convert Date/ISO/string to YYYY-MM-DD (UTC). Returns '' if invalid. */
+function toYMD(v) {
+  if (!v) return ''
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (!t) return ''
+    if (isValidYMD(t)) return t
+    const d = new Date(t)
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+  }
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10)
+  try {
+    const d = new Date(v)
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Phnom Penh "today" as YYYY-MM-DD (no dayjs)
  */
 function nowYMD(tz = DEFAULT_TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -50,33 +90,138 @@ function nowYMD(tz = DEFAULT_TZ) {
   return `${parts.year}-${parts.month}-${parts.day}`
 }
 
-function isValidYMD(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim())
-}
-
 /**
- * Create a Date that represents Phnom Penh local midnight for the given YMD,
- * independent of the server timezone.
- *
- * Phnom Penh midnight (00:00 at UTC+7) equals 17:00 of previous day in UTC.
+ * Phnom Penh midnight Date for a YMD (prevents timezone drift).
+ * PP 00:00 == UTC previous day 17:00.
  */
 function phnomPenhMidnightDate(ymd) {
-  const s = String(ymd || '').trim()
-  if (!isValidYMD(s)) return new Date()
-
-  const [y, m, d] = s.split('-').map((x) => Number(x))
-  const utcMidnight = Date.UTC(y, (m || 1) - 1, d || 1, 0, 0, 0)
+  const d = s(ymd)
+  if (!isValidYMD(d)) return new Date()
+  const [y, m, day] = d.split('-').map(Number)
+  const utcMidnight = Date.UTC(y, (m || 1) - 1, day || 1, 0, 0, 0)
   const ppMidnightUtc = utcMidnight - PP_OFFSET_MINUTES * 60 * 1000
   return new Date(ppMidnightUtc)
 }
 
-async function getApprovedRequests(employeeId) {
-  const emp = String(employeeId || '').trim()
-  if (!emp) return []
-  return LeaveRequest.find({ employeeId: emp, status: 'APPROVED' })
-    .sort({ startDate: 1 })
-    .lean()
+/** ✅ support old numeric employeeId data + new string employeeId */
+function buildEmpIdIn(employeeId) {
+  const id = s(employeeId)
+  if (!id) return { $in: [] }
+  const n = Number(id)
+  const list = [id]
+  if (Number.isFinite(n)) list.push(n)
+  return { $in: [...new Set(list)] }
 }
+
+/* ───────── approvalMode normalization (profile schema: GM_ONLY / GM_AND_COO) ───────── */
+
+function toSemanticApprovalMode(storedMode) {
+  const m = s(storedMode).toUpperCase()
+  return m === 'GM_AND_COO' ? 'GM_AND_COO' : 'MANAGER_AND_GM'
+}
+
+/* ───────── carry logic (match admin concept) ───────── */
+
+function normalizeCarry(obj) {
+  const base = obj && typeof obj === 'object' ? obj : {}
+  const out = {}
+  ;['AL', 'SP', 'MC', 'MA', 'UL'].forEach((k) => {
+    out[k] = Number(base[k] || 0)
+    if (!Number.isFinite(out[k])) out[k] = 0
+  })
+  return out
+}
+
+function carryFromProfile(doc) {
+  const c = normalizeCarry(doc?.carry || {})
+  const legacy = Number(doc?.alCarry || 0)
+  if (Number(c.AL || 0) === 0 && legacy !== 0) c.AL = legacy
+  return c
+}
+
+/**
+ * Apply carry to balances:
+ * - entitlement = entitlement + carry[type]
+ * - remaining = max(0, entitlement - used)
+ * - SP remaining capped by AL remaining (SP consumes AL)
+ * - UL stays 0
+ */
+function applyCarryToBalances(balances = [], carry = {}) {
+  const c = normalizeCarry(carry)
+  const out = (balances || []).map((b) => ({ ...(b || {}) }))
+
+  const getRow = (code) => out.find((x) => s(x.leaveTypeCode).toUpperCase() === code)
+
+  const applyOne = (code) => {
+    const row = getRow(code)
+    if (!row) return
+    if (code === 'UL') {
+      row.yearlyEntitlement = 0
+      row.remaining = 0
+      return
+    }
+    const used = Number(row.used || 0)
+    const baseEnt = Number(row.yearlyEntitlement || 0)
+    const ent = baseEnt + Number(c[code] || 0)
+    row.yearlyEntitlement = ent
+    row.remaining = Math.max(0, ent - used)
+  }
+
+  ;['AL', 'SP', 'MC', 'MA', 'UL'].forEach(applyOne)
+
+  // SP remaining must be <= AL remaining
+  const al = getRow('AL')
+  const sp = getRow('SP')
+  if (al && sp) {
+    sp.remaining = Math.max(0, Math.min(Number(sp.remaining || 0), Number(al.remaining || 0)))
+  }
+
+  return out
+}
+
+/* ───────── contract meta helpers ───────── */
+
+function pickContract(profile, { contractId, contractNo }) {
+  const list = Array.isArray(profile?.contracts) ? profile.contracts : []
+  if (!list.length) return null
+  if (contractId) return list.find((c) => String(c._id) === String(contractId)) || null
+  if (contractNo) return list.find((c) => Number(c.contractNo) === Number(contractNo)) || null
+  return null
+}
+
+function getCurrentContract(profile) {
+  const list = Array.isArray(profile?.contracts) ? profile.contracts : []
+  if (!list.length) return null
+  const open = list.filter((c) => !c.closedAt)
+  return (open.length ? open : list).sort((a, b) => Number(a.contractNo) - Number(b.contractNo)).pop()
+}
+
+function contractMeta(contract) {
+  if (!contract) return null
+  return {
+    contractId: String(contract._id),
+    contractNo: contract.contractNo,
+    startDate: contract.startDate,
+    endDate: contract.endDate,
+    closedAt: contract.closedAt || null,
+  }
+}
+
+function listContractsMeta(profile) {
+  const list = Array.isArray(profile?.contracts) ? profile.contracts : []
+  const current = getCurrentContract(profile)
+  return list.map((c) => ({
+    contractId: String(c._id),
+    contractNo: c.contractNo,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    closedAt: c.closedAt || null,
+    isCurrent: current && String(current._id) === String(c._id),
+    label: `Contract ${c.contractNo}: ${c.startDate}${c.endDate ? ` → ${c.endDate}` : ''}`,
+  }))
+}
+
+/* ───────── permissions ───────── */
 
 function isAdminLike(roles) {
   const set = new Set(roles || [])
@@ -84,28 +229,26 @@ function isAdminLike(roles) {
 }
 
 /**
- * ✅ 핵심: multi-role user MUST be able to view own profile.
- * - If asking for self: always allowed.
- * - If asking for others (?employeeId=): apply manager/gm/coo/admin restrictions.
+ * - Self: always allowed (employeeId matches my employeeId OR my numeric loginId)
+ * - Admin: allowed
+ * - Manager/GM/COO: allowed if target profile points to me (managerLoginId/gmLoginId/cooLoginId)
  *
- * IMPORTANT:
- * Some deployments store approver fields (managerLoginId/gmLoginId/cooLoginId)
- * as loginId. Some store as employeeId. We allow both by checking (meLoginId OR meEmployeeId).
+ * Approver fields might contain employeeId OR loginId, so check both meLoginId and meEmployeeId.
  */
 function canViewProfile({ roles, meLoginId, meEmployeeId, profile, targetEmployeeId }) {
-  const meA = String(meLoginId || '').trim()
-  const meB = String(meEmployeeId || '').trim()
-  const target = String(targetEmployeeId || '').trim()
+  const meA = s(meLoginId)
+  const meB = s(meEmployeeId)
+  const target = s(targetEmployeeId)
 
-  // ✅ always allow self
+  // ✅ self allowed
   if (target && (target === meA || target === meB)) return true
 
   // ✅ admins can view anything
   if (isAdminLike(roles)) return true
 
-  const mgr = String(profile?.managerLoginId || '').trim()
-  const gm = String(profile?.gmLoginId || '').trim()
-  const coo = String(profile?.cooLoginId || '').trim()
+  const mgr = s(profile?.managerLoginId)
+  const gm = s(profile?.gmLoginId)
+  const coo = s(profile?.cooLoginId)
 
   const isMe = (v) => v && (v === meA || v === meB)
 
@@ -119,17 +262,33 @@ function canViewProfile({ roles, meLoginId, meEmployeeId, profile, targetEmploye
   return false
 }
 
+/* ───────── data loaders ───────── */
+
+async function getApprovedRequests(employeeId) {
+  const emp = s(employeeId)
+  if (!emp) return []
+  return LeaveRequest.find({ employeeId: buildEmpIdIn(emp), status: 'APPROVED' })
+    .sort({ startDate: 1, createdAt: 1 })
+    .lean()
+}
+
 /* ───────────────── controllers ───────────────── */
 
 /**
  * GET /api/leave/profile/my
- * - If no ?employeeId= -> returns my profile (always allowed)
- * - If ?employeeId=XXXX -> only allowed based on role ownership rules
- * - Returns balances computed from APPROVED requests (no DB write here)
  *
- * ✅ Real-time behavior:
- * This endpoint stays read-only. Frontend refreshes it when it receives socket events
- * (leave:req:*). Your leaveRequest.controller emits those events via broadcastLeaveRequest.
+ * Query:
+ *  - employeeId (optional)  -> for approvers/admin viewing others
+ *  - asOf (optional YYYY-MM-DD) -> default today (PP)
+ *  - contractId / contractNo (optional) -> return meta.selectedContract
+ *
+ * Returns:
+ *  - profile (lean base fields)
+ *  - balances computed (approved only) + carry applied
+ *  - approvalMode semantic
+ *  - contract meta + contracts list
+ *
+ * ✅ read-only (no save). Frontend refreshes via realtime events.
  */
 exports.getMyProfile = async (req, res) => {
   try {
@@ -139,54 +298,98 @@ exports.getMyProfile = async (req, res) => {
 
     if (!meLoginId) return res.status(401).json({ message: 'Unauthorized' })
 
-    const targetEmployeeId = String(req.query.employeeId || '').trim()
-    const employeeId = targetEmployeeId || meEmployeeId || meLoginId
+    const targetEmployeeIdRaw = s(req.query.employeeId)
+    const targetEmployeeId = targetEmployeeIdRaw || meEmployeeId || (isDigitsOnly(meLoginId) ? meLoginId : '')
+    if (!targetEmployeeId) {
+      return res.status(400).json({
+        message: 'Missing employeeId. Your token must include employeeId or use a numeric loginId.',
+      })
+    }
 
-    const doc = await LeaveProfile.findOne({ employeeId }).lean()
-    if (!doc) return res.status(404).json({ message: 'Profile not found.' })
+    // load profile (support numeric stored employeeId too)
+    const prof =
+      (await LeaveProfile.findOne({ employeeId: targetEmployeeId }).lean()) ||
+      (await LeaveProfile.findOne({ employeeId: Number(targetEmployeeId) }).lean())
+
+    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
 
     const ok = canViewProfile({
       roles,
       meLoginId,
       meEmployeeId,
-      profile: doc,
-      targetEmployeeId: employeeId,
+      profile: prof,
+      targetEmployeeId,
     })
     if (!ok) return res.status(403).json({ message: 'Forbidden' })
 
-    const approved = await getApprovedRequests(employeeId)
-
-    const asOf = nowYMD()
+    // asOf
+    const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : nowYMD()
     const asOfDate = phnomPenhMidnightDate(asOf)
 
-    const snap = computeBalances(doc, approved, asOfDate)
+    const approved = await getApprovedRequests(targetEmployeeId)
+
+    // compute snapshot
+    const snap = computeBalances(prof, approved, asOfDate)
+
+    const rawBalances = Array.isArray(snap?.balances)
+      ? snap.balances
+      : Array.isArray(prof.balances)
+        ? prof.balances
+        : []
+
+    // ✅ apply carry same idea as admin
+    const carry = carryFromProfile(prof)
+    const balances = applyCarryToBalances(rawBalances, carry)
+
+    // contract meta
+    const requested = pickContract(prof, { contractId: s(req.query.contractId), contractNo: s(req.query.contractNo) })
+    const current = getCurrentContract(prof)
+    const selectedContract = requested || current
 
     return res.json({
-      ...doc,
-      balances: Array.isArray(snap?.balances)
-        ? snap.balances
-        : Array.isArray(doc.balances)
-          ? doc.balances
-          : [],
-      balancesAsOf: asOf,
-      meta: snap?.meta || null,
+      profile: {
+        ...prof,
+        employeeId: s(prof.employeeId),
+        managerLoginId: s(prof.managerLoginId),
+        gmLoginId: s(prof.gmLoginId),
+        cooLoginId: s(prof.cooLoginId),
+
+        // ✅ semantic mode for UI
+        approvalMode: toSemanticApprovalMode(prof.approvalMode),
+
+        // ✅ normalize carry fields
+        carry: normalizeCarry(prof.carry || {}),
+        alCarry: Number(prof.alCarry || 0),
+
+        // ✅ computed fields
+        balances,
+        balancesAsOf: asOf,
+        meta: snap?.meta || null,
+
+        // ✅ contract helpers for UI
+        contract: contractMeta(selectedContract),
+        contracts: listContractsMeta(prof),
+      },
     })
   } catch (e) {
     console.error('getMyProfile error', e)
-    return res.status(500).json({ message: 'Failed to load profile.' })
+    return res.status(500).json({ message: e.message || 'Failed to load profile.' })
   }
 }
 
 /**
  * GET /api/leave/profile/managed
- * - MANAGER: employees where managerLoginId = me (or my employeeId)
- * - GM: employees where gmLoginId = me (or my employeeId)
- * - COO: employees where cooLoginId = me (or my employeeId)
- * - ADMIN/LEAVE_ADMIN: all active
  *
- * ✅ Real-time behavior:
- * This is read-only. Frontend can refresh list when receiving leave:profile:* events
- * (emitted from admin controller via broadcastLeaveProfile).
+ * Query:
+ *  - includeInactive=1 (admin only; default active)
+ *  - withBalances=1 (optional; compute balances per employee)  ⚠️ heavier
+ *  - asOf=YYYY-MM-DD (optional for withBalances)
+ *
+ * Behavior:
+ *  - ADMIN/LEAVE_ADMIN: all profiles (active by default)
+ *  - GM: profiles where gmLoginId matches me (loginId OR employeeId)
+ *  - COO: profiles where cooLoginId matches me (loginId OR employeeId)
+ *  - MANAGER: profiles where managerLoginId matches me (loginId OR employeeId)
  */
 exports.listManagedProfiles = async (req, res) => {
   try {
@@ -196,10 +399,13 @@ exports.listManagedProfiles = async (req, res) => {
 
     if (!meLoginId) return res.status(401).json({ message: 'Unauthorized' })
 
-    const query = { isActive: { $ne: false } }
+    const includeInactive = s(req.query.includeInactive) === '1'
+    const withBalances = s(req.query.withBalances) === '1'
+
+    const query = includeInactive ? {} : { isActive: { $ne: false } }
 
     if (isAdminLike(roles)) {
-      // all active
+      // all (respect includeInactive)
     } else if (roles.includes('LEAVE_GM')) {
       query.$or = [{ gmLoginId: meLoginId }, { gmLoginId: meEmployeeId }]
     } else if (roles.includes('LEAVE_COO')) {
@@ -211,15 +417,79 @@ exports.listManagedProfiles = async (req, res) => {
     }
 
     const rows = await LeaveProfile.find(query)
-      .select(
-        'employeeId name department joinDate contractDate contractEndDate managerLoginId gmLoginId cooLoginId approvalMode isActive'
-      )
       .sort({ employeeId: 1 })
       .lean()
 
-    return res.json(rows || [])
+    if (!withBalances) {
+      // light response for inbox lists
+      return res.json(
+        (rows || []).map((p) => ({
+          employeeId: s(p.employeeId),
+          name: p.name || '',
+          department: p.department || '',
+          joinDate: p.joinDate || null,
+          contractDate: p.contractDate || null,
+          contractEndDate: p.contractEndDate || null,
+
+          managerLoginId: s(p.managerLoginId),
+          gmLoginId: s(p.gmLoginId),
+          cooLoginId: s(p.cooLoginId),
+          approvalMode: toSemanticApprovalMode(p.approvalMode),
+
+          isActive: p.isActive !== false,
+
+          // optional contract list (useful for UI)
+          contract: contractMeta(getCurrentContract(p)),
+          contracts: listContractsMeta(p),
+        }))
+      )
+    }
+
+    // heavy: compute balances per employee
+    const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : nowYMD()
+    const asOfDate = phnomPenhMidnightDate(asOf)
+
+    const out = []
+    for (const p of rows || []) {
+      const empId = s(p.employeeId)
+      if (!empId) continue
+
+      const approved = await getApprovedRequests(empId)
+      const snap = computeBalances(p, approved, asOfDate)
+
+      const rawBalances = Array.isArray(snap?.balances) ? snap.balances : []
+      const carry = carryFromProfile(p)
+      const balances = applyCarryToBalances(rawBalances, carry)
+
+      out.push({
+        employeeId: empId,
+        name: p.name || '',
+        department: p.department || '',
+        joinDate: p.joinDate || null,
+        contractDate: p.contractDate || null,
+        contractEndDate: p.contractEndDate || null,
+
+        managerLoginId: s(p.managerLoginId),
+        gmLoginId: s(p.gmLoginId),
+        cooLoginId: s(p.cooLoginId),
+        approvalMode: toSemanticApprovalMode(p.approvalMode),
+
+        isActive: p.isActive !== false,
+        balances,
+        balancesAsOf: asOf,
+        meta: snap?.meta || null,
+
+        carry: normalizeCarry(p.carry || {}),
+        alCarry: Number(p.alCarry || 0),
+
+        contract: contractMeta(getCurrentContract(p)),
+        contracts: listContractsMeta(p),
+      })
+    }
+
+    return res.json(out)
   } catch (e) {
     console.error('listManagedProfiles error', e)
-    return res.status(500).json({ message: 'Failed to load employees.' })
+    return res.status(500).json({ message: e.message || 'Failed to load employees.' })
   }
 }
