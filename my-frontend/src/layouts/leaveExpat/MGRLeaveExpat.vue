@@ -205,7 +205,7 @@ async function toggleAuth() {
       >
         <div class="flex items-center justify-between border-b border-slate-300 px-2 py-2 dark:border-slate-800">
           <span class="ml-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
-            Expat Manager
+            Expat Manager  
           </span>
           <button
             type="button"

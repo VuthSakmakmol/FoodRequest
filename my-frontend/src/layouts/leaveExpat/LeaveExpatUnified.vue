@@ -31,7 +31,7 @@ const groups = computed(() => {
   const out = []
 
   // ✅ My Leave (for anyone who can request leave)
-  if (canUser.value || canManager.value || canGm.value || canCoo.value || canAdmin.value) {
+  if (canUser.value || canManager.value || canGm.value || canCoo.value) {
     out.push({
       key: 'my-leave',
       header: 'My Leave',
@@ -85,17 +85,17 @@ const groups = computed(() => {
   }
 
   // ✅ Admin portal shortcuts
-  if (canAdmin.value) {
-    out.push({
-      key: 'admin',
-      header: 'Admin',
-      icon: 'fa-solid fa-screwdriver-wrench',
-      children: [
-        { label: 'Profiles', icon: 'fa-solid fa-users', to: { name: 'leave-admin-profiles' } },
-        { label: 'Reports',  icon: 'fa-solid fa-chart-line', to: { name: 'leave-admin-report' } },
-      ].filter(x => x.to?.name),
-    })
-  }
+  // if (canAdmin.value) {
+  //   out.push({
+  //     key: 'admin',
+  //     header: 'Admin',
+  //     icon: 'fa-solid fa-screwdriver-wrench',
+  //     children: [
+  //       { label: 'Profiles', icon: 'fa-solid fa-users', to: { name: 'leave-admin-profiles' } },
+  //       { label: 'Reports',  icon: 'fa-solid fa-chart-line', to: { name: 'leave-admin-report' } },
+  //     ].filter(x => x.to?.name),
+  //   })
+  // }
 
   return out.filter(g => Array.isArray(g.children) && g.children.length)
 })

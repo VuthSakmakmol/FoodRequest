@@ -1,7 +1,15 @@
-<!-- src/views/expat/GmLeaveInbox.vue -->
+<!-- src/views/expat/GmLeaveInbox.vue
+  ✅ Same UI system as ManagerLeaveInbox.vue (ui-page / ui-card / ui-hero-gradient / ui-table)
+  ✅ Edge-to-edge (no wasted edges)
+  ✅ Responsive: mobile cards + desktop fixed table with aligned columns
+  ✅ Filters: search + requested date range + expat id
+  ✅ Actions: Export CSV only (Excel compatible)
+  ✅ NO action buttons
+  ✅ NO profile route / navigation
+-->
+
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
@@ -10,35 +18,25 @@ import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
 defineOptions({ name: 'GmLeaveInbox' })
 
-const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ✅ roles helper (supports user.role + user.roles[]) */
-const roles = computed(() => {
-  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
-  const base = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...base].map(r => String(r || '').trim()))]
-})
-const canGmDecide = computed(() => roles.value.includes('LEAVE_GM'))
-
-/* ───────── Responsive flag ───────── */
+/* ───────── responsive flag ───────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── State ───────── */
+/* ───────── STATE ───────── */
 const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusTab = ref('PENDING_GM') // 'PENDING_GM' | 'FINISHED'
 
-/* ✅ Filters (default ALL) */
+/* ✅ Filters (default empty = show all) */
 const fromDate = ref('') // Requested at (createdAt)
-const toDate = ref('')   // Requested at (createdAt)
+const toDate = ref('') // Requested at (createdAt)
 const employeeFilter = ref('')
 
 /* Pagination */
@@ -71,15 +69,21 @@ function statusChipClasses(status) {
   }
 }
 
-/* Sort order for GM queue */
+/* Sort: GM pending first, then approved/rejected/cancelled, then manager pending (if any) */
 function statusWeight(s) {
   switch (s) {
-    case 'PENDING_GM':      return 0
-    case 'APPROVED':        return 1
-    case 'REJECTED':        return 2
-    case 'CANCELLED':       return 3
-    case 'PENDING_MANAGER': return 4
-    default:                return 99
+    case 'PENDING_GM':
+      return 0
+    case 'APPROVED':
+      return 1
+    case 'REJECTED':
+      return 2
+    case 'CANCELLED':
+      return 3
+    case 'PENDING_MANAGER':
+      return 4
+    default:
+      return 99
   }
 }
 
@@ -97,23 +101,14 @@ function rejectedByLabel(row) {
   return 'Rejected'
 }
 
-/* ✅ Go to GM Profile page and auto-select that expat */
-function goProfile(row) {
-  const empId = String(row?.employeeId || '').trim()
-  if (!empId) return
-  router.push({ name: 'leave-gm-profile', query: { employeeId: empId } })
-}
-
-/* Quick actions */
+/* quick tools */
 function clearFilters() {
   search.value = ''
   employeeFilter.value = ''
   fromDate.value = ''
   toDate.value = ''
-  statusTab.value = 'PENDING_GM'
 }
 
-/* ───────── Data ───────── */
 async function fetchInbox() {
   try {
     loading.value = true
@@ -131,43 +126,34 @@ async function fetchInbox() {
   }
 }
 
-/**
- * Tabs:
- * - PENDING_GM: show all rows (default)
- * - FINISHED:   only APPROVED/REJECTED/CANCELLED
- */
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
 
   let list = [...rows.value]
 
-  if (empQ) {
-    list = list.filter(r => String(r.employeeId || '').toLowerCase().includes(empQ))
-  }
+  if (empQ) list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
 
   if (q) {
-    list = list.filter(r =>
-      String(r.employeeId || '').toLowerCase().includes(q) ||
-      String(r.employeeName || '').toLowerCase().includes(q) ||
-      String(r.department || '').toLowerCase().includes(q) ||
-      String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
-      String(r.reason || '').toLowerCase().includes(q) ||
-      String(r.gmComment || '').toLowerCase().includes(q) ||
-      String(r.managerComment || '').toLowerCase().includes(q)
+    list = list.filter(
+      (r) =>
+        String(r.employeeId || '').toLowerCase().includes(q) ||
+        String(r.employeeName || '').toLowerCase().includes(q) ||
+        String(r.department || '').toLowerCase().includes(q) ||
+        String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
+        String(r.reason || '').toLowerCase().includes(q) ||
+        String(r.status || '').toLowerCase().includes(q) ||
+        String(r.gmComment || '').toLowerCase().includes(q) ||
+        String(r.managerComment || '').toLowerCase().includes(q)
     )
-  }
-
-  if (statusTab.value === 'FINISHED') {
-    list = list.filter(r => ['APPROVED', 'REJECTED', 'CANCELLED'].includes(r.status))
   }
 
   // ✅ Date filter by REQUEST DATE (createdAt)
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
-  const toVal   = toDate.value   ? dayjs(toDate.value).endOf('day').valueOf()   : null
+  const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
 
   if (fromVal !== null || toVal !== null) {
-    list = list.filter(r => {
+    list = list.filter((r) => {
       if (!r.createdAt) return false
       const t = dayjs(r.createdAt).valueOf()
       if (fromVal !== null && t < fromVal) return false
@@ -176,6 +162,7 @@ const filteredRows = computed(() => {
     })
   }
 
+  // Sort by status priority, then created desc
   list.sort((a, b) => {
     const sw = statusWeight(a.status) - statusWeight(b.status)
     if (sw !== 0) return sw
@@ -202,97 +189,77 @@ const totalCount = computed(() => rows.value.length)
 const filteredCount = computed(() => filteredRows.value.length)
 
 watch(
-  () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
-  () => { page.value = 1 }
+  () => [search.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
+  () => {
+    page.value = 1
+  }
 )
 
-/* ───────── Confirm dialog ───────── */
-const confirmDialog = ref({
-  open: false,
-  action: 'APPROVE', // 'APPROVE' | 'REJECT'
-  row: null,
-  comment: '',
-})
-const rejectError = ref('')
-
-function openDecisionDialog(row, action) {
-  if (!canGmDecide.value) {
-    showToast({
-      type: 'error',
-      title: 'Not allowed',
-      message: 'You do not have permission to approve or reject as GM.',
-    })
-    return
-  }
-  confirmDialog.value.open = true
-  confirmDialog.value.row = row
-  confirmDialog.value.action = action
-  confirmDialog.value.comment = ''
-  rejectError.value = ''
+/* ───────── Export to Excel (CSV download; works without extra libs) ───────── */
+function csvEscape(v) {
+  const s = String(v ?? '')
+  const needs = /[",\n\r]/.test(s)
+  const escaped = s.replace(/"/g, '""')
+  return needs ? `"${escaped}"` : escaped
 }
 
-function closeDecisionDialog() {
-  confirmDialog.value.open = false
-  confirmDialog.value.row = null
-  confirmDialog.value.comment = ''
-  rejectError.value = ''
+function downloadTextFile(filename, text, mime = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 3000)
 }
 
-const confirmTitle = computed(() =>
-  confirmDialog.value.action === 'APPROVE'
-    ? 'Approve this leave request?'
-    : 'Reject this leave request?'
-)
+function buildExportRows(list) {
+  return (list || []).map((r) => ({
+    RequestedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+    EmployeeId: r.employeeId || '',
+    EmployeeName: r.employeeName || '',
+    Department: r.department || '',
+    LeaveType: r.leaveTypeCode || '',
+    LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
+    LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
+    LeaveRange: formatRange(r),
+    TotalDays: Number(r.totalDays || 0),
+    Status: r.status || '',
+    RejectBy: r.status === 'REJECTED' ? rejectedByLabel(r) : '',
+    RejectReason: r.status === 'REJECTED' ? getRejectReason(r) : '',
+    Reason: (r.reason || '').replace(/\s+/g, ' ').trim(),
+  }))
+}
 
-const confirmPrimaryLabel = computed(() =>
-  confirmDialog.value.action === 'APPROVE' ? 'Approve' : 'Reject'
-)
-
-const confirmPrimaryClasses = computed(() =>
-  confirmDialog.value.action === 'APPROVE'
-    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-    : 'bg-rose-600 hover:bg-rose-700 text-white'
-)
-
-async function submitDecision() {
-  const { row, action } = confirmDialog.value
-  const comment = String(confirmDialog.value.comment || '').trim()
-
-  if (!row || !action) {
-    closeDecisionDialog()
-    return
-  }
-
-  if (action === 'REJECT' && !comment) {
-    rejectError.value = 'Reject reason is required.'
-    return
-  }
-
+function exportExcel(scope = 'FILTERED') {
   try {
-    loading.value = true
+    const list = scope === 'ALL' ? rows.value : filteredRows.value
+    if (!list.length) {
+      showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
+      return
+    }
 
-    await api.post(`/leave/requests/${row._id}/gm-decision`, {
-      action,
-      ...(action === 'REJECT' ? { comment } : {}),
-    })
+    const data = buildExportRows(list)
+    const headers = Object.keys(data[0])
 
-    showToast({
-      type: 'success',
-      title: action === 'APPROVE' ? 'Approved' : 'Rejected',
-      message: 'GM decision has been saved.',
-    })
+    const csv = [
+      headers.map(csvEscape).join(','),
+      ...data.map((row) => headers.map((h) => csvEscape(row[h])).join(',')),
+    ].join('\n')
 
-    closeDecisionDialog()
-    await fetchInbox()
+    const tag =
+      scope === 'ALL'
+        ? 'ALL'
+        : `${fromDate.value ? `_${fromDate.value}` : ''}${toDate.value ? `_${toDate.value}` : ''}` || 'FILTERED'
+
+    downloadTextFile(`GmInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.csv`, csv)
+
+    showToast({ type: 'success', title: 'Exported', message: 'Downloaded CSV (Excel compatible).' })
   } catch (e) {
-    console.error('gmDecision error', e)
-    showToast({
-      type: 'error',
-      title: 'Update failed',
-      message: e?.response?.data?.message || 'Unable to update this leave request.',
-    })
-  } finally {
-    loading.value = false
+    console.error('exportExcel error', e)
+    showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })
   }
 }
 
@@ -309,7 +276,6 @@ function setupRealtime() {
   subscribeRoleIfNeeded({
     role: auth.user?.role,
     employeeId: auth.user?.employeeId,
-    // ✅ IMPORTANT: prefer loginId (string used in leave rooms), not Mongo _id
     loginId: auth.user?.loginId || auth.user?.employeeId || auth.user?.id,
     company: auth.user?.companyCode,
   })
@@ -332,603 +298,349 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
-  offHandlers.forEach(off => { try { off && off() } catch {} })
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
 })
 </script>
 
 <template>
-  <div class="px-1 py-1 sm:px-3">
-    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Header -->
-      <div class="rounded-t-2xl ui-hero-gradient">
-        <!-- Desktop -->
-        <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex flex-col gap-1 min-w-[240px]">
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
-            <p class="text-sm font-semibold">GM Inbox</p>
-            <p class="text-[11px] text-sky-50/90">Final approval queue for expatriate leave requests.</p>
+  <div class="ui-page min-h-screen w-full">
+    <div class="ui-container-edge">
+      <div class="ui-card rounded-none border-x-0 border-t-0">
+        <div class="ui-hero-gradient">
+          <!-- Desktop header -->
+          <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
+            <div class="flex flex-col gap-1 min-w-[240px]">
+              <p class="ui-hero-kicker text-white/80">Expat Leave</p>
+              <p class="text-[15px] font-extrabold">GM Inbox</p>
+              <p class="text-[11px] text-white/90">Final approval queue for expatriate leave requests.</p>
 
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Total: {{ totalCount }}
-              </span>
-              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Showing: {{ filteredCount }}
-              </span>
-            </div>
-          </div>
-
-          <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-            <!-- Search -->
-            <div class="min-w-[220px] max-w-xs">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
-              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-xs">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Employee / type / reason / reject note..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
-                />
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
               </div>
             </div>
 
-            <!-- Status pills -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-sky-50/90 mr-1">Status</span>
-              <div class="flex rounded-full bg-sky-900/30 p-0.5">
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                  @click="statusTab = 'PENDING_GM'"
-                >
-                  Pending (GM)
-                </button>
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'FINISHED' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                  @click="statusTab = 'FINISHED'"
-                >
-                  Finished
-                </button>
-              </div>
-            </div>
-
-            <!-- Requested at range filter -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-sky-50/80">Requested</span>
-              <input
-                v-model="fromDate"
-                type="date"
-                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
-              />
-              <span>to</span>
-              <input
-                v-model="toDate"
-                type="date"
-                class="rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
-              />
-            </div>
-
-            <!-- Expat ID filter -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-sky-50/80">Expat ID</span>
-              <input
-                v-model="employeeFilter"
-                type="text"
-                placeholder="EMP001..."
-                class="w-28 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70"
-              />
-            </div>
-
-            <!-- Actions -->
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
-                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
-                @click="fetchInbox"
-                :disabled="loading"
-                title="Refresh"
-              >
-                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
-                Refresh
-              </button>
-
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
-                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
-                @click="clearFilters"
-              >
-                <i class="fa-solid fa-broom text-[11px]"></i>
-                Clear
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Mobile -->
-        <div v-else class="space-y-2">
-          <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-sky-100/80">Expat Leave</p>
-            <p class="text-sm font-semibold">GM Inbox</p>
-            <p class="text-[11px] text-sky-50/90">Final approval queue for expatriate leave requests.</p>
-
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="rounded-full bg-white/15 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Total: {{ totalCount }}
-              </span>
-              <span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-semibold text-white/95">
-                Showing: {{ filteredCount }}
-              </span>
-            </div>
-          </div>
-
-          <div class="space-y-2">
-            <div class="space-y-1">
-              <label class="mb-1 block text-[11px] font-medium text-sky-50">Search</label>
-              <div class="flex items-center rounded-xl border border-sky-100/80 bg-sky-900/30 px-2.5 py-1.5 text-[11px]">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-sky-100/80" />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Employee / type / reason / reject note..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-sky-100/70"
-                />
-              </div>
-            </div>
-
-            <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <div class="flex items-center gap-1">
-                <span class="text-sky-50/90">Status</span>
-                <div class="flex rounded-full bg-sky-900/30 p-0.5">
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'PENDING_GM' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                    @click="statusTab = 'PENDING_GM'"
-                  >
-                    Pending
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'FINISHED' ? 'bg-white text-sky-700 shadow-sm' : 'text-sky-100 hover:bg-sky-900/50'"
-                    @click="statusTab = 'FINISHED'"
-                  >
-                    Finished
-                  </button>
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
+              <!-- Search -->
+              <div class="min-w-[240px] max-w-xs">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Search</label>
+                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                    <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
+                    <input
+                      v-model="search"
+                      type="text"
+                      placeholder="Employee / type / reason / reject note..."
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <input
-                v-model="employeeFilter"
-                type="text"
-                placeholder="Expat ID..."
-                class="w-24 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none placeholder:text-sky-100/70 focus:border-white focus:ring-1 focus:ring-white/70"
-              />
+              <!-- Requested at range filter -->
+              <div class="flex items-end gap-2">
+                <div class="ui-field w-[150px]">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date" />
+                </div>
+                <div class="ui-field w-[150px]">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date" />
+                </div>
+              </div>
+
+              <!-- Expat ID filter -->
+              <div class="ui-field w-[140px]">
+                <label class="text-[11px] font-extrabold text-white/90">Expat ID</label>
+                <input
+                  v-model="employeeFilter"
+                  type="text"
+                  placeholder="EMP001..."
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none placeholder:text-white/70"
+                />
+              </div>
+
+              <!-- Actions: Export only -->
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  @click="exportExcel('FILTERED')"
+                  :disabled="loading || !filteredRows.length"
+                  title="Export filtered list to Excel"
+                >
+                  <i class="fa-solid fa-file-excel text-[11px]" />
+                  Export
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mobile header -->
+          <div v-else class="space-y-3">
+            <div>
+              <p class="ui-hero-kicker text-white/80">Expat Leave</p>
+              <p class="text-[15px] font-extrabold">GM Inbox</p>
+              <p class="text-[11px] text-white/90">Final approval queue for expatriate leave requests.</p>
+
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+              </div>
             </div>
 
-            <!-- Requested at range filter -->
-            <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              <span class="text-sky-50/80">Requested</span>
-              <input
-                v-model="fromDate"
-                type="date"
-                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
-              />
-              <span>to</span>
-              <input
-                v-model="toDate"
-                type="date"
-                class="flex-1 rounded-lg border border-sky-100/80 bg-sky-900/40 px-2 py-1 text-[11px] text-sky-50 outline-none focus:border-white focus:ring-1 focus:ring-white/70"
-              />
-            </div>
+            <div class="space-y-2">
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Search</label>
+                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Employee / type / reason / reject note..."
+                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                  />
+                </div>
+              </div>
 
-            <!-- Actions -->
-            <div class="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5
-                       text-[11px] font-semibold text-white transition hover:bg-white/15 disabled:opacity-60"
-                @click="fetchInbox"
-                :disabled="loading"
-              >
-                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
-                Refresh
-              </button>
+              <div class="flex items-center justify-between gap-2">
+                <div class="ui-field flex-1">
+                  <label class="text-[11px] font-extrabold text-white/90">Expat ID</label>
+                  <input
+                    v-model="employeeFilter"
+                    type="text"
+                    placeholder="EMP001..."
+                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none placeholder:text-white/70"
+                  />
+                </div>
 
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5
-                       text-[11px] font-semibold text-slate-900 shadow hover:bg-white/95 transition"
-                @click="clearFilters"
-              >
-                <i class="fa-solid fa-broom text-[11px]"></i>
-                Clear
-              </button>
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  @click="exportExcel('FILTERED')"
+                  :disabled="loading || !filteredRows.length"
+                >
+                  <i class="fa-solid fa-file-excel text-[11px]" />
+                  Export
+                </button>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date" />
+                </div>
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date" />
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-ghost"
+                  @click="exportExcel('ALL')"
+                  :disabled="loading || !rows.length"
+                >
+                  Export ALL
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Body -->
-      <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
-        <div
-          v-if="loading && !filteredRows.length"
-          class="mb-2 rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700
-                 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
-        >
-          Loading GM inbox...
-        </div>
-
-        <!-- Mobile cards -->
-        <div v-if="isMobile" class="space-y-2">
-          <p v-if="!pagedRows.length && !loading" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
-            No leave requests in your GM queue.
-          </p>
-
-          <article
-            v-for="row in pagedRows"
-            :key="row._id"
-            class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
-                   shadow-[0_10px_24px_rgba(15,23,42,0.12)]
-                   dark:border-slate-700 dark:bg-slate-900/95"
+        <!-- Body -->
+        <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
+          <div
+            v-if="loading && !filteredRows.length"
+            class="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700
+                   dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div class="space-y-1">
-                <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border" :class="statusChipClasses(row.status)">
-                  {{ row.status }}
-                </span>
+            Loading GM inbox...
+          </div>
 
-                <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
-                  {{ row.employeeId || '—' }}
-                </div>
+          <!-- Mobile cards -->
+          <div v-if="isMobile" class="space-y-2">
+            <p v-if="!pagedRows.length && !loading" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              No leave requests in your GM queue.
+            </p>
 
-                <div v-if="row.employeeName || row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                  {{ row.employeeName || '' }} <span v-if="row.department">· {{ row.department }}</span>
-                </div>
+            <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="space-y-1">
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    Requested:
+                    <span class="font-semibold text-slate-900 dark:text-slate-50">
+                      {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                    </span>
+                  </div>
 
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                  Date: <span class="font-medium">{{ formatRange(row) }}</span>
-                  · Days: <span class="font-semibold">{{ Number(row.totalDays || 0).toLocaleString() }}</span>
-                </div>
-              </div>
-
-              <div class="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                <div class="whitespace-nowrap">
-                  {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                </div>
-                <div class="mt-1">
-                  <span class="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 border border-sky-100 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80">
-                    {{ row.leaveTypeCode || '—' }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-2 h-px bg-slate-200 dark:bg-slate-800" />
-
-            <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-              <span class="font-medium">Request reason:</span>
-              <span class="text-truncate-2 inline-block align-top">{{ row.reason || '—' }}</span>
-            </div>
-
-            <div
-              v-if="row.status === 'REJECTED'"
-              class="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
-                     dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
-            >
-              <span class="font-semibold">{{ rejectedByLabel(row) }}:</span>
-              <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
-            </div>
-
-            <div class="mt-3 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1
-                       text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                @click="goProfile(row)"
-              >
-                <i class="fa-solid fa-id-badge text-[10px]" />
-                Profile
-              </button>
-
-              <template v-if="canGmDecide && row.status === 'PENDING_GM'">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                  @click="openDecisionDialog(row, 'APPROVE')"
-                >
-                  <i class="fa-solid fa-check text-[10px]" />
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50
-                         dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                  @click="openDecisionDialog(row, 'REJECT')"
-                >
-                  <i class="fa-solid fa-xmark text-[10px]" />
-                  Reject
-                </button>
-              </template>
-
-              <template v-else>
-                <span class="text-[11px] text-slate-400 dark:text-slate-500">No action available</span>
-              </template>
-            </div>
-          </article>
-        </div>
-
-        <!-- Desktop table -->
-        <div v-else class="overflow-x-auto">
-          <table class="min-w-[1100px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
-            <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
-              <tr>
-                <th class="table-th">Requested at</th>
-                <th class="table-th">Employee</th>
-                <th class="table-th">Type</th>
-                <th class="table-th">Leave Date</th>
-                <th class="table-th text-right">Days</th>
-                <th class="table-th">Request reason</th>
-                <th class="table-th text-center">Status</th>
-                <th class="table-th text-right">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr v-if="!loading && !filteredRows.length">
-                <td colspan="8" class="px-3 py-6 text-center text-[12px] text-slate-500 border-t border-slate-200 dark:border-slate-700 dark:text-slate-400">
-                  No leave requests in your GM queue.
-                </td>
-              </tr>
-
-              <tr
-                v-for="row in pagedRows"
-                :key="row._id"
-                class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70"
-              >
-                <td class="table-td whitespace-nowrap align-top">
-                  {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                </td>
-
-                <td class="table-td align-top">
                   <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
                     {{ row.employeeId || '—' }}
                   </div>
-                  <div v-if="row.employeeName || row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ row.employeeName || '' }} <span v-if="row.department">· {{ row.department }}</span>
+                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ row.employeeName || '—' }}
                   </div>
-                </td>
 
-                <td class="table-td align-top">
-                  <span class="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 border border-sky-100 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-800/80">
-                    {{ row.leaveTypeCode || '—' }}
-                  </span>
-                </td>
-
-                <td class="table-td whitespace-nowrap align-top">{{ formatRange(row) }}</td>
-                <td class="table-td text-right align-top">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
-
-                <td class="table-td align-top">
-                  <p class="text-truncate-2 text-xs sm:text-[13px]">{{ row.reason || '—' }}</p>
-
-                  <div
-                    v-if="row.status === 'REJECTED'"
-                    class="mt-2 inline-flex max-w-[520px] items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
-                           dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
-                  >
-                    <span class="font-semibold whitespace-nowrap">
-                      {{ rejectedByLabel(row) }}:
-                    </span>
-                    <span class="min-w-0 break-words">{{ getRejectReason(row) || '—' }}</span>
+                  <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                    {{ row.department }}
                   </div>
-                </td>
 
-                <td class="table-td text-center align-top">
-                  <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(row.status)">
-                    {{ row.status }}
-                  </span>
-                </td>
+                  <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                    Date: <span class="font-semibold">{{ formatRange(row) }}</span>
+                    · Days: <span class="font-extrabold">{{ Number(row.totalDays || 0).toLocaleString() }}</span>
+                  </div>
+                </div>
 
-                <td class="table-td text-right align-top">
-                  <div class="inline-flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1
-                             text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                      @click="goProfile(row)"
+                <div class="text-right space-y-1 text-[11px]">
+                  <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
+                  <div>
+                    <span
+                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
+                      :class="statusChipClasses(row.status)"
                     >
-                      <i class="fa-solid fa-id-badge text-[10px]" />
-                      Profile
-                    </button>
-
-                    <template v-if="canGmDecide && row.status === 'PENDING_GM'">
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
-                        @click="openDecisionDialog(row, 'APPROVE')"
-                      >
-                        <i class="fa-solid fa-check text-[10px]" />
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50
-                               dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                        @click="openDecisionDialog(row, 'REJECT')"
-                      >
-                        <i class="fa-solid fa-xmark text-[10px]" />
-                        Reject
-                      </button>
-                    </template>
-
-                    <template v-else>
-                      <span class="text-[11px] text-slate-400 dark:text-slate-500">No action</span>
-                    </template>
+                      {{ row.status }}
+                    </span>
                   </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                </div>
+              </div>
 
-        <!-- Pagination -->
-        <div class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
-          <div class="flex items-center gap-2">
-            <span>Rows per page</span>
-            <select v-model="perPage" class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900">
-              <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-            </select>
+              <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
+                <span class="font-semibold">Reason:</span> <span>{{ row.reason || '—' }}</span>
+              </div>
+
+              <div
+                v-if="row.status === 'REJECTED'"
+                class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                       dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+              >
+                <span class="font-extrabold">{{ rejectedByLabel(row) }}:</span>
+                <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
+              </div>
+            </article>
           </div>
 
-          <div class="flex items-center justify-end gap-1">
-            <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = 1">«</button>
-            <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
-            <span class="px-2">Page {{ page }} / {{ pageCount }}</span>
-            <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
-            <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+          <!-- Desktop table -->
+          <div v-else class="ui-table-wrap">
+            <table class="ui-table text-left min-w-[1120px]">
+              <colgroup>
+                <col class="w-[150px]" />
+                <col class="w-[260px]" />
+                <col class="w-[92px]" />
+                <col class="w-[160px]" />
+                <col class="w-[80px]" />
+                <col />
+                <col class="w-[120px]" />
+              </colgroup>
+
+              <thead>
+                <tr>
+                  <th class="ui-th text-left">Requested at</th>
+                  <th class="ui-th text-left">Employee</th>
+                  <th class="ui-th text-left">Type</th>
+                  <th class="ui-th text-left">Date range</th>
+                  <th class="ui-th text-right">Days</th>
+                  <th class="ui-th text-left">Reason</th>
+                  <th class="ui-th">Status</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr v-if="!loading && !filteredRows.length">
+                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                    No leave requests in your GM queue.
+                  </td>
+                </tr>
+
+                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover">
+                  <td class="ui-td text-left whitespace-nowrap align-top">
+                    {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                  </td>
+
+                  <td class="ui-td text-left align-top">
+                    <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
+                      {{ row.employeeId || '—' }}
+                    </div>
+                    <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                      {{ row.employeeName || '—' }}
+                    </div>
+                    <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                      {{ row.department }}
+                    </div>
+                  </td>
+
+                  <td class="ui-td text-left align-top">
+                    <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
+                  </td>
+
+                  <td class="ui-td text-left whitespace-nowrap align-top">
+                    {{ formatRange(row) }}
+                  </td>
+
+                  <td class="ui-td text-right align-top tabular-nums">
+                    {{ Number(row.totalDays || 0).toLocaleString() }}
+                  </td>
+
+                  <td class="ui-td text-left align-top">
+                    <p class="reason-cell">{{ row.reason || '—' }}</p>
+
+                    <div
+                      v-if="row.status === 'REJECTED' && getRejectReason(row)"
+                      class="mt-2 inline-flex max-w-[640px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                    >
+                      <span class="font-extrabold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
+                      <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
+                    </div>
+                  </td>
+
+                  <td class="ui-td align-top">
+                    <span
+                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
+                      :class="statusChipClasses(row.status)"
+                    >
+                      {{ row.status }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-2">
+              <span class="font-extrabold">Rows per page</span>
+              <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
+                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-end gap-1">
+              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
+              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
+              <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
+              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
+              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
-
-    <!-- Confirm dialog -->
-    <transition name="modal-fade">
-      <div v-if="confirmDialog.open" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
-        <div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
-          <!-- Header -->
-          <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
-            <div class="flex items-start justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <div class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/60 dark:text-sky-200">
-                  <i v-if="confirmDialog.action === 'APPROVE'" class="fa-solid fa-check text-sm" />
-                  <i v-else class="fa-solid fa-xmark text-sm" />
-                </div>
-                <div>
-                  <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">{{ confirmTitle }}</div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                    <span v-if="confirmDialog.action === 'APPROVE'">No comment needed for approve.</span>
-                    <span v-else>Reject requires a reason.</span>
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/80"
-                @click="closeDecisionDialog"
-              >
-                <i class="fa-solid fa-xmark text-xs" />
-              </button>
-            </div>
-          </div>
-
-          <!-- Body -->
-          <div class="px-4 py-3">
-            <div class="text-[12px] text-slate-700 dark:text-slate-100">
-              <div v-if="confirmDialog.row" class="mb-2 text-[11px]">
-                <div class="font-semibold">
-                  {{ confirmDialog.row.employeeId }} — {{ confirmDialog.row.employeeName || '—' }}
-                  <span v-if="confirmDialog.row.department" class="font-normal text-slate-500 dark:text-slate-400">
-                    · {{ confirmDialog.row.department }}
-                  </span>
-                </div>
-                <div class="text-slate-500 dark:text-slate-400">
-                  {{ formatRange(confirmDialog.row) }} · {{ confirmDialog.row.leaveTypeCode }} · Days: {{ Number(confirmDialog.row.totalDays || 0).toLocaleString() }}
-                </div>
-                <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
-                  <span class="font-semibold">Request reason:</span>
-                  <span class="ml-1">{{ confirmDialog.row.reason || '—' }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- Reject comment only -->
-            <div v-if="confirmDialog.action === 'REJECT'" class="mt-3">
-              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                Reject reason <span class="text-rose-600">*</span>
-              </label>
-              <textarea
-                v-model="confirmDialog.comment"
-                rows="3"
-                class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs shadow-sm
-                       focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="Write reject reason..."
-                @input="rejectError = ''"
-              ></textarea>
-
-              <p v-if="rejectError" class="mt-1 text-[11px] font-semibold text-rose-600">
-                {{ rejectError }}
-              </p>
-            </div>
-          </div>
-
-          <!-- Footer -->
-          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button
-              type="button"
-              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="closeDecisionDialog"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-sm
-                     focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-900"
-              :class="confirmPrimaryClasses"
-              :disabled="loading"
-              @click="submitDecision"
-            >
-              <i class="fa-solid mr-1 text-[10px]" :class="confirmDialog.action === 'APPROVE' ? 'fa-check' : 'fa-xmark'" />
-              <span>{{ confirmPrimaryLabel }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
   </div>
 </template>
 
 <style scoped>
-.text-truncate-2 {
+.reason-cell {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; }
-.table-td { padding: 8px 10px; vertical-align: top; }
-
-.pagination-btn {
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(100, 116, 139, 0.95);
-  background: white;
-  font-size: 11px;
-  color: #0f172a;
-}
-.pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.pagination-btn:not(:disabled):hover { background: #e5edff; }
-.dark .pagination-btn { background: #020617; color: #e5e7eb; border-color: rgba(148, 163, 184, 0.9); }
-.dark .pagination-btn:not(:disabled):hover { background: #1e293b; }
-
-.modal-fade-enter-active,
-.modal-fade-leave-active {
-  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
-}
-.modal-fade-enter-from,
-.modal-fade-leave-to {
-  opacity: 0;
-  transform: translateY(6px) scale(0.98);
+  line-height: 1.35;
 }
 </style>

@@ -232,7 +232,7 @@ onBeforeUnmount(() => {
           >
             <div class="min-w-0">
               <div class="truncate text-[11px] font-extrabold uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                Expat Leave
+              Expat Leave
               </div>
               <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
                 Admin Portal
