@@ -8,13 +8,19 @@ const { requireAuth } = require('../../middlewares/auth')
 const userCtrl = require('../../controllers/leave/leaveProfile.user.controller')
 const leaveRecordUser = require('../../controllers/leave/leaveRecord.user.controller')
 
+// ✅ Self + manager detail view
 // GET /api/leave/user/profile
+// GET /api/leave/user/profile?employeeId=E123   (manager view)
 router.get('/profile', requireAuth, userCtrl.getMyLeaveProfile)
 
-// GET /api/leave/user/signatures/resolve/:idLike
+// ✅ Manager list
+// GET /api/leave/user/profile/managed
+router.get('/profile/managed', requireAuth, userCtrl.getManagedProfiles)
+
+// ✅ Signature resolve (used by reports / PDF)
 router.get('/signatures/resolve/:idLike', requireAuth, leaveRecordUser.resolveSignatureMeta)
 
-// (optional) if you also have record endpoint here:
+// (optional)
 // router.get('/record', requireAuth, leaveRecordUser.getMyLeaveRecord)
 
 module.exports = router

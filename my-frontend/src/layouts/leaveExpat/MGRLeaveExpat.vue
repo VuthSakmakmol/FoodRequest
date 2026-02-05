@@ -26,7 +26,7 @@ const groups = [
         to: { name: 'leave-manager-inbox' },
       },
       {
-        label: 'My Profile Profile',
+        label: 'My Profile',
         icon: 'fa-solid fa-id-badge',
         to: { name: 'leave-manager-profile' },
       },

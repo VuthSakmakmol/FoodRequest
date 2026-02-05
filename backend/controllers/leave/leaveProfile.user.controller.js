@@ -6,14 +6,20 @@ const createError = require('http-errors')
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
-// Use whichever you already use in your project:
-const { computeBalances } = require('../../utils/leave.rules')
-
 function s(v) {
   return String(v ?? '').trim()
 }
 function up(v) {
   return s(v).toUpperCase()
+}
+function uniq(arr) {
+  return [...new Set((arr || []).map((x) => s(x)).filter(Boolean))]
+}
+
+function getRoles(req) {
+  const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
+  const base = req.user?.role ? [req.user.role] : []
+  return uniq([...raw, ...base]).map((x) => up(x))
 }
 
 async function resolveEmployeeIdFromAuth(req) {
@@ -28,7 +34,13 @@ async function resolveEmployeeIdFromAuth(req) {
   const emp =
     (await EmployeeDirectory.findOne({ loginId }).lean()) ||
     (await EmployeeDirectory.findOne({ employeeId: loginId }).lean())
+
   return s(emp?.employeeId)
+}
+
+function actorLoginId(req) {
+  // supports old + new payload shapes
+  return s(req.user?.loginId || req.user?.id || req.user?.sub || req.user?.employeeId || '')
 }
 
 function pickContractId(c) {
@@ -36,103 +48,147 @@ function pickContractId(c) {
 }
 
 function mapContractForSelector(c) {
-  // keep small (for dropdown)
+  // Support both your schema styles:
+  // - { startDate, endDate }
+  // - { from, to }
+  const from = s(c?.startDate || c?.from || '')
+  const to = s(c?.endDate || c?.to || '')
+
   return {
     _id: pickContractId(c),
-    from: s(c?.from),
-    to: s(c?.to),
+    from,
+    to,
     note: s(c?.note || c?.closeSnapshot?.note || ''),
-    // optional snapshots if you store them
     closeSnapshot: c?.closeSnapshot || null,
-    balances: Array.isArray(c?.balances) ? c.balances : undefined,
-    carry: c?.carry || undefined,
   }
 }
 
-// GET /api/leave/user/profile?contractId=xxxx
+async function loadManagerCard(prof) {
+  let manager = null
+  const managerEmployeeId = s(prof.managerEmployeeId)
+  const managerLoginId = s(prof.managerLoginId)
+
+  if (managerEmployeeId || managerLoginId) {
+    const mgr =
+      (managerEmployeeId
+        ? await EmployeeDirectory.findOne({ employeeId: managerEmployeeId }).lean()
+        : null) ||
+      (managerLoginId ? await EmployeeDirectory.findOne({ loginId: managerLoginId }).lean() : null)
+
+    if (mgr) {
+      manager = {
+        employeeId: s(mgr.employeeId),
+        loginId: s(mgr.loginId),
+        name: s(mgr.name || mgr.fullName),
+        department: s(mgr.department || mgr.departmentName),
+      }
+    }
+  }
+  return manager
+}
+
+/**
+ * ✅ GET /api/leave/user/profile/managed
+ * Returns employees under current manager (by managerLoginId matching manager's loginId OR employeeId)
+ */
+exports.getManagedProfiles = async (req, res, next) => {
+  try {
+    const roles = getRoles(req)
+    // optional strict role gate (recommended)
+    if (!roles.includes('LEAVE_MANAGER') && !roles.includes('MANAGER') && !roles.includes('LEAVE_ADMIN')) {
+      // if you want to allow everyone to call, remove this block
+      // but your UI calls this only for managers.
+      return res.json({ rows: [] })
+    }
+
+    const myLoginId = actorLoginId(req)
+    const myEmployeeId = await resolveEmployeeIdFromAuth(req)
+
+    const keys = uniq([myLoginId, myEmployeeId])
+    if (!keys.length) throw createError(401, 'Unauthorized (missing loginId/employeeId)')
+
+    // In your LeaveProfile schema you use managerLoginId (string)
+    const docs = await LeaveProfile.find({
+      isActive: { $ne: false },
+      managerLoginId: { $in: keys },
+    })
+      .select('employeeId name department joinDate contractDate contractEndDate isActive managerLoginId')
+      .sort({ employeeId: 1 })
+      .lean()
+
+    // return in the exact structure your UI expects
+    const rows = (docs || []).map((p) => ({
+      employeeId: s(p.employeeId),
+      name: s(p.name),
+      department: s(p.department),
+      joinDate: p.joinDate || null,
+      contractDate: p.contractDate || null,
+      contractEndDate: p.contractEndDate || null,
+      managerLoginId: s(p.managerLoginId),
+      isActive: p.isActive !== false,
+    }))
+
+    return res.json({ rows })
+  } catch (err) {
+    return next(err)
+  }
+}
+
+/**
+ * ✅ GET /api/leave/user/profile/my
+ * - Self view: /my
+ * - Manager view: /my?employeeId=xxxxx  (only if employee is under me)
+ */
 exports.getMyLeaveProfile = async (req, res, next) => {
   try {
     const myEmployeeId = await resolveEmployeeIdFromAuth(req)
-    if (!myEmployeeId) throw createError(401, 'Unauthorized (missing employeeId)')
+    const myLoginId = actorLoginId(req)
+    if (!myEmployeeId && !myLoginId) throw createError(401, 'Unauthorized (missing identity)')
 
-    const contractId = s(req.query.contractId)
+    const targetEmployeeId = s(req.query.employeeId) || myEmployeeId
 
-    const prof = await LeaveProfile.findOne({ employeeId: myEmployeeId }).lean()
+    // load target profile
+    const prof = await LeaveProfile.findOne({ employeeId: targetEmployeeId }).lean()
     if (!prof) throw createError(404, 'Not found')
 
-    // manager lookup (only my manager)
-    let manager = null
-    const managerEmployeeId = s(prof.managerEmployeeId)
-    const managerLoginId = s(prof.managerLoginId)
-
-    if (managerEmployeeId || managerLoginId) {
-      const mgr =
-        (managerEmployeeId
-          ? await EmployeeDirectory.findOne({ employeeId: managerEmployeeId }).lean()
-          : null) ||
-        (managerLoginId ? await EmployeeDirectory.findOne({ loginId: managerLoginId }).lean() : null)
-
-      if (mgr) {
-        manager = {
-          employeeId: s(mgr.employeeId),
-          loginId: s(mgr.loginId),
-          name: s(mgr.name || mgr.fullName),
-          department: s(mgr.department),
-        }
+    // If viewing someone else => must be their manager (or admin)
+    if (targetEmployeeId !== myEmployeeId) {
+      const roles = getRoles(req)
+      const isAdmin = roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')
+      if (!isAdmin) {
+        const keys = uniq([myLoginId, myEmployeeId])
+        const ok = keys.includes(s(prof.managerLoginId))
+        if (!ok) throw createError(403, 'Forbidden (not your employee)')
       }
     }
 
-    // build meta.contracts for dropdown
+    const contractId = s(req.query.contractId)
+
+    // contracts dropdown meta
     const contracts = Array.isArray(prof.contracts) ? prof.contracts : []
     const metaContracts = contracts.map(mapContractForSelector)
 
-    // choose view contract (optional)
-    const selected =
-      contractId &&
-      contracts.find((c) => pickContractId(c) === contractId)
+    // optional contract snapshot view
+    const selected = contractId ? contracts.find((c) => pickContractId(c) === contractId) : null
 
     // balances:
-    // - If selected contract has snapshot balances, show those
+    // - if selected contract has closeSnapshot.balances, show that
     // - else show live prof.balances
     let balances = Array.isArray(prof.balances) ? prof.balances : []
     let carry = prof.carry && typeof prof.carry === 'object' ? prof.carry : {}
 
-    const snapshotBalances =
-      selected?.closeSnapshot?.balances ||
-      selected?.balances ||
-      null
+    const snapBalances = selected?.closeSnapshot?.balances
+    const snapCarry = selected?.closeSnapshot?.carry
 
-    const snapshotCarry =
-      selected?.closeSnapshot?.carry ||
-      selected?.carry ||
-      null
+    if (Array.isArray(snapBalances) && snapBalances.length) balances = snapBalances
+    if (snapCarry && typeof snapCarry === 'object') carry = snapCarry
 
-    if (Array.isArray(snapshotBalances) && snapshotBalances.length) {
-      balances = snapshotBalances
-    }
-    if (snapshotCarry && typeof snapshotCarry === 'object') {
-      carry = snapshotCarry
-    }
+    const manager = await loadManagerCard(prof)
 
-    // IMPORTANT: ensure balances are computed the same as admin (if your admin uses computeBalances)
-    // If your LeaveProfile already stores computed balances, this won't change anything.
-    // If you want it identical to admin, keep this:
-    try {
-      balances = computeBalances({
-        profile: prof,
-        // allow override if viewing snapshot
-        overrideBalances: balances,
-        overrideCarry: carry,
-      })
-    } catch (e) {
-      // if your computeBalances signature is different, it will throw — we keep existing balances
-      // console.warn('computeBalances skipped:', e.message)
-    }
-
-    const payload = {
+    return res.json({
       profile: {
         employeeId: s(prof.employeeId),
-        loginId: s(prof.loginId || req.user?.loginId),
+        loginId: s(prof.loginId || ''),
         name: s(prof.name),
         department: s(prof.department),
         joinDate: s(prof.joinDate),
@@ -141,19 +197,18 @@ exports.getMyLeaveProfile = async (req, res, next) => {
         approvalMode: up(prof.approvalMode),
         isActive: prof.isActive !== false,
 
-        manager, // ✅ only my manager
+        manager,
         carry,
         balances,
-        // keep contracts too if your UI needs it
+
+        // keep contracts if UI needs it
         contracts,
       },
       meta: {
         updatedAt: new Date().toISOString(),
         contracts: metaContracts,
       },
-    }
-
-    return res.json(payload)
+    })
   } catch (err) {
     return next(err)
   }

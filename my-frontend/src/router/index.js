@@ -75,7 +75,7 @@ const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
 const CooProfile = () => import('@/views/expat/coo/Profile.vue')
 
 // Manager/GM Profile views
-const ManagerProfile = () => import('@/views/expat/manager/Profile.vue')
+const ManagerProfile = () => import('@/views/expat/manager/UserUnderManagerProfile.vue')
 const GMProfile = () => import('@/views/expat/generalManager/Profile.vue')
 
 /* ─────────────────────────────────────────────
