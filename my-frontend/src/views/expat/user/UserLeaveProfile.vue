@@ -1,306 +1,239 @@
 <!-- src/views/expat/user/UserLeaveProfile.vue
-  ✅ Works with backend controller:
-     GET /api/leave/profile/my  (no employeeId param for user)
-  ✅ Read-only
-  ✅ Shows balances computed by backend (balancesAsOf)
-  ✅ Contract history reads LeaveProfile.contracts[] (closeSnapshot.balances)
-  ✅ Used includes negative carry debt (carry.AL=-2 => Used shows 2 more)
-  ✅ Realtime refresh via socket rooms user:<loginId> + employee:<employeeId>
-  ✅ Full-screen edges (no wasted container)
+  ✅ Employee/User self leave profile (read-only)
+  ✅ Full-screen edge-to-edge layout
+  ✅ Contract history table
+  ✅ Preview PDF opens modal (separate file)
+  ✅ Uses /leave/user/profile only
+  ✅ No SweetAlert / no window alert (useToast)
 -->
+
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
+import UserLeavePreviewModal from './components/UserLeavePreviewModal.vue'
+
 defineOptions({ name: 'UserLeaveProfile' })
 
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ───────── Identity ───────── */
-const loginId = computed(() =>
-  String(auth.user?.loginId || auth.user?.id || localStorage.getItem('loginId') || '').trim()
-)
-const employeeIdFromAuth = computed(() =>
-  String(auth.user?.employeeId || localStorage.getItem('employeeId') || '').trim()
-)
-
-/* ───────── Responsive ───────── */
-const isMobile = ref(false)
-function updateIsMobile() {
-  if (typeof window === 'undefined') return
-  isMobile.value = window.innerWidth < 768
+/* ───────── mini helpers ───────── */
+const s = (v) => String(v ?? '').trim()
+const up = (v) => s(v).toUpperCase()
+const ymd = (v) => {
+  const t = s(v)
+  if (!t) return ''
+  const d = dayjs(t)
+  return d.isValid() ? d.format('YYYY-MM-DD') : t
 }
-
-/* ───────── Base state ───────── */
-const loading = ref(false)
-const error = ref('')
-const profile = ref(null)
-const lastUpdatedAt = ref('')
-
-function num(v) {
+const num = (v) => {
   const n = Number(v ?? 0)
   return Number.isFinite(n) ? n : 0
 }
 
-function fmtYMD(v) {
-  if (!v) return '—'
-  const d = dayjs(v)
-  return d.isValid() ? d.format('YYYY-MM-DD') : '—'
-}
-function fmtDT(v) {
-  if (!v) return '—'
-  const d = dayjs(v)
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—'
+/* ───────── Identity ───────── */
+const loginId = computed(() => s(auth.user?.loginId || auth.user?.id || localStorage.getItem('loginId') || ''))
+const employeeIdFromToken = computed(() => s(auth.user?.employeeId || auth.user?.employeeId || ''))
+
+/* ───────── UI ───────── */
+const ui = {
+  wrap: 'w-full min-h-screen px-4 sm:px-6 py-5 bg-slate-950 text-slate-100',
+  card: 'rounded-2xl border border-slate-800 bg-slate-900/40 backdrop-blur',
+  th: 'px-3 py-2 text-left text-[11px] font-extrabold uppercase tracking-wide text-slate-300 whitespace-nowrap',
+  td: 'px-3 py-2.5 text-[12px] text-slate-100 align-middle',
+  table: 'min-w-full border-collapse text-[12px] table-fixed',
+  btn: 'inline-flex items-center gap-2 rounded-full px-4 py-2 text-[12px] font-semibold',
+  btnGhost:
+    'border border-slate-700 bg-slate-950/40 hover:bg-slate-900/60 text-slate-100 disabled:opacity-60 disabled:cursor-not-allowed',
+  btnPrimary:
+    'bg-white text-slate-900 hover:bg-white/90 disabled:opacity-60 disabled:cursor-not-allowed',
 }
 
-/* ───────── Carry / Used helpers ───────── */
-function normalizeCarryObj(c) {
-  const src = c && typeof c === 'object' ? c : {}
+/* ───────── State ───────── */
+const loading = ref(false)
+const error = ref('')
+const updatedAt = ref('')
+const raw = ref(null) // keep original response
+const me = ref({
+  employeeId: '',
+  loginId: '',
+  name: '',
+  department: '',
+  joinDate: '',
+  contractDate: '',
+  contractEndDate: '',
+  approvalMode: '',
+  isActive: true,
+  balances: [],
+  carry: {},
+  contracts: [],
+})
+
+/* Normalize profile response robustly */
+function normalizeProfileResponse(data) {
+  const root = data || {}
+  const p = root.profile || root.data?.profile || root // support {profile, meta} or plain
+
+  const employeeId =
+    s(p.employeeId || root.employeeId || employeeIdFromToken.value || '')
+  const login =
+    s(p.loginId || root.loginId || loginId.value || '')
+  const name =
+    s(p.name || p.fullName || root.name || root.fullName || '')
+  const department =
+    s(p.department || root.department || '')
+  const joinDate =
+    ymd(p.joinDate || root.joinDate || '')
+  const contractDate =
+    ymd(p.contractDate || root.contractDate || '')
+  const contractEndDate =
+    ymd(p.contractEndDate || root.contractEndDate || '')
+  const approvalMode =
+    s(p.approvalMode || root.approvalMode || '')
+  const isActive = p.isActive !== false && root.isActive !== false
+
+  const balances = Array.isArray(p.balances) ? p.balances : Array.isArray(root.balances) ? root.balances : []
+  const carry = (p.carry && typeof p.carry === 'object') ? p.carry : (root.carry && typeof root.carry === 'object') ? root.carry : {}
+
+  // contracts may be in meta.contracts or profile.contracts
+  const metaContracts = root.meta?.contracts
+  const profileContracts = p.contracts
+  const contracts = Array.isArray(metaContracts)
+    ? metaContracts
+    : Array.isArray(profileContracts)
+      ? profileContracts
+      : []
+
   return {
-    AL: num(src.AL),
-    SP: num(src.SP),
-    MC: num(src.MC),
-    MA: num(src.MA),
-    UL: num(src.UL),
+    employeeId,
+    loginId: login,
+    name,
+    department,
+    joinDate,
+    contractDate,
+    contractEndDate,
+    approvalMode,
+    isActive,
+    balances,
+    carry,
+    contracts,
   }
 }
-function usedWithCarryDebt(used, carryVal) {
-  const debt = carryVal < 0 ? Math.abs(carryVal) : 0
-  return num(used) + debt
-}
 
-/* ───────── balances (from backend profile.balances) ───────── */
-const balances = computed(() => {
-  const raw = Array.isArray(profile.value?.balances) ? profile.value.balances : []
-  const carry = normalizeCarryObj(profile.value?.carry)
+/* Contract mapping (supports many backend shapes) */
+function normalizeContracts(list, fallbackMe) {
+  const arr = Array.isArray(list) ? list : []
+  const mapped = arr.map((c, i) => {
+    const id = s(c.contractId || c._id || c.id || '')
+    const idx = Number(c.contractNo || c.contractNumber || c.no || (i + 1))
+    const from = ymd(c.startDate || c.from || c.contractDate || '')
+    const to = ymd(c.endDate || c.to || c.contractEndDate || '')
+    const isCurrent = !!c.isCurrent || (!c.closedAt && c.closedAt !== undefined ? false : false) || !!c.isActive
+    const label = s(c.label) || `Contract ${idx}${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`
+    return { id, idx, from, to, isCurrent, label }
+  }).filter(x => x.id || x.from || x.to)
 
-  const arr = raw
-    .map((b) => {
-      const code = String(b?.leaveTypeCode || b?.code || '').toUpperCase()
-      if (!code) return null
-
-      const yearlyEntitlement = num(b?.yearlyEntitlement)
-      const used = num(b?.used)
-      // backend may already provide remaining; if not, compute
-      const remaining = b?.remaining != null ? num(b.remaining) : yearlyEntitlement - used
-
-      return {
-        leaveTypeCode: code,
-        yearlyEntitlement,
-        used,
-        usedDisplay: usedWithCarryDebt(used, carry[code]),
-        remaining,
-      }
+  // If none returned, fallback to single contract from me
+  if (!mapped.length) {
+    const from = ymd(fallbackMe?.contractDate || '')
+    const to = ymd(fallbackMe?.contractEndDate || '')
+    mapped.push({
+      id: 'single',
+      idx: 1,
+      from,
+      to,
+      isCurrent: true,
+      label: `Contract 1${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`,
     })
-    .filter(Boolean)
-
-  const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
-  arr.sort((a, b) => {
-    const ia = ORDER.indexOf(a.leaveTypeCode)
-    const ib = ORDER.indexOf(b.leaveTypeCode)
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
-    return a.leaveTypeCode.localeCompare(b.leaveTypeCode)
-  })
-
-  return arr
-})
-
-/* ───────── Contract end + days left ───────── */
-function pickContractEnd(obj = {}) {
-  return (
-    obj.contractEndDate ||
-    obj.contractEnd ||
-    obj.contractEndAt ||
-    obj.currentContractEnd ||
-    obj.currentContract?.endDate ||
-    obj.currentContract?.end ||
-    obj.latestContractEnd ||
-    ''
-  )
-}
-const contractEndYmd = computed(() => {
-  const v = pickContractEnd(profile.value || {})
-  if (!v) return ''
-  const d = dayjs(v)
-  return d.isValid() ? d.format('YYYY-MM-DD') : ''
-})
-const daysLeft = computed(() => {
-  if (!contractEndYmd.value) return null
-  const end = dayjs(contractEndYmd.value).startOf('day')
-  const now = dayjs().startOf('day')
-  return end.diff(now, 'day')
-})
-function daysLeftLabel(v) {
-  if (v == null) return '—'
-  if (v < 0) return `Expired ${Math.abs(v)}d`
-  return `${v}d`
-}
-function daysLeftClass(v) {
-  if (v == null) {
-    return 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100'
   }
-  if (v < 0 || v <= 30) {
-    return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'
-  }
-  if (v <= 200) {
-    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'
-  }
-  return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-}
 
-/* ───────── Contract history (embedded) ───────── */
-const expandedContractId = ref('')
-
-function normalizeBalancesLike(arr) {
-  const raw = Array.isArray(arr) ? arr : []
-  return raw
-    .map((b) => ({
-      leaveTypeCode: String(b?.leaveTypeCode || b?.code || '').toUpperCase(),
-      used: num(b?.used),
-      remaining: b?.remaining != null ? num(b.remaining) : null,
-      yearlyEntitlement: b?.yearlyEntitlement != null ? num(b.yearlyEntitlement) : null,
-    }))
-    .filter((x) => x.leaveTypeCode)
-}
-
-const contracts = computed(() => {
-  const list = Array.isArray(profile.value?.contracts) ? profile.value.contracts : []
-  const liveCarry = normalizeCarryObj(profile.value?.carry)
-  const liveBalances = Array.isArray(profile.value?.balances) ? profile.value.balances : []
-
-  const mapped = list.map((c, idx) => {
-    const id = String(c?._id || c?.id || c?.contractId || c?.contractNo || `${idx}`)
-    const start = c?.startDate || c?.contractDate || c?.fromDate || c?.from || c?.start || null
-    const end = c?.endDate || c?.contractEndDate || c?.toDate || c?.to || c?.end || null
-    const note = String(c?.note || c?.remark || '')
-    const openedAt = c?.openedAt || c?.createdAt || null
-    const closedAt = c?.closedAt || null
-
-    const snapBalances =
-      c?.closeSnapshot?.balances ||
-      c?.closeSnapshot?.balance ||
-      c?.closeSnapshot?.leaveBalances ||
-      null
-
-    const snapAsOf =
-      c?.closeSnapshot?.balancesAsOf ||
-      c?.closeSnapshot?.asOf ||
-      ''
-
-    const isActive = !closedAt
-    const balancesForUI = isActive ? normalizeBalancesLike(liveBalances) : normalizeBalancesLike(snapBalances)
-    const carryForUI = isActive ? liveCarry : normalizeCarryObj(c?.closeSnapshot?.carry)
-
-    return {
-      id,
-      contractNo: c?.contractNo ?? idx + 1,
-      startDate: start,
-      endDate: end,
-      openedAt,
-      closedAt,
-      note,
-      snapshotAsOf: snapAsOf || '',
-      isActive,
-      balances: balancesForUI,
-      carry: carryForUI,
+  // infer current if missing
+  const today = dayjs().format('YYYY-MM-DD')
+  if (mapped.length && !mapped.some(x => x.isCurrent)) {
+    for (const c of mapped) {
+      if (c.from && (!c.to ? c.from <= today : c.from <= today && today <= c.to)) c.isCurrent = true
     }
-  })
+    if (!mapped.some(x => x.isCurrent)) mapped[mapped.length - 1].isCurrent = true
+  }
 
-  mapped.sort((a, b) => {
-    const na = Number(a.contractNo || 0)
-    const nb = Number(b.contractNo || 0)
-    if (na && nb && na !== nb) return na - nb
-    const da = a.startDate ? dayjs(a.startDate).valueOf() : 0
-    const db = b.startDate ? dayjs(b.startDate).valueOf() : 0
-    return da - db
-  })
-
+  // sort by from
+  mapped.sort((a, b) => (a.from || '').localeCompare(b.from || ''))
   return mapped
+}
+
+const contractId = ref('')
+const contractOptions = computed(() => normalizeContracts(me.value.contracts, me.value))
+const selectedContract = computed(() => {
+  const id = s(contractId.value)
+  return contractOptions.value.find(c => s(c.id) === id) || null
 })
 
-function contractUsedChips(c) {
-  if (!Array.isArray(c?.balances) || !c.balances.length) return []
-  const ORDER = ['AL', 'SP', 'MC', 'MA', 'UL']
-  const arr = [...c.balances]
-  arr.sort((a, b) => {
-    const ia = ORDER.indexOf(a.leaveTypeCode)
-    const ib = ORDER.indexOf(b.leaveTypeCode)
-    if (ia !== -1 || ib !== -1) return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib)
-    return a.leaveTypeCode.localeCompare(b.leaveTypeCode)
-  })
+watch(contractOptions, (arr) => {
+  if (!arr?.length) {
+    contractId.value = ''
+    return
+  }
+  if (!contractId.value) {
+    const cur = arr.find(x => x.isCurrent)
+    contractId.value = s(cur?.id || arr[arr.length - 1]?.id || '')
+  }
+})
 
-  const carry = normalizeCarryObj(c?.carry)
-  return arr.map((b) => {
-    const code = b.leaveTypeCode
-    const usedDisplay = usedWithCarryDebt(num(b.used), carry[code])
-    return `${code}: ${usedDisplay}`
-  })
-}
+/* balances chip (carry-aware) */
+const balancePairs = computed(() => {
+  const order = ['AL', 'SP', 'MC', 'MA', 'UL']
+  const m = new Map((me.value.balances || []).map(b => [up(b.leaveTypeCode), b]))
+  const carry = me.value.carry || {}
+  return order.map(k => {
+    const b = m.get(k)
+    if (!b) return null
+    const ent = num(b.yearlyEntitlement)
+    let used = num(b.used)
+    const carryVal = num(carry[k])
+    if (carryVal < 0) used += Math.abs(carryVal)
+    const remaining = ent - used
+    return { k, used, ent, remaining }
+  }).filter(Boolean)
+})
 
-function toggleContract(id) {
-  expandedContractId.value = expandedContractId.value === id ? '' : id
-}
-
-/* ───────── Fetch profile ───────── */
-async function fetchMyProfile(silent = false) {
+/* ───────── API ───────── */
+async function fetchMe() {
+  loading.value = true
+  error.value = ''
   try {
-    loading.value = true
-    error.value = ''
-
-    // ✅ Controller returns self. Do NOT pass employeeId.
-    const res = await api.get('/leave/profile/my')
-
-    profile.value = res?.data?.profile || res?.data || null
-    lastUpdatedAt.value = dayjs().toISOString()
+    const res = await api.get('/leave/user/profile')
+    raw.value = res?.data || null
+    me.value = normalizeProfileResponse(res?.data)
+    updatedAt.value = s(res?.data?.meta?.updatedAt || new Date().toISOString())
   } catch (e) {
-    console.error('fetchMyProfile error', e)
-    error.value = e?.response?.data?.message || 'Unable to load leave profile.'
-    if (!silent) showToast({ type: 'error', title: 'Failed to load', message: error.value })
+    console.error('fetchMe error', e)
+    error.value = e?.response?.data?.message || e?.message || 'Failed to load profile.'
+    showToast({ type: 'error', title: 'Failed', message: error.value })
   } finally {
     loading.value = false
   }
 }
 
 /* ───────── realtime ───────── */
-function myEmployeeId() {
-  // prefer profile employeeId, else auth employeeId, else loginId
-  return String(profile.value?.employeeId || employeeIdFromAuth.value || loginId.value || '').trim()
-}
-
-function isMyDoc(payload = {}) {
-  const emp = String(payload.employeeId || '').trim()
-  const requester = String(payload.requesterLoginId || '').trim()
-  const meEmp = myEmployeeId()
-  const meLogin = String(loginId.value || '').trim()
-  return (emp && meEmp && emp === meEmp) || (requester && meLogin && requester === meLogin)
-}
-
-let refreshTimer = null
-function triggerRefresh() {
-  if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(() => fetchMyProfile(true), 180)
-}
-
 const offHandlers = []
-function setupRealtime() {
-  // join rooms
+function bindRealtime() {
   if (loginId.value) subscribeUserIfNeeded(loginId.value)
-  const eid = myEmployeeId()
-  if (eid) subscribeEmployeeIfNeeded(eid)
+  if (me.value.employeeId) subscribeEmployeeIfNeeded(me.value.employeeId)
 
   offHandlers.push(
-    onSocket('leave:req:created', (p) => isMyDoc(p) && triggerRefresh()),
-    onSocket('leave:req:updated', (p) => isMyDoc(p) && triggerRefresh()),
-    onSocket('leave:req:manager-decision', (p) => isMyDoc(p) && triggerRefresh()),
-    onSocket('leave:req:gm-decision', (p) => isMyDoc(p) && triggerRefresh()),
-    onSocket('leave:req:coo-decision', (p) => isMyDoc(p) && triggerRefresh()),
-    onSocket('leave:profile:updated', (p) => isMyDoc(p) && triggerRefresh()),
-    onSocket('leave:profile:recalculated', (p) => isMyDoc(p) && triggerRefresh())
+    onSocket('leave:profile', (payload) => {
+      const pid = s(payload?.employeeId || payload?.profile?.employeeId)
+      if (pid && pid === me.value.employeeId) fetchMe()
+    }),
+    onSocket('leave:request', (payload) => {
+      const pid = s(payload?.employeeId || payload?.request?.employeeId)
+      if (pid && pid === me.value.employeeId) fetchMe()
+    })
   )
 }
 function teardownRealtime() {
@@ -310,429 +243,185 @@ function teardownRealtime() {
   offHandlers.length = 0
 }
 
-/* ───────── lifecycle ───────── */
-onMounted(async () => {
-  updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+/* ───────── Preview modal ───────── */
+const previewOpen = ref(false)
+const previewContract = ref(null)
 
-  await fetchMyProfile(true)
-  setupRealtime()
+function openPreviewForContract(c) {
+  // IMPORTANT: set contractId first, then open modal
+  contractId.value = s(c?.id || contractId.value)
+  previewContract.value = c || selectedContract.value
+  previewOpen.value = true
+}
+function closePreview() {
+  previewOpen.value = false
+  previewContract.value = null
+}
+
+onMounted(async () => {
+  await fetchMe()
+  bindRealtime()
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
 })
 </script>
 
 <template>
-  <!-- ✅ Full screen width/height area, no wasted edges -->
-  <div class="h-full w-full p-0">
-    <div class="h-full w-full rounded-none border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Header -->
-      <div class="ui-hero-gradient rounded-t-2xl px-3 py-3 sm:px-4">
-        <div class="flex flex-wrap items-start justify-between gap-3">
-          <div class="min-w-[240px]">
-            <p class="text-[10px] uppercase tracking-[0.35em] font-semibold text-white/90">
-              Employee · Expat leave
-            </p>
+  <div :class="ui.wrap">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <div class="text-[22px] font-black">My Leave Profile</div>
+        <div class="text-[12px] text-slate-400">Expat Leave Portal · Read-only</div>
+      </div>
 
-            <div class="mt-0.5 flex items-center gap-2">
-              <p class="text-sm font-semibold">My Leave Profile</p>
-              <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold">
-                Read-only
-              </span>
-              <span
-                v-if="profile?.balancesAsOf"
-                class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-2 py-0.5 text-[10px] font-semibold"
-              >
-                As of: {{ profile?.balancesAsOf }}
-              </span>
-            </div>
+      <button :class="[ui.btn, ui.btnGhost]" :disabled="loading" @click="fetchMe">
+        <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
+        Refresh
+      </button>
+    </div>
 
-            <p class="mt-1 text-[11px] text-white/90">
-              Balances may be negative when SP borrows from AL.
-            </p>
+    <div v-if="error" class="mt-3 rounded-xl border border-rose-700/50 bg-rose-950/30 px-4 py-3 text-[12px] text-rose-100">
+      <b>Failed:</b> {{ error }}
+    </div>
+
+    <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-3">
+      <div :class="ui.card" class="p-4">
+        <div class="text-[12px] font-extrabold">Me</div>
+        <div class="mt-3 space-y-2">
+          <div class="flex justify-between">
+            <div class="text-[11px] text-slate-400">Employee ID</div>
+            <div class="font-mono font-bold">{{ me.employeeId || '—' }}</div>
           </div>
-
-          <div class="flex items-center gap-2">
-
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px]
-                     font-semibold text-white hover:bg-white/15 disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="loading"
-              @click="fetchMyProfile()"
-            >
-              <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
-              Refresh
-            </button>
+          <div class="flex justify-between">
+            <div class="text-[11px] text-slate-400">Name</div>
+            <div class="font-semibold">{{ me.name || '—' }}</div>
+          </div>
+          <div class="flex justify-between">
+            <div class="text-[11px] text-slate-400">Department</div>
+            <div class="font-semibold">{{ me.department || '—' }}</div>
+          </div>
+          <div class="flex justify-between">
+            <div class="text-[11px] text-slate-400">Join Date</div>
+            <div class="font-mono font-bold">{{ me.joinDate || '—' }}</div>
+          </div>
+          <div class="flex justify-between">
+            <div class="text-[11px] text-slate-400">Updated</div>
+            <div class="font-mono text-[11px] text-slate-300">{{ updatedAt || '—' }}</div>
           </div>
         </div>
       </div>
 
-      <!-- Body -->
-      <div class="px-2 pb-2 pt-3 sm:px-4 sm:pb-4">
-        <div
-          v-if="error"
-          class="mb-2 rounded-md border border-rose-400 bg-rose-50 px-3 py-2 text-[11px]
-                 text-rose-700 dark:border-rose-500/70 dark:bg-rose-950/40 dark:text-rose-100"
-        >
-          {{ error }}
+      <div :class="ui.card" class="p-4 lg:col-span-2">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <div class="text-[12px] font-extrabold">Current Balances</div>
+            <div class="text-[11px] text-slate-400">Carry-aware (negative shows red)</div>
+          </div>
+          <span class="text-[11px] text-slate-400">
+            Selected contract: <span class="font-mono text-slate-200">{{ selectedContract?.from || '—' }} → {{ selectedContract?.to || '—' }}</span>
+          </span>
         </div>
 
-        <div v-if="loading && !profile" class="space-y-2">
-          <div class="h-10 w-full animate-pulse rounded-xl bg-slate-200/90 dark:bg-slate-800/70" />
-          <div class="h-28 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
-        </div>
-
-        <div v-else>
-          <!-- Meta -->
+        <div class="mt-3 flex flex-wrap gap-2">
           <div
-            class="mb-3 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50/70 p-3
-                   text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-300 sm:grid-cols-5"
+            v-for="b in balancePairs"
+            :key="b.k"
+            class="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-950/30 px-3 py-1 text-[11px] font-semibold"
           >
-            <div class="flex items-center justify-between sm:block">
-              <div class="font-semibold text-slate-800 dark:text-slate-100">Employee</div>
-              <div>{{ profile?.employeeId || loginId || '—' }}</div>
-            </div>
-
-            <div class="flex items-center justify-between sm:block">
-              <div class="font-semibold text-slate-800 dark:text-slate-100">Join date</div>
-              <div>{{ profile?.joinDate ? dayjs(profile.joinDate).format('YYYY-MM-DD') : '—' }}</div>
-            </div>
-
-            <div class="flex items-center justify-between sm:block">
-              <div class="font-semibold text-slate-800 dark:text-slate-100">Contract date</div>
-              <div>{{ profile?.contractDate ? dayjs(profile.contractDate).format('YYYY-MM-DD') : '—' }}</div>
-            </div>
-
-            <div class="flex items-center justify-between sm:block">
-              <div class="font-semibold text-slate-800 dark:text-slate-100">Contract end</div>
-              <div class="font-semibold text-slate-900 dark:text-slate-50">
-                {{ contractEndYmd || '—' }}
-              </div>
-            </div>
-
-            <div class="flex items-center justify-between sm:block">
-              <div class="font-semibold text-slate-800 dark:text-slate-100">Department</div>
-              <div>{{ profile?.department || '—' }}</div>
-            </div>
-
-            <div v-if="lastUpdatedAt" class="sm:col-span-5 text-[10px] text-slate-500 dark:text-slate-400">
-              Last updated: {{ dayjs(lastUpdatedAt).format('YYYY-MM-DD HH:mm') }}
-            </div>
-          </div>
-
-          <!-- Contract History -->
-          <div class="mb-3 rounded-2xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950/30">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <div class="text-xs font-semibold text-slate-900 dark:text-slate-50">Contract History</div>
-                <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  Closed contracts show snapshot usage from <span class="font-semibold">closeSnapshot.balances</span>.
-                  Active contract shows live balances.
-                </div>
-              </div>
-            </div>
-
-            <p v-if="!contracts.length" class="mt-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
-              No contract history found.
-            </p>
-
-            <!-- Mobile contract cards -->
-            <div v-else-if="isMobile" class="mt-3 space-y-2">
-              <article
-                v-for="c in contracts"
-                :key="c.id"
-                class="rounded-2xl border border-slate-200 bg-white p-3 text-xs
-                       shadow-[0_10px_24px_rgba(15,23,42,0.08)]
-                       dark:border-slate-800 dark:bg-slate-900/60"
-              >
-                <div class="flex items-start justify-between gap-2">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        Contract #{{ c.contractNo }}
-                      </div>
-                      <span
-                        class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                        :class="c.isActive
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-                          : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100'"
-                      >
-                        {{ c.isActive ? 'Active' : 'Closed' }}
-                      </span>
-                    </div>
-
-                    <div class="mt-0.5 font-semibold text-slate-900 dark:text-slate-50">
-                      {{ fmtYMD(c.startDate) }} → {{ fmtYMD(c.endDate) }}
-                    </div>
-                  </div>
-
-                  <button
-                    class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
-                           font-semibold text-slate-800 hover:bg-slate-50
-                           dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:bg-slate-900/60"
-                    @click="toggleContract(c.id)"
-                  >
-                    <i class="fa-solid" :class="expandedContractId === c.id ? 'fa-chevron-up' : 'fa-chevron-down'" />
-                    Details
-                  </button>
-                </div>
-
-                <div
-                  v-if="expandedContractId === c.id"
-                  class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40"
-                >
-                  <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-                    Leave used ({{ c.isActive ? 'live' : 'snapshot' }})
-                  </div>
-
-                  <div v-if="!contractUsedChips(c).length" class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    No leave balances available for this contract.
-                  </div>
-
-                  <div v-else class="mt-2 flex flex-wrap gap-2">
-                    <span
-                      v-for="chip in contractUsedChips(c)"
-                      :key="chip"
-                      class="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px]
-                             font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-100"
-                    >
-                      {{ chip }}
-                    </span>
-                  </div>
-
-                  <div v-if="c.note" class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    Note: <span class="text-slate-800 dark:text-slate-100 font-semibold">{{ c.note }}</span>
-                  </div>
-
-                  <div v-if="!c.isActive && c.snapshotAsOf" class="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
-                    Snapshot as of: {{ c.snapshotAsOf }}
-                  </div>
-                </div>
-              </article>
-            </div>
-
-            <!-- Desktop contract table -->
-            <div v-else class="mt-3 overflow-x-auto">
-              <table class="min-w-[1100px] w-full text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
-                <thead
-                  class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200
-                         dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
-                >
-                  <tr>
-                    <th class="table-th">#</th>
-                    <th class="table-th">Start</th>
-                    <th class="table-th">End</th>
-                    <th class="table-th">Status</th>
-                    <th class="table-th">Leave used</th>
-                    <th class="table-th">Note</th>
-                    <th class="table-th text-right">Action</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  <template v-for="c in contracts" :key="c.id">
-                    <tr class="border-b border-slate-200 hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70">
-                      <td class="table-td font-semibold">{{ c.contractNo }}</td>
-                      <td class="table-td">{{ fmtYMD(c.startDate) }}</td>
-                      <td class="table-td">{{ fmtYMD(c.endDate) }}</td>
-
-                      <td class="table-td">
-                        <span
-                          class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold"
-                          :class="c.isActive
-                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-                            : 'border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100'"
-                        >
-                          {{ c.isActive ? 'Active' : 'Closed' }}
-                        </span>
-                      </td>
-
-                      
-                      <td class="table-td">
-                        <div v-if="contractUsedChips(c).length" class="flex flex-wrap gap-2">
-                          <span
-                            v-for="chip in contractUsedChips(c)"
-                            :key="chip"
-                            class="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px]
-                                   font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100"
-                          >
-                            {{ chip }}
-                          </span>
-                        </div>
-                        <span v-else class="text-[11px] text-slate-500 dark:text-slate-400">—</span>
-                      </td>
-
-                      <td class="table-td text-[11px] text-slate-600 dark:text-slate-300">
-                        {{ c.note || '—' }}
-                      </td>
-
-                      <td class="table-td text-right">
-                        <button
-                          class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px]
-                                 font-semibold text-slate-800 hover:bg-slate-50
-                                 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:bg-slate-900/60"
-                          @click="toggleContract(c.id)"
-                        >
-                          <i class="fa-solid" :class="expandedContractId === c.id ? 'fa-chevron-up' : 'fa-chevron-down'" />
-                          Detail
-                        </button>
-                      </td>
-                    </tr>
-
-                    <tr v-if="expandedContractId === c.id" class="border-b border-slate-200 dark:border-slate-700">
-                      <td class="table-td" colspan="9">
-                        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950/40">
-                          <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">Contract detail</div>
-                          <div class="mt-2 grid gap-2 sm:grid-cols-4 text-[11px] text-slate-600 dark:text-slate-300">
-                            <div><span class="font-semibold text-slate-800 dark:text-slate-100">Start:</span> {{ fmtYMD(c.startDate) }}</div>
-                            <div><span class="font-semibold text-slate-800 dark:text-slate-100">End:</span> {{ fmtYMD(c.endDate) }}</div>
-                          </div>
-                          <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-                            <span class="font-semibold text-slate-800 dark:text-slate-100">Note:</span> {{ c.note || '—' }}
-                          </div>
-                          <div v-if="!c.isActive && c.snapshotAsOf" class="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
-                            Snapshot as of: {{ c.snapshotAsOf }}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Balances -->
-          <p v-if="!balances.length" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
-            No leave balance data found.
-          </p>
-
-          <!-- Mobile balances -->
-          <div v-else-if="isMobile" class="space-y-2">
-            <article
-              v-for="b in balances"
-              :key="b.leaveTypeCode"
-              class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs
-                     shadow-[0_10px_24px_rgba(15,23,42,0.12)]
-                     dark:border-slate-700 dark:bg-slate-900/95"
+            <span class="font-black">{{ b.k }}</span>
+            <span class="font-mono text-slate-300">{{ b.used }}/{{ b.ent }}</span>
+            <span
+              class="ml-1 rounded-full px-2 py-0.5 text-[10px] font-black"
+              :class="b.remaining < 0 ? 'bg-rose-900/40 text-rose-200' : 'bg-emerald-900/35 text-emerald-200'"
             >
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <span
-                    class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px]
-                           font-semibold text-slate-800 border border-slate-200
-                           dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700"
-                  >
-                    {{ b.leaveTypeCode }}
-                  </span>
-                  <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    Entitlement:
-                    <span class="font-semibold text-slate-900 dark:text-slate-50">{{ b.yearlyEntitlement }}</span>
-                  </div>
-                </div>
-
-                <div class="text-right text-[11px]">
-                  <div class="text-slate-500 dark:text-slate-400">
-                    Used:
-                    <span class="font-semibold text-slate-900 dark:text-slate-50">{{ b.usedDisplay }}</span>
-                  </div>
-                  <div class="mt-0.5">
-                    <span class="text-slate-500 dark:text-slate-400">Remaining:dw</span>
-                    <span
-                      class="ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold"
-                      :class="b.remaining > 0
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-                        : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
-                    >
-                      {{ b.remaining }}assas
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </article>
+              {{ b.remaining }}
+            </span>
           </div>
 
-          <!-- Desktop balances -->
-          <!-- <div v-else class="overflow-x-auto">
-            <table class="min-w-[760px] w-full table-fixed text-left text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
-              <colgroup>
-                <col style="width: 140px" />
-                <col style="width: 200px" />
-                <col style="width: 160px" />
-                <col style="width: 200px" />
-              </colgroup>
-
-              <thead
-                class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500
-                      border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300"
-              >
-                <tr>
-                  <th class="table-th">Type</th>
-                  <th class="table-th text-right">Entitlement</th>
-                  <th class="table-th text-right">Used</th>
-                  <th class="table-th text-right">Remaining</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                <tr
-                  v-for="b in balances"
-                  :key="b.leaveTypeCode"
-                  class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80
-                        dark:border-slate-700 dark:hover:bg-slate-900/70"
-                >
-                  <td class="table-td align-middle">
-                    <span
-                      class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[11px]
-                            font-semibold text-slate-800 border border-slate-200
-                            dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700"
-                    >
-                      {{ b.leaveTypeCode }}
-                    </span>
-                  </td>
-
-                  <td class="table-td text-right tabular-nums align-middle">{{ b.yearlyEntitlement }}</td>
-                  <td class="table-td text-right tabular-nums align-middle">{{ b.usedDisplay }}</td>
-
-                  <td class="table-td text-right align-middle">
-                    <div class="flex justify-end">
-                      <span
-                        class="inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px]
-                              font-semibold tabular-nums"
-                        :class="b.remaining > 0
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200'
-                          : 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-200'"
-                      >
-                        {{ b.remaining }}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div> -->
-
-          <div class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
-            Read-only. If anything looks wrong, contact HR/Leave Admin.
-          </div>
+          <div v-if="!balancePairs.length" class="text-[12px] text-slate-400">No balances</div>
         </div>
       </div>
     </div>
+
+    <div class="mt-4 :class=ui.card">
+      <div :class="ui.card" class="overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
+          <div>
+            <div class="text-[12px] font-extrabold">Contract History</div>
+            <div class="text-[11px] text-slate-400">Preview PDF per contract</div>
+          </div>
+          <div class="text-[11px] text-slate-400">Total: {{ contractOptions.length }}</div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table :class="ui.table">
+            <colgroup>
+              <col style="width: 220px" />
+              <col style="width: 220px" />
+              <col />
+              <col style="width: 140px" />
+              <col style="width: 170px" />
+            </colgroup>
+            <thead class="border-b border-slate-800 bg-slate-950/40">
+              <tr>
+                <th :class="ui.th">From</th>
+                <th :class="ui.th">To</th>
+                <th :class="ui.th">Label</th>
+                <th :class="ui.th">Current</th>
+                <th :class="[ui.th, 'text-right']">Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              <tr
+                v-for="c in contractOptions"
+                :key="c.id || c.label"
+                class="border-b border-slate-800 hover:bg-slate-950/40"
+              >
+                <td :class="ui.td" class="font-mono">{{ c.from || '—' }}</td>
+                <td :class="ui.td" class="font-mono">{{ c.to || '—' }}</td>
+                <td :class="ui.td" class="truncate">
+                  <span class="font-semibold">{{ c.label }}</span>
+                </td>
+                <td :class="ui.td">
+                  <span v-if="c.isCurrent" class="rounded-full bg-emerald-900/35 px-2 py-0.5 text-[10px] font-black text-emerald-200">
+                    Current
+                  </span>
+                  <span v-else class="text-[11px] text-slate-500">—</span>
+                </td>
+                <td :class="ui.td" class="text-right">
+                  <button
+                    :class="[ui.btn, ui.btnPrimary]"
+                    :disabled="loading"
+                    @click="openPreviewForContract(c)"
+                  >
+                    <i class="fa-solid fa-eye text-[11px]" />
+                    Preview PDF
+                  </button>
+                </td>
+              </tr>
+
+              <tr v-if="!contractOptions.length">
+                <td colspan="5" class="py-8 text-center text-[12px] text-slate-400">
+                  No contract history found from backend. (Your endpoint must return meta.contracts or profile.contracts)
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <UserLeavePreviewModal
+      :open="previewOpen"
+      :me="me"
+      :contracts="contractOptions"
+      :contract-id="contractId"
+      @update:contractId="(v) => (contractId = v)"
+      @close="closePreview"
+    />
   </div>
 </template>
-
-<style scoped>
-/* keep your global hero gradient class name */
-.ui-hero-gradient {
-  background: linear-gradient(135deg, rgba(14,165,233,1) 0%, rgba(16,185,129,1) 100%);
-  border-radius: 0px;
-}
-.table-th { padding: 8px 10px; font-size: 11px; font-weight: 800; white-space: nowrap; }
-.table-td { padding: 8px 10px; vertical-align: middle; }
-</style>

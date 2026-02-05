@@ -20,6 +20,7 @@ const CATEGORY = ['Car', 'Messenger']
 const AIRPORT_DESTINATION = 'Techo International Airport'
 const LOCATIONS = [
   'Techo International Airport',
+  'CGTI',
   'CARGOPORT ( OFFICE )',
   'Khai Nam',
   'DB ( OFFICE )',

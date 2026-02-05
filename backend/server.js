@@ -118,13 +118,14 @@ attachDebugEndpoints(app)
 app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
 
 app.use('/api/leave',               require('./routes/leave/leaveType-expat.routes'))
-app.use('/api/leave/profile',       require('./routes/leave/leaveProfile.routes'))
+app.use('/api/leave/user', require('./routes/leave/leaveUser.routes'))
+app.use('/api/leave/user', require('./routes/leave/leaveUserRecord.routes'))
+
 app.use('/api/leave/replace-days',  require('./routes/leave/replaceDay.routes'))
 
 app.use('/api/admin/leave',         require('./routes/leave/leaveAdmin.routes'))
 app.use('/api/admin/leave/types',   require('./routes/leave/leaveType-admin.routes'))
 
-// ✅ FIX: COO inbox must NOT reuse same base path
 app.use('/api/coo/leave/requests', require('./routes/leave/leaveRequests.coo.routes'))
 
 // leave report

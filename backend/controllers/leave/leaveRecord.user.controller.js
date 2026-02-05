@@ -1,5 +1,7 @@
 /* eslint-disable no-console */
-// backend/controllers/leave/leaveRecord.admin.controller.js
+// backend/controllers/leave/leaveRecord.user.controller.js
+
+const mongoose = require('mongoose')
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const LeaveRequest = require('../../models/leave/LeaveRequest')
@@ -15,22 +17,17 @@ function num(v) {
   const n = Number(v ?? 0)
   return Number.isFinite(n) ? n : 0
 }
-
 function safeText(v) {
   return String(v ?? '').trim()
 }
-
 function isValidYMD(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim())
 }
-
 function assertYMD(s, label = 'date') {
   const v = String(s || '').trim()
   if (!isValidYMD(v)) throw new Error(`Invalid ${label}. Expected YYYY-MM-DD, got "${s}"`)
   return v
 }
-
-/** Convert Date/ISO/string to YYYY-MM-DD (UTC). Returns '' if invalid. */
 function toYMD(v) {
   if (!v) return ''
   if (typeof v === 'string') {
@@ -40,9 +37,7 @@ function toYMD(v) {
     const d = new Date(s)
     return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
   }
-  if (v instanceof Date) {
-    return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10)
-  }
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10)
   try {
     const d = new Date(v)
     return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
@@ -50,7 +45,6 @@ function toYMD(v) {
     return ''
   }
 }
-
 function nowYMD(tz = DEFAULT_TZ) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
@@ -62,11 +56,7 @@ function nowYMD(tz = DEFAULT_TZ) {
     .reduce((acc, p) => ((acc[p.type] = p.value), acc), {})
   return `${parts.year}-${parts.month}-${parts.day}`
 }
-
-/**
- * Phnom Penh midnight Date for a YMD (prevents timezone drift).
- * PP 00:00 == UTC previous day 17:00.
- */
+/** Phnom Penh midnight Date for a YMD (prevents timezone drift). */
 function phnomPenhMidnightDate(ymd) {
   const s = String(ymd || '').trim()
   if (!isValidYMD(s)) return new Date()
@@ -74,22 +64,6 @@ function phnomPenhMidnightDate(ymd) {
   const utcMidnight = Date.UTC(y, (m || 1) - 1, d || 1, 0, 0, 0)
   const ppMidnightUtc = utcMidnight - PP_OFFSET_MINUTES * 60 * 1000
   return new Date(ppMidnightUtc)
-}
-
-function uniqUpper(arr) {
-  return [...new Set((arr || []).map((x) => String(x || '').toUpperCase().trim()))].filter(Boolean)
-}
-
-function getRoles(req) {
-  const roles = []
-  if (req.user?.role) roles.push(req.user.role)
-  if (Array.isArray(req.user?.roles)) roles.push(...req.user.roles)
-  return uniqUpper(roles)
-}
-
-function isAdminViewer(req) {
-  const roles = getRoles(req)
-  return roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN') || roles.includes('ROOT_ADMIN')
 }
 
 /** ✅ support old numeric employeeId data + new string employeeId */
@@ -133,31 +107,11 @@ function dayColsForPdf(pdfCode, totalDays) {
   }
 }
 
-
-async function loadDirMap(ids = []) {
-  const uniq = [...new Set(ids.map((x) => String(x || '').trim()).filter(Boolean))]
-  if (!uniq.length) return new Map()
-
-  const rows = await EmployeeDirectory.find(
-    { employeeId: { $in: uniq } },
-    { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1 }
-  ).lean()
-
-  const map = new Map()
-  for (const r of rows || []) map.set(String(r.employeeId), r)
-  return map
-}
-
-function displayName(dirRow, fallback = '') {
-  return safeText(dirRow?.name || dirRow?.fullName || fallback || '')
-}
-
 // ───────── Contract helpers ─────────
 
 function pickContract(profile, { contractId, contractNo }) {
   const list = Array.isArray(profile?.contracts) ? profile.contracts : []
   if (!list.length) return null
-
   if (contractId) return list.find((c) => String(c._id) === String(contractId)) || null
   if (contractNo) return list.find((c) => Number(c.contractNo) === Number(contractNo)) || null
   return null
@@ -196,28 +150,118 @@ function listContractsMeta(profile) {
   }))
 }
 
-// ───────────────── controller ─────────────────
+/** resolve employeeId from token (best effort) */
+async function resolveEmployeeId(req) {
+  const direct = safeText(req.user?.employeeId)
+  if (direct) return direct
 
-exports.getEmployeeLeaveRecord = async (req, res) => {
+  const loginId = safeText(req.user?.loginId || req.user?.id || req.user?.sub)
+  if (!loginId) return ''
+
+  const emp =
+    (await EmployeeDirectory.findOne({ loginId }).lean()) ||
+    (await EmployeeDirectory.findOne({ employeeId: loginId }).lean())
+
+  return safeText(emp?.employeeId)
+}
+
+async function loadDirectoryForEmployee(employeeId) {
+  const id = safeText(employeeId)
+  if (!id) return null
+  return (
+    (await EmployeeDirectory.findOne({ employeeId: id }).lean()) ||
+    (await EmployeeDirectory.findOne({ employeeId: Number(id) }).lean()) ||
+    null
+  )
+}
+
+// ───────────────── SIGNATURE META RESOLVER (inside same controller file) ─────────────────
+//
+// This returns only { signatureUrl } so the frontend can fetch the image with JWT.
+// Why user couldn’t render before: user token can’t call /admin/signatures/*
+//
+// ✅ You MUST set these model names to match your project once.
+//
+const EMPLOYEE_SIG_MODEL = process.env.EMPLOYEE_SIG_MODEL || 'EmployeeSignature'
+const APPROVER_SIG_MODEL = process.env.APPROVER_SIG_MODEL || 'ApproverSignature'
+
+function getModelSafe(name) {
   try {
-    if (!isAdminViewer(req)) return res.status(403).json({ message: 'Forbidden' })
+    return mongoose.models?.[name] || null
+  } catch {
+    return null
+  }
+}
 
-    const employeeId = String(req.params.employeeId || '').trim()
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required' })
+function isLikelyEmployeeId(v) {
+  return /^\d{4,}$/.test(safeText(v))
+}
+
+async function findEmployeeSignatureUrl(employeeIdLike) {
+  const Model = getModelSafe(EMPLOYEE_SIG_MODEL)
+  if (!Model) return ''
+  const id = safeText(employeeIdLike)
+  if (!id) return ''
+
+  const n = Number(id)
+  const doc =
+    (await Model.findOne({ employeeId: id }).lean()) ||
+    (Number.isFinite(n) ? await Model.findOne({ employeeId: n }).lean() : null)
+
+  return safeText(doc?.signatureUrl || doc?.url || '')
+}
+
+async function findApproverSignatureUrl(loginId) {
+  const Model = getModelSafe(APPROVER_SIG_MODEL)
+  if (!Model) return ''
+  const id = safeText(loginId)
+  if (!id) return ''
+  const doc = await Model.findOne({ loginId: id }).lean()
+  return safeText(doc?.signatureUrl || doc?.url || '')
+}
+
+// ✅ GET /api/leave/user/signatures/resolve/:idLike
+exports.resolveSignatureMeta = async (req, res) => {
+  try {
+    const idLike = safeText(req.params.idLike)
+    if (!idLike) return res.json({ signatureUrl: '' })
+
+    const numericFirst = isLikelyEmployeeId(idLike)
+
+    let url = ''
+    if (numericFirst) {
+      url = (await findEmployeeSignatureUrl(idLike)) || (await findApproverSignatureUrl(idLike))
+    } else {
+      url = (await findApproverSignatureUrl(idLike)) || (await findEmployeeSignatureUrl(idLike))
+    }
+
+    return res.json({ signatureUrl: url || '' })
+  } catch (e) {
+    console.error('resolveSignatureMeta error', e)
+    return res.status(500).json({ message: e.message || 'Failed to resolve signature meta' })
+  }
+}
+
+// ───────────────── Leave Record (USER) ─────────────────
+
+// ✅ GET /api/leave/user/record?contractId=...&contractNo=...&from=...&to=...&asOf=...
+exports.getMyLeaveRecord = async (req, res) => {
+  try {
+    const employeeId = await resolveEmployeeId(req)
+    if (!employeeId) return res.status(401).json({ message: 'Unauthorized (missing employeeId)' })
 
     const from = req.query.from ? assertYMD(req.query.from, 'from') : ''
     const to = req.query.to ? assertYMD(req.query.to, 'to') : ''
-    if ((from && !to) || (!from && to)) {
-      return res.status(400).json({ message: 'from and to must be provided together.' })
-    }
-    if (from && to && from > to) {
-      return res.status(400).json({ message: 'from cannot be after to.' })
-    }
+    if ((from && !to) || (!from && to)) return res.status(400).json({ message: 'from and to must be provided together.' })
+    if (from && to && from > to) return res.status(400).json({ message: 'from cannot be after to.' })
 
     const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : ''
 
     const statuses = safeText(req.query.statuses)
-      ? safeText(req.query.statuses).split(',').map((s) => s.trim().toUpperCase())
+      ? safeText(req.query.statuses)
+          .split(',')
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean)
       : ['APPROVED', 'PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO']
 
     const contractId = safeText(req.query.contractId)
@@ -226,14 +270,19 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
     const profile =
       (await LeaveProfile.findOne({ employeeId }).lean()) ||
       (await LeaveProfile.findOne({ employeeId: Number(employeeId) }).lean())
-    if (!profile) return res.status(404).json({ message: 'Leave profile not found.' })
 
-    const leaveAdminId = safeText(profile.leaveAdminLoginId || 'leave_admin')
+    if (!profile) return res.status(404).json({ message: 'Leave profile not found.' })
 
     const requested = pickContract(profile, { contractId, contractNo })
     const current = getCurrentContract(profile)
     const selectedContract = requested || current
     if (!selectedContract) return res.status(400).json({ message: 'No contract found.' })
+
+    const dir = await loadDirectoryForEmployee(employeeId)
+    const name = safeText(dir?.name || dir?.fullName || profile?.name || '')
+    const department = safeText(dir?.departmentName || dir?.department || profile?.department || '')
+    const section = safeText(dir?.section || 'Foreigner')
+    const joinDate = toYMD(profile?.joinDate || '')
 
     let docs = await LeaveRequest.find({
       employeeId: buildEmpIdIn(employeeId),
@@ -242,68 +291,74 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       .sort({ startDate: 1, createdAt: 1 })
       .lean()
 
-    docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, selectedContract.startDate, selectedContract.endDate))
+    // ✅ always clamp to selected contract range
+    docs = docs.filter((r) =>
+      overlapsRange(r.startDate, r.endDate, selectedContract.startDate, selectedContract.endDate)
+    )
+
+    // optional extra range
     if (from && to) docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, from, to))
+
+    // optional asOf
     if (asOf) docs = docs.filter((r) => toYMD(r.startDate) <= asOf)
 
-    const approved = docs.filter((r) => r.status === 'APPROVED')
+    // compute AL remaining only for approved AL/SP rows
+    const approved = docs.filter((r) => safeText(r.status).toUpperCase() === 'APPROVED')
     const approvedIndex = new Map(approved.map((r, i) => [String(r._id), i]))
 
     const rows = []
     for (const r of docs) {
-      let alRemain = ''
+      const st = safeText(r.status).toUpperCase()
+      const pdfCode = mapToPdfCode(r.leaveTypeCode)
 
-      if (r.status === 'APPROVED') {
+      let alRemain = ''
+      if (st === 'APPROVED' && shouldCountAsAL(r.leaveTypeCode)) {
         const idx = approvedIndex.get(String(r._id))
         const hist = idx >= 0 ? approved.slice(0, idx + 1) : approved
 
-        // compute AL remaining as-of endDate of this row
-        const snap = computeBalances(profile, hist, phnomPenhMidnightDate(toYMD(r.endDate || r.startDate)))
-        const al = (snap?.balances || []).find((b) => String(b.leaveTypeCode).toUpperCase() === 'AL')
+        const snapDate = phnomPenhMidnightDate(toYMD(r.endDate || r.startDate) || nowYMD())
+        const snap = computeBalances(profile, hist, snapDate)
+
+        const al = (snap?.balances || []).find((b) => String(b.leaveTypeCode || '').toUpperCase() === 'AL')
         alRemain = num(al?.remaining)
       }
 
-      const pdfCode = mapToPdfCode(r.leaveTypeCode)
-      const st = safeText(r.status).toUpperCase()
-
       rows.push({
-        // (optional) stable id for frontend rowKey if you want later
         _id: String(r._id || ''),
 
         date: toYMD(r.createdAt),
         from: toYMD(r.startDate),
         to: toYMD(r.endDate || r.startDate),
 
-        // AL column includes SP (borrow from AL)
         AL_day: shouldCountAsAL(r.leaveTypeCode) ? num(r.totalDays) : '',
         AL_remain: shouldCountAsAL(r.leaveTypeCode) ? alRemain : '',
 
-        // ✅ UL / SL / ML columns (your template expects these)
         ...dayColsForPdf(pdfCode, r.totalDays),
 
-        // ✅ system for template + excel
         leaveTypeCode: pdfCode,
         status: r.status,
 
-        // ✅ IMPORTANT: signature IDs your frontend is reading
-        recordByLoginId: safeText(profile.employeeId), // ALWAYS employee signature
-
-        // Manager signature shows only after manager approved
-        approvedManagerLoginId:
-          st === 'PENDING_GM' || st === 'APPROVED' ? safeText(profile.managerLoginId) : '',
-
-        // GM signature shows only after GM approved
+        // ✅ IMPORTANT: these IDs are what the frontend uses to resolve signature meta
+        recordByLoginId: safeText(profile.employeeId || employeeId), // employee signature id
+        approvedManagerLoginId: st === 'PENDING_GM' || st === 'APPROVED' ? safeText(profile.managerLoginId) : '',
         approvedGMLoginId: st === 'APPROVED' ? safeText(profile.gmLoginId) : '',
 
-        // ✅ optional remark (your rowKey includes remark)
         remark: safeText(r.reason || r.note || r.remark || ''),
       })
     }
 
-
-    res.json({
+    return res.json({
       meta: {
         employeeId,
+        name,
+        department,
+        section,
+        joinDate,
+
+        // ✅ helpful for user UI signature lookup
+        managerLoginId: safeText(profile.managerLoginId),
+        gmLoginId: safeText(profile.gmLoginId),
+
         contract: contractMeta(selectedContract),
         contracts: listContractsMeta(profile),
         asOf: asOf || null,
@@ -311,7 +366,7 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       rows,
     })
   } catch (e) {
-    console.error('getEmployeeLeaveRecord error', e)
-    res.status(500).json({ message: e.message || 'Failed to load employee leave record' })
+    console.error('getMyLeaveRecord error', e)
+    return res.status(500).json({ message: e.message || 'Failed to load my leave record' })
   }
 }
