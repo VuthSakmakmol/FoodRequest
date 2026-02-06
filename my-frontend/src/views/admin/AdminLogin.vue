@@ -136,7 +136,7 @@ async function submit() {
           <font-awesome-icon icon="user" class="text-slate-950 text-xl" />
         </div>
         <h1 class="text-lg sm:text-xl font-bold tracking-wide">
-          Admin Sign In
+          Sign In
         </h1>
         <p class="mt-1 text-[11px] text-slate-400 text-center">
           Admin • Chef • Driver • Messenger • Leave

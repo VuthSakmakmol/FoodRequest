@@ -454,6 +454,33 @@ function showGmSignatureForRow(r) {
   return st === 'APPROVED'
 }
 
+function pickManagerLoginId(r) {
+  return safeText(
+    r?.approvedManagerLoginId ||
+      r?.approvedByManagerLoginId ||
+      r?.managerLoginId ||
+      r?.managerId || // just in case
+      r?.approvals?.managerLoginId ||
+      r?.approvedBy?.managerLoginId ||
+      previewData.value?.meta?.managerLoginId ||
+      previewEmp.value?.managerLoginId
+  )
+}
+
+function pickGmLoginId(r) {
+  return safeText(
+    r?.approvedGMLoginId ||
+      r?.approvedGmLoginId ||
+      r?.approvedByGmLoginId ||
+      r?.gmLoginId ||
+      r?.gmId ||
+      r?.approvals?.gmLoginId ||
+      r?.approvedBy?.gmLoginId ||
+      previewData.value?.meta?.gmLoginId ||
+      previewEmp.value?.gmLoginId
+  )
+}
+
 async function ensureRowSignatures(rows = []) {
   const list = Array.isArray(rows) ? rows : []
   const jobs = []
@@ -462,15 +489,29 @@ async function ensureRowSignatures(rows = []) {
     const k = rowKey(r)
     if (rowSig.value.has(k)) continue
 
-    const recordById = safeText(r.recordByLoginId)
+    // ✅ Record by: prefer employeeId first (signature belongs to employee)
+    const recordByEmployeeId = safeText(
+      r?.recordByEmployeeId ||
+        r?.recordByEmpId ||
+        r?.employeeId ||
+        r?.requesterEmployeeId ||
+        previewData.value?.meta?.employeeId ||
+        previewEmp.value?.employeeId
+    )
+    const recordByLoginFallback = safeText(r?.recordByLoginId || r?.recordBy)
+
     const checkedById = LEAVE_ADMIN_LOGIN
-    const managerId = safeText(r.approvedManagerLoginId)
-    const gmId = safeText(r.approvedGMLoginId)
+    const managerId = pickManagerLoginId(r)
+    const gmId = pickGmLoginId(r)
 
     jobs.push(
       (async () => {
-        const [recMeta, chkMeta, mgrMeta, gmMeta] = await Promise.all([
-          resolveSignatureMetaUrl(recordById),
+        // ✅ recordBy must use employee signature when possible
+        let recMeta = ''
+        if (recordByEmployeeId) recMeta = await getEmployeeSignatureMetaUrl(recordByEmployeeId)
+        if (!recMeta && recordByLoginFallback) recMeta = await resolveSignatureMetaUrl(recordByLoginFallback)
+
+        const [chkMeta, mgrMeta, gmMeta] = await Promise.all([
           resolveSignatureMetaUrl(checkedById),
           resolveSignatureMetaUrl(managerId),
           resolveSignatureMetaUrl(gmId),
@@ -498,6 +539,7 @@ async function ensureRowSignatures(rows = []) {
     await Promise.all(jobs.slice(i, i + BATCH))
   }
 }
+
 
 /* ───────── Fetch record for selected contract ───────── */
 async function fetchRecordForSelectedContract(employeeId) {
@@ -721,19 +763,25 @@ async function exportRecordExcel() {
       Date: r.date,
       From: r.from,
       To: r.to,
+
       AL_Day: r.AL_day,
+      SP_Day: r.SP_day,          // ✅ add this
       AL_Remain: r.AL_remain,
+
       UL: r.UL_day,
       SL: r.SL_day,
       ML: r.ML_day,
+
       RecordBy: r.recordByLoginId,
       CheckedBy: LEAVE_ADMIN_LOGIN,
       Manager: r.approvedManagerLoginId,
       GM: r.approvedGMLoginId,
+
       Remark: r.remark,
       Status: r.status,
       LeaveType: r.leaveTypeCode,
     }))
+
 
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
@@ -1129,24 +1177,29 @@ onBeforeUnmount(() => {
                     <div class="meta-row">
                       <div class="meta-label">Date Join:</div>
                       <div class="meta-value mono">{{ previewData?.meta?.joinDate || '' }}</div>
-                      <div class="meta-legend">
-                        <span class="meta-label">Leave Type:</span>
-                        <span><b>AL</b>: Annual Leave</span>
-                        <span><b>SL</b>: Sick Leave</span>
-                        <span><b>ML</b>: Maternity Leave</span>
-                        <span><b>UL</b>: Unpaid Leave</span>
-                      </div>
+                        <div class="meta-legend">
+                          <span class="meta-label">Leave Type:</span>
+                          <span><b>AL</b>: Annual Leave</span>
+                          <span><b>SP</b>: Special Leave</span>
+                          <span><b>SL</b>: Sick Leave</span>
+                          <span><b>ML</b>: Maternity Leave</span>
+                          <span><b>UL</b>: Unpaid Leave</span>
+                        </div>
                     </div>
                   </div>
 
                   <!-- Table MANAGER + GM -->
                   <table class="sheet-table">
+                    <!-- ✅ UPDATED colgroup: added SP column -->
                     <colgroup>
                       <col style="width: 16mm;" />
                       <col style="width: 16mm;" />
                       <col style="width: 16mm;" />
-                      <col style="width: 13mm;" />
-                      <col style="width: 13mm;" />
+
+                      <col style="width: 12mm;" /> <!-- AL Day -->
+                      <col style="width: 12mm;" /> <!-- SP Day -->
+                      <col style="width: 12mm;" /> <!-- AL Remain -->
+
                       <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
@@ -1161,7 +1214,10 @@ onBeforeUnmount(() => {
                       <tr>
                         <th rowspan="2">Date</th>
                         <th colspan="2">Leave Date</th>
-                        <th colspan="2">AL</th>
+
+                        <!-- ✅ UPDATED: Leave group includes AL + SP -->
+                        <th colspan="3">Leave</th>
+
                         <th rowspan="2">UL<br />Day</th>
                         <th rowspan="2">SL<br />Day</th>
                         <th rowspan="2">ML<br />Day</th>
@@ -1170,11 +1226,15 @@ onBeforeUnmount(() => {
                         <th colspan="2">Approved by</th>
                         <th rowspan="2">Remark</th>
                       </tr>
+
                       <tr>
                         <th>From</th>
                         <th>To</th>
-                        <th>Day</th>
-                        <th>Remain</th>
+
+                        <th>AL<br />Day</th>
+                        <th>SP<br />Day</th>
+                        <th>AL<br />Remain</th>
+
                         <th>Manager</th>
                         <th>OM / GM</th>
                       </tr>
@@ -1186,7 +1246,9 @@ onBeforeUnmount(() => {
                         <td class="mono nowrap">{{ r.from || '' }}</td>
                         <td class="mono nowrap">{{ r.to || '' }}</td>
 
+                        <!-- ✅ SP shows here (AL stays only for AL) -->
                         <td class="mono center">{{ r.AL_day ?? '' }}</td>
+                        <td class="mono center">{{ r.SP_day ?? '' }}</td>
                         <td class="mono center">{{ r.AL_remain ?? '' }}</td>
 
                         <td class="mono center">{{ r.UL_day ?? '' }}</td>
@@ -1244,11 +1306,13 @@ onBeforeUnmount(() => {
                         <td class="remark">{{ r.remark || '' }}</td>
                       </tr>
 
+                      <!-- ✅ UPDATED blank rows col count: now 14 -->
                       <tr v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)" :key="'blank-' + n">
-                        <td v-for="c in 13" :key="c">&nbsp;</td>
+                        <td v-for="c in 14" :key="c">&nbsp;</td>
                       </tr>
                     </tbody>
                   </table>
+
                 </div>
               </div>
 

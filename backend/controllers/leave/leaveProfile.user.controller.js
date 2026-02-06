@@ -2,256 +2,320 @@
 // backend/controllers/leave/leaveProfile.user.controller.js
 
 const createError = require('http-errors')
+const dayjs = require('dayjs')
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
-function s(v) {
-  return String(v ?? '').trim()
-}
-function up(v) {
-  return s(v).toUpperCase()
-}
-function uniq(arr) {
-  return [...new Set((arr || []).map((x) => s(x)).filter(Boolean))]
-}
+/* ───────────────── helpers ───────────────── */
+
+const s = (v) => String(v ?? '').trim()
+
+const uniqUpper = (arr) =>
+  [...new Set((arr || []).map((x) => String(x || '').toUpperCase().trim()))].filter(Boolean)
 
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
   const base = req.user?.role ? [req.user.role] : []
-  return uniq([...raw, ...base]).map((x) => up(x))
-}
-
-async function resolveEmployeeIdFromAuth(req) {
-  // best-effort from token
-  const employeeId = s(req.user?.employeeId)
-  if (employeeId) return employeeId
-
-  // try loginId -> EmployeeDirectory
-  const loginId = s(req.user?.loginId || req.user?.id || req.user?.sub)
-  if (!loginId) return ''
-
-  const emp =
-    (await EmployeeDirectory.findOne({ loginId }).lean()) ||
-    (await EmployeeDirectory.findOne({ employeeId: loginId }).lean())
-
-  return s(emp?.employeeId)
+  return uniqUpper([...raw, ...base])
 }
 
 function actorLoginId(req) {
-  // supports old + new payload shapes
+  // supports old + new JWT payload shapes
   return s(req.user?.loginId || req.user?.id || req.user?.sub || req.user?.employeeId || '')
 }
 
-function pickContractId(c) {
-  return s(c?._id || c?.id || '')
+function actorEmployeeId(req) {
+  const direct = s(req.user?.employeeId)
+  if (direct) return direct
+
+  const idLike = actorLoginId(req)
+  // many of your tokens use numeric loginId = employeeId
+  if (/^\d{4,}$/.test(idLike)) return idLike
+
+  return ''
 }
 
-function mapContractForSelector(c) {
-  // Support both your schema styles:
-  // - { startDate, endDate }
-  // - { from, to }
-  const from = s(c?.startDate || c?.from || '')
-  const to = s(c?.endDate || c?.to || '')
+function pickApprovalModeSemantic(profile) {
+  const raw =
+    s(profile?.approvalMode) ||
+    s(profile?.meta?.approvalMode) ||
+    s(profile?.approval?.mode) ||
+    ''
+  const up = raw.toUpperCase()
 
-  return {
-    _id: pickContractId(c),
-    from,
-    to,
-    note: s(c?.note || c?.closeSnapshot?.note || ''),
-    closeSnapshot: c?.closeSnapshot || null,
-  }
+  const hasCoo = !!s(profile?.cooLoginId || profile?.meta?.cooLoginId || profile?.approval?.cooLoginId)
+  if (up.includes('COO') || up.includes('GM_AND_COO') || up.includes('GM+COO') || up.includes('GM_COO') || hasCoo)
+    return 'GM_AND_COO'
+
+  // everything else = GM only (no COO)
+  return 'GM_ONLY'
 }
 
-async function loadManagerCard(prof) {
-  let manager = null
-  const managerEmployeeId = s(prof.managerEmployeeId)
-  const managerLoginId = s(prof.managerLoginId)
+async function loadProfileByEmployeeId(employeeId) {
+  const empId = s(employeeId)
+  if (!empId) return null
+  return LeaveProfile.findOne({ employeeId: empId }).lean()
+}
 
-  if (managerEmployeeId || managerLoginId) {
-    const mgr =
-      (managerEmployeeId
-        ? await EmployeeDirectory.findOne({ employeeId: managerEmployeeId }).lean()
-        : null) ||
-      (managerLoginId ? await EmployeeDirectory.findOne({ loginId: managerLoginId }).lean() : null)
+function canViewSelfOnly(roles) {
+  // user only
+  return roles.includes('LEAVE_USER') && !roles.some((r) => ['LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'].includes(r))
+}
 
-    if (mgr) {
-      manager = {
-        employeeId: s(mgr.employeeId),
-        loginId: s(mgr.loginId),
-        name: s(mgr.name || mgr.fullName),
-        department: s(mgr.department || mgr.departmentName),
-      }
-    }
+/**
+ * ✅ Core authorization:
+ * - self: always ok (if employeeId matches actor)
+ * - manager: only if profile.managerLoginId matches actorLoginId
+ * - gm: only if gmLoginId matches AND approvalMode == GM_ONLY
+ * - coo: only if cooLoginId matches AND approvalMode == GM_AND_COO
+ * - admin: allow
+ */
+function assertCanViewEmployee({ roles, actorLogin, actorEmpId, targetEmpId, profile }) {
+  const isAdmin = roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')
+  if (isAdmin) return true
+
+  if (s(targetEmpId) && s(actorEmpId) && s(targetEmpId) === s(actorEmpId)) return true
+
+  const mgrOk =
+    roles.includes('LEAVE_MANAGER') && s(profile?.managerLoginId) && s(profile.managerLoginId) === s(actorLogin)
+
+  if (mgrOk) return true
+
+  const mode = pickApprovalModeSemantic(profile)
+
+  const gmOk =
+    roles.includes('LEAVE_GM') &&
+    mode === 'GM_ONLY' &&
+    s(profile?.gmLoginId) &&
+    s(profile.gmLoginId) === s(actorLogin)
+
+  if (gmOk) return true
+
+  const cooOk =
+    roles.includes('LEAVE_COO') &&
+    mode === 'GM_AND_COO' &&
+    s(profile?.cooLoginId) &&
+    s(profile.cooLoginId) === s(actorLogin)
+
+  if (cooOk) return true
+
+  throw createError(403, 'Not allowed to view this employee.')
+}
+
+/* ───────────────── controllers ───────────────── */
+
+/**
+ * ✅ GET /api/leave/user/profile?employeeId=xxxx&contractId=...
+ * - LEAVE_USER: if no employeeId -> self; if employeeId != self -> 403
+ * - MANAGER/GM/COO: can pass employeeId but must be authorized
+ */
+exports.getMyLeaveProfile = async (req, res, next) => {
+  try {
+    const roles = getRoles(req)
+    const actorLogin = actorLoginId(req)
+    const actorEmpId = actorEmployeeId(req)
+
+    const requestedEmpId = s(req.query?.employeeId) || actorEmpId
+    if (!requestedEmpId) throw createError(400, 'Missing employeeId.')
+
+    const profile = await loadProfileByEmployeeId(requestedEmpId)
+    if (!profile) throw createError(404, 'Leave profile not found.')
+
+    // enforce visibility rules
+    assertCanViewEmployee({
+      roles,
+      actorLogin,
+      actorEmpId,
+      targetEmpId: requestedEmpId,
+      profile,
+    })
+
+    // optional: attach directory info (if you want)
+    let directory = null
+    try {
+      directory = await EmployeeDirectory.findOne({ employeeId: requestedEmpId }).lean()
+    } catch {}
+
+    res.json({
+      profile,
+      directory: directory
+        ? {
+            employeeId: s(directory.employeeId),
+            name: s(directory.name),
+            department: s(directory.department),
+            section: s(directory.section),
+            managerLoginId: s(directory.managerLoginId),
+            gmLoginId: s(directory.gmLoginId),
+          }
+        : null,
+      meta: {
+        approvalMode: pickApprovalModeSemantic(profile),
+        now: dayjs().format('YYYY-MM-DD'),
+      },
+    })
+  } catch (e) {
+    next(e)
   }
-  return manager
 }
 
 /**
  * ✅ GET /api/leave/user/profile/managed
- * Returns employees under current manager (by managerLoginId matching manager's loginId OR employeeId)
+ * Manager staff list: ONLY profiles where managerLoginId == my loginId
  */
 exports.getManagedProfiles = async (req, res, next) => {
   try {
     const roles = getRoles(req)
-    // optional strict role gate (recommended)
-    if (!roles.includes('LEAVE_MANAGER') && !roles.includes('MANAGER') && !roles.includes('LEAVE_ADMIN')) {
-      // if you want to allow everyone to call, remove this block
-      // but your UI calls this only for managers.
-      return res.json({ rows: [] })
+    const actorLogin = actorLoginId(req)
+    if (!roles.includes('LEAVE_MANAGER') && !roles.includes('LEAVE_ADMIN') && !roles.includes('ADMIN')) {
+      throw createError(403, 'Manager access required.')
     }
 
-    const myLoginId = actorLoginId(req)
-    const myEmployeeId = await resolveEmployeeIdFromAuth(req)
+    const q = s(req.query?.q)
+    const includeInactive = s(req.query?.includeInactive) === '1'
+    const limit = Math.min(Number(req.query?.limit || 500), 2000)
 
-    const keys = uniq([myLoginId, myEmployeeId])
-    if (!keys.length) throw createError(401, 'Unauthorized (missing loginId/employeeId)')
+    const filter = {
+      managerLoginId: actorLogin,
+      ...(includeInactive ? {} : { isActive: { $ne: false } }),
+    }
 
-    // In your LeaveProfile schema you use managerLoginId (string)
-    const docs = await LeaveProfile.find({
-      isActive: { $ne: false },
-      managerLoginId: { $in: keys },
+    if (q) {
+      filter.$or = [
+        { employeeId: { $regex: q, $options: 'i' } },
+        { name: { $regex: q, $options: 'i' } },
+        { department: { $regex: q, $options: 'i' } },
+      ]
+    }
+
+    const rows = await LeaveProfile.find(filter).limit(limit).lean()
+
+    res.json({
+      employees: rows.map((p) => ({
+        employeeId: s(p.employeeId),
+        name: s(p.name),
+        department: s(p.department),
+        section: s(p.section),
+        joinDate: p.joinDate || p.meta?.joinDate || null,
+        contractDate: p.contractDate || p.meta?.contractDate || null,
+        contractEndDate: p.contractEndDate || p.meta?.contractEndDate || null,
+        managerLoginId: s(p.managerLoginId),
+        gmLoginId: s(p.gmLoginId),
+        cooLoginId: s(p.cooLoginId),
+        approvalMode: pickApprovalModeSemantic(p),
+        isActive: p.isActive !== false,
+      })),
+      meta: { scope: 'MANAGER', managerLoginId: actorLogin },
     })
-      .select('employeeId name department joinDate contractDate contractEndDate isActive managerLoginId')
-      .sort({ employeeId: 1 })
-      .lean()
-
-    // return in the exact structure your UI expects
-    const rows = (docs || []).map((p) => ({
-      employeeId: s(p.employeeId),
-      name: s(p.name),
-      department: s(p.department),
-      joinDate: p.joinDate || null,
-      contractDate: p.contractDate || null,
-      contractEndDate: p.contractEndDate || null,
-      managerLoginId: s(p.managerLoginId),
-      isActive: p.isActive !== false,
-    }))
-
-    return res.json({ rows })
-  } catch (err) {
-    return next(err)
+  } catch (e) {
+    next(e)
   }
 }
 
-/**
- * ✅ GET /api/leave/user/profile/my
- * - Self view: /my
- * - Manager view: /my?employeeId=xxxxx  (only if employee is under me)
- */
-exports.getMyLeaveProfile = async (req, res, next) => {
-  try {
-    const myEmployeeId = await resolveEmployeeIdFromAuth(req)
-    const myLoginId = actorLoginId(req)
-    if (!myEmployeeId && !myLoginId) throw createError(401, 'Unauthorized (missing identity)')
-
-    const targetEmployeeId = s(req.query.employeeId) || myEmployeeId
-
-    // load target profile
-    const prof = await LeaveProfile.findOne({ employeeId: targetEmployeeId }).lean()
-    if (!prof) throw createError(404, 'Not found')
-
-    // If viewing someone else => must be their manager (or admin)
-    if (targetEmployeeId !== myEmployeeId) {
-      const roles = getRoles(req)
-      const isAdmin = roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')
-      if (!isAdmin) {
-        const keys = uniq([myLoginId, myEmployeeId])
-        const ok = keys.includes(s(prof.managerLoginId))
-        if (!ok) throw createError(403, 'Forbidden (not your employee)')
-      }
-    }
-
-    const contractId = s(req.query.contractId)
-
-    // contracts dropdown meta
-    const contracts = Array.isArray(prof.contracts) ? prof.contracts : []
-    const metaContracts = contracts.map(mapContractForSelector)
-
-    // optional contract snapshot view
-    const selected = contractId ? contracts.find((c) => pickContractId(c) === contractId) : null
-
-    // balances:
-    // - if selected contract has closeSnapshot.balances, show that
-    // - else show live prof.balances
-    let balances = Array.isArray(prof.balances) ? prof.balances : []
-    let carry = prof.carry && typeof prof.carry === 'object' ? prof.carry : {}
-
-    const snapBalances = selected?.closeSnapshot?.balances
-    const snapCarry = selected?.closeSnapshot?.carry
-
-    if (Array.isArray(snapBalances) && snapBalances.length) balances = snapBalances
-    if (snapCarry && typeof snapCarry === 'object') carry = snapCarry
-
-    const manager = await loadManagerCard(prof)
-
-    return res.json({
-      profile: {
-        employeeId: s(prof.employeeId),
-        loginId: s(prof.loginId || ''),
-        name: s(prof.name),
-        department: s(prof.department),
-        joinDate: s(prof.joinDate),
-        contractDate: s(prof.contractDate),
-        contractEndDate: s(prof.contractEndDate),
-        approvalMode: up(prof.approvalMode),
-        isActive: prof.isActive !== false,
-
-        manager,
-        carry,
-        balances,
-
-        // keep contracts if UI needs it
-        contracts,
-      },
-      meta: {
-        updatedAt: new Date().toISOString(),
-        contracts: metaContracts,
-      },
-    })
-  } catch (err) {
-    return next(err)
-  }
-}
 /**
  * ✅ GET /api/leave/user/profile/gm-managed
- * Returns employees assigned to this GM AND only in Manager+GM mode (stored = GM_ONLY)
+ * GM staff list: ONLY profiles where gmLoginId == my loginId AND mode == GM_ONLY
  */
 exports.getGmManagedProfiles = async (req, res, next) => {
   try {
     const roles = getRoles(req)
+    const actorLogin = actorLoginId(req)
     if (!roles.includes('LEAVE_GM') && !roles.includes('LEAVE_ADMIN') && !roles.includes('ADMIN')) {
-      return res.json({ rows: [] })
+      throw createError(403, 'GM access required.')
     }
 
-    const myLoginId = actorLoginId(req)
-    if (!myLoginId) return res.status(401).json({ message: 'Unauthorized (missing loginId)' })
+    const q = s(req.query?.q)
+    const includeInactive = s(req.query?.includeInactive) === '1'
+    const limit = Math.min(Number(req.query?.limit || 500), 2000)
 
-    // ✅ Manager+GM mode is stored as GM_ONLY
-    const docs = await LeaveProfile.find({
-      isActive: { $ne: false },
-      gmLoginId: myLoginId,
-      approvalMode: 'GM_ONLY',
+    const filter = {
+      gmLoginId: actorLogin,
+      ...(includeInactive ? {} : { isActive: { $ne: false } }),
+    }
+
+    if (q) {
+      filter.$or = [
+        { employeeId: { $regex: q, $options: 'i' } },
+        { name: { $regex: q, $options: 'i' } },
+        { department: { $regex: q, $options: 'i' } },
+      ]
+    }
+
+    const rows = await LeaveProfile.find(filter).limit(limit).lean()
+    const gmOnly = rows.filter((p) => pickApprovalModeSemantic(p) === 'GM_ONLY')
+
+    res.json({
+      employees: gmOnly.map((p) => ({
+        employeeId: s(p.employeeId),
+        name: s(p.name),
+        department: s(p.department),
+        section: s(p.section),
+        joinDate: p.joinDate || p.meta?.joinDate || null,
+        contractDate: p.contractDate || p.meta?.contractDate || null,
+        contractEndDate: p.contractEndDate || p.meta?.contractEndDate || null,
+        managerLoginId: s(p.managerLoginId),
+        gmLoginId: s(p.gmLoginId),
+        cooLoginId: s(p.cooLoginId),
+        approvalMode: 'GM_ONLY',
+        isActive: p.isActive !== false,
+      })),
+      meta: { scope: 'GM', gmLoginId: actorLogin, approvalMode: 'GM_ONLY' },
     })
-      .select('employeeId name department joinDate contractDate contractEndDate isActive managerLoginId gmLoginId approvalMode')
-      .sort({ employeeId: 1 })
-      .lean()
+  } catch (e) {
+    next(e)
+  }
+}
 
-    const rows = (docs || []).map((p) => ({
-      employeeId: s(p.employeeId),
-      name: s(p.name),
-      department: s(p.department),
-      joinDate: p.joinDate || null,
-      contractDate: p.contractDate || null,
-      contractEndDate: p.contractEndDate || null,
-      managerLoginId: s(p.managerLoginId),
-      gmLoginId: s(p.gmLoginId),
-      approvalMode: up(p.approvalMode) === 'GM_ONLY' ? 'MANAGER_AND_GM' : 'GM_AND_COO', // nice for UI
-      isActive: p.isActive !== false,
-    }))
+/**
+ * ✅ GET /api/leave/user/profile/coo-managed
+ * COO staff list: ONLY profiles where cooLoginId == my loginId AND mode == GM_AND_COO
+ */
+exports.getCooManagedProfiles = async (req, res, next) => {
+  try {
+    const roles = getRoles(req)
+    const actorLogin = actorLoginId(req)
+    if (!roles.includes('LEAVE_COO') && !roles.includes('LEAVE_ADMIN') && !roles.includes('ADMIN')) {
+      throw createError(403, 'COO access required.')
+    }
 
-    return res.json({ rows })
-  } catch (err) {
-    return next(err)
+    const q = s(req.query?.q)
+    const includeInactive = s(req.query?.includeInactive) === '1'
+    const limit = Math.min(Number(req.query?.limit || 500), 2000)
+
+    const filter = {
+      cooLoginId: actorLogin,
+      ...(includeInactive ? {} : { isActive: { $ne: false } }),
+    }
+
+    if (q) {
+      filter.$or = [
+        { employeeId: { $regex: q, $options: 'i' } },
+        { name: { $regex: q, $options: 'i' } },
+        { department: { $regex: q, $options: 'i' } },
+      ]
+    }
+
+    const rows = await LeaveProfile.find(filter).limit(limit).lean()
+    const gmAndCoo = rows.filter((p) => pickApprovalModeSemantic(p) === 'GM_AND_COO')
+
+    res.json({
+      employees: gmAndCoo.map((p) => ({
+        employeeId: s(p.employeeId),
+        name: s(p.name),
+        department: s(p.department),
+        section: s(p.section),
+        joinDate: p.joinDate || p.meta?.joinDate || null,
+        contractDate: p.contractDate || p.meta?.contractDate || null,
+        contractEndDate: p.contractEndDate || p.meta?.contractEndDate || null,
+        managerLoginId: s(p.managerLoginId),
+        gmLoginId: s(p.gmLoginId),
+        cooLoginId: s(p.cooLoginId),
+        approvalMode: 'GM_AND_COO',
+        isActive: p.isActive !== false,
+      })),
+      meta: { scope: 'COO', cooLoginId: actorLogin, approvalMode: 'GM_AND_COO' },
+    })
+  } catch (e) {
+    next(e)
   }
 }

@@ -4,28 +4,39 @@ const router = express.Router()
 
 const { requireAuth } = require('../../middlewares/auth')
 
+// controllers
 const userCtrl = require('../../controllers/leave/leaveProfile.user.controller')
 const leaveRecordUser = require('../../controllers/leave/leaveRecord.user.controller')
 
-// TEMP DEBUG (remove after fixed)
-console.log('userCtrl keys:', Object.keys(userCtrl || {}))
-console.log('leaveRecordUser keys:', Object.keys(leaveRecordUser || {}))
-console.log('requireAuth type:', typeof requireAuth)
+// ───────────────── Profile ─────────────────
 
-// ✅ profile (self + manager/gm detail)
+// ✅ Self OR role-authorized staff view
+// GET /api/leave/user/profile?employeeId=xxxx&contractId=...
 router.get('/profile', requireAuth, userCtrl.getMyLeaveProfile)
 
-// ✅ manager list
+// ✅ Manager staff list (under this manager)
 router.get('/profile/managed', requireAuth, userCtrl.getManagedProfiles)
 
-// ✅ gm list
+// ✅ GM staff list (GM_ONLY mode only)
 router.get('/profile/gm-managed', requireAuth, userCtrl.getGmManagedProfiles)
 
-// ✅ record
-// IMPORTANT: your controller must export getMyLeaveRecord
+// ✅ COO staff list (GM_AND_COO mode only)
+router.get('/profile/coo-managed', requireAuth, userCtrl.getCooManagedProfiles)
+
+// ───────────────── Signatures ─────────────────
+
+// ✅ GET /api/leave/user/signatures/resolve/:idLike
+router.get('/signatures/resolve/:idLike', requireAuth, leaveRecordUser.resolveSignatureMeta)
+
+// ✅ signature content stream (auth-protected, but accessible to leave portal users)
+router.get('/signatures/content/:fileId', requireAuth, leaveRecordUser.streamSignatureContent)
+
+
+// ───────────────── Record / PDF data ─────────────────
+
+// ✅ GET /api/leave/user/record?employeeId=...&contractId=...&asOf=...
 router.get('/record', requireAuth, leaveRecordUser.getMyLeaveRecord)
 
-// ✅ signature resolve
-router.get('/signatures/resolve/:idLike', requireAuth, leaveRecordUser.resolveSignatureMeta)
+
 
 module.exports = router

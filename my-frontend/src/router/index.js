@@ -75,8 +75,9 @@ const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
 const CooProfile = () => import('@/views/expat/coo/Profile.vue')
 
 // Manager/GM Profile views
-const ManagerProfile = () => import('@/views/expat/manager/UserUnderManagerProfile.vue')
-const GMProfile = () => import('@/views/expat/generalManager/UserUnderManagerAndGmModeProfile.vue')
+const ManagerProfile = () => import('@/views/expat/manager/ManagerProfile.vue')
+const GMProfile = () => import('@/views/expat/gm/GMProfile.vue')
+
 
 /* ─────────────────────────────────────────────
  * Roles helpers (supports user.role + user.roles[])

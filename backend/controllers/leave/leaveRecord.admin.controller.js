@@ -278,6 +278,9 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       const pdfCode = mapToPdfCode(r.leaveTypeCode)
       const st = safeText(r.status).toUpperCase()
 
+      // inside your loop that builds rows:
+      const sysCode = String(r.leaveTypeCode || '').toUpperCase().trim()
+
       rows.push({
         // (optional) stable id for frontend rowKey if you want later
         _id: String(r._id || ''),
@@ -286,9 +289,12 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
         from: toYMD(r.startDate),
         to: toYMD(r.endDate || r.startDate),
 
-        // AL column includes SP (borrow from AL)
-        AL_day: shouldCountAsAL(r.leaveTypeCode) ? num(r.totalDays) : '',
-        AL_remain: shouldCountAsAL(r.leaveTypeCode) ? alRemain : '',
+        // ✅ show in correct column
+        AL_day: sysCode === 'AL' ? num(r.totalDays) : '',
+        SP_day: sysCode === 'SP' ? num(r.totalDays) : '',
+
+        // ✅ still show AL remaining for BOTH AL and SP, because SP borrows AL
+        AL_remain: sysCode === 'AL' || sysCode === 'SP' ? alRemain : '',
 
         // ✅ UL / SL / ML columns (your template expects these)
         ...dayColsForPdf(pdfCode, r.totalDays),
@@ -298,18 +304,20 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
         status: r.status,
 
         // ✅ IMPORTANT: signature IDs your frontend is reading
-        recordByLoginId: safeText(profile.employeeId), // ALWAYS employee signature
+        // record-by must be EMPLOYEE signature
+        recordByEmployeeId: safeText(profile.employeeId),
 
-        // Manager signature shows only after manager approved
-        approvedManagerLoginId:
-          st === 'PENDING_GM' || st === 'APPROVED' ? safeText(profile.managerLoginId) : '',
+        // GM signature shows only after GM approved (pending_coo / approved)
+        approvedGMLoginId: st === 'PENDING_COO' || st === 'APPROVED' ? safeText(profile.gmLoginId) : '',
 
-        // GM signature shows only after GM approved
-        approvedGMLoginId: st === 'APPROVED' ? safeText(profile.gmLoginId) : '',
+        // COO signature shows only after final approved
+        approvedCOOLoginId: st === 'APPROVED' ? safeText(profile.cooLoginId) : '',
 
         // ✅ optional remark (your rowKey includes remark)
         remark: safeText(r.reason || r.note || r.remark || ''),
       })
+
+
     }
 
 

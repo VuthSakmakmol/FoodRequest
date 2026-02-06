@@ -11,6 +11,8 @@
   ✅ CHANGE: Removed As Of date input from UI
   ✅ CHANGE: Summary fetch does NOT pass asOf (shows all employees/requests)
   ✅ CHANGE: Preview auto uses asOf = selected contract end date (contract.to)
+
+  ✅ FIX: SP shows in SP column (NOT AL), while AL remain still shows for SP
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
@@ -93,7 +95,7 @@ function showGmSignatureForRow(r) {
 /** ✅ COO shown only after final approved */
 function showCooSignatureForRow(r) {
   const st = upStatus(r?.status)
-  return st === 'APPROVED'
+  return st === 'APPROVED' || st === 'APPROVED_COO' || st === 'FINAL_APPROVED' || st === 'COMPLETED'
 }
 
 /** normalize mode from employee summary row */
@@ -462,20 +464,22 @@ async function ensureRowSignatures(rows = []) {
     const k = rowKey(r)
     if (rowSig.value.has(k)) continue
 
-    const recordByEmployeeId = safeText(r.recordByEmployeeId || r.employeeId || r.requesterEmployeeId)
+    const recordByEmployeeId = safeText(
+      r.recordByEmployeeId || r.recordByEmployeeNo || r.recordByEmpId || r.employeeId || r.requesterEmployeeId
+    )
+    const recordByLoginId = safeText(r.recordByLoginId || r.recordBy || r.createdByLoginId)
+
     const checkedById = LEAVE_ADMIN_LOGIN
     const gmId = safeText(r.approvedGMLoginId)
-    const cooId = safeText(r.approvedCOOLoginId)
+    const cooId = safeText(r.approvedCOOLoginId || r.approvedCooLoginId || r.cooLoginId)
 
     jobs.push(
       (async () => {
-        // RecordBy must be employee signature
-        const recMeta = await getEmployeeSignatureMetaUrl(recordByEmployeeId)
+        let recMeta = ''
+        if (recordByEmployeeId) recMeta = await getEmployeeSignatureMetaUrl(recordByEmployeeId)
+        else if (recordByLoginId) recMeta = await resolveSignatureMetaUrl(recordByLoginId)
 
-        // CheckedBy must be leave_admin user signature
         const chkMeta = await resolveSignatureMetaUrl(checkedById)
-
-        // GM/COO can be users (loginId)
         const [gmMeta, cooMeta] = await Promise.all([resolveSignatureMetaUrl(gmId), resolveSignatureMetaUrl(cooId)])
 
         const [recBlob, chkBlob, gmBlob, cooBlob] = await Promise.all([
@@ -547,18 +551,15 @@ async function openPreview(emp) {
     const employeeId = safeText(emp?.employeeId)
     if (!employeeId) throw new Error('Missing employeeId')
 
-    // 1) fetch once to get meta.contracts + meta.selectedContractId
     await fetchRecordForSelectedContract(employeeId)
 
     const metaContracts = previewData.value?.meta?.contracts || []
     const preferredContractId = safeText(previewData.value?.meta?.selectedContractId)
 
-    // 2) build contracts + set selected
     const list = normalizeContracts(metaContracts, emp)
     contractOptions.value = list
     selectedContractId.value = pickDefaultContractId(list, preferredContractId)
 
-    // 3) refetch using selected contract (now previewAsOf is correct) + build signatures
     contractWatchReady.value = true
     await refetchPreviewByContract()
   } catch (e) {
@@ -712,47 +713,6 @@ async function downloadPdf() {
   }
 }
 
-/* Excel export for the record rows */
-async function exportRecordExcel() {
-  try {
-    const XLSX = await import('xlsx')
-    const emp = previewData.value?.meta || {}
-    const c = selectedContract.value
-
-    const rows = (previewData.value?.rows || []).map((r) => ({
-      Date: r.date,
-      From: r.from,
-      To: r.to,
-      AL_Day: r.AL_day,
-      AL_Remain: r.AL_remain,
-      UL: r.UL_day,
-      SL: r.SL_day,
-      ML: r.ML_day,
-      RecordByEmployeeId: r.recordByEmployeeId || '',
-      CheckedBy: LEAVE_ADMIN_LOGIN,
-      GM: r.approvedGMLoginId,
-      COO: r.approvedCOOLoginId,
-      Remark: r.remark,
-      Status: r.status,
-      LeaveType: r.leaveTypeCode,
-    }))
-
-    const ws = XLSX.utils.json_to_sheet(rows)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'LeaveRecord')
-
-    const empId = safeText(emp.employeeId || previewEmp.value?.employeeId)
-    const contractNo = c?.idx ? `c${c.idx}` : 'contract'
-    const stamp = `${c?.from || 'na'}_${c?.to || 'na'}`
-    XLSX.writeFile(wb, `leave_record_${MODE.toLowerCase()}_${empId}_${contractNo}_${stamp}.xlsx`)
-
-    showToast({ type: 'success', title: 'Exported', message: 'Record exported.' })
-  } catch (e) {
-    console.error('exportRecordExcel error', e)
-    showToast({ type: 'error', title: 'Export failed', message: e?.message || 'Cannot export.' })
-  }
-}
-
 /* ───────── Debounce search ───────── */
 let tmr = null
 watch(q, () => {
@@ -825,8 +785,7 @@ onBeforeUnmount(() => {
             Shows only employees in <span class="font-semibold">GM + COO</span> approval mode.
           </div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Preview uses <span class="font-semibold">selected contract</span> (default current/latest) and calculates as of
-            <span class="font-semibold">contract end date</span>.
+            Preview uses <span class="font-semibold">selected contract</span> and as of <span class="font-semibold">contract end date</span>.
           </div>
         </div>
 
@@ -860,8 +819,6 @@ onBeforeUnmount(() => {
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Search</label>
           <input v-model="q" type="text" placeholder="Employee ID, name, dept..." :class="ui.input" />
         </div>
-
-        <!-- ✅ REMOVED: As Of input -->
 
         <div class="md:col-span-4">
           <label class="block text-[11px] font-medium text-slate-600 dark:text-slate-300">Department</label>
@@ -1127,24 +1084,29 @@ onBeforeUnmount(() => {
                     <div class="meta-row">
                       <div class="meta-label">Date Join:</div>
                       <div class="meta-value mono">{{ previewData?.meta?.joinDate || '' }}</div>
-                      <div class="meta-legend">
-                        <span class="meta-label">Leave Type:</span>
-                        <span><b>AL</b>: Annual Leave</span>
-                        <span><b>SL</b>: Sick Leave</span>
-                        <span><b>ML</b>: Maternity Leave</span>
-                        <span><b>UL</b>: Unpaid Leave</span>
-                      </div>
+                        <div class="meta-legend">
+                          <span class="meta-label">Leave Type:</span>
+                          <span><b>AL</b>: Annual Leave</span>
+                          <span><b>SP</b>: Special Leave</span>
+                          <span><b>SL</b>: Sick Leave</span>
+                          <span><b>ML</b>: Maternity Leave</span>
+                          <span><b>UL</b>: Unpaid Leave</span>
+                        </div>
                     </div>
                   </div>
 
                   <!-- Table (GM + COO layout) -->
                   <table class="sheet-table">
+                    <!-- ✅ UPDATED colgroup: added SP column -->
                     <colgroup>
                       <col style="width: 16mm;" />
                       <col style="width: 16mm;" />
                       <col style="width: 16mm;" />
-                      <col style="width: 13mm;" />
-                      <col style="width: 13mm;" />
+
+                      <col style="width: 12mm;" /> <!-- AL Day -->
+                      <col style="width: 12mm;" /> <!-- SP Day -->
+                      <col style="width: 12mm;" /> <!-- AL Remain -->
+
                       <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
@@ -1159,7 +1121,10 @@ onBeforeUnmount(() => {
                       <tr>
                         <th rowspan="2">Date</th>
                         <th colspan="2">Leave Date</th>
-                        <th colspan="2">AL</th>
+
+                        <!-- ✅ UPDATED: AL + SP -->
+                        <th colspan="3">Leave</th>
+
                         <th rowspan="2">UL<br />Day</th>
                         <th rowspan="2">SL<br />Day</th>
                         <th rowspan="2">ML<br />Day</th>
@@ -1171,8 +1136,11 @@ onBeforeUnmount(() => {
                       <tr>
                         <th>From</th>
                         <th>To</th>
-                        <th>Day</th>
-                        <th>Remain</th>
+
+                        <th>AL<br />Day</th>
+                        <th>SP<br />Day</th>
+                        <th>AL<br />Remain</th>
+
                         <th>GM</th>
                         <th>COO</th>
                       </tr>
@@ -1184,7 +1152,9 @@ onBeforeUnmount(() => {
                         <td class="mono nowrap">{{ r.from || '' }}</td>
                         <td class="mono nowrap">{{ r.to || '' }}</td>
 
+                        <!-- ✅ UPDATED cells -->
                         <td class="mono center">{{ r.AL_day ?? '' }}</td>
+                        <td class="mono center">{{ r.SP_day ?? '' }}</td>
                         <td class="mono center">{{ r.AL_remain ?? '' }}</td>
 
                         <td class="mono center">{{ r.UL_day ?? '' }}</td>
@@ -1242,8 +1212,9 @@ onBeforeUnmount(() => {
                         <td class="remark">{{ r.remark || '' }}</td>
                       </tr>
 
+                      <!-- ✅ UPDATED blank rows col count: now 14 -->
                       <tr v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)" :key="'blank-' + n">
-                        <td v-for="c in 13" :key="c">&nbsp;</td>
+                        <td v-for="c in 14" :key="c">&nbsp;</td>
                       </tr>
                     </tbody>
                   </table>

@@ -1,15 +1,11 @@
 <!-- src/views/expat/user/components/UserLeavePreviewModal.vue
-  ✅ AdminGmAndCooReport-style fullscreen preview
-  ✅ Uses /leave/user/record (NOT admin endpoints)
-  ✅ Contract selector (from parent contracts)
-  ✅ Preview uses asOf = selected contract end date (contract.to)
-  ✅ Vector Print-to-PDF (iframe print)
-  ✅ Signatures (best-effort):
-      - Record By => employee signature (employeeId)
-      - Checked by => leave_admin signature
-      - Manager => shown after manager approved
-      - GM => shown after gm approved (or final)
-    If signature endpoints blocked => it will just show blank cells (no crash)
+  ✅ Fullscreen preview
+  ✅ Uses /leave/user/record
+  ✅ Contract selector
+  ✅ asOf = selected contract end date
+  ✅ Vector Print-to-PDF
+  ✅ Signature fetch (supports url/signatureUrl/fileId)
+  ✅ AL remain fallback calc if backend sends 0/missing
 -->
 
 <script setup>
@@ -20,101 +16,34 @@ import { useToast } from '@/composables/useToast'
 
 defineOptions({ name: 'UserLeavePreviewModal' })
 
-const props = defineProps({
-  open: { type: Boolean, default: false },
-  me: { type: Object, default: () => ({}) }, // { employeeId, name, department, joinDate, approvalMode, ... }
-  contracts: { type: Array, default: () => [] }, // [{ id, idx, from, to, label, isCurrent }]
-  contractId: { type: String, default: '' },
-})
-
-const emit = defineEmits(['close', 'update:contractId'])
-
 const { showToast } = useToast()
 
+const props = defineProps({
+  open: { type: Boolean, default: false },
+  me: { type: Object, default: () => ({}) }, // { employeeId, loginId, name, ... }
+})
+
+const emit = defineEmits(['close'])
+
 /* ───────── helpers ───────── */
-const s = (v) => String(v ?? '').trim()
-const ymd = (v) => {
-  const t = s(v)
-  if (!t) return ''
-  const d = dayjs(t)
-  return d.isValid() ? d.format('YYYY-MM-DD') : t
+function safeText(v) {
+  return String(v ?? '').trim()
 }
-const up = (v) => s(v).toUpperCase()
-const upStatus = (v) => String(v || '').toUpperCase().trim()
-
-function fmtYMD(v) {
-  const t = s(v)
-  if (!t) return ''
-  const d = dayjs(t)
-  return d.isValid() ? d.format('YYYY-MM-DD') : t
+function upStatus(v) {
+  return safeText(v).toUpperCase()
 }
-
-/* ───────── contract selection ───────── */
-const selectedContract = computed(() => {
-  const id = s(props.contractId)
-  return (props.contracts || []).find((c) => s(c.id) === id) || null
-})
-
-const currentContract = computed(() => {
-  const arr = props.contracts || []
-  return arr.find((x) => x.isCurrent) || arr[arr.length - 1] || null
-})
-
-const previewAsOfYMD = computed(() => {
-  // ✅ SAME as admin: use contract end date
-  const end = ymd(selectedContract.value?.to || currentContract.value?.to)
-  return end || dayjs().format('YYYY-MM-DD')
-})
-
-/* ───────── preview state ───────── */
-const previewLoading = ref(false)
-const previewError = ref('')
-const previewData = ref(null) // { meta, rows }
-const previewRef = ref(null)
-
-/* ───────── signature rules (MANAGER+GM flow) ─────────
-   Your backend status chain for user record usually:
-   - PENDING_MANAGER -> PENDING_GM -> APPROVED
-   If your statuses differ, adjust here.
-*/
-function showManagerSignatureForRow(r) {
-  const st = upStatus(r?.status)
-  return st === 'PENDING_GM' || st === 'APPROVED'
+function ymd(v) {
+  const s = safeText(v)
+  if (!s) return ''
+  const d = dayjs(s)
+  return d.isValid() ? d.format('YYYY-MM-DD') : s
 }
-function showGmSignatureForRow(r) {
-  const st = upStatus(r?.status)
-  return st === 'APPROVED'
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
 }
-
-/* ───────── fetch record (user endpoint) ───────── */
-async function fetchRecordForContract() {
-  const c = selectedContract.value || currentContract.value
-  const params = { ts: Date.now(), asOf: previewAsOfYMD.value }
-
-  // prefer contractId if looks like ObjectId
-  if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
-    params.contractId = c.id
-  } else if (c?.from && c?.to) {
-    params.from = c.from
-    params.to = c.to
-  } else if (c?.from && !c?.to) {
-    params.from = c.from
-    params.to = params.asOf
-  }
-
-  const res = await api.get('/leave/user/record', { params })
-  previewData.value = res?.data || null
-}
-
-/* ───────── signature (best-effort) ───────── */
-const LEAVE_ADMIN_LOGIN = 'leave_admin'
-
-function getToken() {
-  try {
-    return localStorage.getItem('token') || ''
-  } catch {
-    return ''
-  }
+function isLikelyEmployeeId(v) {
+  return /^\d{4,}$/.test(safeText(v))
 }
 function revokeIfBlob(url) {
   if (url && String(url).startsWith('blob:')) {
@@ -123,20 +52,129 @@ function revokeIfBlob(url) {
     } catch {}
   }
 }
+
+/* ───────── state ───────── */
+const loading = ref(false)
+const error = ref('')
+const record = ref(null)
+const previewRef = ref(null)
+
+/* ───────── contracts ───────── */
+const contractOptions = ref([]) // [{ id, idx, from, to, label, isCurrent }]
+const selectedContractId = ref('')
+const contractWatchReady = ref(false)
+
+function stripCurrentSuffix(label) {
+  const s = safeText(label)
+  if (!s) return ''
+  return s.replace(/\s*\(current\)\s*/gi, ' ').replace(/\s{2,}/g, ' ').trim()
+}
+
+function normalizeContracts(rawContracts, fallbackMe = {}) {
+  const arr = Array.isArray(rawContracts) ? rawContracts : []
+
+  const mapped = arr
+    .map((c, i) => {
+      const from = ymd(c.startDate || c.contractDate || c.from)
+      const to = ymd(c.endDate || c.contractEndDate || c.to)
+      const id = safeText(c.contractId || c._id || c.id || `${from || 'na'}:${to || 'na'}:${i + 1}`)
+      const idx = Number(c.contractNo) || Number(c.contractNumber) || (i + 1)
+      const labelRaw = safeText(c.label) || `Contract ${idx}${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`
+      const label = stripCurrentSuffix(labelRaw)
+      const isCurrent = !!c.isCurrent
+      return { id, idx, from, to, label, isCurrent }
+    })
+    .filter((x) => x.from || x.to)
+
+  if (!mapped.length) {
+    const from = ymd(fallbackMe?.contractDate)
+    const to = ymd(fallbackMe?.contractEndDate)
+    if (from || to) {
+      mapped.push({
+        id: `single:${from || 'na'}:${to || 'na'}`,
+        idx: 1,
+        from,
+        to,
+        label: stripCurrentSuffix(`Contract 1${from ? `: ${from}` : ''}${to ? ` → ${to}` : ''}`),
+        isCurrent: true,
+      })
+    }
+  }
+
+  mapped.sort((a, b) => (a.from || '').localeCompare(b.from || ''))
+
+  const today = dayjs().format('YYYY-MM-DD')
+  const anyCurrentFlag = mapped.some((x) => x.isCurrent)
+  if (!anyCurrentFlag) {
+    for (const c of mapped) {
+      const from = c.from || ''
+      const to = c.to || ''
+      const isCur = !!from && (!to ? from <= today : from <= today && today <= to)
+      if (isCur) c.isCurrent = true
+    }
+    if (!mapped.some((x) => x.isCurrent) && mapped.length) mapped[mapped.length - 1].isCurrent = true
+  }
+
+  return mapped.map((c, i) => {
+    const idx = c.idx || (i + 1)
+    const label =
+      stripCurrentSuffix(c.label) ||
+      stripCurrentSuffix(`Contract ${idx}${c.from ? `: ${c.from}` : ''}${c.to ? ` → ${c.to}` : ''}`)
+    return { ...c, idx, label }
+  })
+}
+
+function pickDefaultContractId(list, preferredId = '') {
+  const pref = safeText(preferredId)
+  if (pref) {
+    const ok = list.find((x) => x.id === pref)
+    if (ok) return ok.id
+  }
+  const cur = list.find((x) => x.isCurrent)
+  return cur?.id || list[list.length - 1]?.id || ''
+}
+
+const selectedContract = computed(() => {
+  const id = safeText(selectedContractId.value)
+  return contractOptions.value.find((x) => x.id === id) || null
+})
+
+function contractDisplayLabel(c) {
+  if (!c) return ''
+  return c.isCurrent ? `${c.label} (Current)` : c.label
+}
+
+/* internal asOf = contract end date */
+const previewAsOfYMD = computed(() => {
+  const c = selectedContract.value
+  const end = ymd(c?.to) || ymd(record.value?.meta?.contract?.endDate || record.value?.meta?.contract?.to)
+  return end || dayjs().format('YYYY-MM-DD')
+})
+
+/* ───────── signature fetch (user endpoints) ───────── */
+function getToken() {
+  try {
+    return localStorage.getItem('token') || ''
+  } catch {
+    return ''
+  }
+}
+
 function toAbsUrl(urlOrPath) {
-  const u = s(urlOrPath)
+  const u = safeText(urlOrPath)
   if (!u) return ''
   if (/^https?:\/\//i.test(u)) return u
 
-  const apiBase = s(import.meta.env.VITE_API_URL || '')
+  const apiBase = safeText(import.meta.env.VITE_API_URL || '')
     .replace(/\/api\/?$/i, '')
     .replace(/\/$/, '')
 
   const origin = apiBase || (typeof window !== 'undefined' ? window.location.origin : '')
   return `${origin}${u.startsWith('/') ? '' : '/'}${u}`
 }
+
 async function toAuthedBlobUrl(rawUrl) {
-  const u = s(rawUrl)
+  const u = safeText(rawUrl)
   if (!u) return ''
   const abs = toAbsUrl(u)
 
@@ -153,48 +191,59 @@ async function toAuthedBlobUrl(rawUrl) {
   }
 }
 
-const metaCache = new Map()
-const blobCache = new Map()
+const metaCache = new Map() // key -> resolved meta url
+const blobCache = new Map() // metaUrl -> blobUrl
 
-function clearSigCaches() {
+function clearBlobCache() {
   for (const v of blobCache.values()) revokeIfBlob(v)
-  metaCache.clear()
   blobCache.clear()
 }
 
-async function getSignatureMetaUrl(idLike) {
-  const id = s(idLike)
-  if (!id) return ''
+function normalizeMetaToUrl(data) {
+  // supports:
+  // { url }
+  // { signatureUrl }
+  // { signatureUrl: { url } }
+  // { fileId } or { gridFsId } => build content url
+  const url =
+    safeText(data?.url) ||
+    safeText(data?.signatureUrl) ||
+    safeText(data?.signatureUrl?.url) ||
+    ''
 
-  const key = `meta:${id}`
-  if (metaCache.has(key)) return metaCache.get(key) || ''
+  if (url) return url
 
-  // Best effort endpoints (some deployments block these for user)
-  const endpoints = [
-    `/leave/user/signatures/${encodeURIComponent(id)}`, // optional if you add later
-    `/admin/signatures/users/${encodeURIComponent(id)}`,
-    `/admin/signatures/employees/${encodeURIComponent(id)}`,
-  ]
-
-  for (const ep of endpoints) {
-    try {
-      const res = await api.get(ep)
-      const url = res?.data?.signatureUrl || res?.data?.url || ''
-      if (url) {
-        metaCache.set(key, url)
-        return url
-      }
-    } catch {
-      // ignore
-    }
+  const fileId = safeText(data?.fileId || data?.gridFsId || data?.id)
+  if (fileId) {
+    // IMPORTANT: requires backend route:
+    // GET /api/leave/user/signatures/content/:fileId
+    const base = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+    return `${base}/leave/user/signatures/content/${encodeURIComponent(fileId)}?ts=${Date.now()}`
   }
 
-  metaCache.set(key, '')
   return ''
 }
 
+async function resolveSignatureMetaUrl(idLike) {
+  const id = safeText(idLike)
+  if (!id) return ''
+
+  const key = `any:${id}`
+  if (metaCache.has(key)) return metaCache.get(key) || ''
+
+  try {
+    const res = await api.get(`/leave/user/signatures/resolve/${encodeURIComponent(id)}`)
+    const url = normalizeMetaToUrl(res?.data || {})
+    metaCache.set(key, url || '')
+    return url || ''
+  } catch {
+    metaCache.set(key, '')
+    return ''
+  }
+}
+
 async function metaUrlToBlob(metaUrl) {
-  const m = s(metaUrl)
+  const m = safeText(metaUrl)
   if (!m) return ''
   if (blobCache.has(m)) return blobCache.get(m) || ''
   const b = await toAuthedBlobUrl(m)
@@ -202,49 +251,76 @@ async function metaUrlToBlob(metaUrl) {
   return b || ''
 }
 
-/* per-row signature cache */
-const rowSig = ref(new Map()) // key -> { recordBy, checkedBy, manager, gm }
+/* ───────── row signatures ───────── */
+const rowSig = ref(new Map()) // key -> { recordBy, checkedBy, manager, gm, coo }
+
 function rowKey(r) {
-  return `${s(r?.date)}|${s(r?.from)}|${s(r?.to)}|${s(r?.leaveTypeCode)}|${s(r?.status)}|${s(r?.remark)}`
-}
-function clearRowSig() {
-  rowSig.value = new Map()
+  return `${safeText(r?.date)}|${safeText(r?.from)}|${safeText(r?.to)}|${safeText(r?.leaveTypeCode)}|${safeText(
+    r?.status
+  )}|${safeText(r?.remark)}`
 }
 function setRowSig(k, v) {
   const m = new Map(rowSig.value)
   m.set(k, v)
   rowSig.value = m
 }
+function clearRowSig() {
+  rowSig.value = new Map()
+}
+
+const LEAVE_ADMIN_LOGIN = 'leave_admin'
+
+function showManagerSignatureForRow(r) {
+  const st = upStatus(r?.status)
+  return st === 'PENDING_GM' || st === 'PENDING_COO' || st === 'APPROVED'
+}
+function showGmSignatureForRow(r) {
+  const st = upStatus(r?.status)
+  return st === 'PENDING_COO' || st === 'APPROVED'
+}
+function showCooSignatureForRow(r) {
+  const st = upStatus(r?.status)
+  return st === 'APPROVED'
+}
 
 async function ensureRowSignatures(rows = []) {
   const list = Array.isArray(rows) ? rows : []
   const jobs = []
 
-  // these come from profile meta normally
-  const managerId = s(previewData.value?.meta?.managerLoginId || '')
-  const gmId = s(previewData.value?.meta?.gmLoginId || '')
+  const meEmpId = safeText(props.me?.employeeId)
+  const meLogin = safeText(props.me?.loginId)
 
   for (const r of list) {
     const k = rowKey(r)
     if (rowSig.value.has(k)) continue
 
-    const recordByEmployeeId = s(props.me?.employeeId || r?.employeeId || r?.recordByEmployeeId || '')
+    // ✅ record-by: prefer row value, else fallback to me.employeeId/loginId
+    const recordById =
+      safeText(r.recordByLoginId) ||
+      safeText(r.recordByEmployeeId) ||
+      (isLikelyEmployeeId(meEmpId) ? meEmpId : meLogin)
+
     const checkedById = LEAVE_ADMIN_LOGIN
+    const managerId = safeText(r.approvedManagerLoginId)
+    const gmId = safeText(r.approvedGMLoginId)
+    const cooId = safeText(r.approvedCOOLoginId)
 
     jobs.push(
       (async () => {
-        const [recMeta, chkMeta, mgrMeta, gmMeta] = await Promise.all([
-          getSignatureMetaUrl(recordByEmployeeId),
-          getSignatureMetaUrl(checkedById),
-          getSignatureMetaUrl(managerId),
-          getSignatureMetaUrl(gmId),
+        const [recMeta, chkMeta, mgrMeta, gmMeta, cooMeta] = await Promise.all([
+          resolveSignatureMetaUrl(recordById),
+          resolveSignatureMetaUrl(checkedById),
+          resolveSignatureMetaUrl(managerId),
+          resolveSignatureMetaUrl(gmId),
+          resolveSignatureMetaUrl(cooId),
         ])
 
-        const [recBlob, chkBlob, mgrBlob, gmBlob] = await Promise.all([
+        const [recBlob, chkBlob, mgrBlob, gmBlob, cooBlob] = await Promise.all([
           metaUrlToBlob(recMeta),
           metaUrlToBlob(chkMeta),
           metaUrlToBlob(mgrMeta),
           metaUrlToBlob(gmMeta),
+          metaUrlToBlob(cooMeta),
         ])
 
         setRowSig(k, {
@@ -252,6 +328,7 @@ async function ensureRowSignatures(rows = []) {
           checkedBy: chkBlob || '',
           manager: mgrBlob || '',
           gm: gmBlob || '',
+          coo: cooBlob || '',
         })
       })()
     )
@@ -263,47 +340,152 @@ async function ensureRowSignatures(rows = []) {
   }
 }
 
-/* ───────── open / refetch ───────── */
-async function openAndLoad() {
-  previewLoading.value = true
-  previewError.value = ''
-  previewData.value = null
+/* ───────── AL remain fallback (client-side) ───────── */
+function findBalance(balances, code) {
+  const c = safeText(code).toUpperCase()
+  const arr = Array.isArray(balances) ? balances : []
+  return arr.find((b) => safeText(b?.leaveTypeCode).toUpperCase() === c) || null
+}
+
+const computedRows = computed(() => {
+  const rows = Array.isArray(record.value?.rows) ? record.value.rows : []
+  if (!rows.length) return rows
+
+  // if backend already sends meaningful remain, keep it
+  const anyNonZeroRemain = rows.some((r) => num(r.AL_remain) > 0)
+  if (anyNonZeroRemain) return rows
+
+  // fallback: starting remaining from meta balances
+  const startBal =
+    findBalance(record.value?.meta?.balances, 'AL') ||
+    findBalance(record.value?.meta?.closeSnapshot?.balances, 'AL') ||
+    findBalance(record.value?.meta?.openSnapshot?.balances, 'AL')
+
+  const startRemain = num(startBal?.remaining ?? startBal?.strictRemaining ?? 0)
+  if (startRemain <= 0) return rows
+
+  let remain = startRemain
+  return rows.map((r) => {
+    const alDay = num(r.AL_day)
+    remain = remain - alDay
+    // do not force negative clamp — keep truthful if it goes below 0
+    return { ...r, AL_remain: remain }
+  })
+})
+
+/* ───────── API: record ───────── */
+async function fetchRecordForSelectedContract() {
+  const params = { ts: Date.now(), asOf: previewAsOfYMD.value }
+
+  const c = selectedContract.value
+  if (c?.id && /^[a-f0-9]{24}$/i.test(String(c.id))) {
+    params.contractId = c.id
+  } else {
+    if (c?.from && c?.to) {
+      params.from = c.from
+      params.to = c.to
+    } else if (c?.from && !c?.to) {
+      params.from = c.from
+      params.to = params.asOf
+    }
+  }
+
+  const res = await api.get('/leave/user/record', { params })
+  record.value = res?.data || null
+
   clearRowSig()
-  clearSigCaches()
+  await ensureRowSignatures(record.value?.rows || [])
+}
+
+/* ───────── open/close ───────── */
+async function openAndLoad() {
+  loading.value = true
+  error.value = ''
+  record.value = null
+
+  contractOptions.value = []
+  selectedContractId.value = ''
+  contractWatchReady.value = false
+
+  clearRowSig()
+  clearBlobCache()
+  metaCache.clear()
 
   try {
-    await fetchRecordForContract()
-    // signatures are best-effort; if blocked, it stays blank (no crash)
-    await ensureRowSignatures(previewData.value?.rows || [])
+    // first fetch to obtain meta.contracts
+    await fetchRecordForSelectedContract()
+
+    const metaContracts = record.value?.meta?.contracts || []
+    const preferred = safeText(record.value?.meta?.selectedContractId)
+
+    const list = normalizeContracts(metaContracts, record.value?.meta || props.me)
+    contractOptions.value = list
+    selectedContractId.value = pickDefaultContractId(list, preferred)
+
+    contractWatchReady.value = true
+
+    // refetch with selected contract (ensures correct contract context)
+    await fetchRecordForSelectedContract()
   } catch (e) {
-    console.error('User preview load error', e)
-    previewError.value = e?.response?.data?.message || e?.message || 'Failed to load leave record.'
+    console.error('UserLeavePreviewModal open error', e)
+    error.value = e?.response?.data?.message || e?.message || 'Failed to load your leave record.'
+    showToast({ type: 'error', title: 'Preview failed', message: error.value })
   } finally {
-    previewLoading.value = false
+    loading.value = false
   }
 }
 
-watch(
-  () => props.open,
-  async (v) => {
-    if (v) await openAndLoad()
-  }
-)
-
-watch(
-  () => props.contractId,
-  async () => {
-    if (!props.open) return
-    await openAndLoad()
-  }
-)
-
-function closePreview() {
+function close() {
   emit('close')
 }
 
-/* ───────── Print-to-PDF (vector iframe) ───────── */
-async function downloadPdf() {
+/* contract change -> refetch */
+watch(
+  () => selectedContractId.value,
+  async () => {
+    if (!props.open) return
+    if (!contractWatchReady.value) return
+    try {
+      loading.value = true
+      error.value = ''
+      clearRowSig()
+      clearBlobCache()
+      await fetchRecordForSelectedContract()
+    } catch (e) {
+      console.error('contract refetch error', e)
+      error.value = e?.response?.data?.message || e?.message || 'Failed to load record.'
+    } finally {
+      loading.value = false
+    }
+  }
+)
+
+watch(
+  () => props.open,
+  (v) => {
+    if (v) openAndLoad()
+    else {
+      clearRowSig()
+      clearBlobCache()
+      record.value = null
+      error.value = ''
+      loading.value = false
+      contractOptions.value = []
+      selectedContractId.value = ''
+      contractWatchReady.value = false
+      metaCache.clear()
+    }
+  },
+  { immediate: true }
+)
+
+onBeforeUnmount(() => {
+  clearRowSig()
+  clearBlobCache()
+})
+
+/* ───────── Vector Print-to-PDF ───────── */
+async function printPdf() {
   try {
     const el = previewRef.value
     if (!el) return
@@ -333,26 +515,12 @@ async function downloadPdf() {
     .sheet-brand { display:flex; justify-content:flex-end; align-items:center; }
     .sheet-logo { height:24px !important; width:auto !important; max-width:60mm !important; object-fit:contain; display:block; }
     .sheet-line { height:2px; background:#14532d; margin:6px 0 8px 0; opacity:0.9; }
-    .sheet-meta { font-size:10.5px; }
-    .meta-row {
-      display:grid;
-      grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
-      gap: 5px 8px;
-      align-items: center;
-      margin-bottom: 7px;
-    }
-    .meta-label { font-weight:700; }
-    .meta-value { border-bottom: 0.5pt solid #111827; padding: 1px 4px; min-height: 14px; }
-    .meta-legend { grid-column: span 7; display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
-
     table.sheet-table { width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
     .sheet-table th, .sheet-table td { border: 0.5pt solid #111827; padding: 4px 4px; vertical-align: top; }
     .sheet-table thead th { background:#e7e3da; text-align:center; font-weight:800; }
     .center { text-align:center; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .nowrap { white-space:nowrap; }
-    .small { font-size:10px; }
-    .remark { font-size:10px; }
     .sig-img { max-height:16mm; max-width:100%; object-fit:contain; }
     .sig-cell { display:flex; align-items:flex-end; justify-content:center; min-height:16mm; }
   </style>
@@ -394,21 +562,15 @@ async function downloadPdf() {
     window.addEventListener('focus', cleanup)
     window.addEventListener('afterprint', cleanup)
   } catch (e) {
-    console.error('downloadPdf error', e)
+    console.error('printPdf error', e)
     showToast({ type: 'error', title: 'PDF failed', message: e?.message || 'Cannot export PDF.' })
   }
 }
-
-onBeforeUnmount(() => {
-  clearRowSig()
-  clearSigCaches()
-})
 </script>
 
 <template>
-  <!-- FULLSCREEN modal exactly like admin -->
   <div v-if="open" class="fixed inset-0 z-[60]">
-    <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="closePreview" />
+    <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="close" />
 
     <div class="absolute inset-0 p-0">
       <div class="h-full w-full bg-white dark:bg-slate-950 flex flex-col">
@@ -416,33 +578,32 @@ onBeforeUnmount(() => {
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
           <div class="min-w-[260px]">
             <div class="text-[12px] font-semibold text-slate-900 dark:text-white">
-              My Leave Record — <span class="font-mono">{{ me?.employeeId }}</span>
+              My Leave Record — <span class="font-mono">{{ me?.employeeId || me?.loginId }}</span>
             </div>
 
             <div class="text-[11px] text-slate-500 dark:text-slate-300">
-              Contract:
-              <span class="font-mono">{{ selectedContract?.from || currentContract?.from || '—' }}</span>
-              <span class="mx-1">→</span>
-              <span class="font-mono">{{ selectedContract?.to || currentContract?.to || '—' }}</span>
-              <span class="mx-2">·</span>
               As of: <span class="font-mono">{{ previewAsOfYMD }}</span>
             </div>
 
-            <!-- Contract selector -->
             <div class="mt-1 flex flex-wrap items-center gap-2">
               <div class="text-[11px] text-slate-500 dark:text-slate-300">Contract:</div>
-
               <select
+                v-model="selectedContractId"
                 class="h-8 rounded-xl border border-slate-300 bg-white px-2 text-[11px] outline-none
                        focus:border-slate-400 focus:ring-2 focus:ring-slate-200
                        dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100 dark:focus:border-slate-600 dark:focus:ring-slate-800/70"
-                :value="contractId"
-                @change="emit('update:contractId', $event.target.value)"
               >
-                <option v-for="c in contracts" :key="c.id" :value="c.id">
-                  {{ c.isCurrent ? `${c.label} (Current)` : c.label }}
+                <option v-for="c in contractOptions" :key="c.id" :value="c.id">
+                  {{ contractDisplayLabel(c) }}
                 </option>
+                <option v-if="!contractOptions.length" value="">(No contract info)</option>
               </select>
+
+              <div v-if="selectedContract" class="text-[11px] text-slate-500 dark:text-slate-300">
+                <span class="font-mono">{{ selectedContract.from || '—' }}</span>
+                <span class="mx-1">→</span>
+                <span class="font-mono">{{ selectedContract.to || '—' }}</span>
+              </div>
             </div>
           </div>
 
@@ -450,8 +611,8 @@ onBeforeUnmount(() => {
             <button
               class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50
                      dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900 disabled:opacity-60"
-              :disabled="previewLoading || !previewData"
-              @click="downloadPdf"
+              :disabled="loading || !record"
+              @click="printPdf"
             >
               <i class="fa-solid fa-print text-[11px]" />
               Print / PDF
@@ -460,7 +621,7 @@ onBeforeUnmount(() => {
             <button
               class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800
                      dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
-              @click="closePreview"
+              @click="close"
             >
               <i class="fa-solid fa-xmark text-[11px]" />
               Close
@@ -471,14 +632,14 @@ onBeforeUnmount(() => {
         <!-- Body -->
         <div class="flex-1 overflow-y-auto bg-slate-100/70 p-3 sm:p-4 dark:bg-slate-900">
           <div
-            v-if="previewError"
+            v-if="error"
             class="mb-3 rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
                    dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100"
           >
-            {{ previewError }}
+            {{ error }}
           </div>
 
-          <div v-if="previewLoading" class="space-y-2">
+          <div v-if="loading" class="space-y-2">
             <div class="h-10 w-full animate-pulse rounded-xl bg-slate-200/90 dark:bg-slate-800/70" />
             <div class="h-14 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
             <div class="h-14 w-full animate-pulse rounded-xl bg-slate-200/80 dark:bg-slate-800/60" />
@@ -492,12 +653,13 @@ onBeforeUnmount(() => {
                     <div class="sheet-title">Leave Record - Foreigner</div>
                     <div class="text-[10px] text-slate-700">
                       Contract:
-                      <span class="mono">{{ selectedContract?.from || currentContract?.from || '—' }}</span>
+                      <span class="mono">{{ selectedContract?.from || '—' }}</span>
                       <span class="mx-1">→</span>
-                      <span class="mono">{{ selectedContract?.to || currentContract?.to || '—' }}</span>
+                      <span class="mono">{{ selectedContract?.to || '—' }}</span>
                     </div>
                     <div class="text-[10px] text-slate-700">
-                      As of: <span class="mono">{{ previewAsOfYMD }}</span>
+                      As of:
+                      <span class="mono">{{ previewAsOfYMD }}</span>
                     </div>
                   </div>
                   <div class="sheet-brand">
@@ -507,52 +669,7 @@ onBeforeUnmount(() => {
 
                 <div class="sheet-line"></div>
 
-                <div class="sheet-meta">
-                  <div class="meta-row">
-                    <div class="meta-label">Name:</div>
-                    <div class="meta-value">{{ me?.name || previewData?.meta?.name || '' }}</div>
-
-                    <div class="meta-label">ID:</div>
-                    <div class="meta-value mono">{{ me?.employeeId || previewData?.meta?.employeeId || '' }}</div>
-
-                    <div class="meta-label">Department:</div>
-                    <div class="meta-value">{{ me?.department || previewData?.meta?.department || '' }}</div>
-
-                    <div class="meta-label">Section:</div>
-                    <div class="meta-value">{{ previewData?.meta?.section || 'Foreigner' }}</div>
-                  </div>
-
-                  <div class="meta-row">
-                    <div class="meta-label">Date Join:</div>
-                    <div class="meta-value mono">{{ fmtYMD(me?.joinDate || previewData?.meta?.joinDate) || '' }}</div>
-                    <div class="meta-legend">
-                      <span class="meta-label">Leave Type:</span>
-                      <span><b>AL</b>: Annual Leave</span>
-                      <span><b>SL</b>: Sick Leave</span>
-                      <span><b>ML</b>: Maternity Leave</span>
-                      <span><b>UL</b>: Unpaid Leave</span>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- SAME TABLE STYLE AS ADMIN (Manager + GM) -->
                 <table class="sheet-table">
-                  <colgroup>
-                    <col style="width: 16mm;" />
-                    <col style="width: 16mm;" />
-                    <col style="width: 16mm;" />
-                    <col style="width: 13mm;" />
-                    <col style="width: 13mm;" />
-                    <col style="width: 8mm;" />
-                    <col style="width: 8mm;" />
-                    <col style="width: 8mm;" />
-                    <col style="width: 22mm;" />
-                    <col style="width: 22mm;" />
-                    <col style="width: 30mm;" />
-                    <col style="width: 30mm;" />
-                    <col style="width: 14mm;" />
-                  </colgroup>
-
                   <thead>
                     <tr>
                       <th rowspan="2">Date</th>
@@ -563,7 +680,7 @@ onBeforeUnmount(() => {
                       <th rowspan="2">ML<br />Day</th>
                       <th rowspan="2">Record<br />By</th>
                       <th rowspan="2">Checked<br />by</th>
-                      <th colspan="2">Approved by</th>
+                      <th colspan="3">Approved by</th>
                       <th rowspan="2">Remark</th>
                     </tr>
                     <tr>
@@ -572,12 +689,13 @@ onBeforeUnmount(() => {
                       <th>Day</th>
                       <th>Remain</th>
                       <th>Manager</th>
-                      <th>OM / GM</th>
+                      <th>GM</th>
+                      <th>COO</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    <tr v-for="(r, idx) in (previewData?.rows || [])" :key="idx">
+                    <tr v-for="(r, idx) in computedRows" :key="idx">
                       <td class="mono nowrap">{{ r.date || '' }}</td>
                       <td class="mono nowrap">{{ r.from || '' }}</td>
                       <td class="mono nowrap">{{ r.to || '' }}</td>
@@ -589,49 +707,43 @@ onBeforeUnmount(() => {
                       <td class="mono center">{{ r.SL_day ?? '' }}</td>
                       <td class="mono center">{{ r.ML_day ?? '' }}</td>
 
-                      <!-- Record By (employee) -->
                       <td class="small">
                         <div class="sig-cell">
-                          <img
-                            v-if="rowSig.get(rowKey(r))?.recordBy"
-                            :src="rowSig.get(rowKey(r))?.recordBy"
-                            alt="Record by sign"
-                            class="sig-img"
-                          />
+                          <img v-if="rowSig.get(rowKey(r))?.recordBy" :src="rowSig.get(rowKey(r))?.recordBy" class="sig-img" />
                         </div>
                       </td>
 
-                      <!-- Checked By (leave_admin) -->
                       <td class="small">
                         <div class="sig-cell">
-                          <img
-                            v-if="rowSig.get(rowKey(r))?.checkedBy"
-                            :src="rowSig.get(rowKey(r))?.checkedBy"
-                            alt="Checked by sign"
-                            class="sig-img"
-                          />
+                          <img v-if="rowSig.get(rowKey(r))?.checkedBy" :src="rowSig.get(rowKey(r))?.checkedBy" class="sig-img" />
                         </div>
                       </td>
 
-                      <!-- Manager -->
                       <td class="small">
                         <div class="sig-cell">
                           <img
                             v-if="rowSig.get(rowKey(r))?.manager && showManagerSignatureForRow(r)"
                             :src="rowSig.get(rowKey(r))?.manager"
-                            alt="Manager sign"
                             class="sig-img"
                           />
                         </div>
                       </td>
 
-                      <!-- GM -->
                       <td class="small">
                         <div class="sig-cell">
                           <img
                             v-if="rowSig.get(rowKey(r))?.gm && showGmSignatureForRow(r)"
                             :src="rowSig.get(rowKey(r))?.gm"
-                            alt="GM sign"
+                            class="sig-img"
+                          />
+                        </div>
+                      </td>
+
+                      <td class="small">
+                        <div class="sig-cell">
+                          <img
+                            v-if="rowSig.get(rowKey(r))?.coo && showCooSignatureForRow(r)"
+                            :src="rowSig.get(rowKey(r))?.coo"
                             class="sig-img"
                           />
                         </div>
@@ -640,16 +752,16 @@ onBeforeUnmount(() => {
                       <td class="remark">{{ r.remark || '' }}</td>
                     </tr>
 
-                    <tr v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)" :key="'blank-' + n">
-                      <td v-for="c in 13" :key="c">&nbsp;</td>
+                    <tr v-for="n in Math.max(0, 18 - computedRows.length)" :key="'blank-' + n">
+                      <td v-for="c in 14" :key="c">&nbsp;</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
             </div>
 
-            <div v-if="!previewLoading && previewData" class="mt-2 text-[11px] text-slate-500 dark:text-slate-300">
-              Tip: In print dialog, choose “Save as PDF”. Turn off “Headers and footers” for clean output.
+            <div v-if="record" class="mt-2 text-[11px] text-slate-500 dark:text-slate-300">
+              Tip: Print → “Save as PDF”, turn off “Headers and footers”.
             </div>
           </div>
         </div>
@@ -659,7 +771,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* printable sheet (same as admin) */
 .print-sheet {
   width: 210mm;
   min-height: 297mm;
@@ -670,108 +781,26 @@ onBeforeUnmount(() => {
   font-size: 10.5px;
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
 }
-.sheet-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 10px;
-}
-.sheet-title {
-  font-size: 16px;
-  font-weight: 800;
-  letter-spacing: 0.2px;
-}
-.sheet-brand {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-.sheet-logo {
-  height: 24px !important;
-  width: auto !important;
-  max-width: 60mm !important;
-  object-fit: contain;
-  display: block;
-}
-.sheet-line {
-  height: 2px;
-  background: #14532d;
-  margin: 6px 0 8px 0;
-  opacity: 0.9;
-}
-.sheet-meta {
-  font-size: 10.5px;
-}
-.meta-row {
-  display: grid;
-  grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
-  gap: 5px 8px;
-  align-items: center;
-  margin-bottom: 7px;
-}
-.meta-label {
-  font-weight: 700;
-}
-.meta-value {
-  border-bottom: 0.6px solid #111827;
-  padding: 1px 4px;
-  min-height: 14px;
-}
-.meta-legend {
-  grid-column: span 7;
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.sheet-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 10.5px;
-  margin-top: 5px;
-}
-.sheet-table th,
-.sheet-table td {
-  border: 0.6px solid #111827;
-  padding: 4px 4px;
-  vertical-align: top;
-}
-.sheet-table thead th {
-  background: #e7e3da;
-  text-align: center;
-  font-weight: 800;
-}
-.center {
-  text-align: center;
-}
-.small {
-  font-size: 10px;
-}
-.remark {
-  font-size: 10px;
-}
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-}
-.nowrap {
-  white-space: nowrap;
-}
-.sig-cell {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  min-height: 16mm;
-}
-.sig-img {
-  max-height: 16mm;
-  max-width: 100%;
-  object-fit: contain;
-}
+.sheet-header { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; }
+.sheet-title { font-size:16px; font-weight:800; letter-spacing:0.2px; }
+.sheet-brand { display:flex; justify-content:flex-end; align-items:center; }
+.sheet-logo { height:24px !important; width:auto !important; max-width:60mm !important; object-fit:contain; display:block; }
+.sheet-line { height:2px; background:#14532d; margin:6px 0 8px 0; opacity:0.9; }
+
+.sheet-table { width:100%; border-collapse:collapse; font-size:10.5px; margin-top:5px; }
+.sheet-table th, .sheet-table td { border: 0.6px solid #111827; padding: 4px 4px; vertical-align: top; }
+.sheet-table thead th { background:#e7e3da; text-align:center; font-weight:800; }
+
+.small { font-size:10px; }
+.remark { font-size:10px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; }
+.nowrap { white-space:nowrap; }
+.center { text-align:center; }
+
+.sig-cell { display:flex; align-items:flex-end; justify-content:center; min-height:16mm; }
+.sig-img { max-height:16mm; max-width:100%; object-fit:contain; }
 </style>
 
 <style>
-@page {
-  size: A4;
-  margin: 0;
-}
+@page { size: A4; margin: 0; }
 </style>
