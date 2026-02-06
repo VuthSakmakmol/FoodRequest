@@ -4,23 +4,28 @@ const router = express.Router()
 
 const { requireAuth } = require('../../middlewares/auth')
 
-// controllers
 const userCtrl = require('../../controllers/leave/leaveProfile.user.controller')
 const leaveRecordUser = require('../../controllers/leave/leaveRecord.user.controller')
 
-// ✅ Self + manager detail view
-// GET /api/leave/user/profile
-// GET /api/leave/user/profile?employeeId=E123   (manager view)
+// TEMP DEBUG (remove after fixed)
+console.log('userCtrl keys:', Object.keys(userCtrl || {}))
+console.log('leaveRecordUser keys:', Object.keys(leaveRecordUser || {}))
+console.log('requireAuth type:', typeof requireAuth)
+
+// ✅ profile (self + manager/gm detail)
 router.get('/profile', requireAuth, userCtrl.getMyLeaveProfile)
 
-// ✅ Manager list
-// GET /api/leave/user/profile/managed
+// ✅ manager list
 router.get('/profile/managed', requireAuth, userCtrl.getManagedProfiles)
 
-// ✅ Signature resolve (used by reports / PDF)
-router.get('/signatures/resolve/:idLike', requireAuth, leaveRecordUser.resolveSignatureMeta)
+// ✅ gm list
+router.get('/profile/gm-managed', requireAuth, userCtrl.getGmManagedProfiles)
 
-// (optional)
-// router.get('/record', requireAuth, leaveRecordUser.getMyLeaveRecord)
+// ✅ record
+// IMPORTANT: your controller must export getMyLeaveRecord
+router.get('/record', requireAuth, leaveRecordUser.getMyLeaveRecord)
+
+// ✅ signature resolve
+router.get('/signatures/resolve/:idLike', requireAuth, leaveRecordUser.resolveSignatureMeta)
 
 module.exports = router

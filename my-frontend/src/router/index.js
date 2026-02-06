@@ -76,7 +76,7 @@ const CooProfile = () => import('@/views/expat/coo/Profile.vue')
 
 // Manager/GM Profile views
 const ManagerProfile = () => import('@/views/expat/manager/UserUnderManagerProfile.vue')
-const GMProfile = () => import('@/views/expat/generalManager/Profile.vue')
+const GMProfile = () => import('@/views/expat/generalManager/UserUnderManagerAndGmModeProfile.vue')
 
 /* ─────────────────────────────────────────────
  * Roles helpers (supports user.role + user.roles[])

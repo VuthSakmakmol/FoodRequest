@@ -213,3 +213,45 @@ exports.getMyLeaveProfile = async (req, res, next) => {
     return next(err)
   }
 }
+/**
+ * ✅ GET /api/leave/user/profile/gm-managed
+ * Returns employees assigned to this GM AND only in Manager+GM mode (stored = GM_ONLY)
+ */
+exports.getGmManagedProfiles = async (req, res, next) => {
+  try {
+    const roles = getRoles(req)
+    if (!roles.includes('LEAVE_GM') && !roles.includes('LEAVE_ADMIN') && !roles.includes('ADMIN')) {
+      return res.json({ rows: [] })
+    }
+
+    const myLoginId = actorLoginId(req)
+    if (!myLoginId) return res.status(401).json({ message: 'Unauthorized (missing loginId)' })
+
+    // ✅ Manager+GM mode is stored as GM_ONLY
+    const docs = await LeaveProfile.find({
+      isActive: { $ne: false },
+      gmLoginId: myLoginId,
+      approvalMode: 'GM_ONLY',
+    })
+      .select('employeeId name department joinDate contractDate contractEndDate isActive managerLoginId gmLoginId approvalMode')
+      .sort({ employeeId: 1 })
+      .lean()
+
+    const rows = (docs || []).map((p) => ({
+      employeeId: s(p.employeeId),
+      name: s(p.name),
+      department: s(p.department),
+      joinDate: p.joinDate || null,
+      contractDate: p.contractDate || null,
+      contractEndDate: p.contractEndDate || null,
+      managerLoginId: s(p.managerLoginId),
+      gmLoginId: s(p.gmLoginId),
+      approvalMode: up(p.approvalMode) === 'GM_ONLY' ? 'MANAGER_AND_GM' : 'GM_AND_COO', // nice for UI
+      isActive: p.isActive !== false,
+    }))
+
+    return res.json({ rows })
+  } catch (err) {
+    return next(err)
+  }
+}

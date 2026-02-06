@@ -227,6 +227,18 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       (await LeaveProfile.findOne({ employeeId }).lean()) ||
       (await LeaveProfile.findOne({ employeeId: Number(employeeId) }).lean())
     if (!profile) return res.status(404).json({ message: 'Leave profile not found.' })
+    
+      // ✅ ENRICH META for preview (name/department/section/joinDate)
+    const dir = await EmployeeDirectory.findOne(
+      { employeeId: buildEmpIdIn(employeeId) },
+      { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1, joinDate: 1 }
+    ).lean()
+
+    const metaName = safeText(dir?.name || dir?.fullName || profile?.name || '')
+    const metaDepartment = safeText(dir?.departmentName || dir?.department || profile?.department || '')
+    const metaSection = safeText(dir?.section || profile?.section || 'Foreigner')
+    const metaJoinDate = toYMD(dir?.joinDate || profile?.joinDate || profile?.meta?.joinDate)
+
 
     const leaveAdminId = safeText(profile.leaveAdminLoginId || 'leave_admin')
 
@@ -301,15 +313,21 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
     }
 
 
-    res.json({
+        res.json({
       meta: {
         employeeId,
+        name: metaName,
+        department: metaDepartment,
+        section: metaSection,
+        joinDate: metaJoinDate,
+
         contract: contractMeta(selectedContract),
         contracts: listContractsMeta(profile),
         asOf: asOf || null,
       },
       rows,
     })
+
   } catch (e) {
     console.error('getEmployeeLeaveRecord error', e)
     res.status(500).json({ message: e.message || 'Failed to load employee leave record' })
