@@ -26,11 +26,11 @@ const groups = [
         icon: 'fa-solid fa-star',
         to: { name: 'leave-gm-inbox' },
       },
-      {
-        label: 'Profile',
-        icon: 'fa-solid fa-user-group',
-        to: { name: 'leave-gm-profile' },
-      },
+      // {
+      //   label: 'Profile',
+      //   icon: 'fa-solid fa-user-group',
+      //   to: { name: 'leave-gm-profile' },
+      // },
     ],
   },
 ]

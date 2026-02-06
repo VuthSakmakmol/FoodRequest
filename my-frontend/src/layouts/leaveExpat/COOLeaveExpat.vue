@@ -25,11 +25,11 @@ const groups = [
         icon: 'fa-solid fa-circle-check',
         to: { name: 'leave-coo-inbox' },
       },
-      {
-        label: 'Profile',
-        icon: 'fa-solid fa-user-group',
-        to: { name: 'leave-coo-profile' },
-      },
+      // {
+      //   label: 'Profile',
+      //   icon: 'fa-solid fa-user-group',
+      //   to: { name: 'leave-coo-profile' },
+      // },
     ],
   },
 ]

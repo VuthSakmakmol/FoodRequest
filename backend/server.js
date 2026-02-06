@@ -118,8 +118,9 @@ attachDebugEndpoints(app)
 app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
 
 app.use('/api/leave',               require('./routes/leave/leaveType-expat.routes'))
-app.use('/api/leave/user', require('./routes/leave/leaveUser.routes'))
-app.use('/api/leave/user', require('./routes/leave/leaveUserRecord.routes'))
+// ========================== USER (Leave module) ================================
+app.use('/api/leave/user', require('./routes/leave/leaveProfile.user.routes'))
+
 
 app.use('/api/leave/replace-days',  require('./routes/leave/replaceDay.routes'))
 

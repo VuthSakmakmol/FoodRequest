@@ -53,7 +53,7 @@ const groups = computed(() => {
       icon: 'fa-solid fa-clipboard-check',
       children: [
         { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',   to: { name: 'leave-manager-inbox' } },
-        { label: 'Your Employee',      icon: 'fa-solid fa-id-badge',    to: { name: 'leave-manager-profile' } },
+        // { label: 'Your Employee',      icon: 'fa-solid fa-id-badge',    to: { name: 'leave-manager-profile' } },
       ],
     })
   }
@@ -66,7 +66,7 @@ const groups = computed(() => {
       icon: 'fa-solid fa-user-shield',
       children: [
         { label: 'GM Inbox',  icon: 'fa-solid fa-inbox',     to: { name: 'leave-gm-inbox' } },
-        { label: 'Profile',   icon: 'fa-solid fa-id-badge',  to: { name: 'leave-gm-profile' } },
+        // { label: 'Profile',   icon: 'fa-solid fa-id-badge',  to: { name: 'leave-gm-profile' } },
       ].filter(x => x.to?.name),
     })
   }
@@ -79,7 +79,7 @@ const groups = computed(() => {
       icon: 'fa-solid fa-user-check',
       children: [
         { label: 'COO Inbox', icon: 'fa-solid fa-inbox',     to: { name: 'leave-coo-inbox' } },
-        { label: 'Profile',   icon: 'fa-solid fa-id-badge',  to: { name: 'leave-coo-profile' } },
+        // { label: 'Profile',   icon: 'fa-solid fa-id-badge',  to: { name: 'leave-coo-profile' } },
       ].filter(x => x.to?.name),
     })
   }
