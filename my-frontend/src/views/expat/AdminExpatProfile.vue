@@ -11,6 +11,185 @@ defineOptions({ name: 'AdminExpatProfile' })
 const router = useRouter()
 const { showToast } = useToast()
 
+import * as XLSX from 'xlsx'
+
+function fmt(v) {
+  const s = String(v ?? '').trim()
+  return s || ''
+}
+
+/* Excel sheet names cannot contain: \ / ? * [ ] : and max length 31 */
+function safeSheetName(name, fallback = 'Manager') {
+  let s = String(name || '').trim() || fallback
+  s = s.replace(/[\\\/\?\*\[\]\:]/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+  if (!s) s = fallback
+  if (s.length > 31) s = s.slice(0, 31)
+  return s
+}
+
+
+
+/**
+ * Build a balance map by type code:
+ * - ent = yearlyEntitlement (already includes carry effect from backend)
+ * - used = used (+ abs(negative carry) as debt like your UI)
+ * - remain = ent - used
+ */
+function buildBalanceMap(balances, carry) {
+  const arr = Array.isArray(balances) ? balances : []
+  const c = carry && typeof carry === 'object' ? carry : {}
+  const m = new Map()
+
+  for (const b of arr) {
+    const code = String(b?.leaveTypeCode || '').toUpperCase().trim()
+    if (!code) continue
+
+    const ent = num(b.yearlyEntitlement)
+    let used = num(b.used)
+
+    const carryVal = num(c[code])
+    if (carryVal < 0) used += Math.abs(carryVal) // show debt as used
+
+    const remain = ent - used
+    m.set(code, { ent, used, remain })
+  }
+
+  return m
+}
+
+function buildRow(e, managerName = '') {
+  const bm = buildBalanceMap(e.balances, e.carry)
+
+  const get = (code) => bm.get(code) || { used: 0, ent: 0, remain: 0 }
+
+  const AL = get('AL')
+  const SP = get('SP')
+  const MC = get('MC')
+  const MA = get('MA')
+  const UL = get('UL')
+
+  return {
+    Manager: fmt(managerName),
+    EmployeeID: fmt(e.employeeId),
+    Name: fmt(e.name),
+    Department: fmt(e.department),
+    JoinDate: fmt(e.joinDate),
+    ContractDate: fmt(e.contractDate),
+    ContractEnd: fmt(e.contractEndDate),
+    Mode: modeLabel(e.approvalMode),
+    Status: e.isActive ? 'Active' : 'Inactive',
+
+    // ✅ AL
+    AL_Used: AL.used,
+    AL_Ent: AL.ent,
+    AL_Remain: AL.remain, // ✅ remain only AL + SP
+
+    // ✅ SP
+    SP_Used: SP.used,
+    SP_Ent: SP.ent,
+    SP_Remain: SP.remain, // ✅ remain only AL + SP
+
+    // ✅ MC (no remain column)
+    MC_Used: MC.used,
+
+
+    // ✅ MA (no remain column)
+    MA_Used: MA.used,
+
+
+    // ✅ UL (no remain column)
+    UL_Used: UL.used,
+
+  }
+}
+
+/**
+ * ✅ Export ALL filtered data grouped into sheets by manager (1 workbook)
+ * - Uses filteredManagers (q + includeInactive already applied)
+ * - Exports ALL rows (ignores pagination)
+ * - Each manager becomes a sheet
+ * - Balances split into individual columns
+ */
+function exportGroupedByManagerExcel() {
+  const base = Array.isArray(filteredManagers.value) ? filteredManagers.value : []
+  if (!base.length) {
+    showToast({ type: 'info', title: 'Export', message: 'No data to export.' })
+    return
+  }
+
+  const wb = XLSX.utils.book_new()
+
+  // Summary sheet
+  const summaryRows = base.map((g) => ({
+    Manager: fmt(g.manager?.name) || 'Unknown Manager',
+    ManagerEmployeeId: fmt(g.manager?.employeeId),
+    Department: fmt(g.manager?.department),
+    Employees: (g.employees || []).length,
+  }))
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows)
+  wsSummary['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }, { wch: 10 }]
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+
+  // Avoid duplicate sheet names
+  const usedNames = new Map()
+
+  for (const g of base) {
+    const managerName = fmt(g.manager?.name) || 'Unknown Manager'
+    const list = Array.isArray(g.employees) ? g.employees : []
+    const rows = list.map((e) => buildRow(e, managerName))
+
+    let sheetName = safeSheetName(managerName, 'Manager')
+    const used = usedNames.get(sheetName) || 0
+    usedNames.set(sheetName, used + 1)
+    if (used > 0) {
+      const suffix = ` (${used + 1})`
+      sheetName = safeSheetName(sheetName.slice(0, 31 - suffix.length) + suffix)
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+
+    // Column widths (match your exported columns)
+    ws['!cols'] = [
+      { wch: 22 }, // Manager
+      { wch: 12 }, // EmployeeID
+      { wch: 22 }, // Name
+      { wch: 22 }, // Department
+      { wch: 12 }, // JoinDate
+      { wch: 12 }, // ContractDate
+      { wch: 12 }, // ContractEnd
+      { wch: 14 }, // Mode
+      { wch: 10 }, // Status
+
+      { wch: 10 }, // AL_Used
+      { wch: 10 }, // AL_Ent
+      { wch: 12 }, // AL_Remain
+
+      { wch: 10 }, // SP_Used
+      { wch: 10 }, // SP_Ent
+      { wch: 12 }, // SP_Remain
+
+      { wch: 10 }, // MC_Used
+      { wch: 10 }, // MC_Ent
+
+      { wch: 10 }, // MA_Used
+      { wch: 10 }, // MA_Ent
+
+      { wch: 10 }, // UL_Used
+      { wch: 10 }, // UL_Ent
+    ]
+
+    XLSX.utils.book_append_sheet(wb, ws, sheetName)
+  }
+
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const filename = `ExpatProfiles-GroupedByManager-${stamp}.xlsx`
+  XLSX.writeFile(wb, filename)
+
+  showToast({ type: 'success', title: 'Export', message: `Saved: ${filename}` })
+}
+
+
 /* ───────── responsive ───────── */
 const isMobile = ref(false)
 function updateIsMobile() {
@@ -611,17 +790,8 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
-                @click="fetchGroups"
-                :disabled="loading"
-                title="Refresh"
-              >
-                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
-                Refresh
-              </button>
-
+  
+              
               <button
                 type="button"
                 class="rounded-xl bg-white px-3 py-2 text-[12px] font-extrabold text-emerald-700 hover:bg-emerald-50"
@@ -634,12 +804,15 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
-                @click="clearFilters"
-                title="Clear filters"
+                @click="exportGroupedByManagerExcel"
+                title="Export ALL filtered employees grouped by manager (each manager is a sheet)"
               >
-                <i class="fa-solid fa-broom text-[11px]"></i>
-                Clear
+                <i class="fa-solid fa-file-excel text-[11px]" />
+                Export
               </button>
+
+
+            
             </div>
           </div>
         </div>

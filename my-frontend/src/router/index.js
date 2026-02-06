@@ -72,11 +72,9 @@ const UserReplaceDayList = () => import('@/views/expat/user/UserReplaceDayList.v
 
 // COO views
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
-const CooProfile = () => import('@/views/expat/coo/Profile.vue')
+
 
 // Manager/GM Profile views
-const ManagerProfile = () => import('@/views/expat/manager/ManagerProfile.vue')
-const GMProfile = () => import('@/views/expat/gm/GMProfile.vue')
 
 
 /* ─────────────────────────────────────────────
@@ -296,7 +294,6 @@ const router = createRouter({
         { path: 'request', name: 'leave-manager-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-manager-my-requests', component: ExpatMyRequests },
         { path: 'inbox', name: 'leave-manager-inbox', component: ManagerLeaveInbox },
-        { path: 'profile/:employeeId?', name: 'leave-manager-profile', component: ManagerProfile, meta: { title: 'Employee Leave Profile' } },
       ],
     },
 
@@ -312,7 +309,6 @@ const router = createRouter({
         { path: 'request', name: 'leave-gm-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-gm-my-requests', component: ExpatMyRequests },
         { path: 'inbox', name: 'leave-gm-inbox', component: GmLeaveInbox },
-        { path: 'profile/:employeeId?', name: 'leave-gm-profile', component: GMProfile, meta: { title: 'Employee leave profile' } },
       ],
     },
 
@@ -326,7 +322,6 @@ const router = createRouter({
       children: [
         { path: '', redirect: { name: 'leave-coo-inbox' } },
         { path: 'inbox', name: 'leave-coo-inbox', component: CooLeaveInbox },
-        { path: 'profile/:employeeId?', name: 'leave-coo-profile', component: CooProfile, meta: { title: 'Employee leave profile' } },
       ],
     },
 

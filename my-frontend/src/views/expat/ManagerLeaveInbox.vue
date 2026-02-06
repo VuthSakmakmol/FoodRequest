@@ -206,7 +206,6 @@ function buildExportRows(list) {
     LeaveType: r.leaveTypeCode || '',
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
-    LeaveRange: formatRange(r),
     TotalDays: Number(r.totalDays || 0),
     Status: r.status || '',
     Reason: (r.reason || '').replace(/\s+/g, ' ').trim(),
@@ -346,16 +345,6 @@ onBeforeUnmount(() => {
 
               <!-- Actions -->
               <div class="flex items-center gap-2">
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading" title="Refresh">
-                  <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
-                  Refresh
-                </button>
-
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" @click="clearFilters">
-                  <i class="fa-solid fa-broom text-[11px]"></i>
-                  Clear
-                </button>
-
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"
@@ -419,16 +408,6 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex flex-wrap items-center justify-end gap-2">
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading">
-                  <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
-                  Refresh
-                </button>
-
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" @click="clearFilters">
-                  <i class="fa-solid fa-broom text-[11px]"></i>
-                  Clear
-                </button>
-
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"

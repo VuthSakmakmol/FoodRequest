@@ -86,6 +86,16 @@ function upStatus(v) {
   return String(v || '').toUpperCase().trim()
 }
 
+function fileSafeName(v) {
+  return String(v || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, '')   // remove invalid Windows filename chars
+    .replace(/\s+/g, ' ')           // collapse spaces
+    .replace(/\./g, '_')            // avoid weird dot names
+    .slice(0, 80)                   // keep it short
+}
+
+
 /** ✅ GM shown only after GM approved (pending_coo or approved) */
 function showGmSignatureForRow(r) {
   const st = upStatus(r?.status)
@@ -162,45 +172,57 @@ function prevPage() {
   if (page.value > 1) page.value -= 1
 }
 
-/* ───────── Excel Export (employees list) ───────── */
-async function exportEmployeesExcel() {
+/* Excel export for the record rows (GM+COO) */
+async function exportRecordExcel() {
   try {
     const XLSX = await import('xlsx')
-    const codes = TYPE_ORDER.value
+    const meta = previewData.value?.meta || {}
+    const c = selectedContract.value
 
-    const rows = employeesAll.value.map((emp) => {
-      const base = {
-        employeeId: safeText(emp.employeeId),
-        name: safeText(emp.name),
-        department: safeText(emp.department),
-        joinDate: fmtYMD(emp.joinDate),
-        contractDate: fmtYMD(emp.contractDate),
-        managerLoginId: safeText(emp.managerLoginId),
-        gmLoginId: safeText(emp.gmLoginId),
-        cooLoginId: safeText(emp.cooLoginId),
-        approvalMode: safeText(emp.approvalMode) || MODE,
-        isActive: emp.isActive ? 'YES' : 'NO',
-      }
-      for (const code of codes) {
-        const b = balOf(emp, code) || {}
-        base[`${code}_Used`] = num(b.used)
-        base[`${code}_Remaining`] = num(b.remaining)
-        base[`${code}_StrictRemaining`] = num(b.strictRemaining)
-      }
-      return base
-    })
+    const rows = (previewData.value?.rows || []).map((r) => ({
+      Date: r.date,
+      From: r.from,
+      To: r.to,
+
+      AL_Day: r.AL_day ?? '',
+      SP_Day: r.SP_day ?? '',          // ✅ SP in SP column
+      AL_Remain: r.AL_remain ?? '',
+
+      UL_Day: r.UL_day ?? '',
+      SL_Day: r.SL_day ?? '',
+      ML_Day: r.ML_day ?? '',
+
+      RecordBy: r.recordByEmployeeId || r.employeeId || r.recordByLoginId || r.recordBy || '',
+      CheckedBy: LEAVE_ADMIN_LOGIN,
+
+      GM: r.approvedGMLoginId || r.approvedGmLoginId || r.gmLoginId || '',
+      COO: r.approvedCOOLoginId || r.approvedCooLoginId || r.cooLoginId || '',
+
+      Remark: r.remark || '',
+      Status: r.status || '',
+      LeaveType: r.leaveTypeCode || '',
+    }))
 
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'GM_COO')
+    XLSX.utils.book_append_sheet(wb, ws, 'LeaveRecord_GM_COO')
 
-    XLSX.writeFile(wb, `leave_report_gm_coo_all.xlsx`)
-    showToast({ type: 'success', title: 'Exported', message: 'Employees exported.' })
+    const empName = fileSafeName(meta.name || previewEmp.value?.name || 'employee')
+    const empId = fileSafeName(meta.employeeId || previewEmp.value?.employeeId || '')
+    const contractNo = c?.idx ? `c${c.idx}` : 'contract'
+    const stamp = `${previewAsOf.value || 'as_of'}`
+
+    XLSX.writeFile(wb, `LeaveRecord_${empName}_${empId}_${contractNo}_${stamp}.xlsx`)
+
+
+
+    showToast({ type: 'success', title: 'Exported', message: 'Record exported.' })
   } catch (e) {
-    console.error('exportEmployeesExcel error', e)
+    console.error('exportRecordExcel error', e)
     showToast({ type: 'error', title: 'Export failed', message: e?.message || 'Cannot export.' })
   }
 }
+
 
 /* ───────── Preview (per employee) ───────── */
 const previewOpen = ref(false)
@@ -611,7 +633,7 @@ function closePreview() {
   clearBlobCache()
 }
 
-/* ✅ BEST PDF: Vector Print-to-PDF */
+/* ✅ BEST PDF: Vector Print-to-PDF (iframe print) + auto filename = employee name */
 async function downloadPdf() {
   try {
     const el = previewRef.value
@@ -619,67 +641,90 @@ async function downloadPdf() {
 
     await nextTick()
 
+    const meta = previewData.value?.meta || {}
+    const c = selectedContract.value
+
+    const empName = fileSafeName(meta.name || previewEmp.value?.name || 'LeaveRecord')
+    const empId = fileSafeName(meta.employeeId || previewEmp.value?.employeeId || '')
+    const contractNo = c?.idx ? `C${c.idx}` : 'Contract'
+    const stamp = fileSafeName(previewAsOf.value || dayjs().format('YYYY-MM-DD'))
+
+    // ✅ Chrome print dialog filename comes from document.title
+    const pdfTitle = `${empName}${empId ? `_${empId}` : ''}_${contractNo}_${stamp}`
+
+    const css = `
+      @page { size: A4; margin: 0; }
+      html, body { margin:0; padding:0; background:#fff; }
+      * { box-sizing: border-box; }
+      img { max-width: 100%; height: auto; }
+
+      .print-sheet{
+        width:210mm;
+        min-height:297mm;
+        padding:5mm;
+        margin:0 auto;
+        background:#fff;
+        color:#111827;
+        font-size:10.5px;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      }
+
+      .sheet-header{ display:flex; align-items:flex-end; justify-content:space-between; gap:10px; }
+      .sheet-title{ font-size:16px; font-weight:800; letter-spacing:.2px; }
+      .sheet-brand{ display:flex; justify-content:flex-end; align-items:center; }
+      .sheet-logo{ height:24px !important; width:auto !important; max-width:60mm !important; object-fit:contain; display:block; }
+      .sheet-line{ height:2px; background:#14532d; margin:6px 0 8px; opacity:.9; }
+
+      .sheet-meta{ font-size:10.5px; }
+      .meta-row{
+        display:grid;
+        grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
+        gap:5px 8px;
+        align-items:center;
+        margin-bottom:7px;
+      }
+      .meta-label{ font-weight:700; }
+      .meta-value{ border-bottom:.6px solid #111827; padding:1px 4px; min-height:14px; }
+      .meta-legend{ grid-column: span 7; display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+
+      table.sheet-table{ width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
+      .sheet-table th, .sheet-table td{
+        border:.2px solid #111827;     /* ✅ thinner lines */
+        padding:1px 1px;               /* ✅ tighter cells */
+        vertical-align:middle;         /* ✅ center vertical */
+        text-align:center;             /* ✅ center horizontal */
+      }
+      .sheet-table thead th{ background:#e7e3da; font-weight:800; }
+      .remark{ text-align:left; padding-left:2px; }
+
+      .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
+      .nowrap{ white-space:nowrap; }
+
+      .sig-cell{
+        display:flex;
+        align-items:center;            /* ✅ middle */
+        justify-content:center;        /* ✅ center */
+        height:100%;
+        min-height:10mm;               /* ✅ reduce top padding feel */
+      }
+      .sig-img{
+        max-height:10mm;               /* ✅ smaller signature */
+        max-width:100%;
+        object-fit:contain;
+        display:block;
+      }
+    `
+
+    // ✅ IMPORTANT: title controls default PDF filename in Chrome print dialog
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Leave Record</title>
-  <style>
-    @page { size: A4; margin: 0; }
-    html, body { margin:0; padding:0; background:#fff; }
-    .print-sheet {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 5mm;
-      margin: 0;
-      color: #111827;
-      background: #ffffff;
-      font-size: 10.5px;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    }
-    .sheet-header { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; }
-    .sheet-title { font-size:16px; font-weight:800; letter-spacing:0.2px; }
-    .sheet-brand { display:flex; justify-content:flex-end; align-items:center; }
-    .sheet-logo { height:24px !important; width:auto !important; max-width:60mm !important; object-fit:contain; display:block; }
-    .sheet-line { height:2px; background:#14532d; margin:6px 0 8px 0; opacity:0.9; }
-
-    .sheet-meta { font-size:10.5px; }
-    .meta-row {
-      display:grid;
-      grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
-      gap: 5px 8px;
-      align-items: center;
-      margin-bottom: 7px;
-    }
-    .meta-label { font-weight:700; }
-    .meta-value { border-bottom: 0.5pt solid #111827; padding: 1px 4px; min-height: 14px; }
-    .meta-legend { grid-column: span 7; display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
-
-    table.sheet-table { width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
-    .sheet-table th, .sheet-table td {
-      border: 0.5pt solid #111827;
-      padding: 4px 4px;
-      vertical-align: top;
-    }
-    .sheet-table thead th { background:#e7e3da; text-align:center; font-weight:800; }
-    .center { text-align:center; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .nowrap { white-space:nowrap; }
-    .small { font-size:10px; }
-    .remark { font-size:10px; }
-    .sig-img { max-height:16mm; max-width:100%; object-fit:contain; }
-    .sig-cell { display:flex; align-items:flex-end; justify-content:center; min-height:16mm; }
-  </style>
+  <title>${pdfTitle}</title>
+  <style>${css}</style>
 </head>
 <body>
   ${el.outerHTML}
-  <script>
-    (async () => {
-      const imgs = Array.from(document.images || []);
-      await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload=r; img.onerror=r; })));
-      setTimeout(() => { window.focus(); window.print(); }, 50);
-    })();
-  <\\/script>
 </body>
 </html>`
 
@@ -698,20 +743,52 @@ async function downloadPdf() {
     doc.write(html)
     doc.close()
 
+    // ✅ reinforce title (Chrome uses this for filename)
+    try {
+      win.document.title = pdfTitle
+    } catch {}
+
+    // ✅ wait images (logo + signatures) then print
+    const waitImages = async () => {
+      const imgs = Array.from(win.document.images || [])
+      await Promise.all(
+        imgs.map((img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise((r) => {
+                img.onload = r
+                img.onerror = r
+              })
+        )
+      )
+    }
+
     const cleanup = () => {
       try {
         document.body.removeChild(iframe)
       } catch {}
-      window.removeEventListener('focus', cleanup)
       window.removeEventListener('afterprint', cleanup)
+      window.removeEventListener('focus', cleanup)
     }
-    window.addEventListener('focus', cleanup)
     window.addEventListener('afterprint', cleanup)
+    window.addEventListener('focus', cleanup)
+
+    setTimeout(async () => {
+      try {
+        await waitImages()
+        win.focus()
+        win.print()
+      } catch (e) {
+        console.error(e)
+        cleanup()
+      }
+    }, 50)
   } catch (e) {
     console.error('downloadPdf(print) error', e)
     showToast({ type: 'error', title: 'PDF failed', message: e?.message || 'Cannot export PDF.' })
   }
 }
+
 
 /* ───────── Debounce search ───────── */
 let tmr = null
@@ -1016,6 +1093,16 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-print text-[11px]" />
                 Print / PDF
               </button>
+              <button
+                class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 hover:bg-slate-50
+                      dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900 disabled:opacity-60"
+                :disabled="previewLoading || !previewData"
+                @click="exportRecordExcel"
+              >
+                <i class="fa-solid fa-file-excel text-[11px]" />
+                Excel
+              </button>
+
 
               <button
                 class="inline-flex items-center gap-2 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-slate-800
@@ -1251,6 +1338,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 10px;
 }
+
 .sheet-title {
   font-size: 16px;
   font-weight: 800;
@@ -1262,6 +1350,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   align-items: center;
 }
+
 .sheet-logo {
   height: 24px !important;
   width: auto !important;
@@ -1280,6 +1369,7 @@ onBeforeUnmount(() => {
 .sheet-meta {
   font-size: 10.5px;
 }
+
 .meta-row {
   display: grid;
   grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
@@ -1287,14 +1377,17 @@ onBeforeUnmount(() => {
   align-items: center;
   margin-bottom: 7px;
 }
+
 .meta-label {
   font-weight: 700;
 }
+
 .meta-value {
   border-bottom: 0.6px solid #111827;
-  padding: 1px 4px;
+  padding: 1px 2px;
   min-height: 14px;
 }
+
 .meta-legend {
   grid-column: span 7;
   display: flex;
@@ -1307,48 +1400,63 @@ onBeforeUnmount(() => {
 .sheet-table {
   width: 100%;
   border-collapse: collapse;
+  border-spacing: 0;
   font-size: 10.5px;
   margin-top: 5px;
 }
+
 .sheet-table th,
 .sheet-table td {
-  border: 0.6px solid #111827;
-  padding: 4px 4px;
-  vertical-align: top;
+  border: 0.3px solid #111827;
+  padding: 1px 1px;          /* ✅ smaller */
+  line-height: 1.1;          /* ✅ reduce extra vertical whitespace */
+  vertical-align: middle;
+  text-align: center;
 }
+
+.sheet-table { border-collapse: collapse; }
+
 .sheet-table thead th {
   background: #e7e3da;
-  text-align: center;
   font-weight: 800;
 }
 
 .center {
   text-align: center;
 }
+
 .small {
   font-size: 10px;
 }
-.remark {
-  font-size: 10px;
-}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
+
 .nowrap {
   white-space: nowrap;
 }
 
-/* signature */
+/* remark stays left only */
+.remark {
+  font-size: 10px;
+  text-align: left;             /* ✅ only remark left */
+  padding-left: 2px;
+}
+
+/* signatures centered inside cell */
 .sig-cell {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
-  min-height: 16mm;
+  min-height: 8mm;           /* ✅ smaller height */
+  padding: 0;                /* ✅ remove internal padding */
 }
+
 .sig-img {
-  max-height: 16mm;
-  max-width: 100%;
-  object-fit: contain;
+  max-height: 8mm;           /* ✅ smaller signature */
+  margin: 0;                 /* ✅ no extra top/bottom */
+  display: block;
 }
 
 @media print {

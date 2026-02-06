@@ -650,7 +650,6 @@ function closePreview() {
   clearBlobCache()
 }
 
-/* ✅ BEST PDF: Vector Print-to-PDF */
 async function downloadPdf() {
   try {
     const el = previewRef.value
@@ -658,67 +657,78 @@ async function downloadPdf() {
 
     await nextTick()
 
+    const css = `
+      @page { size: A4; margin: 0; }
+      html, body { margin:0; padding:0; background:#fff; }
+      * { box-sizing: border-box; }
+      img { max-width: 100%; height: auto; }
+
+      .print-sheet{
+        width:210mm;
+        min-height:297mm;
+        padding:5mm;
+        margin:0 auto;
+        background:#fff;
+        color:#111827;
+        font-size:10.5px;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      }
+
+      .sheet-header{ display:flex; align-items:flex-end; justify-content:space-between; gap:10px; }
+      .sheet-title{ font-size:16px; font-weight:800; letter-spacing:.2px; }
+      .sheet-brand{ display:flex; justify-content:flex-end; align-items:center; }
+      .sheet-logo{ height:24px !important; width:auto !important; max-width:60mm !important; object-fit:contain; display:block; }
+      .sheet-line{ height:2px; background:#14532d; margin:6px 0 8px; opacity:.9; }
+
+      .sheet-meta{ font-size:10.5px; }
+      .meta-row{
+        display:grid;
+        grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
+        gap:5px 8px;
+        align-items:center;
+        margin-bottom:7px;
+      }
+      .meta-label{ font-weight:700; }
+      .meta-value{ border-bottom:.6px solid #111827; padding:1px 4px; min-height:14px; }
+      .meta-legend{ grid-column: span 7; display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+
+      table.sheet-table{ width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
+      .sheet-table th, .sheet-table td{
+        border:.6px solid #111827;
+        padding:2px 2px;            /* ✅ 1px padding */
+        vertical-align:middle;       /* ✅ text middle */
+        text-align:center;           /* ✅ center like paper */
+      }
+      .sheet-table thead th{ background:#e7e3da; font-weight:800; }
+      .remark{ text-align:left; padding-left:2px; }
+
+      .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace; }
+      .nowrap{ white-space:nowrap; }
+
+      .sig-cell{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        height:100%;
+        min-height:14mm;
+      }
+      .sig-img{
+        max-height:14mm;             /* ✅ keep signature small */
+        max-width:100%;
+        object-fit:contain;
+        display:block;
+      }
+    `
+
     const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8"/>
   <title>Leave Record</title>
-  <style>
-    @page { size: A4; margin: 0; }
-    html, body { margin:0; padding:0; background:#fff; }
-    .print-sheet {
-      width: 210mm;
-      min-height: 297mm;
-      padding: 5mm;
-      margin: 0;
-      color: #111827;
-      background: #ffffff;
-      font-size: 10.5px;
-      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    }
-    .sheet-header { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; }
-    .sheet-title { font-size:16px; font-weight:800; letter-spacing:0.2px; }
-    .sheet-brand { display:flex; justify-content:flex-end; align-items:center; }
-    .sheet-logo { height:24px !important; width:auto !important; max-width:60mm !important; object-fit:contain; display:block; }
-    .sheet-line { height:2px; background:#14532d; margin:6px 0 8px 0; opacity:0.9; }
-
-    .sheet-meta { font-size:10.5px; }
-    .meta-row {
-      display:grid;
-      grid-template-columns: 18mm 1fr 12mm 26mm 22mm 1fr 16mm 1fr;
-      gap: 5px 8px;
-      align-items: center;
-      margin-bottom: 7px;
-    }
-    .meta-label { font-weight:700; }
-    .meta-value { border-bottom: 0.5pt solid #111827; padding: 1px 4px; min-height: 14px; }
-    .meta-legend { grid-column: span 7; display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
-
-    table.sheet-table { width:100%; border-collapse:collapse; border-spacing:0; font-size:10.5px; margin-top:5px; }
-    .sheet-table th, .sheet-table td {
-      border: 0.5pt solid #111827;
-      padding: 4px 4px;
-      vertical-align: top;
-    }
-    .sheet-table thead th { background:#e7e3da; text-align:center; font-weight:800; }
-    .center { text-align:center; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .nowrap { white-space:nowrap; }
-    .small { font-size:10px; }
-    .remark { font-size:10px; }
-    .sig-img { max-height:16mm; max-width:100%; object-fit:contain; }
-    .sig-cell { display:flex; align-items:flex-end; justify-content:center; min-height:16mm; }
-  </style>
+  <style>${css}</style>
 </head>
 <body>
   ${el.outerHTML}
-  <script>
-    (async () => {
-      const imgs = Array.from(document.images || []);
-      await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload=r; img.onerror=r; })));
-      setTimeout(() => { window.focus(); window.print(); }, 50);
-    })();
-  <\\/script>
 </body>
 </html>`
 
@@ -737,20 +747,39 @@ async function downloadPdf() {
     doc.write(html)
     doc.close()
 
-    const cleanup = () => {
-      try {
-        document.body.removeChild(iframe)
-      } catch {}
-      window.removeEventListener('focus', cleanup)
-      window.removeEventListener('afterprint', cleanup)
+    // ✅ wait images (logo + signatures) then print
+    const waitImages = async () => {
+      const imgs = Array.from(win.document.images || [])
+      await Promise.all(
+        imgs.map((img) => (img.complete ? Promise.resolve() : new Promise((r) => { img.onload = r; img.onerror = r })))
+      )
     }
-    window.addEventListener('focus', cleanup)
+
+    setTimeout(async () => {
+      try {
+        await waitImages()
+        win.focus()
+        win.print()
+      } catch (e) {
+        console.error(e)
+      }
+    }, 50)
+
+    const cleanup = () => {
+      try { document.body.removeChild(iframe) } catch {}
+      window.removeEventListener('afterprint', cleanup)
+      window.removeEventListener('focus', cleanup)
+    }
     window.addEventListener('afterprint', cleanup)
+    window.addEventListener('focus', cleanup)
+
   } catch (e) {
-    console.error('downloadPdf(print) error', e)
-    showToast({ type: 'error', title: 'PDF failed', message: e?.message || 'Cannot export PDF.' })
+    console.error(e)
+    showToast({ type: 'error', title: 'PDF failed', message: e?.message || 'Cannot print.' })
   }
 }
+
+
 
 /* Excel export for the record rows */
 async function exportRecordExcel() {
@@ -1043,7 +1072,7 @@ onBeforeUnmount(() => {
     <div v-if="previewOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="closePreview" />
 
-      <div class="absolute inset-0 p-0">
+      <div class="absolute inset-0 p-0 z-[61]">
         <div class="h-full w-full bg-white dark:bg-slate-950 flex flex-col">
           <!-- Top bar -->
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
@@ -1340,6 +1369,8 @@ onBeforeUnmount(() => {
   font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
 }
 
+
+
 .sheet-header {
   display: flex;
   align-items: flex-end;
@@ -1408,9 +1439,10 @@ onBeforeUnmount(() => {
 .sheet-table th,
 .sheet-table td {
   border: 0.6px solid #111827;
-  padding: 4px 4px;
-  vertical-align: top;
+  padding: 2px 2px;          
+  vertical-align: middle;   
 }
+
 .sheet-table thead th {
   background: #e7e3da;
   text-align: center;
@@ -1434,12 +1466,14 @@ onBeforeUnmount(() => {
 }
 
 /* signature */
-.sig-cell {
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  min-height: 16mm;
+.sig-img {
+  max-height: 14mm;          
+  max-width: 100%;
+  object-fit: contain;
+  display: block;
 }
+
+
 .sig-img {
   max-height: 16mm;
   max-width: 100%;
