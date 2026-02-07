@@ -1,7 +1,13 @@
-<!-- src/views/expat/CooLeaveInbox.vue -->
+<!-- src/views/expat/CooLeaveInbox.vue
+  ✅ Column aligned (fixed widths + colgroup)
+  ✅ Removed status tabs (Pending/Finished)
+  ✅ Filters: search + requested date range + expat id
+  ✅ Export CSV (Excel compatible): Filtered + ALL
+  ✅ Approve/Reject with confirm modal (auto close on success)
+-->
+
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
@@ -10,7 +16,6 @@ import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
 
 defineOptions({ name: 'CooLeaveInbox' })
 
-const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
 
@@ -34,7 +39,6 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusTab = ref('PENDING') // 'PENDING' | 'FINISHED'
 
 /* ✅ Filters (default ALL) */
 const fromDate = ref('') // Requested at (createdAt)
@@ -74,11 +78,7 @@ function statusChipClasses(status) {
 }
 
 /**
- * ✅ IMPORTANT (your new rule):
- * COO sees the SAME final queue as GM.
- * Final queue status is PENDING_GM, but approvalMode decides who can act.
- *
- * Recommended backend endpoint: GET /leave/requests/coo/inbox
+ * ✅ COO inbox endpoint (your current)
  */
 async function fetchInbox(silent = false) {
   try {
@@ -103,10 +103,9 @@ async function fetchInbox(silent = false) {
 function statusWeight(s) {
   const st = String(s || '').toUpperCase()
   switch (st) {
-    // ✅ show pending first
-    case 'PENDING_GM':
-      return 0
     case 'PENDING_COO':
+      return 0
+    case 'PENDING_GM':
       return 1
     case 'PENDING_MANAGER':
       return 2
@@ -138,27 +137,14 @@ function rejectedByLabel(row) {
   return 'Rejected'
 }
 
-/* ✅ Go to COO Profile page and auto-select that expat */
-function goProfile(row) {
-  const empId = String(row?.employeeId || '').trim()
-  if (!empId) return
-  router.push({ name: 'leave-coo-profile', query: { employeeId: empId } })
-}
-
-/**
- * Tabs:
- * - PENDING:  show pending queue rows
- * - FINISHED: only APPROVED/REJECTED/CANCELLED
- */
+/* ✅ Filters (NO status tab) */
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
 
   let list = [...rows.value]
 
-  if (empQ) {
-    list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
-  }
+  if (empQ) list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
 
   if (q) {
     list = list.filter(
@@ -168,24 +154,13 @@ const filteredRows = computed(() => {
         String(r.department || '').toLowerCase().includes(q) ||
         String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
         String(r.reason || '').toLowerCase().includes(q) ||
+        String(r.status || '').toLowerCase().includes(q) ||
         String(r.cooComment || '').toLowerCase().includes(q) ||
         String(r.gmComment || '').toLowerCase().includes(q) ||
         String(r.managerComment || '').toLowerCase().includes(q)
     )
   }
 
-  if (statusTab.value === 'FINISHED') {
-    list = list.filter((r) =>
-      ['APPROVED', 'REJECTED', 'CANCELLED'].includes(String(r.status || '').toUpperCase())
-    )
-  } else {
-    // ✅ pending tab
-    list = list.filter((r) =>
-      ['PENDING_GM', 'PENDING_COO', 'PENDING_MANAGER'].includes(String(r.status || '').toUpperCase())
-    )
-  }
-
-  // ✅ Date filter by REQUEST DATE (createdAt)
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
   const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
 
@@ -222,11 +197,72 @@ const pageCount = computed(() => {
 })
 
 watch(
-  () => [search.value, statusTab.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
-  () => {
-    page.value = 1
-  }
+  () => [search.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
+  () => (page.value = 1)
 )
+
+/* ───────── Export CSV (Excel compatible) ───────── */
+function csvEscape(v) {
+  const s = String(v ?? '')
+  const needs = /[",\n\r]/.test(s)
+  const escaped = s.replace(/"/g, '""')
+  return needs ? `"${escaped}"` : escaped
+}
+
+function downloadTextFile(filename, text, mime = 'text/csv;charset=utf-8') {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 3000)
+}
+
+function buildExportRows(list) {
+  return (list || []).map((r) => ({
+    RequestedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+    EmployeeId: r.employeeId || '',
+    EmployeeName: r.employeeName || '',
+    Department: r.department || '',
+    LeaveType: r.leaveTypeCode || '',
+    LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
+    LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
+    LeaveRange: formatRange(r),
+    TotalDays: Number(r.totalDays || 0),
+    Status: String(r.status || ''),
+    RejectBy: String(r.status || '').toUpperCase() === 'REJECTED' ? rejectedByLabel(r) : '',
+    RejectReason: String(r.status || '').toUpperCase() === 'REJECTED' ? getRejectReason(r) : '',
+    RequestReason: (r.reason || '').replace(/\s+/g, ' ').trim(),
+  }))
+}
+
+function exportExcel(scope = 'FILTERED') {
+  try {
+    const list = scope === 'ALL' ? rows.value : filteredRows.value
+    if (!list.length) {
+      showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
+      return
+    }
+
+    const data = buildExportRows(list)
+    const headers = Object.keys(data[0])
+
+    const csv = [
+      headers.map(csvEscape).join(','),
+      ...data.map((row) => headers.map((h) => csvEscape(row[h])).join(',')),
+    ].join('\n')
+
+    const tag = scope === 'ALL' ? 'ALL' : 'FILTERED'
+    downloadTextFile(`CooInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.csv`, csv)
+    showToast({ type: 'success', title: 'Exported', message: 'Downloaded CSV (Excel compatible).' })
+  } catch (e) {
+    console.error('exportExcel error', e)
+    showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })
+  }
+}
 
 /* ───────── Confirm dialog ───────── */
 const confirmDialog = ref({
@@ -249,7 +285,8 @@ function openDecisionDialog(row, action) {
   rejectError.value = ''
 }
 
-function closeDecisionDialog() {
+function closeDecisionDialog(force = false) {
+  if (!force && loading.value) return
   confirmDialog.value.open = false
   confirmDialog.value.row = null
   confirmDialog.value.comment = ''
@@ -270,16 +307,13 @@ const confirmPrimaryClasses = computed(() =>
 
 /**
  * ✅ COO decision endpoint
- * Must be atomic in backend:
- * - only allow update when status is still pending (PENDING_GM for OR-final)
- * - if already APPROVED/REJECTED, return 409
  */
 async function submitDecision() {
   const { row, action } = confirmDialog.value
   const comment = String(confirmDialog.value.comment || '').trim()
 
   if (!row || !action) {
-    closeDecisionDialog()
+    closeDecisionDialog(true)
     return
   }
 
@@ -301,7 +335,8 @@ async function submitDecision() {
       message: 'COO decision has been saved.',
     })
 
-    closeDecisionDialog()
+    // ✅ auto close
+    closeDecisionDialog(true)
     await fetchInbox(true)
   } catch (e) {
     console.error('cooDecision error', e)
@@ -325,10 +360,7 @@ function triggerRealtimeRefresh() {
 }
 
 function setupRealtime() {
-  // ✅ Use your shared helper (it should join admins/roles rooms automatically)
   subscribeRoleIfNeeded()
-
-  // ✅ same events as GM (because same final stage)
   offHandlers.push(
     onSocket('leave:req:created', () => triggerRealtimeRefresh()),
     onSocket('leave:req:updated', () => triggerRealtimeRefresh()),
@@ -375,6 +407,11 @@ onBeforeUnmount(() => {
             <p class="text-[10px] uppercase tracking-[0.25em] text-white/80">Expat Leave</p>
             <p class="text-sm font-semibold">COO Inbox</p>
             <p class="text-[11px] text-white/90">Shared final approval queue (GM or COO).</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="ui-badge ui-badge-info">Total: {{ rows.length }}</span>
+              <span class="ui-badge ui-badge-info">Showing: {{ filteredRows.length }}</span>
+            </div>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -386,32 +423,9 @@ onBeforeUnmount(() => {
                 <input
                   v-model="search"
                   type="text"
-                  placeholder="Employee / type / reason / note..."
+                  placeholder="Employee / type / reason / status / note..."
                   class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-white/70"
                 />
-              </div>
-            </div>
-
-            <!-- Status pills -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-white/90 mr-1">Status</span>
-              <div class="flex rounded-full bg-black/15 p-0.5">
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'PENDING' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
-                  @click="statusTab = 'PENDING'"
-                >
-                  Pending
-                </button>
-                <button
-                  type="button"
-                  class="rounded-full px-2.5 py-1 text-[11px] font-medium"
-                  :class="statusTab === 'FINISHED' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
-                  @click="statusTab = 'FINISHED'"
-                >
-                  Finished
-                </button>
               </div>
             </div>
 
@@ -423,7 +437,7 @@ onBeforeUnmount(() => {
                 type="date"
                 class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
               />
-              <span>to</span>
+              <span class="text-white/80">to</span>
               <input
                 v-model="toDate"
                 type="date"
@@ -441,6 +455,19 @@ onBeforeUnmount(() => {
                 class="w-28 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
               />
             </div>
+
+            <!-- Export buttons -->
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="ui-btn ui-btn-sm ui-btn-indigo"
+                @click="exportExcel('FILTERED')"
+                :disabled="loading || !filteredRows.length"
+              >
+                <i class="fa-solid fa-file-excel text-[11px]" />
+                Export
+              </button>
+            </div>
           </div>
         </div>
 
@@ -450,6 +477,11 @@ onBeforeUnmount(() => {
             <p class="text-[10px] uppercase tracking-[0.25em] text-white/80">Expat Leave</p>
             <p class="text-sm font-semibold">COO Inbox</p>
             <p class="text-[11px] text-white/90">Shared final approval queue (GM or COO).</p>
+
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="ui-badge ui-badge-info">Total: {{ rows.length }}</span>
+              <span class="ui-badge ui-badge-info">Showing: {{ filteredRows.length }}</span>
+            </div>
           </div>
 
           <div class="space-y-2">
@@ -460,41 +492,39 @@ onBeforeUnmount(() => {
                 <input
                   v-model="search"
                   type="text"
-                  placeholder="Employee / type / reason / note..."
+                  placeholder="Employee / type / reason / status..."
                   class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-white/70"
                 />
               </div>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-              <div class="flex items-center gap-1">
-                <span class="text-white/90">Status</span>
-                <div class="flex rounded-full bg-black/15 p-0.5">
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'PENDING' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
-                    @click="statusTab = 'PENDING'"
-                  >
-                    Pending
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-full px-2 py-0.5 text-[11px] font-medium"
-                    :class="statusTab === 'FINISHED' ? 'bg-white text-orange-700 shadow-sm' : 'text-white/90 hover:bg-black/15'"
-                    @click="statusTab = 'FINISHED'"
-                  >
-                    Finished
-                  </button>
-                </div>
-              </div>
-
+            <div class="flex items-center justify-between gap-2">
               <input
                 v-model="employeeFilter"
                 type="text"
                 placeholder="Expat ID..."
-                class="w-24 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
+                class="w-28 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
               />
+
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  @click="exportExcel('FILTERED')"
+                  :disabled="loading || !filteredRows.length"
+                >
+                  <i class="fa-solid fa-file-excel text-[11px]" />
+                  Export
+                </button>
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost"
+                  @click="exportExcel('ALL')"
+                  :disabled="loading || !rows.length"
+                >
+                  ALL
+                </button>
+              </div>
             </div>
 
             <div class="flex flex-wrap items-center gap-2 text-[11px]">
@@ -504,7 +534,7 @@ onBeforeUnmount(() => {
                 type="date"
                 class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
               />
-              <span>to</span>
+              <span class="text-white/80">to</span>
               <input
                 v-model="toDate"
                 type="date"
@@ -581,21 +611,11 @@ onBeforeUnmount(() => {
               class="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
                      dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
             >
-              <span class="font-semibold">{{ rejectedByLabel(row) }}<span v-if="row.department"> ({{ row.department }})</span>:</span>
+              <span class="font-semibold">{{ rejectedByLabel(row) }}:</span>
               <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
             </div>
 
             <div class="mt-3 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                @click="goProfile(row)"
-              >
-                <i class="fa-solid fa-id-badge text-[10px]" />
-                Profile
-              </button>
-
               <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_COO'">
                 <button
                   type="button"
@@ -623,19 +643,30 @@ onBeforeUnmount(() => {
           </article>
         </div>
 
-        <!-- Desktop table -->
+        <!-- Desktop table (✅ aligned columns) -->
         <div v-else class="overflow-x-auto">
-          <table class="min-w-[1100px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+          <table class="min-w-[1240px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
+            <colgroup>
+              <col class="w-[160px]" />
+              <col class="w-[280px]" />
+              <col class="w-[110px]" />
+              <col class="w-[170px]" />
+              <col class="w-[80px]" />
+              <col />
+              <col class="w-[130px]" />
+              <col class="w-[180px]" />
+            </colgroup>
+
             <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
               <tr>
-                <th class="table-th">Requested at</th>
-                <th class="table-th">Employee</th>
-                <th class="table-th">Type</th>
-                <th class="table-th">Date range</th>
+                <th class="table-th text-left">Requested at</th>
+                <th class="table-th text-left">Employee</th>
+                <th class="table-th text-left">Type</th>
+                <th class="table-th text-left">Date range</th>
                 <th class="table-th text-right">Days</th>
-                <th class="table-th">Request reason</th>
+                <th class="table-th text-left">Request reason</th>
                 <th class="table-th text-center">Status</th>
-                <th class="table-th text-right">Actions</th>
+                <th class="table-th text-center">Actions</th>
               </tr>
             </thead>
 
@@ -659,53 +690,49 @@ onBeforeUnmount(() => {
                   <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
                     {{ row.employeeId || '—' }}
                   </div>
-                  <div v-if="row.employeeName || row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ row.employeeName || '' }} <span v-if="row.department">· {{ row.department }}</span>
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    {{ row.employeeName || '—' }} <span v-if="row.department">· {{ row.department }}</span>
                   </div>
                 </td>
 
                 <td class="table-td align-top">
-                  <span class="inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700 border border-orange-100 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800/80">
+                  <span class="inline-flex items-center justify-center rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700 border border-orange-100 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800/80">
                     {{ row.leaveTypeCode || '—' }}
                   </span>
                 </td>
 
-                <td class="table-td whitespace-nowrap align-top">{{ formatRange(row) }}</td>
-                <td class="table-td text-right align-top">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
+                <td class="table-td whitespace-nowrap align-top">
+                  {{ formatRange(row) }}
+                </td>
+
+                <td class="table-td text-right align-top tabular-nums">
+                  {{ Number(row.totalDays || 0).toLocaleString() }}
+                </td>
 
                 <td class="table-td align-top">
                   <p class="text-truncate-2 text-xs sm:text-[13px]">{{ row.reason || '—' }}</p>
 
                   <div
-                    v-if="String(row.status || '').toUpperCase() === 'REJECTED'"
-                    class="mt-2 inline-flex max-w-[520px] items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
+                    v-if="String(row.status || '').toUpperCase() === 'REJECTED' && getRejectReason(row)"
+                    class="mt-2 inline-flex max-w-[620px] items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
                            dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
                   >
-                    <span class="font-semibold whitespace-nowrap">
-                      {{ rejectedByLabel(row) }}<span v-if="row.department"> ({{ row.department }})</span>:
-                    </span>
-                    <span class="min-w-0 break-words">{{ getRejectReason(row) || '—' }}</span>
+                    <span class="font-semibold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
+                    <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
                   </div>
                 </td>
 
                 <td class="table-td text-center align-top">
-                  <span class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold" :class="statusChipClasses(row.status)">
+                  <span
+                    class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border"
+                    :class="statusChipClasses(row.status)"
+                  >
                     {{ row.status }}
                   </span>
                 </td>
 
-                <td class="table-td text-right align-top">
-                  <div class="inline-flex flex-wrap justify-end gap-2">
-                    <button
-                      type="button"
-                      class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 shadow-sm hover:bg-slate-50
-                             dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
-                      @click="goProfile(row)"
-                    >
-                      <i class="fa-solid fa-id-badge text-[10px]" />
-                      Profile
-                    </button>
-
+                <td class="table-td text-center align-top">
+                  <div class="inline-flex flex-wrap justify-center gap-2">
                     <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_COO'">
                       <button
                         type="button"
@@ -727,7 +754,7 @@ onBeforeUnmount(() => {
                     </template>
 
                     <template v-else>
-                      <span class="text-[11px] text-slate-400 dark:text-slate-500">No action</span>
+                      <span class="text-[11px] text-slate-400 dark:text-slate-500">—</span>
                     </template>
                   </div>
                 </td>
@@ -784,7 +811,8 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/80"
-                @click="closeDecisionDialog"
+                @click="closeDecisionDialog()"
+                :disabled="loading"
               >
                 <i class="fa-solid fa-xmark text-xs" />
               </button>
@@ -835,7 +863,8 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="closeDecisionDialog"
+              @click="closeDecisionDialog()"
+              :disabled="loading"
             >
               Cancel
             </button>

@@ -4,8 +4,9 @@
   ✅ Responsive: mobile cards + desktop fixed table with aligned columns
   ✅ Filters: search + requested date range (+ optional expat id)
   ✅ Actions: Export CSV (Excel compatible) + Refresh + Clear
-  ✅ NO per-row Action buttons (no approve/reject)
+  ✅ NOW: Approve + Reject buttons (Manager action)
   ✅ Keep realtime refresh
+  ✅ NO SweetAlert / NO window.alert (custom confirm modal)
 -->
 
 <script setup>
@@ -242,6 +243,77 @@ function exportExcel(scope = 'FILTERED') {
   }
 }
 
+/* ───────── Approve / Reject ───────── */
+const deciding = ref(false)
+const decideId = ref('') // request _id
+const decideAction = ref('') // 'APPROVE' | 'REJECT'
+const rejectNote = ref('')
+
+const canDecide = (row) => String(row?.status || '').toUpperCase() === 'PENDING_MANAGER'
+
+function openApprove(row) {
+  if (!row?._id) return
+  decideId.value = row._id
+  decideAction.value = 'APPROVE'
+  rejectNote.value = ''
+}
+
+function openReject(row) {
+  if (!row?._id) return
+  decideId.value = row._id
+  decideAction.value = 'REJECT'
+  rejectNote.value = ''
+}
+
+function closeDecisionModal(force = false) {
+  if (!force && deciding.value) return
+  decideId.value = ''
+  decideAction.value = ''
+  rejectNote.value = ''
+}
+
+
+async function confirmDecision() {
+  if (!decideId.value || !decideAction.value) return
+
+  const action = decideAction.value === 'APPROVE' ? 'APPROVE' : 'REJECT'
+  const comment = action === 'REJECT' ? rejectNote.value.trim() : ''
+
+  if (action === 'REJECT' && !comment) {
+    showToast({ type: 'warning', title: 'Reject reason required', message: 'Please enter a short reason to reject.' })
+    return
+  }
+
+  try {
+    deciding.value = true
+
+    await api.post(`/leave/requests/${decideId.value}/manager-decision`, { action, comment })
+
+    showToast({
+      type: 'success',
+      title: action === 'APPROVE' ? 'Approved' : 'Rejected',
+      message: action === 'APPROVE' ? 'Sent to GM queue.' : 'Request rejected.',
+    })
+
+    // ✅ AUTO CLOSE immediately after success
+    closeDecisionModal(true)
+
+    await fetchInbox()
+  } catch (e) {
+    console.error('confirmDecision error', e)
+    showToast({
+      type: 'error',
+      title: 'Action failed',
+      message: e?.response?.data?.message || 'Unable to update request. Please try again.',
+    })
+  } finally {
+    deciding.value = false
+  }
+}
+
+
+
+
 /* ───────── Realtime ───────── */
 const offHandlers = []
 let refreshTimer = null
@@ -355,6 +427,16 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="fetchInbox()" :disabled="loading">
+                  <i class="fa-solid fa-rotate text-[11px]" />
+                  Refresh
+                </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters()" :disabled="loading">
+                  <i class="fa-solid fa-broom text-[11px]" />
+                  Clear
+                </button>
               </div>
             </div>
           </div>
@@ -417,10 +499,25 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="fetchInbox()" :disabled="loading">
+                  <i class="fa-solid fa-rotate text-[11px]" />
+                  Refresh
+                </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters()" :disabled="loading">
+                  <i class="fa-solid fa-broom text-[11px]" />
+                  Clear
+                </button>
               </div>
 
               <div class="flex justify-end">
-                <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="exportExcel('ALL')" :disabled="loading || !rows.length">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-ghost"
+                  @click="exportExcel('ALL')"
+                  :disabled="loading || !rows.length"
+                >
                   Export ALL
                 </button>
               </div>
@@ -487,12 +584,34 @@ onBeforeUnmount(() => {
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <span class="font-semibold">Reason:</span> <span>{{ row.reason || '—' }}</span>
               </div>
+
+              <!-- ✅ Actions (only if PENDING_MANAGER) -->
+              <div v-if="canDecide(row)" class="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-emerald"
+                  :disabled="loading || deciding"
+                  @click="openApprove(row)"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-rose"
+                  :disabled="loading || deciding"
+                  @click="openReject(row)"
+                >
+                  <i class="fa-solid fa-circle-xmark text-[11px]" />
+                  Reject
+                </button>
+              </div>
             </article>
           </div>
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left min-w-[1120px]">
+            <table class="ui-table text-left min-w-[1240px]">
               <colgroup>
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
@@ -500,7 +619,8 @@ onBeforeUnmount(() => {
                 <col class="w-[160px]" />
                 <col class="w-[80px]" />
                 <col />
-                <col class="w-[140px]" />
+                <col class="w-[170px]" />
+                <col class="w-[170px]" />
               </colgroup>
 
               <thead>
@@ -508,16 +628,17 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Requested at</th>
                   <th class="ui-th text-left">Employee</th>
                   <th class="ui-th text-left">Type</th>
-                  <th class="ui-th text-left">Date range</th>
+                  <th class="ui-th text-left">Leave Date</th>
                   <th class="ui-th text-right">Days</th>
                   <th class="ui-th text-left">Reason</th>
                   <th class="ui-th">Status</th>
+                  <th class="ui-th text-center">Actions</th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No leave requests in your manager queue.
                   </td>
                 </tr>
@@ -559,6 +680,31 @@ onBeforeUnmount(() => {
                       {{ row.status }}
                     </span>
                   </td>
+
+                  <!-- ✅ Actions -->
+                  <td class="ui-td align-top text-center">
+                    <div v-if="canDecide(row)" class="flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        class="ui-btn ui-btn-xs ui-btn-emerald"
+                        :disabled="loading || deciding"
+                        @click="openApprove(row)"
+                      >
+                        <i class="fa-solid fa-circle-check text-[11px]" />
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        class="ui-btn ui-btn-xs ui-btn-rose"
+                        :disabled="loading || deciding"
+                        @click="openReject(row)"
+                      >
+                        <i class="fa-solid fa-circle-xmark text-[11px]" />
+                        Reject
+                      </button>
+                    </div>
+                    <span v-else class="text-[11px] text-slate-400">—</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -579,6 +725,75 @@ onBeforeUnmount(() => {
               <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
               <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
               <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ✅ Confirm modal (Approve / Reject) -->
+    <div v-if="!!decideAction" class="fixed inset-0 z-[60]">
+      <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal" />
+      <div class="absolute inset-0 flex items-center justify-center p-3">
+        <div class="ui-card w-full max-w-lg p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                {{ decideAction === 'APPROVE' ? 'Approve request' : 'Reject request' }}
+              </p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                This will update the request status immediately.
+              </p>
+            </div>
+            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal" :disabled="deciding">
+              <i class="fa-solid fa-xmark" />
+            </button>
+          </div>
+
+          <div class="mt-3 space-y-2">
+            <div
+              v-if="decideAction === 'REJECT'"
+              class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <label class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Reject reason</label>
+              <textarea
+                v-model="rejectNote"
+                rows="3"
+                class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-900 outline-none
+                       placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                placeholder="Example: Not enough coverage during that period..."
+              />
+              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                Required. This reason will be visible in request history.
+              </p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeDecisionModal" :disabled="deciding">
+                Cancel
+              </button>
+
+              <button
+                v-if="decideAction === 'APPROVE'"
+                type="button"
+                class="ui-btn ui-btn-sm ui-btn-emerald"
+                @click="confirmDecision"
+                :disabled="deciding"
+              >
+                <i class="fa-solid fa-circle-check text-[11px]" />
+                {{ deciding ? 'Approving...' : 'Approve' }}
+              </button>
+
+              <button
+                v-else
+                type="button"
+                class="ui-btn ui-btn-sm ui-btn-rose"
+                @click="confirmDecision"
+                :disabled="deciding"
+              >
+                <i class="fa-solid fa-circle-xmark text-[11px]" />
+                {{ deciding ? 'Rejecting...' : 'Reject' }}
+              </button>
             </div>
           </div>
         </div>
