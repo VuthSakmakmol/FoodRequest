@@ -856,15 +856,7 @@ onBeforeUnmount(() => {
     <!-- Filters -->
     <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-950/40">
       <div class="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">GM + COO Report</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Shows only employees in <span class="font-semibold">GM + COO</span> approval mode.
-          </div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Preview uses <span class="font-semibold">selected contract</span> and as of <span class="font-semibold">contract end date</span>.
-          </div>
-        </div>
+
 
         <div class="flex flex-wrap items-center gap-2">
           <button

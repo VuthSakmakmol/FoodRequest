@@ -88,12 +88,6 @@ function statusWeight(s) {
 }
 
 /* quick tools */
-function clearFilters() {
-  search.value = ''
-  employeeFilter.value = ''
-  fromDate.value = ''
-  toDate.value = ''
-}
 
 async function fetchInbox() {
   try {
@@ -427,16 +421,6 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
-
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="fetchInbox()" :disabled="loading">
-                  <i class="fa-solid fa-rotate text-[11px]" />
-                  Refresh
-                </button>
-
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters()" :disabled="loading">
-                  <i class="fa-solid fa-broom text-[11px]" />
-                  Clear
-                </button>
               </div>
             </div>
           </div>
@@ -500,15 +484,7 @@ onBeforeUnmount(() => {
                   Export
                 </button>
 
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="fetchInbox()" :disabled="loading">
-                  <i class="fa-solid fa-rotate text-[11px]" />
-                  Refresh
-                </button>
 
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters()" :disabled="loading">
-                  <i class="fa-solid fa-broom text-[11px]" />
-                  Clear
-                </button>
               </div>
 
               <div class="flex justify-end">
