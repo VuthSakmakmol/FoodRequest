@@ -1335,8 +1335,11 @@ onBeforeUnmount(() => {
                         <td class="remark">{{ r.remark || '' }}</td>
                       </tr>
 
-                      <!-- ✅ UPDATED blank rows col count: now 14 -->
-                      <tr v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)" :key="'blank-' + n">
+                      <tr
+                        v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)"
+                        :key="'blank-' + n"
+                        class="blank-row"
+                      >
                         <td v-for="c in 14" :key="c">&nbsp;</td>
                       </tr>
                     </tbody>
@@ -1370,6 +1373,13 @@ onBeforeUnmount(() => {
 }
 
 
+/* ✅ make ONLY blank rows bigger */
+.blank-row td {
+  height: 10mm;        /* try 9mm / 11mm / 12mm */
+  min-height: 10mm;
+  padding-top: 2mm;
+  padding-bottom: 2mm;
+}
 
 .sheet-header {
   display: flex;

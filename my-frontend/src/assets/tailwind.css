@@ -445,42 +445,144 @@
   }
 }
 
+
 /* ─────────────────────────────────────────────────────────────
-    COO-style action buttons (Approve / Reject)
+     Modern action buttons (Approve / Reject) 
+   ───────────────────────────────────────────────────────────── */
+  .ui-btn-emerald {
+    @apply text-white relative overflow-hidden;
+    background: linear-gradient(90deg, rgb(var(--ui-success)), rgb(var(--ui-primary) / 0.85));
+    box-shadow: 0 10px 24px rgb(var(--ui-success) / 0.18);
+  }
+  .ui-btn-emerald:hover { filter: brightness(1.04); }
+  .ui-btn-emerald:active { transform: translateY(0.5px); }
+
+
+/* ✅ Solid red (NO gradient) */
+  .ui-btn-rose {
+    @apply text-white relative overflow-hidden;
+    background: rgb(var(--ui-danger));          /* rose-500 */
+    box-shadow: 0 10px 24px rgb(var(--ui-danger) / 0.16);
+  }
+
+  .ui-btn-rose:hover { filter: brightness(0.95); }  /* slightly darker */
+  .ui-btn-rose:active { transform: translateY(0.5px); }
+
+
+
+  /* ✅ Shared micro-interactions for all ui-btn */
+  .ui-btn {
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Subtle glossy highlight */
+  .ui-btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(700px circle at 20% 0%, rgba(255,255,255,0.18), transparent 40%);
+    opacity: 0;
+    transition: opacity 180ms ease;
+    pointer-events: none;
+  }
+  .ui-btn:hover::after { opacity: 1; }
+
+  /* Soft focus ring consistent with your tokens */
+  .ui-btn:focus-visible {
+    box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.28), var(--ui-shadow);
+  }
+
+/* ─────────────────────────────────────────────────────────────
+   ✅ ADD-ON: Compact form blocks + chips (APPEND ONLY)
+   - Uses your existing tokens + shadow system
+   - No breaking changes
    ───────────────────────────────────────────────────────────── */
 
-.ui-btn-emerald {
-  @apply inline-flex items-center justify-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold text-white shadow-sm;
-  background-color: rgb(5 150 105); /* emerald-600 */
-}
-.ui-btn-emerald:hover { background-color: rgb(4 120 87); } /* emerald-700 */
-.ui-btn-emerald:active { transform: translateY(0.5px); }
+@layer components {
+  /* Compact inner cards (used for forms inside ui-card) */
+  .ui-mini-card {
+    @apply border;
+    border-radius: var(--ui-r-xl);
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.88);
+    box-shadow: var(--ui-shadow);
+    backdrop-filter: blur(10px);
+  }
 
-.ui-btn-rose {
-  @apply inline-flex items-center justify-center gap-1 rounded-full px-3 py-1 text-[11px] font-semibold;
-  border: 1px solid rgb(244 63 94); /* rose-500 */
-  color: rgb(190 18 60); /* rose-700 */
-  background: transparent;
-}
-.ui-btn-rose:hover { background-color: rgb(255 241 242); } /* rose-50 */
-.ui-btn-rose:active { transform: translateY(0.5px); }
+  /* Row layout with icon on left */
+  .ui-row {
+    @apply flex items-start gap-3;
+  }
 
-/* Dark mode outline + hover */
-.dark .ui-btn-rose {
-  border-color: rgb(244 63 94); /* rose-500 */
-  color: rgb(253 164 175); /* rose-300 */
-}
-.dark .ui-btn-rose:hover { background-color: rgba(136, 19, 55, 0.35); } /* rose-950-ish */
+  .ui-ico {
+    @apply grid place-items-center shrink-0 border;
+    width: 38px;
+    height: 38px;
+    border-radius: 16px;
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-border) / 0.22);
+    color: rgb(var(--ui-fg) / 0.92);
+  }
+  .dark .ui-ico {
+    border-color: rgb(var(--ui-border-2) / 0.70);
+    background: rgb(var(--ui-border) / 0.18);
+    color: rgb(var(--ui-fg) / 0.95);
+  }
 
-/* ✅ Shared focus ring (keep consistent) */
-.ui-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.28), var(--ui-shadow);
-}
+  /* Chips for AM/PM and half edges (reuse your style) */
+  .ui-chip {
+    @apply inline-flex items-center justify-center gap-2 border px-3 py-2 text-[11px] font-extrabold transition;
+    border-radius: 999px;
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.86);
+    color: rgb(var(--ui-fg) / 0.92);
+  }
+  .ui-chip:hover { background: rgb(var(--ui-card) / 0.95); }
 
-/* Optional: make disabled look clean */
-.ui-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-  transform: none !important;
+  .ui-chip-on {
+    border-color: rgb(var(--ui-primary) / 0.40);
+    background: rgb(var(--ui-primary) / 0.14);
+    color: rgb(var(--ui-primary));
+  }
+  .dark .ui-chip-on {
+    color: rgb(var(--ui-fg) / 0.95);
+    border-color: rgb(var(--ui-primary) / 0.45);
+    background: rgb(var(--ui-primary) / 0.16);
+  }
+
+  .ui-chip-am {
+    border-color: rgb(var(--ui-success) / 0.40);
+    background: rgb(var(--ui-success) / 0.12);
+    color: rgb(var(--ui-success));
+  }
+  .dark .ui-chip-am {
+    color: rgb(var(--ui-fg) / 0.95);
+    border-color: rgb(var(--ui-success) / 0.45);
+    background: rgb(var(--ui-success) / 0.14);
+  }
+
+  .ui-chip-pm {
+    border-color: rgb(var(--ui-accent) / 0.40);
+    background: rgb(var(--ui-accent) / 0.12);
+    color: rgb(var(--ui-accent));
+  }
+  .dark .ui-chip-pm {
+    color: rgb(var(--ui-fg) / 0.95);
+    border-color: rgb(var(--ui-accent) / 0.45);
+    background: rgb(var(--ui-accent) / 0.14);
+  }
+
+  /* Realtime pill (matches your badge approach) */
+  .ui-pill {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-extrabold;
+    border-color: rgb(var(--ui-border) / 0.75);
+    background: rgb(var(--ui-card) / 0.85);
+    color: rgb(var(--ui-fg) / 0.92);
+  }
+  .ui-pill-on {
+    border-color: rgb(var(--ui-success) / 0.35);
+    background: rgb(var(--ui-success) / 0.12);
+    color: rgb(var(--ui-success));
+  }
 }

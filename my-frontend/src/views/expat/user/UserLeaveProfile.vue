@@ -1,7 +1,11 @@
 <!-- src/views/expat/user/UserLeaveProfile.vue
-  ✅ Compact summary to save space (for RequestLeave.vue)
-  ✅ ONLY: name + used of all leave types + contract history
-  ✅ Uses your tailwind.css UI classes (ui-page/ui-container/ui-hero/ui-card/ui-table-wrap...)
+  ✅ Compact summary for RequestLeave.vue
+  ✅ Shows:
+      - Name
+      - Remaining AL + SP (1 row, compact) ✅
+      - Used leave for ALL types (even used = 0) ✅
+      - Contract history
+  ✅ Uses your tailwind.css UI classes (ui-card/ui-frame/ui-badge/ui-divider...)
   ✅ Endpoint: /leave/user/profile
 -->
 <script setup>
@@ -19,15 +23,35 @@ const error = ref('')
 const data = ref({ profile: null, employee: null })
 
 const profile = computed(() => data.value?.profile || null)
-const name = computed(() => String(profile.value?.name || '').trim() || '—')
 
-/* ✅ used for ALL leave types (even used = 0) */
+/* ✅ Prefer directory name if available, fallback to profile.name */
+const name = computed(() => {
+  const empName = String(data.value?.employee?.name || '').trim()
+  if (empName) return empName
+  return String(profile.value?.name || '').trim() || '—'
+})
+
+/* ───────────────── helpers ───────────────── */
+
+function fmtYMD(v) {
+  const s = String(v || '').trim()
+  if (!s) return '—'
+  const d = dayjs(s)
+  return d.isValid() ? d.format('YYYY-MM-DD') : '—'
+}
+
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+/* ✅ USED for ALL leave types (even used = 0) */
 const usedLeaves = computed(() => {
   const arr = Array.isArray(profile.value?.balances) ? profile.value.balances : []
   return arr
     .map((x) => ({
       leaveTypeCode: String(x?.leaveTypeCode || '').trim().toUpperCase(),
-      used: Number(x?.used ?? 0),
+      used: num(x?.used),
     }))
     .filter((x) => x.leaveTypeCode)
 })
@@ -42,20 +66,47 @@ const usedLeavesSorted = computed(() => {
   return [...usedLeaves.value].sort((a, b) => mapIndex(a.leaveTypeCode) - mapIndex(b.leaveTypeCode))
 })
 
+/* ✅ Balance rows to compute remaining AL/SP
+   - Uses backend remaining if provided
+   - Else remaining = balance - used (balance/total/entitled/available/accrued)
+*/
+const balanceRows = computed(() => {
+  const arr = Array.isArray(profile.value?.balances) ? profile.value.balances : []
+  return arr
+    .map((x) => {
+      const leaveTypeCode = String(x?.leaveTypeCode || '').trim().toUpperCase()
+      const used = num(x?.used)
+
+      const balanceCandidate =
+        x?.balance ??
+        x?.total ??
+        x?.entitled ??
+        x?.available ??
+        x?.accrued ??
+        null
+
+      const balance = num(balanceCandidate)
+      const remaining = x?.remaining != null ? num(x.remaining) : num(balance - used)
+
+      return { leaveTypeCode, used, balance, remaining }
+    })
+    .filter((r) => r.leaveTypeCode)
+})
+
+const remainingAL = computed(() => {
+  const r = balanceRows.value.find((x) => x.leaveTypeCode === 'AL')
+  return r ? num(r.remaining) : 0
+})
+
+const remainingSP = computed(() => {
+  const r = balanceRows.value.find((x) => x.leaveTypeCode === 'SP')
+  return r ? num(r.remaining) : 0
+})
+
+/* Contracts */
 const contracts = computed(() => (Array.isArray(profile.value?.contracts) ? profile.value.contracts : []))
 
-function fmtYMD(v) {
-  const s = String(v || '').trim()
-  if (!s) return '—'
-  const d = dayjs(s)
-  return d.isValid() ? d.format('YYYY-MM-DD') : '—'
-}
-
-function num(v) {
-  const n = Number(v ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
+/* ───────────────── API ───────────────── */
 async function fetchProfile() {
   loading.value = true
   error.value = ''
@@ -76,9 +127,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- ✅ compact wrapper (no extra page background, because RequestLeave already has layout) -->
   <section class="ui-card">
-    <!-- Compact header (small height) -->
+    <!-- Header -->
     <div class="ui-hero-gradient rounded-t-2xl">
       <div class="flex items-center justify-between gap-2">
         <div class="min-w-0">
@@ -119,7 +169,45 @@ onMounted(() => {
       </div>
 
       <template v-else>
-        <!-- Used leave summary (tight) -->
+        <!-- ✅ Remaining (AL/SP) — 1 row, compact cards -->
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="ui-section-title">Remaining</div>
+            <div class="ui-section-desc">AL & SP</div>
+          </div>
+          <span class="ui-badge ui-badge-info">Remain</span>
+        </div>
+
+        <!-- ✅ 1 row always: 2 columns -->
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <!-- AL -->
+          <div class="ui-frame px-2 py-1.5">
+            <div class="flex items-center justify-between">
+              <div class="text-[10px] font-extrabold" style="color: rgb(var(--ui-muted));">AL</div>
+              <i class="fa-solid fa-leaf text-[9px]" style="color: rgb(var(--ui-success));"></i>
+            </div>
+            <div class="mt-0.5 font-mono text-[14px] font-extrabold" style="color: rgb(var(--ui-fg) / 0.95);">
+              {{ remainingAL }}
+            </div>
+            <div class="mt-0.5 text-[10px]" style="color: rgb(var(--ui-muted));">days</div>
+          </div>
+
+          <!-- SP -->
+          <div class="ui-frame px-2 py-1.5">
+            <div class="flex items-center justify-between">
+              <div class="text-[10px] font-extrabold" style="color: rgb(var(--ui-muted));">SP</div>
+              <i class="fa-solid fa-hand-holding-heart text-[9px]" style="color: rgb(var(--ui-primary));"></i>
+            </div>
+            <div class="mt-0.5 font-mono text-[14px] font-extrabold" style="color: rgb(var(--ui-fg) / 0.95);">
+              {{ remainingSP }}
+            </div>
+            <div class="mt-0.5 text-[10px]" style="color: rgb(var(--ui-muted));">days</div>
+          </div>
+        </div>
+
+        <!-- ✅ Keep your original Used Leave section (ALL types) -->
+        <div class="ui-divider my-3"></div>
+
         <div class="flex items-center justify-between">
           <div>
             <div class="ui-section-title">Used Leave</div>
@@ -132,29 +220,29 @@ onMounted(() => {
           <div
             v-for="r in usedLeavesSorted"
             :key="r.leaveTypeCode"
-            class="ui-frame px-3 py-2"
+            class="ui-frame px-2 py-1.5"
           >
             <div class="flex items-center justify-between">
-              <div class="text-[11px] font-extrabold" style="color: rgb(var(--ui-muted));">
+              <div class="text-[10px] font-extrabold" style="color: rgb(var(--ui-muted));">
                 {{ r.leaveTypeCode }}
               </div>
-              <i class="fa-solid fa-chart-column text-[10px]" style="color: rgb(var(--ui-primary));"></i>
+              <i class="fa-solid fa-chart-column text-[9px]" style="color: rgb(var(--ui-primary));"></i>
             </div>
-            <div class="mt-1 font-mono text-[14px] font-extrabold" style="color: rgb(var(--ui-fg) / 0.95);">
+            <div class="mt-0.5 font-mono text-[13px] font-extrabold" style="color: rgb(var(--ui-fg) / 0.95);">
               {{ num(r.used) }}
             </div>
           </div>
 
           <div
             v-if="!usedLeavesSorted.length"
-            class="ui-frame px-3 py-2 text-[11px]"
+            class="ui-frame px-2 py-1.5 text-[11px]"
             style="color: rgb(var(--ui-muted));"
           >
             No balances found.
           </div>
         </div>
 
-        <!-- Contract history (compact list) -->
+        <!-- Contract history -->
         <div class="ui-divider my-3"></div>
 
         <div class="flex items-center justify-between">
@@ -169,7 +257,7 @@ onMounted(() => {
           <div
             v-for="c in contracts"
             :key="String(c.contractNo)"
-            class="ui-frame px-3 py-2"
+            class="ui-frame px-2 py-1.5"
           >
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0">
@@ -181,6 +269,7 @@ onMounted(() => {
                     {{ c.closedAt ? 'CLOSED' : 'ACTIVE' }}
                   </span>
                 </div>
+
                 <div class="mt-0.5 text-[11px]" style="color: rgb(var(--ui-muted));">
                   <span class="font-mono">{{ fmtYMD(c.startDate) }}</span>
                   <span class="mx-1 opacity-60">→</span>
@@ -200,7 +289,7 @@ onMounted(() => {
 
           <div
             v-if="!contracts.length"
-            class="ui-frame px-3 py-2 text-[11px]"
+            class="ui-frame px-2 py-1.5 text-[11px]"
             style="color: rgb(var(--ui-muted));"
           >
             No contract history found.
@@ -210,3 +299,7 @@ onMounted(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+/* no local styles — rely on global ui-* */
+</style>

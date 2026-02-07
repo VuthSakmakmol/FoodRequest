@@ -350,7 +350,16 @@ function requireStatus(doc, allowed) {
  */
 exports.createMyRequest = async (req, res, next) => {
   try {
-    const { leaveTypeCode, startDate, endDate, reason = '', isHalfDay = false, dayPart = null } = req.body || {}
+    const {
+      leaveTypeCode,
+      startDate,
+      endDate,
+      reason = '',
+      isHalfDay = false,   // legacy
+      dayPart = null,      // legacy
+      startHalf = null,    // NEW
+      endHalf = null,      // NEW
+    } = req.body || {}
 
     const requesterLoginId = actorLoginId(req)
     const employeeId = s(req.user?.employeeId || requesterLoginId)
@@ -390,20 +399,16 @@ exports.createMyRequest = async (req, res, next) => {
       })
     }
 
-    const normalizedDayPart = isHalfDay ? normalizeDayPart(dayPart) : null
-    if (isHalfDay && !normalizedDayPart) {
-      return res.status(400).json({
-        message: 'Half-day requires dayPart = AM/PM (Morning/Afternoon).',
-      })
-    }
-
     const vr = validateAndNormalizeRequest({
       leaveTypeCode: lt.code,
       startDate,
       endDate,
       isHalfDay: !!isHalfDay,
-      dayPart: normalizedDayPart,
+      dayPart,
+      startHalf,
+      endHalf,
     })
+
     if (!vr.ok) return res.status(400).json({ message: vr.message })
 
     const normalized = vr.normalized
@@ -537,10 +542,14 @@ exports.createMyRequest = async (req, res, next) => {
       adminLoginId: '',
     }
 
-    if (normalized.isHalfDay) {
-      createPayload.isHalfDay = true
-      createPayload.dayPart = normalized.dayPart // 'AM' | 'PM'
-    }
+    // ✅ Always save edge halves (multi-day support)
+    createPayload.startHalf = normalized.startHalf || null
+    createPayload.endHalf = normalized.endHalf || null
+
+    // ✅ Always keep legacy fields consistent
+    createPayload.isHalfDay = !!normalized.isHalfDay
+    createPayload.dayPart = normalized.dayPart || null
+
 
     const doc = await LeaveRequest.create(createPayload)
 
@@ -599,9 +608,13 @@ exports.cancelMyRequest = async (req, res, next) => {
       return res.status(403).json({ message: 'Not your request' })
     }
 
-    if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(s(doc.status))) {
-      return res.status(400).json({ message: 'Cannot cancel at this stage' })
+    // ❌ Once manager has approved, user cannot cancel
+    if (s(doc.status) !== 'PENDING_MANAGER') {
+      return res.status(400).json({
+        message: 'You can only cancel a leave request before it is approved by your manager.',
+      })
     }
+
 
     doc.status = 'CANCELLED'
     doc.cancelledAt = new Date()

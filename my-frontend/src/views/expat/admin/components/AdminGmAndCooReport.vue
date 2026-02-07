@@ -171,6 +171,47 @@ function nextPage() {
 function prevPage() {
   if (page.value > 1) page.value -= 1
 }
+/* ───────── Excel Export (employees list) ───────── */
+async function exportEmployeesExcel() {
+  try {
+    const XLSX = await import('xlsx')
+    const codes = TYPE_ORDER.value || ['AL', 'SP', 'MC', 'MA', 'UL']
+
+    const rows = employeesAll.value.map((emp) => {
+      const base = {
+        employeeId: safeText(emp.employeeId),
+        name: safeText(emp.name),
+        department: safeText(emp.department),
+        joinDate: fmtYMD(emp.joinDate),
+        contractDate: fmtYMD(emp.contractDate),
+        gmLoginId: safeText(emp.gmLoginId),
+        cooLoginId: safeText(emp.cooLoginId),
+        approvalMode: safeText(emp.approvalMode) || MODE,
+        isActive: emp.isActive ? 'YES' : 'NO',
+      }
+
+      for (const code of codes) {
+        const b = balOf(emp, code) || {}
+        base[`${code}_Used`] = num(b.used)
+        base[`${code}_Remaining`] = num(b.remaining)
+        base[`${code}_StrictRemaining`] = num(b.strictRemaining)
+      }
+
+      return base
+    })
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'GM_COO')
+
+    XLSX.writeFile(wb, `leave_report_gm_coo_all.xlsx`)
+    showToast({ type: 'success', title: 'Exported', message: 'Employees exported.' })
+  } catch (e) {
+    console.error('exportEmployeesExcel error', e)
+    showToast({ type: 'error', title: 'Export failed', message: e?.message || 'Cannot export.' })
+  }
+}
+
 
 /* Excel export for the record rows (GM+COO) */
 async function exportRecordExcel() {
@@ -1291,10 +1332,15 @@ onBeforeUnmount(() => {
                         <td class="remark">{{ r.remark || '' }}</td>
                       </tr>
 
-                      <!-- ✅ UPDATED blank rows col count: now 14 -->
-                      <tr v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)" :key="'blank-' + n">
+                      <!-- ✅ UPDATED blank rows: add class so we can style only blanks -->
+                      <tr
+                        v-for="n in Math.max(0, 18 - (previewData?.rows || []).length)"
+                        :key="'blank-' + n"
+                        class="blank-row"
+                      >
                         <td v-for="c in 14" :key="c">&nbsp;</td>
                       </tr>
+
                     </tbody>
                   </table>
                 </div>
@@ -1418,7 +1464,7 @@ onBeforeUnmount(() => {
 }
 
 .small {
-  font-size: 10px;
+  font-size: 20px;
 }
 
 .mono {
@@ -1450,6 +1496,15 @@ onBeforeUnmount(() => {
   margin: 0;                 /* ✅ no extra top/bottom */
   display: block;
 }
+
+/* ✅ make ONLY blank rows taller */
+.blank-row td {
+  height: 10mm;        /* change to 9mm / 11mm if you want */
+  min-height: 10mm;
+  padding-top: 2mm;    /* optional: gives “more air” */
+  padding-bottom: 2mm;
+}
+
 
 @media print {
   .print-sheet {

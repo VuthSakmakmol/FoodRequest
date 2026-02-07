@@ -128,39 +128,66 @@ function computeContractYearPeriod(profile, now = new Date()) {
 }
 
 /**
- * ✅ Validate + normalize leave request (supports half-day)
+ * ✅ Validate + normalize leave request (supports half edges)
+ * Rules:
  * - startDate must be working day (Mon–Sat, not holiday)
- * - Half-day: endDate = startDate, totalDays = 0.5, require dayPart AM/PM
- * - MA: fixed 90 calendar days inclusive (end = start + 89), half-day not allowed
+ * - endDate must be working day (Mon–Sat, not holiday)   ✅ (same policy)
+ * - MA: fixed 90 calendar days inclusive (end = start + 89), half not allowed
+ *
+ * Half-day support:
+ * A) Single-day half (legacy):
+ *   - isHalfDay=true, dayPart=AM/PM
+ *   - endDate=startDate, totalDays=0.5
+ *
+ * B) Multi-day half edges (new):
+ *   - startHalf: null|AM|PM (optional)
+ *   - endHalf: null|AM|PM (optional)
+ *   - totalDays = workingDaysCount - 0.5(startHalf?) - 0.5(endHalf?)
+ *   - Works for "2.5 days" (half on start OR end)
  */
 function validateAndNormalizeRequest({
   leaveTypeCode,
   startDate,
   endDate,
-  isHalfDay = false,
-  dayPart = null,
+  isHalfDay = false,   // legacy
+  dayPart = null,      // legacy
+  startHalf = null,    // NEW
+  endHalf = null,      // NEW
 }) {
   const code = String(leaveTypeCode || '').trim().toUpperCase()
   const s = String(startDate || '').trim()
   const e = String(endDate || '').trim()
 
+  const normalizeHalf = (v) => {
+    const x = v ? String(v).trim().toUpperCase() : ''
+    if (!x) return null
+    if (x === 'AM' || x === 'MORNING') return 'AM'
+    if (x === 'PM' || x === 'AFTERNOON') return 'PM'
+    return null
+  }
+
   if (!code) return { ok: false, message: 'leaveTypeCode is required' }
   if (!isValidYMD(s)) return { ok: false, message: 'startDate must be YYYY-MM-DD' }
   if (!isValidYMD(e)) return { ok: false, message: 'endDate must be YYYY-MM-DD' }
-
-  if (!isWorkingDay(s)) {
-    return { ok: false, message: 'startDate must be a working day (Mon–Sat, not holiday).' }
-  }
 
   const sd = parseYMD(s)
   const ed = parseYMD(e)
   if (!sd || !ed) return { ok: false, message: 'Invalid date format' }
   if (ed.isBefore(sd)) return { ok: false, message: 'endDate must be >= startDate' }
 
-  const half = !!isHalfDay
-  const dp = dayPart ? String(dayPart).toUpperCase() : null
+  // ✅ policy: both start & end must be working days
+  if (!isWorkingDay(s)) {
+    return { ok: false, message: 'startDate must be a working day (Mon–Sat, not holiday).' }
+  }
+  if (!isWorkingDay(e)) {
+    return { ok: false, message: 'endDate must be a working day (Mon–Sat, not holiday).' }
+  }
 
+  // ✅ MA fixed 90 calendar days inclusive, no half
   if (code === 'MA') {
+    if (isHalfDay || startHalf || endHalf) {
+      return { ok: false, message: 'MA does not support half-day.' }
+    }
     const endFixed = sd.add(89, 'day').format('YYYY-MM-DD')
     return {
       ok: true,
@@ -169,17 +196,27 @@ function validateAndNormalizeRequest({
         startDate: s,
         endDate: endFixed,
         totalDays: 90,
+        // legacy
         isHalfDay: false,
         dayPart: null,
+        // new
+        startHalf: null,
+        endHalf: null,
         mode: 'CALENDAR_FIXED_90',
       },
     }
   }
 
-  if (half) {
-    if (!dp || !['AM', 'PM'].includes(dp)) {
-      return { ok: false, message: 'Half-day requires dayPart AM or PM.' }
-    }
+  const isSingleDay = s === e
+
+  // ✅ Legacy single-day half
+  const legacyHalf = !!isHalfDay
+  const dp = legacyHalf ? normalizeHalf(dayPart) : null
+
+  if (legacyHalf) {
+    if (!dp) return { ok: false, message: 'Half-day requires dayPart AM or PM.' }
+
+    // single-day only
     return {
       ok: true,
       normalized: {
@@ -187,18 +224,78 @@ function validateAndNormalizeRequest({
         startDate: s,
         endDate: s,
         totalDays: 0.5,
+        // legacy
         isHalfDay: true,
         dayPart: dp,
-        mode: 'HALF_DAY',
+        // new mapping (helps consistency)
+        startHalf: dp,
+        endHalf: null,
+        mode: 'HALF_DAY_SINGLE',
       },
     }
   }
 
+  // ✅ New half edges (multi-day or single-day full)
+  let sh = normalizeHalf(startHalf)
+  let eh = normalizeHalf(endHalf)
+
+  // For single-day requests: allow only ONE half selector (use startHalf)
+  if (isSingleDay) {
+    // if user sets any half on same day -> 0.5
+    if (eh && !sh) sh = eh
+    eh = null
+
+    if (sh) {
+      return {
+        ok: true,
+        normalized: {
+          leaveTypeCode: code,
+          startDate: s,
+          endDate: s,
+          totalDays: 0.5,
+          // legacy fields kept consistent
+          isHalfDay: true,
+          dayPart: sh,
+          // new
+          startHalf: sh,
+          endHalf: null,
+          mode: 'HALF_DAY_SINGLE',
+        },
+      }
+    }
+
+    // single-day full
+    return {
+      ok: true,
+      normalized: {
+        leaveTypeCode: code,
+        startDate: s,
+        endDate: s,
+        totalDays: 1,
+        isHalfDay: false,
+        dayPart: null,
+        startHalf: null,
+        endHalf: null,
+        mode: 'WORKING_DAYS',
+      },
+    }
+  }
+
+  // ✅ Multi-day working days with optional half edges
   const workingDates = enumerateWorkingDates(s, e)
-  const totalDays = workingDates.length
-  if (!totalDays || totalDays <= 0) {
+  const workingCount = workingDates.length
+  if (!workingCount || workingCount <= 0) {
     return { ok: false, message: 'Invalid date range (no working days).' }
   }
+
+  // Edge halves only deduct if the edge date is working day (it is, per policy),
+  // but we still keep safe.
+  let totalDays = workingCount
+  if (sh && isWorkingDay(s)) totalDays -= 0.5
+  if (eh && isWorkingDay(e)) totalDays -= 0.5
+
+  // clamp to minimum 0.5
+  totalDays = Math.max(0.5, Math.round(totalDays * 2) / 2)
 
   return {
     ok: true,
@@ -207,12 +304,17 @@ function validateAndNormalizeRequest({
       startDate: s,
       endDate: e,
       totalDays,
+      // legacy fields: only for single-day half; multi-day uses new fields
       isHalfDay: false,
       dayPart: null,
-      mode: 'WORKING_DAYS',
+      // new
+      startHalf: sh,
+      endHalf: eh,
+      mode: 'WORKING_DAYS_HALF_EDGES',
     },
   }
 }
+
 
 /**
  * ✅ Compute balances for current contract-year.
