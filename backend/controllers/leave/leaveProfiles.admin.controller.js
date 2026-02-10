@@ -810,3 +810,24 @@ exports.renewContract = async (req, res) => {
     res.status(e.status || 400).json({ message: e.message || 'Failed to renew contract.' })
   }
 }
+
+function validateStrongPassword(pwd) {
+  const p = String(pwd || '')
+  if (p.length < 13) return { ok: false, message: 'Password must be at least 13 characters.' }
+
+  // simple strong rules (you can adjust)
+  const hasUpper = /[A-Z]/.test(p)
+  const hasLower = /[a-z]/.test(p)
+  const hasNum = /\d/.test(p)
+  const hasSym = /[^A-Za-z0-9]/.test(p)
+
+  const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
+  if (score < 3) {
+    return {
+      ok: false,
+      message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.',
+    }
+  }
+  return { ok: true }
+}
+
