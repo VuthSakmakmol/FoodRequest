@@ -91,7 +91,7 @@ router.get('/profiles/:employeeId/contracts', h(ctrl.getContractHistory, 'getCon
 router.post('/profiles/:employeeId/recalculate', h(ctrl.recalculateBalances, 'recalculateBalances'))
 
 // ✅ REQUIRED for your new admin reset password feature
-router.post('/profiles/:employeeId/password', h(ctrl.resetUserPassword, 'resetUserPassword'))
+router.patch('/profiles/:employeeId/password', h(ctrl.resetUserPassword, 'resetUserPassword'))
 
 
 router.patch('/profiles/:employeeId/contracts/:contractNo', h(ctrl.updateContractCarry, 'updateContractCarry'))

@@ -1,24 +1,10 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveProfiles.admin.controller.js
 //
-// ✅ IMPORTANT (new behavior):
+// ✅ IMPORTANT:
 // - Carry is PER-CONTRACT: stored in contracts[].carry (NOT profile.carry)
 // - profile.carry + alCarry remain ONLY for legacy compatibility / migration
 // - Balances calculation uses ACTIVE/LATEST contract carry by default
-// - Renew creates a NEW contract with its own carry
-//
-// Requires:
-// - LeaveProfile model has:
-//    contracts[].{ contractNo,startDate,endDate,openedAt,closedAt,openedBy,closedBy,note,closeSnapshot, carry }
-//    closeSnapshot.{ asOf, balances, contractDate, contractEndDate, carry }
-// - utils: backend/utils/leave/leave.contracts.js exports:
-//    ensureContracts(doc)
-//    pickActiveContract(doc, opts?)
-//    pickLatestContract(doc)
-//    normalizeCarry(obj)
-//    getActiveCarry(doc, opts?)
-//    endFromStartYMD(startYMD)
-//    isValidYMD(ymd)
 
 const bcrypt = require('bcryptjs')
 const createError = require('http-errors')
@@ -42,12 +28,8 @@ const {
 } = require('../../utils/leave/leave.contracts')
 
 const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
-
-// You said: admin must input password (>=13 strong).
-// Keep fallback only if you don’t pass password explicitly.
 const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456'
 
-// Seeded approvers
 const SEED_GM_LOGINID = String(process.env.LEAVE_GM_LOGINID || 'leave_gm').trim()
 const SEED_COO_LOGINID = String(process.env.LEAVE_COO_LOGINID || 'leave_coo').trim()
 
@@ -92,14 +74,13 @@ function actorLoginId(req) {
 }
 
 /* ───────── approvalMode mapping ─────────
-   stored enum in schema: GM_ONLY / GM_AND_COO
-   semantic for UI:       MANAGER_AND_GM / GM_AND_COO
+   stored enum: GM_ONLY / GM_AND_COO
+   semantic:    MANAGER_AND_GM / GM_AND_COO
 */
 
 function normalizeApprovalModeSemantic(v) {
   const m = s(v).toUpperCase()
   if (m === 'GM_AND_COO') return 'GM_AND_COO'
-  // backward compat inputs
   if (m === 'GM_OR_COO') return 'GM_AND_COO'
   return 'MANAGER_AND_GM'
 }
@@ -133,14 +114,11 @@ function validateModeAndChain({ approvalMode, managerEmployeeIdOrLogin }) {
   return semantic
 }
 
-/* ───────── pickers ───────── */
-
 function pickEmployeeId(obj) {
   return s(obj?.employeeId || obj?.employee?.employeeId || obj?.selectedEmployee?.employeeId || obj?.id || '')
 }
 
 function pickManagerId(obj) {
-  // UI passes managerEmployeeId (employeeId). Legacy was managerLoginId.
   return s(obj?.managerEmployeeId || obj?.managerLoginId || obj?.manager?.employeeId || '')
 }
 
@@ -149,9 +127,7 @@ function pickManagerId(obj) {
 async function getDirectory(employeeId) {
   const eid = s(employeeId)
   if (!eid) return null
-  return EmployeeDirectory.findOne({ employeeId: eid })
-    .select('employeeId name department telegramChatId isActive')
-    .lean()
+  return EmployeeDirectory.findOne({ employeeId: eid }).select('employeeId name department telegramChatId isActive').lean()
 }
 
 function validateStrongPassword(pwd) {
@@ -163,32 +139,17 @@ function validateStrongPassword(pwd) {
   const hasSym = /[^A-Za-z0-9]/.test(p)
   const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
   if (score < 3) {
-    return {
-      ok: false,
-      message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.',
-    }
+    return { ok: false, message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.' }
   }
   return { ok: true }
 }
 
-async function ensureUser({
-  loginId,
-  name,
-  role,
-  roles,
-  isActive = true,
-  telegramChatId = '',
-  password, // ✅ optional (admin input)
-}) {
+async function ensureUser({ loginId, name, role, roles, isActive = true, telegramChatId = '', password }) {
   const id = s(loginId)
   if (!id) return null
-
   const cleanChatId = s(telegramChatId)
 
-  const addRoles = [
-    ...(Array.isArray(roles) ? roles : roles ? [roles] : []),
-    ...(role ? [role] : []),
-  ]
+  const addRoles = [...(Array.isArray(roles) ? roles : roles ? [roles] : []), ...(role ? [role] : [])]
     .map((r) => s(r).toUpperCase())
     .filter(Boolean)
 
@@ -200,13 +161,11 @@ async function ensureUser({
     if (name && existing.name !== name) $set.name = name
     if (typeof isActive === 'boolean' && existing.isActive !== isActive) $set.isActive = isActive
     if (cleanChatId && s(existing.telegramChatId) !== cleanChatId) $set.telegramChatId = cleanChatId
-
     if (addRoles.length) $addToSet.roles = { $each: addRoles }
 
     const curRole = s(existing.role)
     if (!curRole && addRoles.length) $set.role = addRoles[0]
 
-    // ✅ optional: reset password if provided
     if (password !== undefined) {
       const check = validateStrongPassword(password)
       if (!check.ok) throw createError(400, check.message)
@@ -223,7 +182,6 @@ async function ensureUser({
     return existing
   }
 
-  // ✅ NEW user: if admin supplies password, use it; else fallback policy
   let plainPwd = ''
   if (password !== undefined) {
     const check = validateStrongPassword(password)
@@ -258,11 +216,21 @@ function sameJSON(a, b) {
 }
 
 /**
- * ✅ Apply carry to balances for DISPLAY + remaining math.
- * - entitlement = baseEnt + carry[type]
- * - remaining = entitlement - used
- * - SP remaining capped by AL remaining (SP consumes AL)
- * - UL entitlement stays 0
+ * Apply carry to balances (display logic).
+ *
+ * ✅ NEW DISPLAY RULE:
+ * - If carry is POSITIVE: it increases entitlement (extra days)
+ * - If carry is NEGATIVE: it is debt → show as USED (adds to used)
+ *
+ * Example:
+ *   UL carry = -2  => UL.used += 2
+ *
+ * ✅ UL policy:
+ * - entitlement stays 0
+ * - remaining stays 0
+ * - BUT used can be >0 (from requests + debt)
+ *
+ * ✅ SP remaining capped by AL remaining (after carry effects)
  */
 function applyCarryToBalances(balances = [], carry = {}) {
   const c = normalizeCarry(carry)
@@ -273,20 +241,36 @@ function applyCarryToBalances(balances = [], carry = {}) {
   const applyOne = (code) => {
     const r = row(code)
     if (!r) return
+
+    const baseEnt = Number(r.yearlyEntitlement || 0)
+    const usedReq = Number(r.used || 0)
+    const delta = Number(c[code] || 0)
+
+    // carry < 0 is DEBT -> show as used
+    const debtUsed = delta < 0 ? Math.abs(delta) : 0
+
+    // carry > 0 increases entitlement
+    const extraEnt = delta > 0 ? delta : 0
+
     if (code === 'UL') {
+      // UL entitlement remains 0 by policy, but we still show debt as used
       r.yearlyEntitlement = 0
+      r.used = usedReq + debtUsed
       r.remaining = 0
       return
     }
-    const used = Number(r.used || 0)
-    const baseEnt = Number(r.yearlyEntitlement || 0)
-    const ent = baseEnt + Number(c[code] || 0)
+
+    const ent = baseEnt + extraEnt
+    const used = usedReq + debtUsed
+
     r.yearlyEntitlement = ent
+    r.used = used
     r.remaining = ent - used
   }
 
   ;['AL', 'SP', 'MC', 'MA', 'UL'].forEach(applyOne)
 
+  // ✅ SP remaining capped by AL remaining (after carry effects)
   const al = row('AL')
   const sp = row('SP')
   if (al && sp) {
@@ -296,11 +280,7 @@ function applyCarryToBalances(balances = [], carry = {}) {
   return out
 }
 
-/**
- * ✅ Recompute balances for profile using ACTIVE/LATEST contract carry.
- * - ensureContracts() must align profile.contractDate to the active/latest contract start
- * - getActiveCarry() reads the active/latest contract carry
- */
+
 async function syncBalancesForProfile(doc, asOfYMD, opts = {}) {
   if (!doc) return
   const asOf = isValidYMD(asOfYMD) ? asOfYMD : nowYMD()
@@ -309,9 +289,7 @@ async function syncBalancesForProfile(doc, asOfYMD, opts = {}) {
 
   ensureContracts(doc)
 
-  const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' })
-    .sort({ startDate: 1 })
-    .lean()
+  const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' }).sort({ startDate: 1 }).lean()
 
   const base = typeof doc.toObject === 'function' ? doc.toObject() : doc
   const snap = computeBalances(base, approved, new Date(asOf + 'T00:00:00Z'))
@@ -330,7 +308,7 @@ async function syncBalancesForProfile(doc, asOfYMD, opts = {}) {
   if (s(doc.balancesAsOf) !== asOf) doc.balancesAsOf = asOf
   if (nextEnd && s(doc.contractEndDate) !== nextEnd) doc.contractEndDate = nextEnd
 
-  // ✅ legacy mirror only
+  // legacy mirror only
   doc.alCarry = Number(normalizeCarry(carry).AL || 0)
 }
 
@@ -384,7 +362,6 @@ exports.getProfilesGrouped = async (req, res) => {
 
     const fresh = await LeaveProfile.find(query).lean()
 
-    // group by managerLoginId field (it now contains manager employeeId in your system)
     const byMgr = new Map()
     for (const p of fresh || []) {
       const mgrId = s(p.managerLoginId) || '—'
@@ -393,9 +370,7 @@ exports.getProfilesGrouped = async (req, res) => {
     }
 
     const managerIds = Array.from(byMgr.keys()).filter((x) => x && x !== '—')
-    const mgrDirs = await EmployeeDirectory.find({ employeeId: { $in: managerIds } })
-      .select('employeeId name department')
-      .lean()
+    const mgrDirs = await EmployeeDirectory.find({ employeeId: { $in: managerIds } }).select('employeeId name department').lean()
     const mgrMap = new Map((mgrDirs || []).map((d) => [s(d.employeeId), d]))
 
     const out = []
@@ -429,20 +404,13 @@ exports.getProfilesGrouped = async (req, res) => {
             balancesAsOf: x.balancesAsOf || null,
             contracts: Array.isArray(x.contracts) ? x.contracts : [],
 
-            // ✅ per-contract carry (current/latest contract)
             carry,
-
-            // legacy mirror only
             alCarry: Number(x.alCarry || 0),
           }
         })
 
       out.push({
-        manager: {
-          employeeId: managerId,
-          name: md?.name || '',
-          department: md?.department || '',
-        },
+        manager: { employeeId: managerId, name: md?.name || '', department: md?.department || '' },
         employees,
       })
     }
@@ -490,10 +458,7 @@ exports.createProfileSingle = async (req, res) => {
     if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
     if (!joinDate) return res.status(400).json({ message: 'joinDate is required.' })
 
-    const semanticMode = validateModeAndChain({
-      approvalMode: body.approvalMode,
-      managerEmployeeIdOrLogin: managerId,
-    })
+    const semanticMode = validateModeAndChain({ approvalMode: body.approvalMode, managerEmployeeIdOrLogin: managerId })
     const storedMode = toStoredApprovalMode(semanticMode)
 
     const { gmLoginId, cooLoginId } = resolveSeededApprovers(semanticMode)
@@ -508,7 +473,7 @@ exports.createProfileSingle = async (req, res) => {
       role: 'LEAVE_USER',
       isActive,
       telegramChatId: empDir?.telegramChatId || '',
-      password: body.password, // optional, strong
+      password: body.password,
     })
 
     if (managerId) {
@@ -522,9 +487,7 @@ exports.createProfileSingle = async (req, res) => {
     }
 
     await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
-    if (cooLoginId) {
-      await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
-    }
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
 
     let prof = await LeaveProfile.findOne({ employeeId })
     const existed = !!prof
@@ -542,11 +505,8 @@ exports.createProfileSingle = async (req, res) => {
     prof.name = empDir?.name || prof.name || ''
     prof.department = empDir?.department || prof.department || ''
 
-    // ✅ PER-CONTRACT carry on initial/latest contract
     const carry = body.carry !== undefined ? normalizeCarry(body.carry) : normalizeCarry({})
-
-    // legacy fields (do not rely on these for logic)
-    prof.carry = prof.carry || {} // keep for backward compat
+    prof.carry = prof.carry || {}
     prof.alCarry = Number(body.alCarry || carry.AL || 0)
 
     ensureContracts(prof)
@@ -555,10 +515,12 @@ exports.createProfileSingle = async (req, res) => {
 
     latest.carry = normalizeCarry(carry)
 
-    // align pointers to latest contract
+    // ✅ force persist nested changes
+    prof.markModified('contracts')
+
     prof.contractDate = latest.startDate || prof.contractDate
     prof.contractEndDate = latest.endDate || prof.contractEndDate
-    prof.alCarry = Number(normalizeCarry(latest.carry).AL || 0) // legacy mirror
+    prof.alCarry = Number(normalizeCarry(latest.carry).AL || 0)
 
     await syncBalancesForProfile(prof, nowYMD())
     await prof.save()
@@ -579,10 +541,7 @@ exports.createManagerWithEmployees = async (req, res) => {
 
     const managerId = pickManagerId(body)
 
-    const semanticMode = validateModeAndChain({
-      approvalMode: body.approvalMode,
-      managerEmployeeIdOrLogin: managerId,
-    })
+    const semanticMode = validateModeAndChain({ approvalMode: body.approvalMode, managerEmployeeIdOrLogin: managerId })
     const storedMode = toStoredApprovalMode(semanticMode)
     const { gmLoginId, cooLoginId } = resolveSeededApprovers(semanticMode)
 
@@ -598,9 +557,7 @@ exports.createManagerWithEmployees = async (req, res) => {
     }
 
     await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
-    if (cooLoginId) {
-      await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
-    }
+    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
 
     let createdCount = 0
     let updatedCount = 0
@@ -622,7 +579,7 @@ exports.createManagerWithEmployees = async (req, res) => {
         role: 'LEAVE_USER',
         isActive,
         telegramChatId: empDir?.telegramChatId || '',
-        password: r.password, // optional, strong
+        password: r.password,
       })
 
       let prof = await LeaveProfile.findOne({ employeeId: empId })
@@ -642,14 +599,15 @@ exports.createManagerWithEmployees = async (req, res) => {
       prof.department = empDir?.department || prof.department || ''
 
       const carry = r.carry !== undefined ? normalizeCarry(r.carry) : normalizeCarry({})
-
-      // legacy mirrors only
       prof.alCarry = Number(r.alCarry || carry.AL || 0)
 
       ensureContracts(prof)
       const latest = pickLatestContract(prof)
       if (!latest) throw createError(500, 'Missing contract.')
       latest.carry = normalizeCarry(carry)
+
+      // ✅ force persist nested changes
+      prof.markModified('contracts')
 
       prof.contractDate = latest.startDate || prof.contractDate
       prof.contractEndDate = latest.endDate || prof.contractEndDate
@@ -684,7 +642,6 @@ exports.updateProfile = async (req, res) => {
     if (body.joinDate !== undefined) prof.joinDate = assertYMD(body.joinDate, 'joinDate')
     if (body.isActive !== undefined) prof.isActive = body.isActive !== false
 
-    // approval chain updates
     const nextManagerId =
       body.managerEmployeeId !== undefined || body.managerLoginId !== undefined ? pickManagerId(body) : s(prof.managerLoginId)
 
@@ -701,9 +658,6 @@ exports.updateProfile = async (req, res) => {
     prof.gmLoginId = gmLoginId
     prof.cooLoginId = nextSemantic === 'GM_AND_COO' ? cooLoginId : ''
 
-    // ✅ contract pointers:
-    // Allow admin to update contractDate only if you want to “change start date of current contract”.
-    // If you do, we update latest contract start + end.
     ensureContracts(prof)
     const latest = pickLatestContract(prof)
     if (!latest) throw createError(500, 'Missing contract.')
@@ -714,18 +668,19 @@ exports.updateProfile = async (req, res) => {
       latest.endDate = endFromStartYMD(newStart)
       prof.contractDate = latest.startDate
       prof.contractEndDate = latest.endDate
+      prof.markModified('contracts')
     } else {
-      // keep aligned anyway
       prof.contractDate = latest.startDate || prof.contractDate
       prof.contractEndDate = latest.endDate || prof.contractEndDate
     }
 
-    // ✅ PER-CONTRACT carry update (current/latest contract)
     if (body.carry !== undefined) {
       latest.carry = normalizeCarry(body.carry)
+
+      // ✅ IMPORTANT: ensures UL/SP/MC/MA changes persist
+      prof.markModified('contracts')
     }
 
-    // legacy mirror only
     if (body.alCarry !== undefined) {
       prof.alCarry = Number(body.alCarry || 0)
     } else if (body.carry !== undefined) {
@@ -797,27 +752,6 @@ exports.recalculateBalances = async (req, res) => {
   }
 }
 
-/**
- * ✅ Renew contract:
- * - Close previous contract (snapshot balances + carry)
- * - Open new contract with its own carry
- *
- * Payload:
- *  {
- *    newContractDate: 'YYYY-MM-DD',
- *    note: '...optional...',
- *    clearUnusedAL: true|false,     // affects default carry logic (see below)
- *    carry: {AL,SP,MC,MA,UL}        // optional carry for NEW contract
- *  }
- *
- * Default NEW contract carry behavior (recommended):
- * - If body.carry provided => use it
- * - Else => start with ZERO carry, but if clearUnusedAL=false you can choose to copy forward
- *
- * Currently we do:
- * - If body.carry missing => carry-forward previous carry (optionally clear positive AL)
- * If you want "new contract starts with zero", change the marked section below.
- */
 exports.renewContract = async (req, res) => {
   try {
     const employeeId = s(req.params?.employeeId)
@@ -836,7 +770,6 @@ exports.renewContract = async (req, res) => {
     const last = pickLatestContract(prof)
     if (!last) throw createError(500, 'Missing last contract.')
 
-    // close last if not closed
     if (!last.closedAt) {
       last.closedAt = new Date()
       last.closedBy = actorLoginId(req)
@@ -850,27 +783,16 @@ exports.renewContract = async (req, res) => {
       }
     }
 
-    // decide new carry
     let nextCarry
     if (body.carry !== undefined) {
       nextCarry = normalizeCarry(body.carry)
     } else {
-      // ✅ CURRENT DEFAULT: carry-forward previous contract carry
       nextCarry = normalizeCarry(last.carry || {})
-
       if (clearUnusedAL) {
-        // clear positive AL only; keep negative debt
         if (Number(nextCarry.AL || 0) > 0) nextCarry.AL = 0
       }
-
-      // ✅ If you want NEW contract always starts zero, use this instead:
-      // nextCarry = normalizeCarry({})
-      // (optional) keep debt only:
-      // const prev = normalizeCarry(last.carry || {})
-      // nextCarry.AL = Math.min(0, Number(prev.AL || 0))
     }
 
-    // open new contract
     const nextNo = Number(last.contractNo || prof.contracts.length || 0) + 1
     const endDate = endFromStartYMD(newContractDate)
 
@@ -884,14 +806,14 @@ exports.renewContract = async (req, res) => {
       closedBy: '',
       note,
       closeSnapshot: null,
-      carry: nextCarry, // ✅ per-contract carry
+      carry: nextCarry,
     })
 
-    // align pointers to new contract
+    // ✅ ensure nested push is saved
+    prof.markModified('contracts')
+
     prof.contractDate = newContractDate
     prof.contractEndDate = endDate
-
-    // legacy mirror only
     prof.alCarry = Number(normalizeCarry(nextCarry).AL || 0)
 
     await syncBalancesForProfile(prof, nowYMD())
@@ -909,11 +831,6 @@ exports.renewContract = async (req, res) => {
  * ✅ Update carry for a specific contract number
  * PATCH /api/admin/leave/profiles/:employeeId/contracts/:contractNo
  * body: { carry: {AL,SP,MC,MA,UL} }
- *
- * Behavior:
- * - Updates that contract's carry
- * - If it is the active/latest contract => recompute balances (because UI shows current remaining)
- * - Always updates legacy mirror prof.alCarry if active contract carry changed
  */
 exports.updateContractCarry = async (req, res) => {
   try {
@@ -941,38 +858,30 @@ exports.updateContractCarry = async (req, res) => {
     const nextCarry = normalizeCarry(body.carry)
     prof.contracts[idx].carry = nextCarry
 
-    // if this contract is the latest/active, align pointers and refresh balances
+    // ✅ THE FIX (UL/SP/MC/MA sometimes not persisted without this)
+    prof.markModified('contracts')
+    prof.markModified(`contracts.${idx}.carry`)
+
     const latest = pickLatestContract(prof)
     const isLatest = latest && Number(latest.contractNo || 0) === contractNo
 
     if (isLatest) {
       prof.contractDate = prof.contracts[idx].startDate || prof.contractDate
       prof.contractEndDate = prof.contracts[idx].endDate || prof.contractEndDate
-      prof.alCarry = Number(nextCarry.AL || 0) // legacy mirror
+      prof.alCarry = Number(nextCarry.AL || 0)
       await syncBalancesForProfile(prof, nowYMD())
     }
 
     await prof.save()
     emitProfile(req, prof, 'leave:profile:updated')
 
-    res.json({
-      ok: true,
-      employeeId,
-      contractNo,
-      carry: nextCarry,
-      isLatest,
-    })
+    res.json({ ok: true, employeeId, contractNo, carry: nextCarry, isLatest })
   } catch (e) {
     console.error('updateContractCarry error', e)
     res.status(e.status || 400).json({ message: e.message || 'Failed to update contract carry.' })
   }
 }
 
-/**
- * ✅ Admin password reset endpoint (optional)
- * POST /api/admin/leave/profiles/:employeeId/password
- * body: { password: "..." }
- */
 exports.resetUserPassword = async (req, res) => {
   try {
     const employeeId = s(req.params?.employeeId)

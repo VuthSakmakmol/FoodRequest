@@ -56,9 +56,8 @@ function pickEmployeeId(emp) {
  * - used = used (+ abs(negative carry) as debt like your UI)
  * - remain = ent - used
  */
-function buildBalanceMap(balances, carry) {
+function buildBalanceMap(balances) {
   const arr = Array.isArray(balances) ? balances : []
-  const c = carry && typeof carry === 'object' ? carry : {}
   const m = new Map()
 
   for (const b of arr) {
@@ -66,12 +65,9 @@ function buildBalanceMap(balances, carry) {
     if (!code) continue
 
     const ent = num(b.yearlyEntitlement)
-    let used = num(b.used)
+    const used = num(b.used)
+    const remain = Number.isFinite(b.remaining) ? num(b.remaining) : ent - used
 
-    const carryVal = num(c[code])
-    if (carryVal < 0) used += Math.abs(carryVal) // show debt as used
-
-    const remain = ent - used
     m.set(code, { ent, used, remain })
   }
 
@@ -79,7 +75,6 @@ function buildBalanceMap(balances, carry) {
 }
 
 function buildRow(e, managerName = '') {
-  const bm = buildBalanceMap(e.balances, e.carry)
   const get = (code) => bm.get(code) || { used: 0, ent: 0, remain: 0 }
 
   const AL = get('AL')
@@ -208,12 +203,9 @@ const includeInactive = ref(false)
 const q = ref('')
 const groups = ref([])
 
-/* used/entitlement chips (example: 2/16 when carry.AL = -2) */
-function compactBalances(balances, carry) {
+function compactBalances(balances) {
   const arr = Array.isArray(balances) ? balances : []
-  const c = carry && typeof carry === 'object' ? carry : {}
   const order = ['AL', 'SP', 'MC', 'MA', 'UL']
-
   const m = new Map(arr.map((x) => [String(x.leaveTypeCode || '').toUpperCase(), x]))
   const out = []
 
@@ -221,26 +213,22 @@ function compactBalances(balances, carry) {
     const b = m.get(k)
     if (!b) continue
 
-    const ent = num(b.yearlyEntitlement) // backend already applied carry to entitlement
-    let used = num(b.used)
-
-    // if carry is negative, show it as "used" (debt)
-    const carryVal = num(c[k])
-    if (carryVal < 0) used += Math.abs(carryVal)
-
-    const remaining = ent - used
+    const ent = num(b.yearlyEntitlement)
+    const used = num(b.used)
+    const remaining = Number.isFinite(b.remaining) ? num(b.remaining) : ent - used
 
     out.push({
       k,
       used,
       ent,
       remaining,
-      pair: `${used}/${ent}`,
+      pair: `${used}/${remaining}`,
     })
   }
 
   return out
 }
+
 
 function statusChipClasses(active) {
   return active ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
@@ -336,8 +324,8 @@ const managerCount = computed(() => filteredManagers.value.length)
 
 /* ───────── pagination (flatten -> slice -> regroup) ───────── */
 const page = ref(1)
-const pageSize = ref(12)
-const PAGE_SIZES = [8, 12, 20, 50]
+const pageSize = ref(10)
+const PAGE_SIZES = [ 10, 20, 50, 100, 500, 1000]
 
 const flatEmployees = computed(() => {
   const out = []
@@ -779,12 +767,13 @@ onBeforeUnmount(() => {
 
             <div class="min-w-[140px]">
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Per page</div>
-              <select
-                v-model.number="pageSize"
-                class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none"
-              >
-                <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
-              </select>
+                <select
+                  v-model.number="pageSize"
+                  class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px]
+                        text-slate-900 dark:text-white outline-none"
+                >
+                  <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
+                </select>
             </div>
 
             <div class="flex items-center gap-2">
@@ -969,7 +958,7 @@ onBeforeUnmount(() => {
 
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
-                    v-for="b in compactBalances(e.balances, e.carry)"
+                    v-for="b in compactBalances(e.balances)"
                     :key="b.k"
                     class="ui-badge"
                     :class="pairChipClasses(b.remaining)"
@@ -1075,7 +1064,7 @@ onBeforeUnmount(() => {
                     <td class="ui-td">
                       <div class="grid grid-cols-5 gap-2 justify-items-center">
                         <span
-                          v-for="b in compactBalances(e.balances, e.carry)"
+                          v-for="b in compactBalances(e.balances)"
                           :key="b.k"
                           class="ui-badge whitespace-nowrap"
                           :class="pairChipClasses(b.remaining)"
@@ -1437,4 +1426,16 @@ onBeforeUnmount(() => {
   opacity: 0;
   transform: translateY(6px) scale(0.98);
 }
+
+/* ✅ Fix native dropdown option visibility */
+:deep(select option) {
+  color: rgb(15 23 42);       /* slate-900 */
+  background: #ffffff;
+}
+
+:deep(html.dark select option) {
+  color: rgb(241 245 249);    /* slate-100 */
+  background: rgb(15 23 42);  /* slate-900 */
+}
+
 </style>

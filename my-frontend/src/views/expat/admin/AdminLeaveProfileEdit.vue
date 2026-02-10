@@ -3,7 +3,8 @@
   ✅ Profile settings edit (joinDate, approvalMode, approvers, active)
   ✅ Contract-aware carry edit (per contractNo)
   ✅ Logs + Renew contract modal
-  ✅ Uses ui-* Tailwind utilities
+  ✅ NEW: Admin password reset (set new password only, no old password)
+  ✅ CLEAN UI: consistent sections, header bars, spacing, responsive
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
@@ -168,19 +169,13 @@ const contractHistory = computed(() => {
   })
 })
 
-/* ───────────────── contract-aware carry editing (NEW) ───────────────── */
+/* ───────────────── contract-aware carry editing ───────────────── */
 const contractsLoading = ref(false)
 const contractsError = ref('')
 const contracts = ref([])
-/**
- * expected backend: GET /admin/leave/profiles/:employeeId/contracts
- * supports shapes:
- * - { contracts: [...] }
- * - [...]
- */
+
 function normalizeContracts(raw) {
   const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
-
   return arr
     .map((c, idx) => {
       const contractNo = c?.contractNo ?? c?.no ?? c?.index ?? idx + 1
@@ -217,7 +212,6 @@ function setSelectedContractDefault() {
     selectedContractNo.value = null
     return
   }
-  // prefer current, else latest (highest contractNo)
   const current = contracts.value.find((c) => c.isCurrent) || contracts.value[0]
   selectedContractNo.value = Number(current.contractNo)
 }
@@ -276,13 +270,10 @@ async function saveContractCarry() {
     // ✅ PATCH /admin/leave/profiles/:employeeId/contracts/:contractNo
     await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${no}`, {
       carry,
-      // (optional legacy mirror for safety)
-      alCarry: num(carry.AL),
+      alCarry: num(carry.AL), // optional mirror
     })
 
     showToast({ type: 'success', title: 'Saved', message: `Carry updated for contract #${no}.` })
-
-    // refresh both profile (balances display) and contracts list
     await fetchProfile()
     await fetchContracts()
   } catch (e) {
@@ -294,19 +285,15 @@ async function saveContractCarry() {
   }
 }
 
-/* ───────────────── EDITABLE PROFILE FORM ───────────────── */
+/* ───────────────── profile form ───────────────── */
 const form = reactive({
   joinDate: '',
   approvalMode: 'MANAGER_AND_GM',
-
   managerEmployeeId: '',
   gmLoginId: '',
   cooLoginId: '',
-
-  // profile-level carry (legacy screen; still editable if you want)
-  carry: emptyCarry(),
+  carry: emptyCarry(), // legacy only
   alCarry: 0,
-
   isActive: true,
 })
 
@@ -320,7 +307,6 @@ function fillFormFromProfile(p) {
   form.gmLoginId = String(p?.gmLoginId || '')
   form.cooLoginId = String(p?.cooLoginId || '')
 
-  // profile-level carry (for backward compat; real carry should be contract-based)
   const c = readCarryFromProfile(p)
   form.carry = { ...c }
   form.alCarry = num(c.AL)
@@ -399,27 +385,20 @@ function resetForm() {
 async function updateProfile(payload, { recalc } = { recalc: false }) {
   const url = `/admin/leave/profiles/${employeeId.value}`
   const params = recalc ? { recalc: '1' } : undefined
-
   try {
     return await api.patch(url, payload, { params })
   } catch (e) {
     const st = e?.response?.status
-    if (st === 404 || st === 405) {
-      return await api.put(url, payload, { params })
-    }
+    if (st === 404 || st === 405) return await api.put(url, payload, { params })
     throw e
   }
 }
 
 async function forceRecalcBalances() {
   const id = employeeId.value
-  if (!id) return
+  if (!id) return false
 
-  const payload = {
-    asOf: dayjs().format('YYYY-MM-DD'),
-    reason: 'JOIN_DATE_CHANGED',
-  }
-
+  const payload = { asOf: dayjs().format('YYYY-MM-DD'), reason: 'JOIN_DATE_CHANGED' }
   const tries = [
     () => api.post(`/admin/leave/profiles/${id}/recalculate`, payload),
     () => api.post(`/admin/leave/profiles/${id}/recalc`, payload),
@@ -447,28 +426,17 @@ async function forceRecalcBalances() {
 
 function validateApprovers() {
   const mode = normApprovalMode(form.approvalMode)
-
   if (!String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
-  if (mode === 'MANAGER_AND_GM' && !String(form.managerEmployeeId || '').trim()) {
-    return 'Approval Mode is Manager + GM, so Manager Employee ID is required.'
-  }
-  if (mode === 'GM_AND_COO' && !String(form.cooLoginId || '').trim()) {
-    return 'Approval Mode is GM + COO, so COO Login ID is required.'
-  }
+  if (mode === 'MANAGER_AND_GM' && !String(form.managerEmployeeId || '').trim()) return 'Manager Employee ID is required.'
+  if (mode === 'GM_AND_COO' && !String(form.cooLoginId || '').trim()) return 'COO Login ID is required.'
   return ''
 }
 
 async function saveProfile() {
   formError.value = ''
 
-  if (!employeeId.value) {
-    formError.value = 'Missing employeeId.'
-    return
-  }
-  if (form.joinDate && !isValidYMD(form.joinDate)) {
-    formError.value = 'Join Date is invalid.'
-    return
-  }
+  if (!employeeId.value) return (formError.value = 'Missing employeeId.')
+  if (form.joinDate && !isValidYMD(form.joinDate)) return (formError.value = 'Join Date is invalid.')
 
   const approverErr = validateApprovers()
   if (approverErr) {
@@ -486,15 +454,12 @@ async function saveProfile() {
       {
         joinDate: form.joinDate ? String(form.joinDate) : null,
         approvalMode: mode,
-
         managerEmployeeId: form.managerEmployeeId ? String(form.managerEmployeeId).trim() : null,
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
         cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
-
-        // (legacy profile-level carry; keep for backward compat)
+        // legacy carry
         carry,
         alCarry: num(carry.AL),
-
         isActive: form.isActive !== false,
       },
       { recalc: joinDateChanged.value }
@@ -502,25 +467,16 @@ async function saveProfile() {
 
     if (joinDateChanged.value) {
       const ok = await forceRecalcBalances()
-      if (!ok) {
-        showToast({
-          type: 'warning',
-          title: 'Saved',
-          message: 'Join Date saved. (No recalc endpoint found, balances may refresh later.)',
-        })
-      } else {
-        showToast({
-          type: 'success',
-          title: 'Saved + Recalculated',
-          message: 'Join Date updated and balances recalculated.',
-        })
-      }
+      showToast({
+        type: ok ? 'success' : 'warning',
+        title: ok ? 'Saved + Recalculated' : 'Saved',
+        message: ok ? 'Join Date updated and balances recalculated.' : 'Join Date saved. (No recalc endpoint found.)',
+      })
     } else {
       showToast({ type: 'success', title: 'Saved', message: 'Profile updated.' })
     }
 
     await fetchProfile()
-    // contracts might reference join date for windows; refresh anyway
     await fetchContracts()
   } catch (e) {
     console.error(e)
@@ -529,6 +485,82 @@ async function saveProfile() {
     showToast({ type: 'error', title: 'Save failed', message: msg })
   } finally {
     saving.value = false
+  }
+}
+
+/* ───────────────── password reset (NEW) ───────────────── */
+const pwd = reactive({
+  open: false,
+  show: false,
+  password: '',
+  confirm: '',
+  submitting: false,
+  error: '',
+})
+
+function validateStrongPassword(p) {
+  const s = String(p || '')
+  if (s.length < 13) return 'Password must be at least 13 characters.'
+  const hasUpper = /[A-Z]/.test(s)
+  const hasLower = /[a-z]/.test(s)
+  const hasNum = /\d/.test(s)
+  const hasSym = /[^A-Za-z0-9]/.test(s)
+  const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
+  if (score < 3) return 'Password must include at least 3 of: uppercase, lowercase, number, symbol.'
+  return ''
+}
+
+function resetPwdForm() {
+  pwd.password = ''
+  pwd.confirm = ''
+  pwd.error = ''
+  pwd.show = false
+}
+
+function openPwdPanel() {
+  pwd.open = true
+  pwd.error = ''
+  pwd.show = false
+}
+
+function closePwdPanel() {
+  if (pwd.submitting) return
+  pwd.open = false
+  resetPwdForm()
+}
+
+async function submitResetPassword() {
+  pwd.error = ''
+  if (!employeeId.value) return (pwd.error = 'Missing employeeId.')
+
+  const v = validateStrongPassword(pwd.password)
+  if (v) {
+    pwd.error = v
+    showToast({ type: 'error', title: 'Validation', message: v })
+    return
+  }
+  if (pwd.password !== pwd.confirm) {
+    pwd.error = 'Confirm password does not match.'
+    showToast({ type: 'error', title: 'Validation', message: pwd.error })
+    return
+  }
+
+  pwd.submitting = true
+  try {
+    // ✅ PATCH (you changed to patch)
+    await api.patch(`/admin/leave/profiles/${employeeId.value}/password`, {
+      password: String(pwd.password),
+    })
+
+    showToast({ type: 'success', title: 'Password updated', message: 'New password saved for this employee.' })
+    closePwdPanel()
+  } catch (e) {
+    console.error(e)
+    const msg = e?.response?.data?.message || 'Failed to reset password.'
+    pwd.error = msg
+    showToast({ type: 'error', title: 'Reset failed', message: msg })
+  } finally {
+    pwd.submitting = false
   }
 }
 
@@ -566,14 +598,8 @@ function closeRenewModal() {
 }
 async function submitRenew() {
   renew.error = ''
-  if (!employeeId.value) {
-    renew.error = 'Missing employeeId.'
-    return
-  }
-  if (!isValidYMD(renew.newContractDate)) {
-    renew.error = 'Please choose a valid new contract start date.'
-    return
-  }
+  if (!employeeId.value) return (renew.error = 'Missing employeeId.')
+  if (!isValidYMD(renew.newContractDate)) return (renew.error = 'Please choose a valid new contract start date.')
 
   renew.submitting = true
   try {
@@ -617,18 +643,17 @@ const InfoRow = defineComponent({
           'div',
           {
             class:
-              'ui-label !text-[10px] !font-extrabold !tracking-[0.28em] uppercase ' +
-              (props.hint ? 'cursor-help' : ''),
+              'ui-label !text-[10px] !font-extrabold !tracking-[0.28em] uppercase ' + (props.hint ? 'cursor-help' : ''),
             title: props.hint || '',
           },
           props.label
         ),
-        h('div', { class: 'mt-1 text-[13px] font-semibold text-ui-fg' }, props.value),
+        h('div', { class: 'mt-1 text-[13px] font-semibold text-ui-fg truncate' }, props.value),
       ])
   },
 })
 
-/* ✅ lock background scroll for ANY modal */
+/* ✅ lock background scroll for ANY modal / drawer */
 const anyModalOpen = computed(() => !!renew.open || !!contractsOpen.value)
 watch(anyModalOpen, (open) => {
   if (typeof document === 'undefined') return
@@ -651,18 +676,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ui-page min-h-screen w-full">
-    <div class="w-full min-h-screen flex flex-col">
-      <!-- Header -->
-      <div class="ui-hero rounded-none border-x-0 border-t-0 px-4 py-3">
-        <div class="flex flex-wrap items-end justify-between gap-4">
-          <div class="min-w-[260px]">
+    <div class="min-h-screen w-full flex flex-col">
+      <!-- Page header -->
+      <header class="ui-hero rounded-none border-x-0 border-t-0 px-4 py-3">
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div class="min-w-0">
             <div class="ui-hero-kicker">Expat Leave · Admin</div>
             <div class="ui-hero-title">Leave Profile Edit</div>
             <div class="ui-hero-subtitle">
               Employee:
               <span class="font-mono font-semibold">{{ employeeId || '—' }}</span>
               <span class="mx-2 opacity-60">•</span>
-              Manage join date, approvers, balances & contracts.
+              Edit settings, carry, logs and password.
             </div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
@@ -671,19 +696,13 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center justify-end gap-2">
+          <div class="flex flex-wrap items-center justify-start lg:justify-end gap-2">
             <button type="button" class="ui-btn ui-btn-ghost" @click="goBack">
               <i class="fa-solid fa-arrow-left text-[11px]" />
               Back
             </button>
 
-            <button
-              type="button"
-              class="ui-btn ui-btn-soft"
-              :disabled="loading || saving || !profile || !isDirty"
-              @click="resetForm"
-              :title="!isDirty ? 'No changes' : 'Reset changes'"
-            >
+            <button type="button" class="ui-btn ui-btn-soft" :disabled="loading || saving || !profile || !isDirty" @click="resetForm">
               <i class="fa-solid fa-rotate-left text-[11px]" />
               Reset
             </button>
@@ -698,13 +717,12 @@ onBeforeUnmount(() => {
               Renew
             </button>
 
-            <button
-              type="button"
-              class="ui-btn ui-btn-primary"
-              :disabled="loading || saving || !profile || !isDirty"
-              @click="saveProfile"
-              :title="!isDirty ? 'No changes' : joinDateChanged ? 'Save + Recalculate balances' : 'Save changes'"
-            >
+            <button type="button" class="ui-btn ui-btn-soft" :disabled="loading || !profile" @click="openPwdPanel">
+              <i class="fa-solid fa-key text-[11px]" />
+              Password
+            </button>
+
+            <button type="button" class="ui-btn ui-btn-primary" :disabled="loading || saving || !profile || !isDirty" @click="saveProfile">
               <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
               Save
               <span v-if="joinDateChanged" class="ml-1 ui-badge">+recalc</span>
@@ -716,10 +734,10 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-      </div>
+      </header>
 
-      <!-- Content -->
-      <div class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-3 space-y-3">
+      <!-- Body -->
+      <main class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-4 space-y-4">
         <!-- Error -->
         <div
           v-if="error"
@@ -730,161 +748,289 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Loading -->
-        <div v-if="loading" class="space-y-2">
-          <div class="ui-card !rounded-2xl h-12 animate-pulse bg-ui-bg-2/60" />
-          <div class="ui-card !rounded-2xl h-40 animate-pulse bg-ui-bg-2/60" />
-          <div class="ui-card !rounded-2xl h-40 animate-pulse bg-ui-bg-2/60" />
+        <div v-if="loading" class="space-y-3">
+          <div class="ui-card !rounded-2xl h-14 animate-pulse bg-ui-bg-2/60" />
+          <div class="ui-card !rounded-2xl h-56 animate-pulse bg-ui-bg-2/60" />
+          <div class="ui-card !rounded-2xl h-56 animate-pulse bg-ui-bg-2/60" />
         </div>
 
         <template v-else>
-          <div v-if="!profile" class="py-8 text-center text-[11px] text-ui-muted">
-            Profile not loaded.
-          </div>
+          <div v-if="!profile" class="py-10 text-center text-[11px] text-ui-muted">Profile not loaded.</div>
 
           <template v-else>
-            <!-- Top summary -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+            <!-- Mini summary cards -->
+            <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <InfoRow label="Employee ID" :value="profile.employeeId || '—'" hint="Read-only" />
               <InfoRow label="Name" :value="profile.name || '—'" hint="Read-only" />
               <InfoRow label="Department" :value="profile.department || '—'" hint="Read-only" />
-            </div>
+            </section>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <!-- Settings -->
-              <section class="ui-card lg:col-span-2 p-3">
+            <!-- SECTION: Password reset (inline card) -->
+            <section v-if="pwd.open" class="ui-card overflow-hidden">
+              <div class="section-head section-head--amber">
                 <div>
-                  <div class="text-[12px] font-extrabold text-ui-fg">Profile settings</div>
-                  <div class="text-[11px] text-ui-muted">
-                    Changing Join Date affects accrual. Approval mode controls workflow.
+                  <div class="section-title">Reset password</div>
+                  <div class="section-sub">
+                    Set a new password directly (no old password). Min 13 chars, must include 3 of 4 categories.
                   </div>
                 </div>
 
-                <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <!-- Join Date -->
-                  <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div
-                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                      title="Controls AL accrual and service-year rules"
-                    >
-                      Join date
-                    </div>
-                    <div class="mt-1">
-                      <input v-model="form.joinDate" type="date" class="ui-date w-full" />
-                      <div class="mt-1 text-[11px] text-ui-muted">
-                        Current: <span class="font-mono">{{ fmtYMD(profile.joinDate) }}</span>
-                        <span v-if="joinDateChanged" class="ml-2 ui-badge">Changed → will recalc</span>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="pwd.submitting" @click="resetPwdForm">
+                    <i class="fa-solid fa-eraser text-[11px]" />
+                    Clear
+                  </button>
+
+                  <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" :disabled="pwd.submitting" @click="closePwdPanel">
+                    <i class="fa-solid fa-xmark text-[11px]" />
+                    Close
+                  </button>
+
+                  <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" :disabled="pwd.submitting" @click="submitResetPassword">
+                    <i class="fa-solid" :class="pwd.submitting ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
+                    Save password
+                  </button>
+                </div>
+              </div>
+
+              <div class="p-3 lg:p-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">New password</div>
+                      <div class="mt-1 relative">
+                        <input
+                          v-model="pwd.password"
+                          :type="pwd.show ? 'text' : 'password'"
+                          class="ui-input w-full pr-12"
+                          placeholder="Type strong password…"
+                          :disabled="pwd.submitting"
+                          autocomplete="new-password"
+                        />
+                        <button
+                          type="button"
+                          class="absolute right-2 top-1/2 -translate-y-1/2 ui-btn ui-btn-ghost ui-btn-xs"
+                          :disabled="pwd.submitting"
+                          @click="pwd.show = !pwd.show"
+                          :title="pwd.show ? 'Hide' : 'Show'"
+                        >
+                          <i class="fa-solid" :class="pwd.show ? 'fa-eye-slash' : 'fa-eye'" />
+                        </button>
                       </div>
+
+                      <div class="mt-2 text-[11px] text-ui-muted">
+                        Rule: 13+ chars and at least 3 of:
+                        <span class="font-semibold">Upper</span>, <span class="font-semibold">Lower</span>,
+                        <span class="font-semibold">Number</span>, <span class="font-semibold">Symbol</span>.
+                      </div>
+                    </div>
+
+                    <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Confirm password</div>
+                      <input
+                        v-model="pwd.confirm"
+                        :type="pwd.show ? 'text' : 'password'"
+                        class="ui-input w-full"
+                        placeholder="Re-type password…"
+                        :disabled="pwd.submitting"
+                        autocomplete="new-password"
+                      />
                     </div>
                   </div>
 
-                  <!-- Contract start (read-only) -->
-                  <InfoRow
-                    label="Current contract start"
-                    :value="fmtYMD(profile.contractDate)"
-                    hint="To change contract date, use Renew"
-                  />
-
-                  <!-- Approval mode -->
-                  <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                    <div
-                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                      title="Approval chain for this employee profile"
-                    >
-                      Approval mode
+                  <aside class="ui-card !rounded-2xl p-3">
+                    <div class="text-[12px] font-extrabold text-ui-fg">Target</div>
+                    <div class="mt-1 text-[11px] text-ui-muted">This will update the login password for:</div>
+                    <div class="mt-2">
+                      <div class="ui-badge ui-badge-amber font-mono">{{ profile.employeeId }}</div>
+                      <div class="mt-1 text-[11px] text-ui-muted truncate">{{ profile.name || '—' }}</div>
                     </div>
 
-                    <div class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <select v-model="form.approvalMode" class="ui-select w-full">
-                        <option v-for="m in APPROVAL_MODES" :key="m.value" :value="m.value">
-                          {{ m.label }}
-                        </option>
-                      </select>
+                    <div class="mt-3 text-[11px] text-ui-muted">
+                      Tip: after saving, inform employee securely (don’t post password in group chats).
+                    </div>
+                  </aside>
+                </div>
 
-                      <div class="ui-card !rounded-2xl px-3 py-2 bg-ui-bg-2/60">
-                        <div class="text-[11px] font-extrabold text-ui-fg">Rule</div>
-                        <div class="mt-0.5 text-[11px] text-ui-muted">
-                          <span v-if="needManager">Manager is required.</span>
-                          <span v-else>COO is required.</span>
-                          <span class="ml-1 opacity-70">GM is always required.</span>
+                <div
+                  v-if="pwd.error"
+                  class="mt-3 ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                         dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+                >
+                  <span class="font-semibold">Failed:</span> {{ pwd.error }}
+                </div>
+              </div>
+            </section>
+
+            <!-- SECTION: Profile Settings + Balances -->
+            <section class="ui-card overflow-hidden">
+              <div class="section-head section-head--indigo">
+                <div>
+                  <div class="section-title">Profile settings</div>
+                  <div class="section-sub">Join date, approval chain, active status and approvers.</div>
+                </div>
+                <div class="hidden sm:flex items-center gap-2">
+                  <span class="ui-badge">Mode: {{ normApprovalMode(profile.approvalMode) }}</span>
+                  <span class="ui-badge">Active: {{ profile.isActive === false ? 'No' : 'Yes' }}</span>
+                </div>
+              </div>
+
+              <div class="p-3 lg:p-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <!-- Left: settings form -->
+                  <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <!-- Join Date -->
+                    <div class="ui-card !rounded-2xl px-3 py-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Controls AL accrual and service-year rules">
+                        Join date
+                      </div>
+                      <div class="mt-1">
+                        <input v-model="form.joinDate" type="date" class="ui-date w-full" />
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          Current: <span class="font-mono">{{ fmtYMD(profile.joinDate) }}</span>
+                          <span v-if="joinDateChanged" class="ml-2 ui-badge">Changed → will recalc</span>
                         </div>
                       </div>
                     </div>
 
-                    <div class="mt-1 text-[11px] text-ui-muted">
-                      Current: <span class="font-mono">{{ normApprovalMode(profile.approvalMode) }}</span>
-                    </div>
-                  </div>
+                    <!-- Contract start (read-only) -->
+                    <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)" hint="To change contract date, use Renew" />
 
-                  <!-- Active -->
-                  <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div
-                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                      title="If inactive, employee cannot request leave"
-                    >
-                      Active
-                    </div>
-                    <div class="mt-2 flex items-center justify-between gap-3">
-                      <div class="text-[12px] font-extrabold text-ui-fg">
-                        {{ form.isActive ? 'Yes' : 'No' }}
+                    <!-- Approval mode -->
+                    <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approval chain for this employee profile">
+                        Approval mode
                       </div>
-                      <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="form.isActive = !form.isActive">
-                        <i class="fa-solid" :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
-                        Toggle
-                      </button>
-                    </div>
-                    <div class="mt-1 text-[11px] text-ui-muted">
-                      Current: <span class="font-mono">{{ profile.isActive === false ? 'No' : 'Yes' }}</span>
-                    </div>
-                  </div>
 
-                  <!-- Manager employeeId -->
-                  <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div
-                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                      :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'"
-                    >
-                      Manager employee ID
-                      <span v-if="needManager" class="ml-2 ui-badge">required</span>
-                    </div>
-                    <div class="mt-1">
-                      <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
+                      <div class="mt-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <select v-model="form.approvalMode" class="ui-select w-full">
+                          <option v-for="m in APPROVAL_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+                        </select>
+
+                        <div class="ui-card !rounded-2xl px-3 py-2 bg-ui-bg-2/60">
+                          <div class="text-[11px] font-extrabold text-ui-fg">Rule</div>
+                          <div class="mt-0.5 text-[11px] text-ui-muted">
+                            <span v-if="needManager">Manager is required.</span>
+                            <span v-else>COO is required.</span>
+                            <span class="ml-1 opacity-70">GM is always required.</span>
+                          </div>
+                        </div>
+                      </div>
+
                       <div class="mt-1 text-[11px] text-ui-muted">
-                        Current: <span class="font-mono">{{ profile.managerEmployeeId || profile.managerLoginId || '—' }}</span>
+                        Current: <span class="font-mono">{{ normApprovalMode(profile.approvalMode) }}</span>
+                      </div>
+                    </div>
+
+                    <!-- Active -->
+                    <div class="ui-card !rounded-2xl px-3 py-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="If inactive, employee cannot request leave">
+                        Active
+                      </div>
+                      <div class="mt-2 flex items-center justify-between gap-3">
+                        <div class="text-[12px] font-extrabold text-ui-fg">{{ form.isActive ? 'Yes' : 'No' }}</div>
+                        <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="form.isActive = !form.isActive">
+                          <i class="fa-solid" :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
+                          Toggle
+                        </button>
+                      </div>
+                      <div class="mt-1 text-[11px] text-ui-muted">
+                        Current: <span class="font-mono">{{ profile.isActive === false ? 'No' : 'Yes' }}</span>
+                      </div>
+                    </div>
+
+                    <!-- Manager employeeId -->
+                    <div class="ui-card !rounded-2xl px-3 py-2">
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'"
+                      >
+                        Manager employee ID
+                        <span v-if="needManager" class="ml-2 ui-badge">required</span>
+                      </div>
+                      <div class="mt-1">
+                        <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          Current: <span class="font-mono">{{ profile.managerEmployeeId || profile.managerLoginId || '—' }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- GM login -->
+                    <div class="ui-card !rounded-2xl px-3 py-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM (required)">
+                        GM login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
+                      </div>
+                      <div class="mt-1">
+                        <input v-model="form.gmLoginId" type="text" placeholder="Example: leave_gm" class="ui-input w-full" />
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          Current: <span class="font-mono">{{ profile.gmLoginId || '—' }}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- COO login -->
+                    <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode is GM + COO">
+                        COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
+                      </div>
+                      <div class="mt-1">
+                        <input v-model="form.cooLoginId" type="text" placeholder="Example: leave_coo" class="ui-input w-full" />
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          Current: <span class="font-mono">{{ profile.cooLoginId || '—' }}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <!-- GM login -->
-                  <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div
-                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                      title="Approver loginId with role LEAVE_GM (required)"
-                    >
-                      GM login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
-                    </div>
-                    <div class="mt-1">
-                      <input v-model="form.gmLoginId" type="text" placeholder="Example: leave_gm" class="ui-input w-full" />
-                      <div class="mt-1 text-[11px] text-ui-muted">
-                        Current: <span class="font-mono">{{ profile.gmLoginId || '—' }}</span>
+                  <!-- Right: balances -->
+                  <aside class="ui-card !rounded-2xl p-3">
+                    <div class="flex items-end justify-between gap-3">
+                      <div>
+                        <div class="text-[12px] font-extrabold text-ui-fg">Balances</div>
+                        <div class="text-[11px] text-ui-muted">
+                          As of <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
+                        </div>
                       </div>
+                      <span class="ui-badge ui-badge-emerald">Live</span>
                     </div>
-                  </div>
 
-                  <!-- COO login (only if needed) -->
-                  <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                    <div
-                      class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                      title="Required when approval mode is GM + COO"
-                    >
-                      COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
-                    </div>
-                    <div class="mt-1">
-                      <input v-model="form.cooLoginId" type="text" placeholder="Example: leave_coo" class="ui-input w-full" />
-                      <div class="mt-1 text-[11px] text-ui-muted">
-                        Current: <span class="font-mono">{{ profile.cooLoginId || '—' }}</span>
+                    <div v-if="!normalizedBalances.length" class="mt-3 text-[11px] text-ui-muted">No balances yet.</div>
+
+                    <div v-else class="mt-3">
+                      <div class="overflow-x-auto ui-scrollbar rounded-xl border border-ui-border/60">
+                        <table class="w-full text-[11px]">
+                          <thead class="bg-ui-bg-2/60">
+                            <tr class="text-ui-muted">
+                              <th class="px-3 py-2 text-left text-[10px] font-extrabold">Type</th>
+                              <th class="px-3 py-2 text-right text-[10px] font-extrabold">Used</th>
+                              <th class="px-3 py-2 text-right text-[10px] font-extrabold">Remain</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr v-for="b in normalizedBalances" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
+                              <td class="px-3 py-2 font-extrabold text-ui-fg">{{ b.leaveTypeCode }}</td>
+                              <td class="px-3 py-2 text-right font-mono text-ui-fg">{{ fmt(b.used) }}</td>
+                              <td class="px-3 py-2 text-right font-mono">
+                                <span
+                                  class="inline-flex items-center rounded-full px-2 py-[1px] text-[10px] font-extrabold"
+                                  :class="
+                                    num(b.remaining) < 0
+                                      ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
+                                      : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
+                                  "
+                                >
+                                  {{ fmt(b.remaining) }}
+                                </span>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                       </div>
                     </div>
-                  </div>
+
+                    <div class="mt-2 text-[10px] text-ui-muted">Tip: If Join Date changed, Save will try to recalc balances.</div>
+                  </aside>
                 </div>
 
                 <div
@@ -894,85 +1040,21 @@ onBeforeUnmount(() => {
                 >
                   <span class="font-semibold">Validation:</span> {{ formError }}
                 </div>
-              </section>
+              </div>
+            </section>
 
-              <!-- Balances -->
-              <section class="ui-card p-3">
+            <!-- SECTION: Contract carry -->
+            <section class="ui-card overflow-hidden">
+              <div class="section-head section-head--emerald">
                 <div>
-                  <div class="text-[12px] font-extrabold text-ui-fg">Balances</div>
-                  <div class="text-[11px] text-ui-muted">
-                    As of <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
-                  </div>
-                </div>
-
-                <div v-if="!normalizedBalances.length" class="mt-2 text-[11px] text-ui-muted">
-                  No balances yet.
-                </div>
-
-                <div v-else class="mt-2">
-                  <div class="inline-block max-w-full overflow-x-auto ui-scrollbar rounded-xl border border-ui-border/60">
-                    <table class="w-auto table-auto text-[11px] leading-tight">
-                      <thead class="bg-ui-bg-2/60">
-                        <tr class="text-ui-muted">
-                          <th class="px-[26px] py-[13px] text-left text-[10px] font-extrabold">Type</th>
-                          <th class="px-[26px] py-[13px] text-right text-[10px] font-extrabold">Used</th>
-                          <th class="px-[26px] py-[13px] text-right text-[10px] font-extrabold">Remain</th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        <tr v-for="b in normalizedBalances" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
-                          <td class="px-[26px] py-[13px] font-extrabold text-ui-fg">
-                            {{ b.leaveTypeCode }}
-                          </td>
-
-                          <td class="px-[26px] py-[13px] text-right font-mono text-ui-fg">
-                            {{ fmt(b.used) }}
-                          </td>
-
-                          <td class="px-[26px] py-[13px] text-right font-mono">
-                            <span
-                              class="inline-flex items-center rounded-full px-[6px] py-[1px] text-[10px] font-extrabold"
-                              :class="
-                                num(b.remaining) < 0
-                                  ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
-                                  : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
-                              "
-                            >
-                              {{ fmt(b.remaining) }}
-                            </span>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div class="mt-2 text-[10px] text-ui-muted">
-                  Tip: If Join Date changed, Save will try to recalc balances.
-                </div>
-              </section>
-            </div>
-
-            <!-- ✅ Contract carry editor (NEW) -->
-            <section class="ui-card p-3">
-              <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
-                <div>
-                  <div class="text-[12px] font-extrabold text-ui-fg">Contract carry</div>
-                  <div class="text-[11px] text-ui-muted">
-                    Edit carry per contract. This is the correct place for AL debt / carry.
-                  </div>
+                  <div class="section-title">Contract carry</div>
+                  <div class="section-sub">Correct place for AL debt/carry. Edit per contract.</div>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    class="ui-btn ui-btn-ghost ui-btn-sm"
-                    :disabled="contractsLoading"
-                    @click="fetchContracts"
-                  >
+                  <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="contractsLoading" @click="fetchContracts">
                     <i class="fa-solid fa-rotate text-[11px]" :class="contractsLoading ? 'fa-spin' : ''" />
-                    Refresh contracts
+                    Refresh
                   </button>
 
                   <button
@@ -980,7 +1062,6 @@ onBeforeUnmount(() => {
                     class="ui-btn ui-btn-primary ui-btn-sm"
                     :disabled="saving || !selectedContract || !contractCarryDirty"
                     @click="saveContractCarry"
-                    :title="!contractCarryDirty ? 'No changes' : 'Save carry for selected contract'"
                   >
                     <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
                     Save carry
@@ -988,201 +1069,162 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div v-if="contractsError" class="mt-3 ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
-                   dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100">
-                <span class="font-semibold">Contracts:</span> {{ contractsError }}
-              </div>
-
-              <div v-if="contractsLoading" class="mt-3 ui-card !rounded-2xl h-12 animate-pulse bg-ui-bg-2/60" />
-
-              <div v-else class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
-                <!-- Contract selector -->
-                <div class="ui-card !rounded-2xl px-3 py-2">
-                  <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Select contract</div>
-
-                  <select v-model.number="selectedContractNo" class="ui-select w-full mt-1" :disabled="!contracts.length">
-                    <option v-if="!contracts.length" :value="null">No contracts</option>
-                    <option v-for="c in contracts" :key="c.contractNo" :value="c.contractNo">
-                      #{{ c.contractNo }} · {{ c.startDate || '—' }} → {{ c.endDate || '—' }}{{ c.isCurrent ? ' (current)' : '' }}
-                    </option>
-                  </select>
-
-                  <div class="mt-2 text-[11px] text-ui-muted">
-                    Current selection:
-                    <span class="font-mono">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
-                  </div>
+              <div class="p-3 lg:p-4">
+                <div
+                  v-if="contractsError"
+                  class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                         dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+                >
+                  <span class="font-semibold">Contracts:</span> {{ contractsError }}
                 </div>
 
-                <!-- Contract summary -->
-                <div class="ui-card !rounded-2xl px-3 py-2">
-                  <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Contract period</div>
-                  <div class="mt-1 text-[12px] font-extrabold text-ui-fg">
-                    {{ selectedContract?.startDate || '—' }}
-                    <span class="opacity-60 mx-1">→</span>
-                    {{ selectedContract?.endDate || '—' }}
-                  </div>
-                  <div class="mt-1 text-[11px] text-ui-muted">
-                    Tip: carry belongs to contract, not profile.
-                  </div>
-                </div>
+                <div v-if="contractsLoading" class="mt-3 ui-card !rounded-2xl h-12 animate-pulse bg-ui-bg-2/60" />
 
-                <!-- Carry editor -->
-                <div class="ui-card !rounded-2xl px-3 py-2 lg:col-span-1">
-                  <div class="flex items-center justify-between">
-                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Carry</div>
+                <div v-else class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <!-- selector -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Select contract</div>
 
-                    <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
-                      <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'" />
-                      {{ showCarryAdvanced ? 'Hide' : 'Advanced' }}
-                    </button>
+                    <select v-model.number="selectedContractNo" class="ui-select w-full mt-1" :disabled="!contracts.length">
+                      <option v-if="!contracts.length" :value="null">No contracts</option>
+                      <option v-for="c in contracts" :key="c.contractNo" :value="c.contractNo">
+                        #{{ c.contractNo }} · {{ c.startDate || '—' }} → {{ c.endDate || '—' }}{{ c.isCurrent ? ' (current)' : '' }}
+                      </option>
+                    </select>
+
+                    <div class="mt-2 text-[11px] text-ui-muted">
+                      Selected:
+                      <span class="font-mono font-semibold">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
+                    </div>
                   </div>
 
-                  <div class="mt-2 grid grid-cols-1 sm:grid-cols-5 gap-2">
-                    <div class="sm:col-span-2">
-                      <div class="ui-label">AL</div>
-                      <input
-                        v-model.number="contractCarryForm.carry.AL"
-                        type="number"
-                        step="0.5"
-                        class="ui-input w-full"
-                        placeholder="0"
-                        :disabled="!selectedContract"
-                      />
-                      <div class="mt-1 text-[11px] text-ui-muted">
-                        Current: <span class="font-mono">{{ fmt(selectedContract?.carry?.AL ?? 0) }}</span>
-                      </div>
+                  <!-- period -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Contract period</div>
+                    <div class="mt-1 text-[12px] font-extrabold text-ui-fg">
+                      {{ selectedContract?.startDate || '—' }}
+                      <span class="opacity-60 mx-1">→</span>
+                      {{ selectedContract?.endDate || '—' }}
+                    </div>
+                  </div>
+
+                  <!-- carry editor -->
+                  <div class="ui-card !rounded-2xl px-3 py-2">
+                    <div class="flex items-center justify-between">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Carry editor</div>
+
+                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
+                        <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'" />
+                        {{ showCarryAdvanced ? 'Basic' : 'Advanced' }}
+                      </button>
                     </div>
 
-                    <template v-if="showCarryAdvanced">
-                      <div>
-                        <div class="ui-label">SP</div>
-                        <input
-                          v-model.number="contractCarryForm.carry.SP"
-                          type="number"
-                          step="0.5"
-                          class="ui-input w-full"
-                          placeholder="0"
-                          :disabled="!selectedContract"
-                        />
+                    <div class="mt-2 grid grid-cols-1 sm:grid-cols-1 gap-2">
+                      <div class="sm:col-span-2">
+                        <div class="ui-label">AL</div>
+                        <input v-model.number="contractCarryForm.carry.AL" type="number" step="0.5" class="ui-input w-full" placeholder="0" :disabled="!selectedContract" />
                       </div>
-                      <div>
-                        <div class="ui-label">MC</div>
-                        <input
-                          v-model.number="contractCarryForm.carry.MC"
-                          type="number"
-                          step="0.5"
-                          class="ui-input w-full"
-                          placeholder="0"
-                          :disabled="!selectedContract"
-                        />
-                      </div>
-                      <div>
-                        <div class="ui-label">MA</div>
-                        <input
-                          v-model.number="contractCarryForm.carry.MA"
-                          type="number"
-                          step="0.5"
-                          class="ui-input w-full"
-                          placeholder="0"
-                          :disabled="!selectedContract"
-                        />
-                      </div>
-                      <div>
-                        <div class="ui-label">UL</div>
-                        <input
-                          v-model.number="contractCarryForm.carry.UL"
-                          type="number"
-                          step="0.5"
-                          class="ui-input w-full"
-                          placeholder="0"
-                          :disabled="!selectedContract"
-                        />
-                      </div>
-                    </template>
-                  </div>
 
-                  <div class="mt-2 text-[11px] text-ui-muted">
-                    Dirty:
-                    <span class="font-semibold" :class="contractCarryDirty ? 'text-rose-600' : 'text-emerald-700'">
-                      {{ contractCarryDirty ? 'Yes' : 'No' }}
-                    </span>
+                      <template v-if="showCarryAdvanced">
+                        <div>
+                          <div class="ui-label">SP</div>
+                          <input v-model.number="contractCarryForm.carry.SP" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                        </div>
+                        <div>
+                          <div class="ui-label">MC</div>
+                          <input v-model.number="contractCarryForm.carry.MC" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                        </div>
+                        <div>
+                          <div class="ui-label">MA</div>
+                          <input v-model.number="contractCarryForm.carry.MA" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                        </div>
+                        <div>
+                          <div class="ui-label">UL</div>
+                          <input v-model.number="contractCarryForm.carry.UL" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                        </div>
+                      </template>
+                    </div>
+
+                    <div class="mt-2 text-[11px] text-ui-muted">
+                      Dirty:
+                      <span class="font-semibold" :class="contractCarryDirty ? 'text-rose-600' : 'text-emerald-700'">
+                        {{ contractCarryDirty ? 'Yes' : 'No' }}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             </section>
 
-            <!-- Contract history -->
-            <section class="ui-card p-3">
-              <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+            <!-- SECTION: Contract history -->
+            <section class="ui-card overflow-hidden">
+              <div class="section-head section-head--slate">
                 <div>
-                  <div class="text-[12px] font-extrabold text-ui-fg">Contract history</div>
-                  <div class="text-[11px] text-ui-muted">Newest first. Full view also available in Logs.</div>
+                  <div class="section-title">Contract history</div>
+                  <div class="section-sub">Newest first. Full view also available in Logs.</div>
                 </div>
                 <div class="text-[11px] text-ui-muted">{{ contractHistory.length }} log(s)</div>
               </div>
 
-              <div v-if="!contractHistory.length" class="mt-4 py-6 text-center text-[11px] text-ui-muted">
-                No contract history.
-              </div>
+              <div class="p-3 lg:p-4">
+                <div v-if="!contractHistory.length" class="py-8 text-center text-[11px] text-ui-muted">No contract history.</div>
 
-              <div v-else class="mt-3 ui-table-wrap ui-scrollbar">
-                <table class="ui-table min-w-[980px]">
-                  <thead>
-                    <tr>
-                      <th class="ui-th">#</th>
-                      <th class="ui-th">Start</th>
-                      <th class="ui-th">End</th>
-                      <th class="ui-th text-right">Carry snapshot</th>
-                      <th class="ui-th">Snapshot balances</th>
-                      <th class="ui-th">Note</th>
-                    </tr>
-                  </thead>
+                <div v-else class="ui-table-wrap ui-scrollbar">
+                  <table class="ui-table min-w-[980px]">
+                    <thead>
+                      <tr>
+                        <th class="ui-th">#</th>
+                        <th class="ui-th">Start</th>
+                        <th class="ui-th">End</th>
+                        <th class="ui-th text-right">Carry snapshot</th>
+                        <th class="ui-th">Snapshot balances</th>
+                        <th class="ui-th">Note</th>
+                      </tr>
+                    </thead>
 
-                  <tbody>
-                    <tr v-for="(c, idx) in contractHistory" :key="c._id || c.createdAt || idx" class="ui-tr-hover">
-                      <td class="ui-td font-mono">{{ c.contractNo ?? idx + 1 }}</td>
-                      <td class="ui-td font-mono">{{ c.startDate || '—' }}</td>
-                      <td class="ui-td font-mono">{{ c.endDate || '—' }}</td>
+                    <tbody>
+                      <tr v-for="(c, idx) in contractHistory" :key="c._id || c.createdAt || idx" class="ui-tr-hover">
+                        <td class="ui-td font-mono">{{ c.contractNo ?? idx + 1 }}</td>
+                        <td class="ui-td font-mono">{{ c.startDate || '—' }}</td>
+                        <td class="ui-td font-mono">{{ c.endDate || '—' }}</td>
 
-                      <td class="ui-td">
-                        <div class="flex flex-wrap justify-end gap-2 text-[11px]">
-                          <span class="ui-badge">AL: {{ fmt(c?.closeSnapshot?.carry?.AL ?? c?.carry?.AL ?? 0) }}</span>
-                          <span class="ui-badge">SP: {{ fmt(c?.closeSnapshot?.carry?.SP ?? c?.carry?.SP ?? 0) }}</span>
-                          <span class="ui-badge">MC: {{ fmt(c?.closeSnapshot?.carry?.MC ?? c?.carry?.MC ?? 0) }}</span>
-                          <span class="ui-badge">MA: {{ fmt(c?.closeSnapshot?.carry?.MA ?? c?.carry?.MA ?? 0) }}</span>
-                          <span class="ui-badge">UL: {{ fmt(c?.closeSnapshot?.carry?.UL ?? c?.carry?.UL ?? 0) }}</span>
-                        </div>
-                      </td>
-
-                      <td class="ui-td">
-                        <div class="text-[11px] text-ui-muted">
-                          <div v-if="Array.isArray(c?.closeSnapshot?.balances)">
-                            <span
-                              v-for="b in c.closeSnapshot.balances"
-                              :key="String(b.leaveTypeCode) + String(c.openedAt || c.createdAt || idx)"
-                              class="mr-2 mb-1 inline-flex ui-badge"
-                            >
-                              {{ String(b.leaveTypeCode).toUpperCase() }}:
-                              U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
-                            </span>
+                        <td class="ui-td">
+                          <div class="flex flex-wrap justify-end gap-2 text-[11px]">
+                            <span class="ui-badge">AL: {{ fmt(c?.closeSnapshot?.carry?.AL ?? c?.carry?.AL ?? 0) }}</span>
+                            <span class="ui-badge">SP: {{ fmt(c?.closeSnapshot?.carry?.SP ?? c?.carry?.SP ?? 0) }}</span>
+                            <span class="ui-badge">MC: {{ fmt(c?.closeSnapshot?.carry?.MC ?? c?.carry?.MC ?? 0) }}</span>
+                            <span class="ui-badge">MA: {{ fmt(c?.closeSnapshot?.carry?.MA ?? c?.carry?.MA ?? 0) }}</span>
+                            <span class="ui-badge">UL: {{ fmt(c?.closeSnapshot?.carry?.UL ?? c?.carry?.UL ?? 0) }}</span>
                           </div>
-                          <div v-else class="opacity-60">—</div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td class="ui-td">
-                        <div class="max-w-[260px] truncate text-[11px] text-ui-muted">
-                          {{ c.note || '—' }}
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                        <td class="ui-td">
+                          <div class="text-[11px] text-ui-muted">
+                            <div v-if="Array.isArray(c?.closeSnapshot?.balances)">
+                              <span
+                                v-for="b in c.closeSnapshot.balances"
+                                :key="String(b.leaveTypeCode) + String(c.openedAt || c.createdAt || idx)"
+                                class="mr-2 mb-1 inline-flex ui-badge"
+                              >
+                                {{ String(b.leaveTypeCode).toUpperCase() }}: U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
+                              </span>
+                            </div>
+                            <div v-else class="opacity-60">—</div>
+                          </div>
+                        </td>
+
+                        <td class="ui-td">
+                          <div class="max-w-[260px] truncate text-[11px] text-ui-muted">{{ c.note || '—' }}</div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </section>
           </template>
         </template>
-      </div>
+      </main>
 
       <!-- Renew modal -->
       <transition name="modal-fade">
@@ -1192,16 +1234,9 @@ onBeforeUnmount(() => {
               <div class="flex items-start justify-between gap-2">
                 <div>
                   <div class="text-[14px] font-extrabold text-ui-fg">Renew contract</div>
-                  <div class="text-[11px] text-ui-muted">
-                    {{ profile?.employeeId }} · {{ profile?.name || '—' }}
-                  </div>
+                  <div class="text-[11px] text-ui-muted">{{ profile?.employeeId }} · {{ profile?.name || '—' }}</div>
                 </div>
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-ghost ui-btn-sm"
-                  :disabled="renew.submitting"
-                  @click="closeRenewModal"
-                >
+                <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="renew.submitting" @click="closeRenewModal">
                   <i class="fa-solid fa-xmark text-xs" />
                 </button>
               </div>
@@ -1250,9 +1285,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
-              <button type="button" class="ui-btn ui-btn-ghost" :disabled="renew.submitting" @click="closeRenewModal">
-                Cancel
-              </button>
+              <button type="button" class="ui-btn ui-btn-ghost" :disabled="renew.submitting" @click="closeRenewModal">Cancel</button>
 
               <button type="button" class="ui-btn ui-btn-primary" :disabled="renew.submitting" @click="submitRenew">
                 <i class="fa-solid" :class="renew.submitting ? 'fa-circle-notch fa-spin' : 'fa-arrows-rotate'" />
@@ -1321,8 +1354,7 @@ onBeforeUnmount(() => {
                               :key="String(b.leaveTypeCode) + String(c.openedAt || c.createdAt || idx)"
                               class="mr-2 mb-1 inline-flex ui-badge"
                             >
-                              {{ String(b.leaveTypeCode).toUpperCase() }}:
-                              U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
+                              {{ String(b.leaveTypeCode).toUpperCase() }}: U{{ fmt(b.used) }} / R{{ fmt(b.remaining) }}
                             </span>
                           </div>
                           <div v-else class="opacity-60">—</div>
@@ -1344,9 +1376,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
-              <button type="button" class="ui-btn ui-btn-ghost" @click="contractsOpen = false">
-                Close
-              </button>
+              <button type="button" class="ui-btn ui-btn-ghost" @click="contractsOpen = false">Close</button>
             </div>
           </div>
         </div>
@@ -1356,6 +1386,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* existing modal */
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
@@ -1364,5 +1395,44 @@ onBeforeUnmount(() => {
 .modal-fade-leave-to {
   opacity: 0;
   transform: translateY(6px) scale(0.98);
+}
+
+/* ✅ consistent section header system */
+.section-head {
+  @apply flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between px-3 lg:px-4 py-3 border-b border-ui-border/60;
+}
+.section-title {
+  @apply text-[12px] font-extrabold text-ui-fg;
+}
+.section-sub {
+  @apply text-[11px] text-ui-muted;
+}
+
+/* subtle colored header backgrounds */
+.section-head--indigo {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.12), rgba(255, 255, 255, 0));
+}
+.section-head--emerald {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(255, 255, 255, 0));
+}
+.section-head--slate {
+  background: linear-gradient(90deg, rgba(100, 116, 139, 0.12), rgba(255, 255, 255, 0));
+}
+.section-head--amber {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(255, 255, 255, 0));
+}
+
+/* dark mode tune */
+:deep(.dark) .section-head--indigo {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.18), rgba(2, 6, 23, 0));
+}
+:deep(.dark) .section-head--emerald {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(2, 6, 23, 0));
+}
+:deep(.dark) .section-head--slate {
+  background: linear-gradient(90deg, rgba(100, 116, 139, 0.18), rgba(2, 6, 23, 0));
+}
+:deep(.dark) .section-head--amber {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(2, 6, 23, 0));
 }
 </style>

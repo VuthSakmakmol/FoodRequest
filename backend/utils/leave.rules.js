@@ -2,6 +2,10 @@
 // backend/utils/leave.rules.js
 const dayjs = require('dayjs')
 
+// ✅ Use contract carry as the single source of truth
+// File you showed: backend/utils/leave/leave.contracts.js
+const { getActiveCarry } = require('./leave/leave.contracts')
+
 let externalIsHoliday = null
 try {
   // eslint-disable-next-line global-require
@@ -131,7 +135,7 @@ function computeContractYearPeriod(profile, now = new Date()) {
  * ✅ Validate + normalize leave request (supports half edges)
  * Rules:
  * - startDate must be working day (Mon–Sat, not holiday)
- * - endDate must be working day (Mon–Sat, not holiday)   ✅ (same policy)
+ * - endDate must be working day (Mon–Sat, not holiday)
  * - MA: fixed 90 calendar days inclusive (end = start + 89), half not allowed
  *
  * Half-day support:
@@ -143,7 +147,6 @@ function computeContractYearPeriod(profile, now = new Date()) {
  *   - startHalf: null|AM|PM (optional)
  *   - endHalf: null|AM|PM (optional)
  *   - totalDays = workingDaysCount - 0.5(startHalf?) - 0.5(endHalf?)
- *   - Works for "2.5 days" (half on start OR end)
  */
 function validateAndNormalizeRequest({
   leaveTypeCode,
@@ -241,7 +244,6 @@ function validateAndNormalizeRequest({
 
   // For single-day requests: allow only ONE half selector (use startHalf)
   if (isSingleDay) {
-    // if user sets any half on same day -> 0.5
     if (eh && !sh) sh = eh
     eh = null
 
@@ -288,13 +290,10 @@ function validateAndNormalizeRequest({
     return { ok: false, message: 'Invalid date range (no working days).' }
   }
 
-  // Edge halves only deduct if the edge date is working day (it is, per policy),
-  // but we still keep safe.
   let totalDays = workingCount
   if (sh && isWorkingDay(s)) totalDays -= 0.5
   if (eh && isWorkingDay(e)) totalDays -= 0.5
 
-  // clamp to minimum 0.5
   totalDays = Math.max(0.5, Math.round(totalDays * 2) / 2)
 
   return {
@@ -315,15 +314,16 @@ function validateAndNormalizeRequest({
   }
 }
 
-
 /**
  * ✅ Compute balances for current contract-year.
  *
- * NEW RULE (AL & SP):
+ * RULES:
  * - SP is allowed (max 7 per contract-year)
- * - BUT every SP day ALWAYS deducts from AL remaining
- * - NO borrowing: AL remaining can NOT go negative
- * - If AL = 0 => SP remaining becomes 0
+ * - Every SP day ALWAYS deducts from AL remaining (AL_USED_TOTAL = AL + SP)
+ *
+ * ✅ DISPLAY RULE (your request):
+ * - If carry is negative => show it as extra "used"
+ *   Example: UL carry -2 => UL used becomes 2
  *
  * IMPORTANT:
  * We count request usage if startDate is within the contract-year window.
@@ -352,50 +352,21 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
   const MC_ENT = 90
   const MA_ENT = 90
 
-  // ✅ NEW RULE: SP consumes AL, but AL cannot go negative
+  // ✅ base request usage (SP always borrows from AL)
   const AL_USED_TOTAL = usedAL + usedSP
+  const alRemaining = Number(AL_ENT - AL_USED_TOTAL)
 
-  const alRemainingRaw = Number(AL_ENT - AL_USED_TOTAL)
-  const alRemaining = Math.max(0, alRemainingRaw) // ✅ no borrowing
-
-  // ✅ SP remaining is limited by both:
-  //   1) SP entitlement remaining
-  //   2) AL remaining (because SP must be covered by AL)
+  // ✅ base SP remaining capped by base AL remaining
   const spEntRemaining = Number(SP_ENT - usedSP)
-  const spRemaining = Math.max(0, Math.min(spEntRemaining, alRemaining))
+  const spRemaining = Math.max(0, Math.min(spEntRemaining, Math.max(0, alRemaining)))
 
   return {
     balances: [
-      {
-        leaveTypeCode: 'AL',
-        yearlyEntitlement: AL_ENT,
-        used: AL_USED_TOTAL,     // includes SP usage
-        remaining: alRemaining,  // never negative
-      },
-      {
-        leaveTypeCode: 'SP',
-        yearlyEntitlement: SP_ENT,
-        used: usedSP,
-        remaining: spRemaining,  // becomes 0 when AL remaining is 0
-      },
-      {
-        leaveTypeCode: 'MC',
-        yearlyEntitlement: MC_ENT,
-        used: usedMC,
-        remaining: MC_ENT - usedMC,
-      },
-      {
-        leaveTypeCode: 'MA',
-        yearlyEntitlement: MA_ENT,
-        used: usedMA,
-        remaining: MA_ENT - usedMA,
-      },
-      {
-        leaveTypeCode: 'UL',
-        yearlyEntitlement: 0,
-        used: usedUL,
-        remaining: 0,
-      },
+      { leaveTypeCode: 'AL', yearlyEntitlement: AL_ENT, used: AL_USED_TOTAL, remaining: alRemaining },
+      { leaveTypeCode: 'SP', yearlyEntitlement: SP_ENT, used: usedSP, remaining: spRemaining },
+      { leaveTypeCode: 'MC', yearlyEntitlement: MC_ENT, used: usedMC, remaining: MC_ENT - usedMC },
+      { leaveTypeCode: 'MA', yearlyEntitlement: MA_ENT, used: usedMA, remaining: MA_ENT - usedMA },
+      { leaveTypeCode: 'UL', yearlyEntitlement: 0, used: usedUL, remaining: 0 },
     ],
     meta: {
       contractYear: { startDate: startYMD, endDate: endYMD },
@@ -405,6 +376,7 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
     },
   }
 }
+
 
 module.exports = {
   validateAndNormalizeRequest,
