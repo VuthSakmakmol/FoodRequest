@@ -5,13 +5,12 @@ import { useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import EmployeeSearch from '../expat/admin/components/EmployeeSearch.vue'
+import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'AdminExpatProfile' })
 
 const router = useRouter()
 const { showToast } = useToast()
-
-import * as XLSX from 'xlsx'
 
 function fmt(v) {
   const s = String(v ?? '').trim()
@@ -28,7 +27,28 @@ function safeSheetName(name, fallback = 'Manager') {
   return s
 }
 
+/* ───────── helpers ───────── */
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+function safeTxt(v) {
+  const s = String(v ?? '').trim()
+  return s ? s : 'None'
+}
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
 
+/* ───────── pickers (EmployeeSearch model) ───────── */
+function pickLoginId(emp) {
+  const e = emp || {}
+  return String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
+}
+function pickEmployeeId(emp) {
+  const e = emp || {}
+  return String(e.employeeId || e.empId || e.id || '').trim()
+}
 
 /**
  * Build a balance map by type code:
@@ -60,7 +80,6 @@ function buildBalanceMap(balances, carry) {
 
 function buildRow(e, managerName = '') {
   const bm = buildBalanceMap(e.balances, e.carry)
-
   const get = (code) => bm.get(code) || { used: 0, ent: 0, remain: 0 }
 
   const AL = get('AL')
@@ -83,24 +102,17 @@ function buildRow(e, managerName = '') {
     // ✅ AL
     AL_Used: AL.used,
     AL_Ent: AL.ent,
-    AL_Remain: AL.remain, // ✅ remain only AL + SP
+    AL_Remain: AL.remain,
 
     // ✅ SP
     SP_Used: SP.used,
     SP_Ent: SP.ent,
-    SP_Remain: SP.remain, // ✅ remain only AL + SP
+    SP_Remain: SP.remain,
 
-    // ✅ MC (no remain column)
+    // ✅ MC/MA/UL (used only)
     MC_Used: MC.used,
-
-
-    // ✅ MA (no remain column)
     MA_Used: MA.used,
-
-
-    // ✅ UL (no remain column)
     UL_Used: UL.used,
-
   }
 }
 
@@ -109,7 +121,6 @@ function buildRow(e, managerName = '') {
  * - Uses filteredManagers (q + includeInactive already applied)
  * - Exports ALL rows (ignores pagination)
  * - Each manager becomes a sheet
- * - Balances split into individual columns
  */
 function exportGroupedByManagerExcel() {
   const base = Array.isArray(filteredManagers.value) ? filteredManagers.value : []
@@ -149,7 +160,6 @@ function exportGroupedByManagerExcel() {
 
     const ws = XLSX.utils.json_to_sheet(rows)
 
-    // Column widths (match your exported columns)
     ws['!cols'] = [
       { wch: 22 }, // Manager
       { wch: 12 }, // EmployeeID
@@ -170,13 +180,8 @@ function exportGroupedByManagerExcel() {
       { wch: 12 }, // SP_Remain
 
       { wch: 10 }, // MC_Used
-      { wch: 10 }, // MC_Ent
-
       { wch: 10 }, // MA_Used
-      { wch: 10 }, // MA_Ent
-
       { wch: 10 }, // UL_Used
-      { wch: 10 }, // UL_Ent
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, sheetName)
@@ -188,7 +193,6 @@ function exportGroupedByManagerExcel() {
 
   showToast({ type: 'success', title: 'Export', message: `Saved: ${filename}` })
 }
-
 
 /* ───────── responsive ───────── */
 const isMobile = ref(false)
@@ -204,29 +208,6 @@ const includeInactive = ref(false)
 const q = ref('')
 const groups = ref([])
 
-/* ───────── helpers ───────── */
-function num(v) {
-  const n = Number(v ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-function safeTxt(v) {
-  const s = String(v ?? '').trim()
-  return s ? s : 'None'
-}
-function up(v) {
-  return String(v ?? '').trim().toUpperCase()
-}
-
-function pickLoginId(emp) {
-  const e = emp || {}
-  return String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
-}
-function pickEmployeeId(emp) {
-  const e = emp || {}
-  return String(e.employeeId || e.empId || e.id || '').trim()
-}
-
-/* used/remaining chips (example: 1/17) */
 /* used/entitlement chips (example: 2/16 when carry.AL = -2) */
 function compactBalances(balances, carry) {
   const arr = Array.isArray(balances) ? balances : []
@@ -247,21 +228,19 @@ function compactBalances(balances, carry) {
     const carryVal = num(c[k])
     if (carryVal < 0) used += Math.abs(carryVal)
 
-    const remaining = ent - used // ✅ compute remaining here
+    const remaining = ent - used
 
     out.push({
       k,
       used,
       ent,
-      remaining,               // ✅ now exists
-      pair: `${used}/${ent}`,  // show used/entitlement
+      remaining,
+      pair: `${used}/${ent}`,
     })
   }
 
   return out
 }
-
-
 
 function statusChipClasses(active) {
   return active ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
@@ -282,21 +261,13 @@ function modeLabel(mode) {
 }
 
 function pairChipClasses(remaining) {
-  // 🔴 red only when negative (both light + dark)
-  if (Number(remaining) < 0) {
-    return 'ui-badge ui-badge-danger'
-  }
-
-  // ✅ neutral when >= 0 (light + dark)
+  if (Number(remaining) < 0) return 'ui-badge ui-badge-danger'
   return [
     'ui-badge',
-    // light
     'border-slate-200 bg-white text-slate-800',
-    // dark
     'dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100',
   ].join(' ')
 }
-
 
 /* ───────── navigation ───────── */
 function goProfile(employeeId) {
@@ -360,9 +331,7 @@ const filteredManagers = computed(() => {
     .filter((g) => (g.employees || []).length > 0)
 })
 
-const filteredCount = computed(() =>
-  filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
-)
+const filteredCount = computed(() => filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0))
 const managerCount = computed(() => filteredManagers.value.length)
 
 /* ───────── pagination (flatten -> slice -> regroup) ───────── */
@@ -502,6 +471,27 @@ function normalizeCarry(c) {
   }
 }
 
+/* ✅ strong password check (same rule as backend) */
+function validateStrongPassword(pwd) {
+  const p = String(pwd || '')
+
+  // optional allowed; if you want REQUIRED, change this line:
+  if (!p) return { ok: true }
+
+  if (p.length < 13) return { ok: false, message: 'Password must be at least 13 characters.' }
+
+  const hasUpper = /[A-Z]/.test(p)
+  const hasLower = /[a-z]/.test(p)
+  const hasNum = /\d/.test(p)
+  const hasSym = /[^A-Za-z0-9]/.test(p)
+  const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
+
+  if (score < 3) {
+    return { ok: false, message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.' }
+  }
+  return { ok: true }
+}
+
 function newRow() {
   return {
     key: Math.random().toString(16).slice(2),
@@ -510,6 +500,9 @@ function newRow() {
     contractDate: '',
     carry: emptyCarry(),
     isActive: true,
+
+    // ✅ NEW
+    password: '',
   }
 }
 
@@ -524,6 +517,9 @@ const form = ref({
   singleCarry: emptyCarry(),
   singleActive: true,
   singleManager: null,
+
+  // ✅ NEW
+  singlePassword: '',
 })
 
 function openCreate() {
@@ -541,6 +537,8 @@ function openCreate() {
     singleCarry: emptyCarry(),
     singleActive: true,
     singleManager: null,
+
+    singlePassword: '',
   }
   createOpen.value = true
   fetchDefaultApprovers()
@@ -609,10 +607,7 @@ async function submitCreate() {
       throw new Error('COO approver is missing (seed or /admin/leave/approvers).')
 
     if (mode === 'MANAGER_AND_GM') {
-      const chosen =
-        createTab.value === 'bulk'
-          ? form.value.manager
-          : form.value.singleManager || form.value.manager
+      const chosen = createTab.value === 'bulk' ? form.value.manager : form.value.singleManager || form.value.manager
       const managerEmpId = pickEmployeeId(chosen)
       if (!managerEmpId) throw new Error('Manager is required for Manager + GM mode.')
     }
@@ -628,18 +623,23 @@ async function submitCreate() {
         if (!mustYmd(r.joinDate)) throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
         const contractDate = r.contractDate || r.joinDate
-        if (!mustYmd(contractDate))
-          throw new Error(`Contract date (Employee #${i + 1}) must be YYYY-MM-DD.`)
+        if (!mustYmd(contractDate)) throw new Error(`Contract date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
         const carry = normalizeCarry(r.carry)
+
+        const pwdCheck = validateStrongPassword(r.password)
+        if (!pwdCheck.ok) throw new Error(`Employee #${i + 1}: ${pwdCheck.message}`)
 
         return {
           employeeId,
           joinDate: r.joinDate,
           contractDate,
-          carry, // ✅ new
-          alCarry: Number(carry.AL || 0), // ✅ legacy mirror (safe)
+          carry,
+          alCarry: Number(carry.AL || 0),
           isActive: r.isActive !== false,
+
+          // ✅ NEW
+          password: String(r.password || '').trim() || undefined,
         }
       })
 
@@ -682,18 +682,24 @@ async function submitCreate() {
 
     const carry = normalizeCarry(form.value.singleCarry)
 
+    const pwdCheck = validateStrongPassword(form.value.singlePassword)
+    if (!pwdCheck.ok) throw new Error(pwdCheck.message)
+
     const payload = {
       approvalMode: mode,
       employeeId,
       joinDate: form.value.singleJoinDate,
       contractDate,
-      carry, // ✅ new
-      alCarry: Number(carry.AL || 0), // ✅ legacy mirror (safe)
+      carry,
+      alCarry: Number(carry.AL || 0),
       isActive: form.value.singleActive !== false,
       managerEmployeeId: singleManagerEmpId,
       managerLoginId: singleManagerLoginId,
       gmLoginId,
       cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
+
+      // ✅ NEW
+      password: String(form.value.singlePassword || '').trim() || undefined,
     }
 
     await api.post('/admin/leave/profiles', payload)
@@ -744,12 +750,8 @@ onBeforeUnmount(() => {
             <div class="text-[12px] sm:text-[13px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge bg-white/15 border-white/25 text-white"
-                >Employees: <b>{{ filteredCount }}</b></span
-              >
-              <span class="ui-badge bg-white/15 border-white/25 text-white"
-                >Managers: <b>{{ managerCount }}</b></span
-              >
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
             </div>
           </div>
 
@@ -757,9 +759,7 @@ onBeforeUnmount(() => {
             <div class="min-w-[260px] max-w-sm">
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Search</div>
               <div class="relative mt-1">
-                <i
-                  class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"
-                ></i>
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"></i>
                 <input
                   v-model="q"
                   type="text"
@@ -771,9 +771,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex items-center gap-2 pt-5">
-              <label
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white"
-              >
+              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
@@ -790,8 +788,6 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex items-center gap-2">
-  
-              
               <button
                 type="button"
                 class="rounded-xl bg-white px-3 py-2 text-[12px] font-extrabold text-emerald-700 hover:bg-emerald-50"
@@ -810,9 +806,6 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-file-excel text-[11px]" />
                 Export
               </button>
-
-
-            
             </div>
           </div>
         </div>
@@ -825,15 +818,9 @@ onBeforeUnmount(() => {
             <div class="text-[12px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge bg-white/15 border-white/25 text-white"
-                >Employees: <b>{{ filteredCount }}</b></span
-              >
-              <span class="ui-badge bg-white/15 border-white/25 text-white"
-                >Managers: <b>{{ managerCount }}</b></span
-              >
-              <span class="ui-badge bg-white/15 border-white/25 text-white"
-                >Page: <b>{{ page }}/{{ totalPages }}</b></span
-              >
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Page: <b>{{ page }}/{{ totalPages }}</b></span>
             </div>
           </div>
 
@@ -841,9 +828,7 @@ onBeforeUnmount(() => {
             <div>
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Search</div>
               <div class="relative mt-1">
-                <i
-                  class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"
-                ></i>
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-white/80"></i>
                 <input
                   v-model="q"
                   type="text"
@@ -855,9 +840,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <label
-                class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold_toggle text-white"
-              >
+              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold_toggle text-white">
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
@@ -938,9 +921,7 @@ onBeforeUnmount(() => {
                   <div class="truncate text-[12px] font-extrabold text-ui-fg">
                     <span class="ui-badge ui-badge-indigo mr-2">MANAGER</span>
                     {{ safeTxt(g.manager?.name) }}
-                    <span class="ml-1 font-mono text-[11px] text-ui-muted">
-                      ({{ safeTxt(g.manager?.employeeId) }})
-                    </span>
+                    <span class="ml-1 font-mono text-[11px] text-ui-muted">({{ safeTxt(g.manager?.employeeId) }})</span>
                   </div>
                   <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
@@ -998,9 +979,7 @@ onBeforeUnmount(() => {
                   <span v-if="!e.balances?.length" class="text-[11px] text-ui-muted">None</span>
                 </div>
 
-                <div class="mt-2 text-[11px] text-ui-muted">
-                  Manager login: {{ safeTxt(e.managerLoginId) }}
-                </div>
+                <div class="mt-2 text-[11px] text-ui-muted">Manager login: {{ safeTxt(e.managerLoginId) }}</div>
 
                 <div class="mt-2 flex flex-wrap justify-end gap-2" @click.stop>
                   <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" @click.stop="goEdit(e.employeeId)">
@@ -1022,18 +1001,12 @@ onBeforeUnmount(() => {
                   <div class="truncate text-[12px] font-extrabold text-ui-fg">
                     <span class="ui-badge ui-badge-indigo mr-2">MANAGER</span>
                     {{ safeTxt(g.manager?.name) }}
-                    <span class="ml-1 font-mono text-[11px] text-ui-muted">
-                      ({{ safeTxt(g.manager?.employeeId) }})
-                    </span>
+                    <span class="ml-1 font-mono text-[11px] text-ui-muted">({{ safeTxt(g.manager?.employeeId) }})</span>
                   </div>
-                  <div class="truncate text-[11px] text-ui-muted">
-                    {{ safeTxt(g.manager?.department) }}
-                  </div>
+                  <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
 
-                <div class="text-[11px] font-extrabold text-ui-muted">
-                  {{ g.employees?.length || 0 }} employees
-                </div>
+                <div class="text-[11px] font-extrabold text-ui-muted">{{ g.employees?.length || 0 }} employees</div>
               </div>
             </div>
 
@@ -1057,7 +1030,7 @@ onBeforeUnmount(() => {
                     <th class="ui-th text-center">Join</th>
                     <th class="ui-th text-center">Contract</th>
                     <th class="ui-th text-center">Mode</th>
-                    <th class="ui-th text-center">Balances (U/R)</th>
+                    <th class="ui-th text-center">Balances (U/E)</th>
                     <th class="ui-th text-center">Status</th>
                     <th class="ui-th text-center">Actions</th>
                   </tr>
@@ -1079,15 +1052,11 @@ onBeforeUnmount(() => {
                     </td>
 
                     <td class="ui-td">
-                      <div class="flex items-center justify-center text-center">
-                        {{ safeTxt(e.department) }}
-                      </div>
+                      <div class="flex items-center justify-center text-center">{{ safeTxt(e.department) }}</div>
                     </td>
 
                     <td class="ui-td whitespace-nowrap">
-                      <div class="flex items-center justify-center">
-                        {{ safeTxt(e.joinDate) }}
-                      </div>
+                      <div class="flex items-center justify-center">{{ safeTxt(e.joinDate) }}</div>
                     </td>
 
                     <td class="ui-td whitespace-nowrap">
@@ -1114,17 +1083,13 @@ onBeforeUnmount(() => {
                           {{ b.k }}: {{ b.pair }}
                         </span>
 
-                        <span v-if="!e.balances?.length" class="text-[11px] text-ui-muted col-span-3 text-center">
-                          None
-                        </span>
+                        <span v-if="!e.balances?.length" class="text-[11px] text-ui-muted col-span-3 text-center">None</span>
                       </div>
                     </td>
 
                     <td class="ui-td !px-2">
                       <div class="flex items-center justify-center">
-                        <span :class="statusChipClasses(!!e.isActive)">
-                          {{ e.isActive ? 'Active' : 'Inactive' }}
-                        </span>
+                        <span :class="statusChipClasses(!!e.isActive)">{{ e.isActive ? 'Active' : 'Inactive' }}</span>
                       </div>
                     </td>
 
@@ -1282,6 +1247,21 @@ onBeforeUnmount(() => {
                       <input v-model="r.contractDate" type="date" class="ui-date" />
                     </div>
 
+                    <!-- ✅ Password -->
+                    <div class="sm:col-span-3">
+                      <div class="ui-label">Password (optional, 13+ strong)</div>
+                      <input
+                        v-model="r.password"
+                        type="password"
+                        autocomplete="new-password"
+                        placeholder="Enter strong password…"
+                        class="ui-input"
+                      />
+                      <p class="mt-1 text-[11px] text-ui-muted">
+                        Must be 13+ and contain at least 3 of: uppercase, lowercase, number, symbol.
+                      </p>
+                    </div>
+
                     <!-- ✅ Carry (AL always visible + optional advanced) -->
                     <div class="sm:col-span-3">
                       <div class="flex items-center justify-between">
@@ -1319,7 +1299,7 @@ onBeforeUnmount(() => {
                       </div>
 
                       <p class="mt-1 text-[11px] text-ui-muted">
-                        Carry supports positive or negative. AL carry affects entitlement immediately in your controller.
+                        Carry supports positive or negative. Negative values are shown as “debt used” in the list chips.
                       </p>
                     </div>
                   </div>
@@ -1349,6 +1329,18 @@ onBeforeUnmount(() => {
                   <div>
                     <div class="ui-label">Contract date</div>
                     <input v-model="form.singleContractDate" type="date" class="ui-date" />
+                  </div>
+
+                  <!-- ✅ Password -->
+                  <div class="sm:col-span-3">
+                    <div class="ui-label">Password (optional, 13+ strong)</div>
+                    <input
+                      v-model="form.singlePassword"
+                      type="password"
+                      autocomplete="new-password"
+                      placeholder="Enter strong password…"
+                      class="ui-input"
+                    />
                   </div>
 
                   <!-- ✅ Carry (AL always visible + optional advanced) -->

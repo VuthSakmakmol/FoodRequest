@@ -5,7 +5,6 @@ const jwt = require('jsonwebtoken')
 
 const router = express.Router()
 
-// ✅ Controller (must export the functions used below)
 const ctrl = require('../../controllers/leave/leaveProfiles.admin.controller')
 
 // ─────────────────────────────────────────────
@@ -43,7 +42,6 @@ function requireLeaveAdmin(req, res, next) {
 function h(fn, name) {
   if (typeof fn !== 'function') {
     console.error(`[leaveAdmin.routes] Missing handler: ${name}. Check controller exports.`)
-    // Return a safe handler so server won't crash; it will return 500 with clear message.
     return (req, res) =>
       res.status(500).json({
         message: `Server misconfigured: missing handler "${name}". Check controller exports.`,
@@ -60,41 +58,42 @@ router.use(requireLeaveAdmin)
 
 // ─────────────────────────────────────────────
 // Admin leave endpoints
-// Mounted at: /api/admin/leave   (from server.js)
+// Mounted at: /api/admin/leave
 // ─────────────────────────────────────────────
 
-// Approvers (GM / COO mapping lists, etc.)
+// Approvers
 router.get('/approvers', h(ctrl.getApprovers, 'getApprovers'))
 
-// Profiles list (frontend-friendly)
+// Profiles list
 router.get('/profiles', h(ctrl.getProfilesGrouped, 'getProfilesGrouped'))
-
-// Backward compatible
 router.get('/profiles/grouped', h(ctrl.getProfilesGrouped, 'getProfilesGrouped'))
 
 // Profile CRUD
 router.get('/profiles/:employeeId', h(ctrl.getProfileOne, 'getProfileOne'))
 router.post('/profiles', h(ctrl.createProfileSingle, 'createProfileSingle'))
 
-// Update (allow PATCH + PUT)
 router.patch('/profiles/:employeeId', h(ctrl.updateProfile, 'updateProfile'))
 router.put('/profiles/:employeeId', h(ctrl.updateProfile, 'updateProfile'))
 
-// Deactivate
 router.delete('/profiles/:employeeId', h(ctrl.deactivateProfile, 'deactivateProfile'))
 
 // Bulk create: manager + employees
-// ✅ UI calls POST /profiles/manager
 router.post('/profiles/manager', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
-
-// Backward compatible endpoint
 router.post('/managers', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
 
 // Renew contract
 router.post('/profiles/:employeeId/contracts/renew', h(ctrl.renewContract, 'renewContract'))
 
+// Contract history
 router.get('/profiles/:employeeId/contracts', h(ctrl.getContractHistory, 'getContractHistory'))
+
+// Recalculate
 router.post('/profiles/:employeeId/recalculate', h(ctrl.recalculateBalances, 'recalculateBalances'))
 
+// ✅ REQUIRED for your new admin reset password feature
+router.post('/profiles/:employeeId/password', h(ctrl.resetUserPassword, 'resetUserPassword'))
+
+
+router.patch('/profiles/:employeeId/contracts/:contractNo', h(ctrl.updateContractCarry, 'updateContractCarry'))
 
 module.exports = router

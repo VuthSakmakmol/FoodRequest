@@ -1,7 +1,9 @@
 <!-- src/views/expat/admin/AdminLeaveProfileEdit.vue
-  ✅ Adds multi-type carry support (carry.AL/SP/MC/MA/UL) with Advanced toggle
-  ✅ Keeps legacy alCarry for backward compatibility (mirrors carry.AL)
-  ✅ Uses your existing UI patterns (Tailwind + ui-* utilities, fullscreen)
+  ✅ Fullscreen Admin edit page
+  ✅ Profile settings edit (joinDate, approvalMode, approvers, active)
+  ✅ Contract-aware carry edit (per contractNo)
+  ✅ Logs + Renew contract modal
+  ✅ Uses ui-* Tailwind utilities
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, defineComponent, h, watch } from 'vue'
@@ -16,17 +18,17 @@ const route = useRoute()
 const router = useRouter()
 const { showToast } = useToast()
 
-/* ───────── responsive ───────── */
+/* ───────────────── responsive ───────────────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── route param ───────── */
+/* ───────────────── route param ───────────────── */
 const employeeId = computed(() => String(route.params.employeeId || '').trim())
 
-/* ───────── leave types (dynamic order) ───────── */
+/* ───────────────── leave types (dynamic order) ───────────────── */
 const leaveTypes = ref([])
 async function fetchLeaveTypes() {
   try {
@@ -44,7 +46,7 @@ const TYPE_ORDER = computed(() => {
   return [...new Set([...fallback, ...codes])]
 })
 
-/* ───────── base state ───────── */
+/* ───────────────── base state ───────────────── */
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
@@ -53,7 +55,7 @@ const profile = ref(null)
 /* store original joinDate to detect changes */
 const originalJoinDate = ref('')
 
-/* ───────── helpers ───────── */
+/* ───────────────── helpers ───────────────── */
 function num(v) {
   const n = Number(v ?? 0)
   return Number.isFinite(n) ? n : 0
@@ -78,15 +80,17 @@ function fmtYMD(v) {
 function safeStr(v) {
   return String(v || '').trim()
 }
+function up(v) {
+  return String(v || '').trim().toUpperCase()
+}
 
-/* ───────── approval mode helpers ───────── */
+/* ───────────────── approval mode helpers ───────────────── */
 const APPROVAL_MODES = [
   { value: 'MANAGER_AND_GM', label: 'Manager + GM', hint: 'Manager approves first, then GM.' },
   { value: 'GM_AND_COO', label: 'GM + COO', hint: 'GM approves first, then COO.' },
 ]
-
 function normApprovalMode(v) {
-  const s = String(v || '').trim().toUpperCase()
+  const s = up(v)
   if (s === 'GM_AND_COO') return 'GM_AND_COO'
   if (s === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   // backward aliases
@@ -96,9 +100,8 @@ function normApprovalMode(v) {
   return 'MANAGER_AND_GM'
 }
 
-/* ───────── carry helpers (NEW) ───────── */
+/* ───────────────── carry helpers ───────────────── */
 const showCarryAdvanced = ref(false)
-
 function emptyCarry() {
   return { AL: 0, SP: 0, MC: 0, MA: 0, UL: 0 }
 }
@@ -121,7 +124,7 @@ function readCarryFromProfile(p) {
   return c
 }
 
-/* ───────── balances normalize ───────── */
+/* ───────────────── balances normalize ───────────────── */
 function normalizeBalances(rawBalances = []) {
   const map = new Map()
 
@@ -149,7 +152,7 @@ function normalizeBalances(rawBalances = []) {
 }
 const normalizedBalances = computed(() => normalizeBalances(profile.value?.balances || []))
 
-/* ───────── contract history ───────── */
+/* ───────────────── contract history (logs snapshot) ───────────────── */
 function readContractHistory(p) {
   if (!p) return []
   if (Array.isArray(p.contractHistory)) return p.contractHistory
@@ -165,20 +168,143 @@ const contractHistory = computed(() => {
   })
 })
 
-/* ───────── EDITABLE FORM ───────── */
+/* ───────────────── contract-aware carry editing (NEW) ───────────────── */
+const contractsLoading = ref(false)
+const contractsError = ref('')
+const contracts = ref([])
+/**
+ * expected backend: GET /admin/leave/profiles/:employeeId/contracts
+ * supports shapes:
+ * - { contracts: [...] }
+ * - [...]
+ */
+function normalizeContracts(raw) {
+  const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
+
+  return arr
+    .map((c, idx) => {
+      const contractNo = c?.contractNo ?? c?.no ?? c?.index ?? idx + 1
+      const start = c?.startDate || c?.from || c?.contractDate || c?.start || ''
+      const end = c?.endDate || c?.to || c?.contractEndDate || c?.end || ''
+      const carry = normalizeCarry(c?.carry || c?.closeSnapshot?.carry || c?.openSnapshot?.carry || {})
+      const isCurrent = !!(c?.isCurrent || c?.current || c?.active)
+      return {
+        ...c,
+        contractNo: Number(contractNo),
+        startDate: start,
+        endDate: end,
+        carry,
+        isCurrent,
+      }
+    })
+    .sort((a, b) => Number(b.contractNo) - Number(a.contractNo))
+}
+
+const selectedContractNo = ref(null)
+
+const selectedContract = computed(() => {
+  const no = Number(selectedContractNo.value)
+  if (!no) return null
+  return contracts.value.find((c) => Number(c.contractNo) === no) || null
+})
+
+const contractCarryForm = reactive({
+  carry: emptyCarry(),
+})
+
+function setSelectedContractDefault() {
+  if (!contracts.value.length) {
+    selectedContractNo.value = null
+    return
+  }
+  // prefer current, else latest (highest contractNo)
+  const current = contracts.value.find((c) => c.isCurrent) || contracts.value[0]
+  selectedContractNo.value = Number(current.contractNo)
+}
+
+function fillContractCarryFormFromSelected() {
+  const c = selectedContract.value
+  if (!c) {
+    contractCarryForm.carry = emptyCarry()
+    return
+  }
+  contractCarryForm.carry = { ...normalizeCarry(c.carry) }
+}
+
+watch(selectedContractNo, () => {
+  fillContractCarryFormFromSelected()
+})
+
+async function fetchContracts() {
+  if (!employeeId.value) return
+  contractsLoading.value = true
+  contractsError.value = ''
+  try {
+    const res = await api.get(`/admin/leave/profiles/${employeeId.value}/contracts`)
+    contracts.value = normalizeContracts(res.data)
+    if (!selectedContractNo.value) setSelectedContractDefault()
+    fillContractCarryFormFromSelected()
+  } catch (e) {
+    console.error(e)
+    contractsError.value = e?.response?.data?.message || 'Failed to load contracts.'
+    contracts.value = []
+  } finally {
+    contractsLoading.value = false
+  }
+}
+
+const contractCarryDirty = computed(() => {
+  const c = selectedContract.value
+  if (!c) return false
+  const a = normalizeCarry(c.carry)
+  const b = normalizeCarry(contractCarryForm.carry)
+  return JSON.stringify(a) !== JSON.stringify(b)
+})
+
+async function saveContractCarry() {
+  if (!employeeId.value) return
+  const no = Number(selectedContractNo.value)
+  if (!no) {
+    showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
+    return
+  }
+
+  saving.value = true
+  try {
+    const carry = normalizeCarry(contractCarryForm.carry)
+
+    // ✅ PATCH /admin/leave/profiles/:employeeId/contracts/:contractNo
+    await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${no}`, {
+      carry,
+      // (optional legacy mirror for safety)
+      alCarry: num(carry.AL),
+    })
+
+    showToast({ type: 'success', title: 'Saved', message: `Carry updated for contract #${no}.` })
+
+    // refresh both profile (balances display) and contracts list
+    await fetchProfile()
+    await fetchContracts()
+  } catch (e) {
+    console.error(e)
+    const msg = e?.response?.data?.message || 'Failed to save contract carry.'
+    showToast({ type: 'error', title: 'Save failed', message: msg })
+  } finally {
+    saving.value = false
+  }
+}
+
+/* ───────────────── EDITABLE PROFILE FORM ───────────────── */
 const form = reactive({
   joinDate: '',
   approvalMode: 'MANAGER_AND_GM',
 
-  // approver mapping
   managerEmployeeId: '',
   gmLoginId: '',
   cooLoginId: '',
 
-  // ✅ NEW: multi-type carry
+  // profile-level carry (legacy screen; still editable if you want)
   carry: emptyCarry(),
-
-  // ✅ Legacy mirror (keep for backward compat)
   alCarry: 0,
 
   isActive: true,
@@ -188,21 +314,16 @@ const formError = ref('')
 
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
-
-  // ✅ approvalMode
   form.approvalMode = normApprovalMode(p?.approvalMode)
 
-  // ✅ manager uses employeeId field; fallback to managerLoginId if old data
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
-
-  // ✅ GM + COO
   form.gmLoginId = String(p?.gmLoginId || '')
   form.cooLoginId = String(p?.cooLoginId || '')
 
-  // ✅ carry (NEW)
+  // profile-level carry (for backward compat; real carry should be contract-based)
   const c = readCarryFromProfile(p)
   form.carry = { ...c }
-  form.alCarry = num(c.AL) // mirror
+  form.alCarry = num(c.AL)
 
   form.isActive = p?.isActive === false ? false : true
   originalJoinDate.value = toInputDate(p?.joinDate)
@@ -211,7 +332,6 @@ function fillFormFromProfile(p) {
 watch(
   () => form.carry.AL,
   (v) => {
-    // keep legacy mirror updated for old endpoints/logic
     form.alCarry = num(v)
   }
 )
@@ -252,7 +372,7 @@ const isDirty = computed(() => {
   return JSON.stringify(a) !== JSON.stringify(b)
 })
 
-/* ───────── API: profile ───────── */
+/* ───────────────── API: profile ───────────────── */
 async function fetchProfile() {
   if (!employeeId.value) return
   loading.value = true
@@ -276,7 +396,6 @@ function resetForm() {
   fillFormFromProfile(profile.value)
 }
 
-/* PATCH/PUT update with optional recalc param */
 async function updateProfile(payload, { recalc } = { recalc: false }) {
   const url = `/admin/leave/profiles/${employeeId.value}`
   const params = recalc ? { recalc: '1' } : undefined
@@ -292,7 +411,6 @@ async function updateProfile(payload, { recalc } = { recalc: false }) {
   }
 }
 
-/* call backend recalc endpoint (with fallbacks) */
 async function forceRecalcBalances() {
   const id = employeeId.value
   if (!id) return
@@ -373,10 +491,8 @@ async function saveProfile() {
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
         cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
 
-        // ✅ NEW
+        // (legacy profile-level carry; keep for backward compat)
         carry,
-
-        // ✅ legacy mirror (safe)
         alCarry: num(carry.AL),
 
         isActive: form.isActive !== false,
@@ -404,6 +520,8 @@ async function saveProfile() {
     }
 
     await fetchProfile()
+    // contracts might reference join date for windows; refresh anyway
+    await fetchContracts()
   } catch (e) {
     console.error(e)
     const msg = e?.response?.data?.message || 'Failed to save.'
@@ -414,18 +532,18 @@ async function saveProfile() {
   }
 }
 
-/* ───────── actions ───────── */
+/* ───────────────── actions ───────────────── */
 function goBack() {
   router.back()
 }
 
-/* ───────── contracts modal ───────── */
+/* ───────────────── contracts modal ───────────────── */
 const contractsOpen = ref(false)
 function openContractsModal() {
   contractsOpen.value = true
 }
 
-/* ───────── renew modal ───────── */
+/* ───────────────── renew modal ───────────────── */
 const renew = reactive({
   open: false,
   newContractDate: '',
@@ -474,6 +592,7 @@ async function submitRenew() {
 
     renew.open = false
     await fetchProfile()
+    await fetchContracts()
   } catch (e) {
     console.error(e)
     renew.error = e?.response?.data?.message || 'Failed to renew contract.'
@@ -483,7 +602,7 @@ async function submitRenew() {
   }
 }
 
-/* ───────── InfoRow (ui-card) ───────── */
+/* ───────────────── InfoRow ───────────────── */
 const InfoRow = defineComponent({
   name: 'InfoRow',
   props: {
@@ -516,12 +635,13 @@ watch(anyModalOpen, (open) => {
   document.body.classList.toggle('overflow-hidden', !!open)
 })
 
-/* ───────── lifecycle ───────── */
+/* ───────────────── lifecycle ───────────────── */
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   await fetchLeaveTypes()
   await fetchProfile()
+  await fetchContracts()
 })
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
@@ -632,12 +752,10 @@ onBeforeUnmount(() => {
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
               <!-- Settings -->
               <section class="ui-card lg:col-span-2 p-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div>
-                    <div class="text-[12px] font-extrabold text-ui-fg">Profile settings</div>
-                    <div class="text-[11px] text-ui-muted">
-                      Changing Join Date affects accrual. Approval mode controls workflow.
-                    </div>
+                <div>
+                  <div class="text-[12px] font-extrabold text-ui-fg">Profile settings</div>
+                  <div class="text-[11px] text-ui-muted">
+                    Changing Join Date affects accrual. Approval mode controls workflow.
                   </div>
                 </div>
 
@@ -694,71 +812,6 @@ onBeforeUnmount(() => {
 
                     <div class="mt-1 text-[11px] text-ui-muted">
                       Current: <span class="font-mono">{{ normApprovalMode(profile.approvalMode) }}</span>
-                    </div>
-                  </div>
-
-                  <!-- ✅ Carry (AL always visible + advanced for others) -->
-                  <div class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                    <div class="flex items-center justify-between">
-                      <div
-                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                        title="Carry supports positive or negative. AL debt from SP should be stored here."
-                      >
-                        Carry (multi-type)
-                      </div>
-
-                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
-                        <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'" />
-                        {{ showCarryAdvanced ? 'Hide' : 'Advanced' }}
-                      </button>
-                    </div>
-
-                    <div class="mt-1 grid grid-cols-1 sm:grid-cols-5 gap-2">
-                      <div class="sm:col-span-2">
-                        <div class="ui-label">AL</div>
-                        <input v-model.number="form.carry.AL" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
-                        <div class="mt-1 text-[11px] text-ui-muted">
-                          Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).AL) }}</span>
-                        </div>
-                      </div>
-
-                      <template v-if="showCarryAdvanced">
-                        <div>
-                          <div class="ui-label">SP</div>
-                          <input v-model.number="form.carry.SP" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
-                          <div class="mt-1 text-[11px] text-ui-muted">
-                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).SP) }}</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div class="ui-label">MC</div>
-                          <input v-model.number="form.carry.MC" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
-                          <div class="mt-1 text-[11px] text-ui-muted">
-                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).MC) }}</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div class="ui-label">MA</div>
-                          <input v-model.number="form.carry.MA" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
-                          <div class="mt-1 text-[11px] text-ui-muted">
-                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).MA) }}</span>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div class="ui-label">UL</div>
-                          <input v-model.number="form.carry.UL" type="number" step="0.5" class="ui-input w-full" placeholder="0" />
-                          <div class="mt-1 text-[11px] text-ui-muted">
-                            Current: <span class="font-mono">{{ fmt(readCarryFromProfile(profile).UL) }}</span>
-                          </div>
-                        </div>
-                      </template>
-                    </div>
-
-                    <div class="mt-2 text-[11px] text-ui-muted">
-                      Legacy mirror: <span class="font-mono">alCarry={{ fmt(form.alCarry) }}</span> (auto from carry.AL)
                     </div>
                   </div>
 
@@ -845,12 +898,10 @@ onBeforeUnmount(() => {
 
               <!-- Balances -->
               <section class="ui-card p-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div>
-                    <div class="text-[12px] font-extrabold text-ui-fg">Balances</div>
-                    <div class="text-[11px] text-ui-muted">
-                      As of <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
-                    </div>
+                <div>
+                  <div class="text-[12px] font-extrabold text-ui-fg">Balances</div>
+                  <div class="text-[11px] text-ui-muted">
+                    As of <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
                   </div>
                 </div>
 
@@ -902,6 +953,163 @@ onBeforeUnmount(() => {
                 </div>
               </section>
             </div>
+
+            <!-- ✅ Contract carry editor (NEW) -->
+            <section class="ui-card p-3">
+              <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+                <div>
+                  <div class="text-[12px] font-extrabold text-ui-fg">Contract carry</div>
+                  <div class="text-[11px] text-ui-muted">
+                    Edit carry per contract. This is the correct place for AL debt / carry.
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-ghost ui-btn-sm"
+                    :disabled="contractsLoading"
+                    @click="fetchContracts"
+                  >
+                    <i class="fa-solid fa-rotate text-[11px]" :class="contractsLoading ? 'fa-spin' : ''" />
+                    Refresh contracts
+                  </button>
+
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-primary ui-btn-sm"
+                    :disabled="saving || !selectedContract || !contractCarryDirty"
+                    @click="saveContractCarry"
+                    :title="!contractCarryDirty ? 'No changes' : 'Save carry for selected contract'"
+                  >
+                    <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
+                    Save carry
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="contractsError" class="mt-3 ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
+                   dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100">
+                <span class="font-semibold">Contracts:</span> {{ contractsError }}
+              </div>
+
+              <div v-if="contractsLoading" class="mt-3 ui-card !rounded-2xl h-12 animate-pulse bg-ui-bg-2/60" />
+
+              <div v-else class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <!-- Contract selector -->
+                <div class="ui-card !rounded-2xl px-3 py-2">
+                  <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Select contract</div>
+
+                  <select v-model.number="selectedContractNo" class="ui-select w-full mt-1" :disabled="!contracts.length">
+                    <option v-if="!contracts.length" :value="null">No contracts</option>
+                    <option v-for="c in contracts" :key="c.contractNo" :value="c.contractNo">
+                      #{{ c.contractNo }} · {{ c.startDate || '—' }} → {{ c.endDate || '—' }}{{ c.isCurrent ? ' (current)' : '' }}
+                    </option>
+                  </select>
+
+                  <div class="mt-2 text-[11px] text-ui-muted">
+                    Current selection:
+                    <span class="font-mono">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
+                  </div>
+                </div>
+
+                <!-- Contract summary -->
+                <div class="ui-card !rounded-2xl px-3 py-2">
+                  <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Contract period</div>
+                  <div class="mt-1 text-[12px] font-extrabold text-ui-fg">
+                    {{ selectedContract?.startDate || '—' }}
+                    <span class="opacity-60 mx-1">→</span>
+                    {{ selectedContract?.endDate || '—' }}
+                  </div>
+                  <div class="mt-1 text-[11px] text-ui-muted">
+                    Tip: carry belongs to contract, not profile.
+                  </div>
+                </div>
+
+                <!-- Carry editor -->
+                <div class="ui-card !rounded-2xl px-3 py-2 lg:col-span-1">
+                  <div class="flex items-center justify-between">
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Carry</div>
+
+                    <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
+                      <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'" />
+                      {{ showCarryAdvanced ? 'Hide' : 'Advanced' }}
+                    </button>
+                  </div>
+
+                  <div class="mt-2 grid grid-cols-1 sm:grid-cols-5 gap-2">
+                    <div class="sm:col-span-2">
+                      <div class="ui-label">AL</div>
+                      <input
+                        v-model.number="contractCarryForm.carry.AL"
+                        type="number"
+                        step="0.5"
+                        class="ui-input w-full"
+                        placeholder="0"
+                        :disabled="!selectedContract"
+                      />
+                      <div class="mt-1 text-[11px] text-ui-muted">
+                        Current: <span class="font-mono">{{ fmt(selectedContract?.carry?.AL ?? 0) }}</span>
+                      </div>
+                    </div>
+
+                    <template v-if="showCarryAdvanced">
+                      <div>
+                        <div class="ui-label">SP</div>
+                        <input
+                          v-model.number="contractCarryForm.carry.SP"
+                          type="number"
+                          step="0.5"
+                          class="ui-input w-full"
+                          placeholder="0"
+                          :disabled="!selectedContract"
+                        />
+                      </div>
+                      <div>
+                        <div class="ui-label">MC</div>
+                        <input
+                          v-model.number="contractCarryForm.carry.MC"
+                          type="number"
+                          step="0.5"
+                          class="ui-input w-full"
+                          placeholder="0"
+                          :disabled="!selectedContract"
+                        />
+                      </div>
+                      <div>
+                        <div class="ui-label">MA</div>
+                        <input
+                          v-model.number="contractCarryForm.carry.MA"
+                          type="number"
+                          step="0.5"
+                          class="ui-input w-full"
+                          placeholder="0"
+                          :disabled="!selectedContract"
+                        />
+                      </div>
+                      <div>
+                        <div class="ui-label">UL</div>
+                        <input
+                          v-model.number="contractCarryForm.carry.UL"
+                          type="number"
+                          step="0.5"
+                          class="ui-input w-full"
+                          placeholder="0"
+                          :disabled="!selectedContract"
+                        />
+                      </div>
+                    </template>
+                  </div>
+
+                  <div class="mt-2 text-[11px] text-ui-muted">
+                    Dirty:
+                    <span class="font-semibold" :class="contractCarryDirty ? 'text-rose-600' : 'text-emerald-700'">
+                      {{ contractCarryDirty ? 'Yes' : 'No' }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
 
             <!-- Contract history -->
             <section class="ui-card p-3">
