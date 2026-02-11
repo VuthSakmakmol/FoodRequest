@@ -1,10 +1,9 @@
-<!-- src/views/expat/admin/AdminExpatProfile.vue -->
+<!-- src/views/expat/admin/profiles/AdminExpatProfile.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
-import EmployeeSearch from '../expat/admin/components/EmployeeSearch.vue'
 import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'AdminExpatProfile' })

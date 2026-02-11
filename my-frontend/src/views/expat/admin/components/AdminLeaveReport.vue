@@ -1,8 +1,8 @@
 <!-- src/views/expat/admin/AdminLeaveReport.vue -->
 <script setup>
 import { ref } from 'vue'
-import AdminManagerAndGmReport from './components/AdminManagerAndGmReport.vue'
-import AdminGmAndCooReport from './components/AdminGmAndCooReport.vue'
+import AdminManagerAndGmReport from './AdminManagerAndGmReport.vue'
+import AdminGmAndCooReport from './AdminGmAndCooReport.vue'
 
 defineOptions({ name: 'AdminLeaveReport' })
 

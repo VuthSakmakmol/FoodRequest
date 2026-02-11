@@ -56,6 +56,14 @@
     --ui-shadow: 0 10px 24px rgba(15, 23, 42, 0.10);
     --ui-shadow-2: 0 18px 38px rgba(15, 23, 42, 0.14);
 
+    /* ✅ FIXED ACTION BUTTON PALETTE (same in light + dark) */
+    --btn-primary: 2 132 199;     /* sky-600 */
+    --btn-primary-2: 14 165 233;  /* sky-500 */
+    --btn-accent: 99 102 241;     /* indigo-500 */
+    --btn-success: 16 185 129;    /* emerald-500 */
+    --btn-warning: 245 158 11;    /* amber-500 */
+    --btn-danger: 244 63 94;      /* rose-500 */
+
     color-scheme: light;
   }
 
@@ -77,6 +85,7 @@
     --ui-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
     --ui-shadow-2: 0 18px 38px rgba(0, 0, 0, 0.45);
 
+    /* ✅ IMPORTANT: DO NOT OVERRIDE --btn-* HERE */
     color-scheme: dark;
   }
 
@@ -208,7 +217,6 @@
   }
   .ui-hero-subtitle {
     @apply mt-1 text-[12px] sm:text-[13px];
-    
   }
 
   /* Card */
@@ -250,23 +258,44 @@
     @apply inline-flex items-center justify-center gap-2 px-3.5 py-2 text-[12px] font-extrabold
            transition disabled:opacity-60 disabled:cursor-not-allowed;
     border-radius: var(--ui-r-sm);
+
+    /* ✅ shared micro-interactions */
+    position: relative;
+    overflow: hidden;
   }
   .ui-btn-sm { @apply px-3 py-1.5 text-[11px]; border-radius: var(--ui-r-sm); }
   .ui-btn-xs { @apply px-2.5 py-1 text-[11px]; border-radius: var(--ui-r-xs); }
 
+  /* ✅ FIXED colors (same in light + dark) */
   .ui-btn-primary {
     @apply text-white;
-    background: linear-gradient(90deg, rgb(var(--ui-primary)), rgb(var(--ui-primary-2)));
-    box-shadow: 0 10px 24px rgb(var(--ui-primary) / 0.18);
+    background: linear-gradient(90deg, rgb(var(--btn-primary)), rgb(var(--btn-primary-2)));
+    box-shadow: 0 10px 24px rgb(var(--btn-primary) / 0.18);
   }
   .ui-btn-primary:hover { filter: brightness(1.03); }
 
   .ui-btn-indigo {
     @apply text-white;
-    background: linear-gradient(90deg, rgb(var(--ui-accent)), rgb(var(--ui-primary) / 0.95));
-    box-shadow: 0 10px 24px rgb(var(--ui-accent) / 0.16);
+    background: linear-gradient(90deg, rgb(var(--btn-accent)), rgb(var(--btn-primary) / 0.95));
+    box-shadow: 0 10px 24px rgb(var(--btn-accent) / 0.16);
   }
   .ui-btn-indigo:hover { filter: brightness(1.03); }
+
+  .ui-btn-emerald {
+    @apply text-white;
+    background: linear-gradient(90deg, rgb(var(--btn-success)), rgb(var(--btn-primary) / 0.85));
+    box-shadow: 0 10px 24px rgb(var(--btn-success) / 0.18);
+  }
+  .ui-btn-emerald:hover { filter: brightness(1.04); }
+  .ui-btn-emerald:active { transform: translateY(0.5px); }
+
+  .ui-btn-rose {
+    @apply text-white;
+    background: rgb(var(--btn-danger)); /* solid red */
+    box-shadow: 0 10px 24px rgb(var(--btn-danger) / 0.16);
+  }
+  .ui-btn-rose:hover { filter: brightness(0.95); }
+  .ui-btn-rose:active { transform: translateY(0.5px); }
 
   .ui-btn-soft {
     @apply border;
@@ -284,6 +313,23 @@
   .ui-btn-danger {
     @apply text-white;
     background: linear-gradient(90deg, rgb(var(--ui-danger)), rgb(var(--ui-warning) / 0.75));
+  }
+
+  /* Subtle glossy highlight */
+  .ui-btn::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(700px circle at 20% 0%, rgba(255,255,255,0.18), transparent 40%);
+    opacity: 0;
+    transition: opacity 180ms ease;
+    pointer-events: none;
+  }
+  .ui-btn:hover::after { opacity: 1; }
+
+  /* Soft focus ring consistent with your tokens */
+  .ui-btn:focus-visible {
+    box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.28), var(--ui-shadow);
   }
 
   /* Inputs */
@@ -316,11 +362,11 @@
     color: rgb(var(--ui-muted) / 0.95);
   }
 
-  /* ✅ Date input (blue pill style) */
+  /* ✅ Date input (FIXED, does NOT change in dark mode) */
   .ui-date {
     @apply w-full border px-3 py-2 text-[12px] outline-none transition;
     border-radius: var(--ui-r-sm);
-    background: linear-gradient(90deg, rgb(var(--ui-primary) / 0.95), rgb(var(--ui-primary-2) / 0.95));
+    background: linear-gradient(90deg, rgb(var(--btn-primary) / 0.95), rgb(var(--btn-primary-2) / 0.95));
     border-color: rgba(255, 255, 255, 0.28);
     color: rgba(255, 255, 255, 0.95);
   }
@@ -332,11 +378,6 @@
     opacity: 1;
     cursor: pointer;
     filter: invert(1) brightness(1.15);
-  }
-  .dark .ui-date {
-    background: linear-gradient(90deg, rgb(var(--ui-primary) / 0.40), rgb(var(--ui-accent) / 0.35));
-    border-color: rgb(var(--ui-border-2) / 0.70);
-    color: rgb(var(--ui-fg) / 0.95);
   }
   .dark .ui-date::-webkit-calendar-picker-indicator {
     filter: invert(1) brightness(1.2);
@@ -354,12 +395,10 @@
   .ui-badge {
     @apply inline-flex items-center gap-1.5 border px-2 py-0.5 text-[10px] font-extrabold;
     border-radius: 999px;
-
     border-color: rgb(var(--ui-primary) / 0.75);
     background: rgb(var(--ui-primary) / 0.22);
     color: rgb(var(--ui-primary));
   }
-
 
   .ui-badge-success { border-color: rgb(var(--ui-success) / 0.35); background: rgb(var(--ui-success) / 0.12); color: rgb(var(--ui-success)); }
   .ui-badge-warning { border-color: rgb(var(--ui-warning) / 0.35); background: rgb(var(--ui-warning) / 0.12); color: rgb(var(--ui-warning)); }
@@ -429,78 +468,10 @@
     background: rgb(var(--ui-card) / 0.92);
     box-shadow: var(--ui-shadow-2);
   }
-}
 
-/* ─────────────────────────────────────────────────────────────
-   Utilities: Scrollbars
-   ───────────────────────────────────────────────────────────── */
-@layer utilities {
-  .ui-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
-  .ui-scrollbar::-webkit-scrollbar-thumb {
-    background: rgb(var(--ui-muted) / 0.35);
-    border-radius: 999px;
-  }
-  .ui-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgb(var(--ui-muted) / 0.48);
-  }
-}
-
-
-/* ─────────────────────────────────────────────────────────────
-     Modern action buttons (Approve / Reject) 
-   ───────────────────────────────────────────────────────────── */
-  .ui-btn-emerald {
-    @apply text-white relative overflow-hidden;
-    background: linear-gradient(90deg, rgb(var(--ui-success)), rgb(var(--ui-primary) / 0.85));
-    box-shadow: 0 10px 24px rgb(var(--ui-success) / 0.18);
-  }
-  .ui-btn-emerald:hover { filter: brightness(1.04); }
-  .ui-btn-emerald:active { transform: translateY(0.5px); }
-
-
-/* ✅ Solid red (NO gradient) */
-  .ui-btn-rose {
-    @apply text-white relative overflow-hidden;
-    background: rgb(var(--ui-danger));          /* rose-500 */
-    box-shadow: 0 10px 24px rgb(var(--ui-danger) / 0.16);
-  }
-
-  .ui-btn-rose:hover { filter: brightness(0.95); }  /* slightly darker */
-  .ui-btn-rose:active { transform: translateY(0.5px); }
-
-
-
-  /* ✅ Shared micro-interactions for all ui-btn */
-  .ui-btn {
-    position: relative;
-    overflow: hidden;
-  }
-
-  /* Subtle glossy highlight */
-  .ui-btn::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(700px circle at 20% 0%, rgba(255,255,255,0.18), transparent 40%);
-    opacity: 0;
-    transition: opacity 180ms ease;
-    pointer-events: none;
-  }
-  .ui-btn:hover::after { opacity: 1; }
-
-  /* Soft focus ring consistent with your tokens */
-  .ui-btn:focus-visible {
-    box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.28), var(--ui-shadow);
-  }
-
-/* ─────────────────────────────────────────────────────────────
-   ✅ ADD-ON: Compact form blocks + chips (APPEND ONLY)
-   - Uses your existing tokens + shadow system
-   - No breaking changes
-   ───────────────────────────────────────────────────────────── */
-
-@layer components {
-  /* Compact inner cards (used for forms inside ui-card) */
+  /* ─────────────────────────────────────────────────────────────
+     ✅ ADD-ON: Compact form blocks + chips (kept)
+     ───────────────────────────────────────────────────────────── */
   .ui-mini-card {
     @apply border;
     border-radius: var(--ui-r-xl);
@@ -510,10 +481,7 @@
     backdrop-filter: blur(10px);
   }
 
-  /* Row layout with icon on left */
-  .ui-row {
-    @apply flex items-start gap-3;
-  }
+  .ui-row { @apply flex items-start gap-3; }
 
   .ui-ico {
     @apply grid place-items-center shrink-0 border;
@@ -530,7 +498,6 @@
     color: rgb(var(--ui-fg) / 0.95);
   }
 
-  /* Chips for AM/PM and half edges (reuse your style) */
   .ui-chip {
     @apply inline-flex items-center justify-center gap-2 border px-3 py-2 text-[11px] font-extrabold transition;
     border-radius: 999px;
@@ -573,7 +540,6 @@
     background: rgb(var(--ui-accent) / 0.14);
   }
 
-  /* Realtime pill (matches your badge approach) */
   .ui-pill {
     @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-extrabold;
     border-color: rgb(var(--ui-border) / 0.75);
@@ -584,5 +550,51 @@
     border-color: rgb(var(--ui-success) / 0.35);
     background: rgb(var(--ui-success) / 0.12);
     color: rgb(var(--ui-success));
+  }
+
+  .ui-hero-btn {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-1.5 text-[11px] font-extrabold transition;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.95);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .ui-hero-btn:hover { background: rgba(255, 255, 255, 0.18); }
+  .ui-hero-btn:active { transform: translateY(0.5px); }
+  .ui-hero-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  /* Primary action in header (Save) */
+  .ui-hero-btn-primary {
+    border-color: rgba(255, 255, 255, 0.32);
+    background: linear-gradient(90deg, rgb(var(--btn-primary)), rgb(var(--btn-primary-2)));
+    box-shadow: 0 10px 24px rgb(var(--btn-primary) / 0.18);
+    color: #fff;
+  }
+  .ui-hero-btn-primary:hover { filter: brightness(1.03); }
+
+  /* Danger action in header (optional) */
+  .ui-hero-btn-danger {
+    border-color: rgba(255, 255, 255, 0.28);
+    background: rgb(var(--btn-danger));
+    box-shadow: 0 10px 24px rgb(var(--btn-danger) / 0.16);
+    color: #fff;
+  }
+  .ui-hero-btn-danger:hover { filter: brightness(0.95); }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Utilities: Scrollbars
+   ───────────────────────────────────────────────────────────── */
+@layer utilities {
+  .ui-scrollbar::-webkit-scrollbar { width: 10px; height: 10px; }
+  .ui-scrollbar::-webkit-scrollbar-thumb {
+    background: rgb(var(--ui-muted) / 0.35);
+    border-radius: 999px;
+  }
+  .ui-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--ui-muted) / 0.48);
   }
 }

@@ -57,14 +57,14 @@ const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalenda
 
 // Expat Leave (shared views)
 const ExpatRequestLeave = () => import('@/views/expat/RequestLeave.vue')
-const AdminAddSignature = () => import('@/views/expat/admin/AdminAddSignature.vue')
+const AdminAddSignature = () => import('@/views/expat/admin/components/AdminAddSignature.vue')
 const ExpatMyRequests = () => import('@/views/expat/MyRequest.vue')
 const AdminLeaveTypes = () => import('@/views/expat/AdminLeaveTypes.vue')
-const AdminExpatProfiles = () => import('@/views/expat/AdminExpatProfile.vue')
+const AdminExpatProfiles = () => import('@/views/expat/admin/profiles/AdminExpatProfile.vue')
 const ManagerLeaveInbox = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
-const AdminLeaveProfileEdit = () => import('@/views/expat/admin/AdminLeaveProfileEdit.vue')
-const AdminLeaveReport = () => import('@/views/expat/admin/AdminLeaveReport.vue')
+const AdminLeaveProfileEdit = () => import('@/views/expat/admin/profiles/AdminLeaveProfileEdit.vue')
+const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeaveReport.vue')
 
 // Replace Day (User)
 const UserReplaceDay = () => import('@/views/expat/user/UserReplaceDay.vue')
