@@ -1,15 +1,15 @@
 // backend/server.js
 require('dotenv').config()
 
-const http        = require('http')
-const path        = require('path')
-const express     = require('express')
-const mongoose    = require('mongoose')
-const cors        = require('cors')
-const helmet      = require('helmet')
+const http = require('http')
+const path = require('path')
+const express = require('express')
+const mongoose = require('mongoose')
+const cors = require('cors')
+const helmet = require('helmet')
 const compression = require('compression')
-const rateLimit   = require('express-rate-limit')
-const { Server }  = require('socket.io')
+const rateLimit = require('express-rate-limit')
+const { Server } = require('socket.io')
 
 const { startTelegramPolling, stopTelegramPolling } = require('./services/telegram.polling')
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime')
@@ -17,24 +17,21 @@ const { registerSocket, attachDebugEndpoints } = require('./utils/realtime')
 const app = express()
 
 /* ───────────────── Env & toggles ───────────────── */
-const isProd     = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
+const isProd = String(process.env.NODE_ENV || '').toLowerCase() === 'production'
 const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true'
 if (isProd) app.set('trust proxy', 1)
 
 /* ───────────────── Telegram polling toggle ───────────────── */
-const POLLING_ENABLED =
-  String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
+const POLLING_ENABLED = String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
 
 /* ───────────────── CORS ───────────────── */
 const rawOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .split(',')
-  .map(s => s.trim())
+  .map((s) => s.trim())
   .filter(Boolean)
 
 const hasWildcard = rawOrigins.includes('*')
-const apiCorsOptions = hasWildcard
-  ? { origin: true, credentials: false }
-  : { origin: rawOrigins, credentials: true }
+const apiCorsOptions = hasWildcard ? { origin: true, credentials: false } : { origin: rawOrigins, credentials: true }
 
 /* ───────────────── HTTPS redirect (if enabled) ───────────────── */
 if (forceHTTPS) {
@@ -46,13 +43,15 @@ if (forceHTTPS) {
 }
 
 /* ───────────────── Security & Perf ───────────────── */
-app.use(helmet({
-  hsts: forceHTTPS,
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false,
-  crossOriginOpenerPolicy: false,
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-}))
+app.use(
+  helmet({
+    hsts: forceHTTPS,
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+)
 
 if (!forceHTTPS) {
   app.use((_, res, next) => {
@@ -73,12 +72,15 @@ app.get('/healthz', (_req, res) => res.json({ ok: true }))
 app.get('/api/health', (_req, res) => res.send('✅ API running'))
 
 /* ───────────────── Basic rate limit on API ───────────────── */
-app.use('/api', rateLimit({
-  windowMs: 60_000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-}))
+app.use(
+  '/api',
+  rateLimit({
+    windowMs: 60_000,
+    max: 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+)
 
 /* ───────────────── HTTP + Socket.IO (CREATE EARLY) ───────────────── */
 const server = http.createServer(app)
@@ -89,7 +91,7 @@ const ioCors = hasWildcard
 
 const io = new Server(server, {
   cors: ioCors,
-  transports: ['websocket'], // if you need fallback in dev: ['websocket','polling']
+  transports: ['websocket'],
   perMessageDeflate: { threshold: 1024 },
   maxHttpBufferSize: 1 * 1024 * 1024,
   pingInterval: 25_000,
@@ -114,55 +116,62 @@ attachDebugEndpoints(app)
 
 /* ───────────────── Routes ───────────────── */
 
-//========================== ADMIN PANEL (Leave module) ===========================
+// ========================== Leave module ==========================
+
+// Leave Requests (NOW includes MANAGER/GM/COO flows in ONE controller)
 app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
 
-app.use('/api/leave',               require('./routes/leave/leaveType-expat.routes'))
-// ========================== USER (Leave module) ================================
+// Leave types
+app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'))
+
+// User profiles (self/team)
 app.use('/api/leave/user', require('./routes/leave/leaveProfile.user.routes'))
 
+// Replace days
+app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
 
-app.use('/api/leave/replace-days',  require('./routes/leave/replaceDay.routes'))
+// Admin leave (profiles, approvers, password reset, contracts)
+app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
+app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
 
-app.use('/api/admin/leave',         require('./routes/leave/leaveAdmin.routes'))
-app.use('/api/admin/leave/types',   require('./routes/leave/leaveType-admin.routes'))
-
-app.use('/api/coo/leave/requests', require('./routes/leave/leaveRequests.coo.routes'))
-
-// leave report
+// Reports + signatures
 app.use('/api', require('./routes/leave/leaveReport-admin.routes'))
 app.use('/api', require('./routes/files/signature.admin.routes'))
+
+// ✅ IMPORTANT: COO controller routes removed (do NOT mount /api/coo/leave/...)
+// app.use('/api/coo/leave/requests', require('./routes/leave/leaveRequest.coo.routes')) // <-- KEEP REMOVED
 
 // Auth
 app.use('/api/auth', require('./routes/auth.routes'))
 
-// ========================== Public ================================
+// ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
 app.use('/api/public', require('./routes/food/food-public.routes'))
 
-// =========================== Food ==================================
+// ========================== Food ==========================
 app.use('/api/admin', require('./routes/food/food-admin.routes'))
 app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'))
 
 // Static uploads
-app.use(
-  '/uploads',
-  express.static(path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads'))
-)
+app.use('/uploads', express.static(path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads')))
 
-// ============================== Transportation ===========================
+// ========================== Transportation ==========================
+
+// ✅ Private (auth) routes
 app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'))
-app.use('/api/public/car-bookings', require('./routes/transportation/carBooking.routes'))
+
+// ✅ Public transport routes (keep only the truly public file)
+app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
 
 app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'))
 app.use('/api/admin', require('./routes/admin-user.routes'))
 
 app.use('/api/driver', require('./routes/transportation/carBooking-driver.routes'))
+
+// ✅ Messenger routes (mount once)
 app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.routes'))
-app.use('/api/messenger/car-bookings', require('./routes/transportation/carBooking-messenger.routes'))
 
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
-app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
 
 // ====================================== Holiday =================================
 app.use('/api/public', require('./routes/public-holidays.routes'))
@@ -184,9 +193,7 @@ const frontendDir = process.env.FRONTEND_DIR
 if (frontendDir) {
   const distPath = path.resolve(frontendDir)
   app.use(express.static(distPath))
-  app.get(/^\/(?!socket\.io\/).*/, (_req, res) =>
-    res.sendFile(path.join(distPath, 'index.html'))
-  )
+  app.get(/^\/(?!socket\.io\/).*/, (_req, res) => res.sendFile(path.join(distPath, 'index.html')))
 }
 
 /* ───────────────── Boot ───────────────── */
@@ -199,7 +206,6 @@ const PORT = Number(process.env.PORT || 4333)
     })
     console.log('✅ MongoDB connected')
 
-    // ✅ Start polling ONLY after DB is ready (important for leader-lock)
     if (POLLING_ENABLED) {
       startTelegramPolling()
       console.log('✅ Telegram polling enabled')
@@ -212,19 +218,20 @@ const PORT = Number(process.env.PORT || 4333)
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`)
     })
 
-
     const shutdown = async (sig) => {
       console.log(`\n${sig} received. Shutting down...`)
-
-      // ✅ stop telegram polling cleanly (prevents 409 after restart)
-      try { await stopTelegramPolling() } catch (_) {}
+      try {
+        await stopTelegramPolling()
+      } catch (_) {}
 
       server.close(() => console.log('HTTP server closed'))
-      try { await mongoose.connection.close() } catch (_) {}
+      try {
+        await mongoose.connection.close()
+      } catch (_) {}
       process.exit(0)
     }
 
-    process.on('SIGINT',  () => shutdown('SIGINT'))
+    process.on('SIGINT', () => shutdown('SIGINT'))
     process.on('SIGTERM', () => shutdown('SIGTERM'))
   } catch (err) {
     console.error('❌ Startup error:', err)

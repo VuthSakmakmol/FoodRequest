@@ -33,6 +33,42 @@ function num(v) {
   return Number.isFinite(n) ? n : 0
 }
 
+function s(v) {
+  return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
+}
+
+/**
+ * ✅ Only 3 approval modes in the whole system (semantic)
+ */
+const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
+
+/**
+ * Normalize old/stored values to ONLY the 3 semantic values.
+ * - Old profile schema used: GM_ONLY / GM_AND_COO (or variants)
+ * - Some old code used: GM_OR_COO
+ */
+function normalizeApprovalMode(v) {
+  const raw = up(v)
+
+  if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+
+  // legacy profile values
+  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'GM_OR_COO') return 'GM_AND_COO'
+  if (raw === 'GM_COO') return 'GM_AND_COO'
+  if (raw === 'COO_AND_GM') return 'GM_AND_COO'
+  if (raw === 'GM_THEN_COO') return 'GM_AND_COO'
+
+  // safest default
+  return 'MANAGER_AND_GM'
+}
+
 // ─────────────────────────────────────────────────────────────
 // Schemas
 // ─────────────────────────────────────────────────────────────
@@ -88,10 +124,12 @@ const ContractHistorySchema = new mongoose.Schema(
     closedBy: { type: String, default: '' },
     note: { type: String, default: '' },
     closeSnapshot: { type: ContractSnapshotSchema, default: null },
+
+    // legacy mirror (keep if you already have data using it)
+    alCarry: { type: Number, default: undefined },
   },
   { _id: false }
 )
-
 
 // ─────────────────────────────────────────────────────────────
 // Main Profile
@@ -105,17 +143,22 @@ const LeaveProfileSchema = new mongoose.Schema(
     // approver1 (optional)
     managerLoginId: { type: String, default: '' },
 
-    // approver2 always exists via backend seed
+    // approver2
     gmLoginId: { type: String, default: '' },
 
-    // COO read-only or final approver (depends on mode)
+    // approver3
     cooLoginId: { type: String, default: '' },
 
-    // ✅ approval mode (your backend maps to MANAGER_AND_GM / GM_AND_COO)
+    /**
+     * ✅ approval mode: ONLY 3 values
+     * - MANAGER_AND_GM
+     * - MANAGER_AND_COO
+     * - GM_AND_COO
+     */
     approvalMode: {
       type: String,
-      enum: ['GM_ONLY', 'GM_AND_COO'],
-      default: 'GM_ONLY',
+      enum: APPROVAL_MODE,
+      default: 'MANAGER_AND_GM',
     },
 
     name: { type: String, default: '' },
@@ -123,7 +166,7 @@ const LeaveProfileSchema = new mongoose.Schema(
 
     joinDate: { type: String, default: '' }, // YYYY-MM-DD
 
-    // These are "current contract pointers" (convenience for UI)
+    // pointers for "current contract"
     contractDate: { type: String, default: '' }, // current start
     contractEndDate: { type: String, default: '' }, // current end
 
@@ -138,10 +181,12 @@ const LeaveProfileSchema = new mongoose.Schema(
     // ─────────────────────────────
     // LEGACY ONLY (keep temporarily)
     // ─────────────────────────────
-    // Old design stored carry at profile-level.
-    // We keep these so we can migrate old JSON safely.
     carry: { type: CarrySchema, default: undefined },
     alCarry: { type: Number, default: undefined },
+
+    // legacy profile enum (if old json still writes here) — keep but not required
+    // (if you don't have this field in DB, remove it)
+    // approvalModeLegacy: { type: String, default: undefined },
 
     contractExpiryNotifiedFor: { type: String, default: '' },
     contractExpiryNotifiedAt: { type: Date, default: null },
@@ -173,7 +218,6 @@ function pickLatestContract(contracts = []) {
   const arr = Array.isArray(contracts) ? contracts : []
   if (!arr.length) return null
 
-  // prefer latest by startDate; fallback by contractNo
   const withStart = arr.filter((c) => isValidYMD(c?.startDate))
   if (withStart.length) {
     return withStart.sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)))[0]
@@ -183,7 +227,6 @@ function pickLatestContract(contracts = []) {
 
 function ensureContractNumbers(contracts = []) {
   const arr = Array.isArray(contracts) ? contracts : []
-  // If some contractNo missing, rebuild sequentially (keep order by startDate if possible)
   const hasAny = arr.some((c) => typeof c?.contractNo === 'number' && Number.isFinite(c.contractNo))
   if (!hasAny) {
     const sorted = arr
@@ -198,11 +241,14 @@ function ensureContractNumbers(contracts = []) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Pre-validate: ensure contract pointers + migrate legacy carry
+// Pre-validate: ensure approvalMode + contract pointers + migrate legacy carry
 // ─────────────────────────────────────────────────────────────
 
 LeaveProfileSchema.pre('validate', function (next) {
   try {
+    // ✅ normalize approvalMode to ONLY 3 modes
+    this.approvalMode = normalizeApprovalMode(this.approvalMode)
+
     // If contractDate missing, use joinDate
     if (!this.contractDate && this.joinDate) this.contractDate = this.joinDate
 
@@ -253,16 +299,11 @@ LeaveProfileSchema.pre('validate', function (next) {
         if (isValidYMD(c.startDate) && !isValidYMD(c.endDate)) {
           c.endDate = contractEndFromStart(c.startDate)
         }
-
-        // carry defaults
         c.carry = normalizeCarryObj(c.carry)
-
-        // legacy mirror inside contract
         c.alCarry = num(c.carry.AL)
       })
 
       // ✅ Move legacy profile-level carry into latest contract ONLY if contract carry is empty
-      // (This prevents breaking old imported JSON where carry was stored at profile root)
       const latest = pickLatestContract(this.contracts)
       if (latest) {
         const latestCarry = normalizeCarryObj(latest.carry)
@@ -305,5 +346,8 @@ LeaveProfileSchema.pre('validate', function (next) {
     next(e)
   }
 })
+
+LeaveProfileSchema.statics.APPROVAL_MODE = APPROVAL_MODE
+LeaveProfileSchema.statics.normalizeApprovalMode = normalizeApprovalMode
 
 module.exports = mongoose.model('LeaveProfile', LeaveProfileSchema)

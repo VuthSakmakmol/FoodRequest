@@ -1,4 +1,5 @@
 // backend/controllers/files/signature.admin.controller.js
+/* eslint-disable no-console */
 const fs = require('fs')
 const { getBucket, uploadBuffer, deleteFile } = require('../../utils/gridfs')
 
@@ -31,6 +32,17 @@ function safeExtFromMime(mime) {
   return '.jpg'
 }
 
+function normalizeKind(kind) {
+  const k = safeText(kind).toLowerCase()
+  if (k === 'employees') return 'employees'
+  if (k === 'users') return 'users'
+  return ''
+}
+
+function normalizeOwnerId(id) {
+  return safeText(id)
+}
+
 function contentUrl(kind, ownerId, ts) {
   const q = ts ? `?ts=${ts}` : ''
   return `/api/admin/signatures/${encodeURIComponent(kind)}/${encodeURIComponent(ownerId)}/content${q}`
@@ -50,14 +62,16 @@ async function deleteAll(kind, ownerId) {
   const b = getBucket()
   const arr = await b.find({ 'metadata.kind': kind, 'metadata.ownerId': ownerId }).toArray()
   for (const f of arr) {
-    try { await deleteFile(f._id) } catch {}
+    try {
+      await deleteFile(f._id)
+    } catch {}
   }
 }
 
 /* ───────────────── GET meta (NO 404 spam) ───────────────── */
 exports.getEmployeeSignature = async (req, res, next) => {
   try {
-    const employeeId = safeText(req.params.employeeId)
+    const employeeId = normalizeOwnerId(req.params.employeeId)
     if (!employeeId) return res.json({ exists: false, url: '' })
 
     const latest = await findLatest('employees', employeeId)
@@ -77,7 +91,7 @@ exports.getEmployeeSignature = async (req, res, next) => {
 
 exports.getUserSignature = async (req, res, next) => {
   try {
-    const loginId = safeText(req.params.loginId)
+    const loginId = normalizeOwnerId(req.params.loginId)
     if (!loginId) return res.json({ exists: false, url: '' })
 
     const latest = await findLatest('users', loginId)
@@ -98,22 +112,29 @@ exports.getUserSignature = async (req, res, next) => {
 /* ───────────────── STREAM content ───────────────── */
 exports.streamSignature = async (req, res, next) => {
   try {
-    const kind = safeText(req.params.kind)
-    const ownerId = safeText(req.params.id)
+    const kind = normalizeKind(req.params.kind)
+    const ownerId = normalizeOwnerId(req.params.id)
 
-    if (kind !== 'employees' && kind !== 'users') return res.status(400).end()
+    if (!kind) return res.status(400).end()
     if (!ownerId) return res.status(404).end()
 
     const latest = await findLatest(kind, ownerId)
     if (!latest?._id) return res.status(404).end()
 
-    // url includes ?ts= so caching is safe
+    // ✅ Cache safely because URL has ?ts=
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
     if (latest.contentType) res.setHeader('Content-Type', latest.contentType)
 
     const b = getBucket()
     const stream = b.openDownloadStream(latest._id)
-    stream.on('error', () => res.status(404).end())
+
+    stream.on('error', () => {
+      // avoid double-send if headers already sent
+      if (!res.headersSent) res.status(404).end()
+      else res.end()
+    })
+
     stream.pipe(res)
   } catch (e) {
     next(e)
@@ -123,12 +144,10 @@ exports.streamSignature = async (req, res, next) => {
 /* ───────────────── UPLOAD ───────────────── */
 exports.uploadSignature = async (req, res, next) => {
   try {
-    const kind = safeText(req.params.kind)
-    const ownerId = safeText(req.params.id)
+    const kind = normalizeKind(req.params.kind)
+    const ownerId = normalizeOwnerId(req.params.id)
 
-    if (kind !== 'employees' && kind !== 'users') {
-      return res.status(400).json({ message: 'Invalid kind. Use employees or users.' })
-    }
+    if (!kind) return res.status(400).json({ message: 'Invalid kind. Use employees or users.' })
     if (!ownerId) return res.status(400).json({ message: 'Missing id' })
 
     const file = pickUploadedFile(req)
@@ -171,7 +190,6 @@ exports.uploadSignature = async (req, res, next) => {
       size: gridFile?.length || buffer.length || 0,
       uploadedAt: gridFile?.uploadDate || new Date(),
     })
-
   } catch (e) {
     console.error('[sig] upload error:', e)
     next(e)
@@ -181,12 +199,10 @@ exports.uploadSignature = async (req, res, next) => {
 /* ───────────────── DELETE (optional) ───────────────── */
 exports.deleteSignature = async (req, res, next) => {
   try {
-    const kind = safeText(req.params.kind)
-    const ownerId = safeText(req.params.id)
+    const kind = normalizeKind(req.params.kind)
+    const ownerId = normalizeOwnerId(req.params.id)
 
-    if (kind !== 'employees' && kind !== 'users') {
-      return res.status(400).json({ message: 'Invalid kind. Use employees or users.' })
-    }
+    if (!kind) return res.status(400).json({ message: 'Invalid kind. Use employees or users.' })
     if (!ownerId) return res.status(400).json({ message: 'Missing id' })
 
     await deleteAll(kind, ownerId)

@@ -2,9 +2,13 @@
 // backend/utils/leave.rules.js
 const dayjs = require('dayjs')
 
-// ✅ Use contract carry as the single source of truth
-// File you showed: backend/utils/leave/leave.contracts.js
-const { getActiveCarry } = require('./leave/leave.contracts')
+// ✅ Contract helpers (single source of truth)
+const {
+  isValidYMD: isValidYMD2,
+  pickActiveContract,
+  endFromStartYMD,
+  getActiveCarry,
+} = require('./leave/leave.contracts')
 
 let externalIsHoliday = null
 try {
@@ -15,6 +19,7 @@ try {
   externalIsHoliday = null
 }
 
+/* ───────────────── helpers ───────────────── */
 function isValidYMD(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim())
 }
@@ -77,6 +82,17 @@ function toYMD(d) {
   return dayjs(d).format('YYYY-MM-DD')
 }
 
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+/* ───────────────── service years / AL cap ───────────────── */
+
 /**
  * ✅ Service years: full years from joinDate to asOfDate.
  */
@@ -99,27 +115,37 @@ function serviceYearsFromJoin(joinYMD, asOfDate = new Date()) {
  */
 function computeALByServiceYears(joinYMD, asOfDate = new Date()) {
   const yrs = serviceYearsFromJoin(joinYMD, asOfDate)
-
   // bump starts at year 4, then every +3 years
   const bumps = Math.floor(Math.max(0, yrs - 1) / 3)
-
   return 18 + bumps
 }
 
+/* ───────────────── contract-year window (ACTIVE CONTRACT) ───────────────── */
+
 /**
- * ✅ Contract-year window:
- * start = contractDate if valid else joinDate
- * end = start + 1 year - 1 day
+ * ✅ Contract-year window MUST follow the active contract
+ * If contracts exist: use active contract start/end
+ * Else fallback to profile.contractDate/joinDate logic
  */
 function computeContractYearPeriod(profile, now = new Date()) {
+  // If we have contracts, use active contract (by pointer or latest)
+  const active = pickActiveContract(profile, {
+    contractDate: isValidYMD(profile?.contractDate) ? String(profile.contractDate).trim() : null,
+  })
+
+  if (active && isValidYMD2(active.startDate)) {
+    const startYMD = String(active.startDate).trim()
+    const endYMD = isValidYMD2(active.endDate) ? String(active.endDate).trim() : endFromStartYMD(startYMD)
+    return { startYMD, endYMD }
+  }
+
+  // fallback (older profiles)
   const join = String(profile?.joinDate || '').trim()
   const contract = String(profile?.contractDate || '').trim()
 
-  const startYMD =
-    isValidYMD(contract) ? contract : isValidYMD(join) ? join : ''
+  const startYMD = isValidYMD(contract) ? contract : isValidYMD(join) ? join : ''
 
   if (!startYMD) {
-    // fallback to calendar year if missing
     const n = dayjs(now)
     const s = dayjs(`${n.year()}-01-01`, 'YYYY-MM-DD', true)
     const e = dayjs(`${n.year()}-12-31`, 'YYYY-MM-DD', true)
@@ -131,23 +157,8 @@ function computeContractYearPeriod(profile, now = new Date()) {
   return { startYMD: s.format('YYYY-MM-DD'), endYMD: end.format('YYYY-MM-DD') }
 }
 
-/**
- * ✅ Validate + normalize leave request (supports half edges)
- * Rules:
- * - startDate must be working day (Mon–Sat, not holiday)
- * - endDate must be working day (Mon–Sat, not holiday)
- * - MA: fixed 90 calendar days inclusive (end = start + 89), half not allowed
- *
- * Half-day support:
- * A) Single-day half (legacy):
- *   - isHalfDay=true, dayPart=AM/PM
- *   - endDate=startDate, totalDays=0.5
- *
- * B) Multi-day half edges (new):
- *   - startHalf: null|AM|PM (optional)
- *   - endHalf: null|AM|PM (optional)
- *   - totalDays = workingDaysCount - 0.5(startHalf?) - 0.5(endHalf?)
- */
+/* ───────────────── request validator (unchanged) ───────────────── */
+
 function validateAndNormalizeRequest({
   leaveTypeCode,
   startDate,
@@ -178,7 +189,6 @@ function validateAndNormalizeRequest({
   if (!sd || !ed) return { ok: false, message: 'Invalid date format' }
   if (ed.isBefore(sd)) return { ok: false, message: 'endDate must be >= startDate' }
 
-  // ✅ policy: both start & end must be working days
   if (!isWorkingDay(s)) {
     return { ok: false, message: 'startDate must be a working day (Mon–Sat, not holiday).' }
   }
@@ -186,7 +196,6 @@ function validateAndNormalizeRequest({
     return { ok: false, message: 'endDate must be a working day (Mon–Sat, not holiday).' }
   }
 
-  // ✅ MA fixed 90 calendar days inclusive, no half
   if (code === 'MA') {
     if (isHalfDay || startHalf || endHalf) {
       return { ok: false, message: 'MA does not support half-day.' }
@@ -199,10 +208,8 @@ function validateAndNormalizeRequest({
         startDate: s,
         endDate: endFixed,
         totalDays: 90,
-        // legacy
         isHalfDay: false,
         dayPart: null,
-        // new
         startHalf: null,
         endHalf: null,
         mode: 'CALENDAR_FIXED_90',
@@ -212,14 +219,11 @@ function validateAndNormalizeRequest({
 
   const isSingleDay = s === e
 
-  // ✅ Legacy single-day half
   const legacyHalf = !!isHalfDay
   const dp = legacyHalf ? normalizeHalf(dayPart) : null
 
   if (legacyHalf) {
     if (!dp) return { ok: false, message: 'Half-day requires dayPart AM or PM.' }
-
-    // single-day only
     return {
       ok: true,
       normalized: {
@@ -227,10 +231,8 @@ function validateAndNormalizeRequest({
         startDate: s,
         endDate: s,
         totalDays: 0.5,
-        // legacy
         isHalfDay: true,
         dayPart: dp,
-        // new mapping (helps consistency)
         startHalf: dp,
         endHalf: null,
         mode: 'HALF_DAY_SINGLE',
@@ -238,11 +240,9 @@ function validateAndNormalizeRequest({
     }
   }
 
-  // ✅ New half edges (multi-day or single-day full)
   let sh = normalizeHalf(startHalf)
   let eh = normalizeHalf(endHalf)
 
-  // For single-day requests: allow only ONE half selector (use startHalf)
   if (isSingleDay) {
     if (eh && !sh) sh = eh
     eh = null
@@ -255,10 +255,8 @@ function validateAndNormalizeRequest({
           startDate: s,
           endDate: s,
           totalDays: 0.5,
-          // legacy fields kept consistent
           isHalfDay: true,
           dayPart: sh,
-          // new
           startHalf: sh,
           endHalf: null,
           mode: 'HALF_DAY_SINGLE',
@@ -266,7 +264,6 @@ function validateAndNormalizeRequest({
       }
     }
 
-    // single-day full
     return {
       ok: true,
       normalized: {
@@ -283,7 +280,6 @@ function validateAndNormalizeRequest({
     }
   }
 
-  // ✅ Multi-day working days with optional half edges
   const workingDates = enumerateWorkingDates(s, e)
   const workingCount = workingDates.length
   if (!workingCount || workingCount <= 0) {
@@ -303,10 +299,8 @@ function validateAndNormalizeRequest({
       startDate: s,
       endDate: e,
       totalDays,
-      // legacy fields: only for single-day half; multi-day uses new fields
       isHalfDay: false,
       dayPart: null,
-      // new
       startHalf: sh,
       endHalf: eh,
       mode: 'WORKING_DAYS_HALF_EDGES',
@@ -314,16 +308,27 @@ function validateAndNormalizeRequest({
   }
 }
 
+/* ───────────────── balances (APPLY ACTIVE CONTRACT CARRY) ───────────────── */
+
 /**
- * ✅ Compute balances for current contract-year.
- *
- * RULES:
- * - SP is allowed (max 7 per contract-year)
- * - Every SP day ALWAYS deducts from AL remaining (AL_USED_TOTAL = AL + SP)
- *
- * ✅ DISPLAY RULE (your request):
- * - If carry is negative => show it as extra "used"
- *   Example: UL carry -2 => UL used becomes 2
+ * ✅ Apply carry:
+ * remaining = (entitlement - used) + carry
+ * used display includes negative carry: used += max(0, -carry)
+ */
+function applyCarry(ent, used, carry) {
+  const c = num(carry)
+  const baseRemaining = num(ent) - num(used)
+  const remaining = baseRemaining + c
+  const usedDisplay = num(used) + (c < 0 ? Math.abs(c) : 0)
+  return { remaining, usedDisplay }
+}
+
+/**
+ * ✅ Compute balances for CURRENT ACTIVE CONTRACT-YEAR.
+ * Rules:
+ * - SP max 7 per contract-year
+ * - SP ALWAYS borrows from AL (AL_USED_TOTAL = AL + SP)
+ * - Carry is read from ACTIVE CONTRACT carry (contracts[].carry)
  *
  * IMPORTANT:
  * We count request usage if startDate is within the contract-year window.
@@ -352,31 +357,73 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
   const MC_ENT = 90
   const MA_ENT = 90
 
+  // ✅ ACTIVE CONTRACT carry (single source of truth)
+  // (If no contract, it returns zeros)
+  const carry = getActiveCarry(profile, { contractDate: profile?.contractDate })
+
   // ✅ base request usage (SP always borrows from AL)
   const AL_USED_TOTAL = usedAL + usedSP
-  const alRemaining = Number(AL_ENT - AL_USED_TOTAL)
 
-  // ✅ base SP remaining capped by base AL remaining
+  // ✅ AL with carry
+  const alCarryApplied = applyCarry(AL_ENT, AL_USED_TOTAL, carry.AL)
+  const alRemaining = alCarryApplied.remaining
+  const alUsedDisplay = alCarryApplied.usedDisplay
+
+  // ✅ SP remaining: (7 - usedSP) capped by max(0, AL remaining)
+  // If AL remaining is negative, SP remaining must be 0.
   const spEntRemaining = Number(SP_ENT - usedSP)
   const spRemaining = Math.max(0, Math.min(spEntRemaining, Math.max(0, alRemaining)))
 
+  // Optional: apply SP carry if you ever use it (normally 0)
+  const spCarryApplied = applyCarry(SP_ENT, usedSP, carry.SP)
+
+  const mcCarryApplied = applyCarry(MC_ENT, usedMC, carry.MC)
+  const maCarryApplied = applyCarry(MA_ENT, usedMA, carry.MA)
+  const ulCarryApplied = applyCarry(0, usedUL, carry.UL)
+
   return {
     balances: [
-      { leaveTypeCode: 'AL', yearlyEntitlement: AL_ENT, used: AL_USED_TOTAL, remaining: alRemaining },
-      { leaveTypeCode: 'SP', yearlyEntitlement: SP_ENT, used: usedSP, remaining: spRemaining },
-      { leaveTypeCode: 'MC', yearlyEntitlement: MC_ENT, used: usedMC, remaining: MC_ENT - usedMC },
-      { leaveTypeCode: 'MA', yearlyEntitlement: MA_ENT, used: usedMA, remaining: MA_ENT - usedMA },
-      { leaveTypeCode: 'UL', yearlyEntitlement: 0, used: usedUL, remaining: 0 },
+      {
+        leaveTypeCode: 'AL',
+        yearlyEntitlement: AL_ENT,
+        used: alUsedDisplay,
+        remaining: alRemaining,
+      },
+      {
+        leaveTypeCode: 'SP',
+        yearlyEntitlement: SP_ENT,
+        used: spCarryApplied.usedDisplay, // mostly same as usedSP unless SP carry negative
+        remaining: spRemaining, // ✅ capped by AL remaining after carry
+      },
+      {
+        leaveTypeCode: 'MC',
+        yearlyEntitlement: MC_ENT,
+        used: mcCarryApplied.usedDisplay,
+        remaining: mcCarryApplied.remaining,
+      },
+      {
+        leaveTypeCode: 'MA',
+        yearlyEntitlement: MA_ENT,
+        used: maCarryApplied.usedDisplay,
+        remaining: maCarryApplied.remaining,
+      },
+      {
+        leaveTypeCode: 'UL',
+        yearlyEntitlement: 0,
+        used: ulCarryApplied.usedDisplay,
+        remaining: 0 + num(carry.UL), // (UL is unlimited, but keep carry visible if you store it)
+      },
     ],
     meta: {
+      asOfYMD: toYMD(now),
       contractYear: { startDate: startYMD, endDate: endYMD },
       contractDate: isValidYMD(profile?.contractDate) ? String(profile.contractDate) : null,
       joinDate: isValidYMD(profile?.joinDate) ? String(profile.joinDate) : null,
       serviceYears: serviceYearsFromJoin(profile?.joinDate, now),
+      carry, // helpful for debugging/UI if you want
     },
   }
 }
-
 
 module.exports = {
   validateAndNormalizeRequest,

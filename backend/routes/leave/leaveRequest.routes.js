@@ -1,3 +1,4 @@
+// backend/routes/leave/leaveRequest.routes.js
 const router = require('express').Router()
 
 const { requireAuth, requireRole } = require('../../middlewares/auth')
@@ -48,6 +49,19 @@ router.post(
   '/:id/gm-decision',
   requireRole('LEAVE_GM', 'LEAVE_ADMIN', 'ADMIN'),
   ctrl.gmDecision
+)
+
+/* coo (✅ moved here, delete coo controller/routes) */
+router.get(
+  '/coo/inbox',
+  requireRole('LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
+  ctrl.listCooInbox
+)
+
+router.post(
+  '/:id/coo-decision',
+  requireRole('LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'),
+  ctrl.cooDecision
 )
 
 module.exports = router

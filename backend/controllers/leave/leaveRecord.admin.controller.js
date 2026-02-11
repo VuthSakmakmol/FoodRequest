@@ -1,5 +1,18 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveRecord.admin.controller.js
+//
+// ✅ Admin-only employee leave record for PDF/Excel
+// ✅ Works with ONLY 3 approval modes (semantic):
+//    - MANAGER_AND_GM
+//    - MANAGER_AND_COO
+//    - GM_AND_COO
+//
+// ✅ Signature logic by mode + status:
+//    - recordByEmployeeId: ALWAYS employeeId
+//    - checkedByLoginId:  ALWAYS "leave_admin" (system signature)
+//    - approvedManagerLoginId: shown after manager approved (when mode includes manager)
+//    - approvedGMLoginId:      shown after GM approved (when mode includes gm)
+//    - approvedCOOLoginId:     shown only after final APPROVED (when mode includes coo)
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const LeaveRequest = require('../../models/leave/LeaveRequest')
@@ -18,6 +31,10 @@ function num(v) {
 
 function safeText(v) {
   return String(v ?? '').trim()
+}
+
+function up(v) {
+  return safeText(v).toUpperCase()
 }
 
 function isValidYMD(s) {
@@ -77,7 +94,7 @@ function phnomPenhMidnightDate(ymd) {
 }
 
 function uniqUpper(arr) {
-  return [...new Set((arr || []).map((x) => String(x || '').toUpperCase().trim()))].filter(Boolean)
+  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))].filter(Boolean)
 }
 
 function getRoles(req) {
@@ -112,16 +129,10 @@ function overlapsRange(docStart, docEnd, from, to) {
 
 /** Map system leaveTypeCode to PDF column codes */
 function mapToPdfCode(systemCode) {
-  const c = String(systemCode || '').toUpperCase().trim()
+  const c = up(systemCode)
   if (c === 'MC') return 'SL'
   if (c === 'MA') return 'ML'
   return c
-}
-
-/** For PDF columns: AL includes SP (borrow from AL) */
-function shouldCountAsAL(systemCode) {
-  const c = String(systemCode || '').toUpperCase().trim()
-  return c === 'AL' || c === 'SP'
 }
 
 function dayColsForPdf(pdfCode, totalDays) {
@@ -131,25 +142,6 @@ function dayColsForPdf(pdfCode, totalDays) {
     SL_day: pdfCode === 'SL' ? d : '',
     ML_day: pdfCode === 'ML' ? d : '',
   }
-}
-
-
-async function loadDirMap(ids = []) {
-  const uniq = [...new Set(ids.map((x) => String(x || '').trim()).filter(Boolean))]
-  if (!uniq.length) return new Map()
-
-  const rows = await EmployeeDirectory.find(
-    { employeeId: { $in: uniq } },
-    { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1 }
-  ).lean()
-
-  const map = new Map()
-  for (const r of rows || []) map.set(String(r.employeeId), r)
-  return map
-}
-
-function displayName(dirRow, fallback = '') {
-  return safeText(dirRow?.name || dirRow?.fullName || fallback || '')
 }
 
 // ───────── Contract helpers ─────────
@@ -178,7 +170,7 @@ function contractMeta(contract) {
     startDate: contract.startDate,
     endDate: contract.endDate,
     closedAt: contract.closedAt || null,
-    balancesAsOf: contract.closeSnapshot?.balancesAsOf || '',
+    closeSnapshotAsOf: safeText(contract.closeSnapshot?.asOf || ''),
   }
 }
 
@@ -194,6 +186,50 @@ function listContractsMeta(profile) {
     isCurrent: current && String(current._id) === String(c._id),
     label: `Contract ${c.contractNo}: ${c.startDate}${c.endDate ? ` → ${c.endDate}` : ''}`,
   }))
+}
+
+// ───────── Approval / signature helpers ─────────
+
+function normMode(v) {
+  if (typeof LeaveRequest.normalizeMode === 'function') return LeaveRequest.normalizeMode(v)
+  // fallback (should not happen if you used the updated LeaveRequest model)
+  const m = up(v)
+  if (m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'MANAGER_AND_GM') return m
+  return 'MANAGER_AND_GM'
+}
+
+function modeHasManager(mode) {
+  const m = normMode(mode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO'
+}
+function modeHasGm(mode) {
+  const m = normMode(mode)
+  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO'
+}
+function modeHasCoo(mode) {
+  const m = normMode(mode)
+  return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO'
+}
+
+function shouldShowManagerSig(mode, status) {
+  if (!modeHasManager(mode)) return false
+  const st = up(status)
+  // manager considered "approved" once it moves beyond PENDING_MANAGER
+  return st === 'PENDING_GM' || st === 'PENDING_COO' || st === 'APPROVED'
+}
+
+function shouldShowGmSig(mode, status) {
+  if (!modeHasGm(mode)) return false
+  const st = up(status)
+  // gm considered "approved" once it moves beyond PENDING_GM (or final approved)
+  return st === 'PENDING_COO' || st === 'APPROVED'
+}
+
+function shouldShowCooSig(mode, status) {
+  if (!modeHasCoo(mode)) return false
+  const st = up(status)
+  // COO shown only after final approved
+  return st === 'APPROVED'
 }
 
 // ───────────────── controller ─────────────────
@@ -217,7 +253,7 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
     const asOf = req.query.asOf ? assertYMD(req.query.asOf, 'asOf') : ''
 
     const statuses = safeText(req.query.statuses)
-      ? safeText(req.query.statuses).split(',').map((s) => s.trim().toUpperCase())
+      ? safeText(req.query.statuses).split(',').map((x) => up(x))
       : ['APPROVED', 'PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO']
 
     const contractId = safeText(req.query.contractId)
@@ -227,8 +263,8 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       (await LeaveProfile.findOne({ employeeId }).lean()) ||
       (await LeaveProfile.findOne({ employeeId: Number(employeeId) }).lean())
     if (!profile) return res.status(404).json({ message: 'Leave profile not found.' })
-    
-      // ✅ ENRICH META for preview (name/department/section/joinDate)
+
+    // ✅ Enrich meta (name/department/section/joinDate)
     const dir = await EmployeeDirectory.findOne(
       { employeeId: buildEmpIdIn(employeeId) },
       { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1, joinDate: 1 }
@@ -239,8 +275,8 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
     const metaSection = safeText(dir?.section || profile?.section || 'Foreigner')
     const metaJoinDate = toYMD(dir?.joinDate || profile?.joinDate || profile?.meta?.joinDate)
 
-
-    const leaveAdminId = safeText(profile.leaveAdminLoginId || 'leave_admin')
+    // ✅ Your system signature for Checked By
+    const checkedByLoginId = safeText(process.env.LEAVE_ADMIN_LOGIN_ID || 'leave_admin')
 
     const requested = pickContract(profile, { contractId, contractNo })
     const current = getCurrentContract(profile)
@@ -254,35 +290,40 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       .sort({ startDate: 1, createdAt: 1 })
       .lean()
 
+    // Filter to contract window + optional range + asOf
     docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, selectedContract.startDate, selectedContract.endDate))
     if (from && to) docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, from, to))
     if (asOf) docs = docs.filter((r) => toYMD(r.startDate) <= asOf)
 
-    const approved = docs.filter((r) => r.status === 'APPROVED')
+    // Only approved rows are used for remaining calculation
+    const approved = docs.filter((r) => up(r.status) === 'APPROVED')
     const approvedIndex = new Map(approved.map((r, i) => [String(r._id), i]))
 
     const rows = []
     for (const r of docs) {
-      let alRemain = ''
+      const sysCode = up(r.leaveTypeCode)
+      const st = up(r.status)
+      const mode = normMode(r.approvalMode || profile.approvalMode)
 
-      if (r.status === 'APPROVED') {
+      let alRemain = ''
+      if (st === 'APPROVED') {
         const idx = approvedIndex.get(String(r._id))
         const hist = idx >= 0 ? approved.slice(0, idx + 1) : approved
 
         // compute AL remaining as-of endDate of this row
         const snap = computeBalances(profile, hist, phnomPenhMidnightDate(toYMD(r.endDate || r.startDate)))
-        const al = (snap?.balances || []).find((b) => String(b.leaveTypeCode).toUpperCase() === 'AL')
+        const al = (snap?.balances || []).find((b) => up(b.leaveTypeCode) === 'AL')
         alRemain = num(al?.remaining)
       }
 
-      const pdfCode = mapToPdfCode(r.leaveTypeCode)
-      const st = safeText(r.status).toUpperCase()
+      const pdfCode = mapToPdfCode(sysCode)
 
-      // inside your loop that builds rows:
-      const sysCode = String(r.leaveTypeCode || '').toUpperCase().trim()
+      // Approvers: prefer per-request (historically correct), fallback to profile
+      const mgrId = safeText(r.managerLoginId || profile.managerLoginId || '')
+      const gmId = safeText(r.gmLoginId || profile.gmLoginId || '')
+      const cooId = safeText(r.cooLoginId || profile.cooLoginId || '')
 
       rows.push({
-        // (optional) stable id for frontend rowKey if you want later
         _id: String(r._id || ''),
 
         date: toYMD(r.createdAt),
@@ -293,35 +334,30 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
         AL_day: sysCode === 'AL' ? num(r.totalDays) : '',
         SP_day: sysCode === 'SP' ? num(r.totalDays) : '',
 
-        // ✅ still show AL remaining for BOTH AL and SP, because SP borrows AL
+        // ✅ show AL remaining for BOTH AL and SP (SP borrows AL)
         AL_remain: sysCode === 'AL' || sysCode === 'SP' ? alRemain : '',
 
-        // ✅ UL / SL / ML columns (your template expects these)
+        // ✅ UL / SL / ML columns
         ...dayColsForPdf(pdfCode, r.totalDays),
 
         // ✅ system for template + excel
         leaveTypeCode: pdfCode,
         status: r.status,
+        approvalMode: mode,
 
-        // ✅ IMPORTANT: signature IDs your frontend is reading
-        // record-by must be EMPLOYEE signature
+        // ✅ Signature IDs (frontend reads these)
         recordByEmployeeId: safeText(profile.employeeId),
+        checkedByLoginId,
 
-        // GM signature shows only after GM approved (pending_coo / approved)
-        approvedGMLoginId: st === 'PENDING_COO' || st === 'APPROVED' ? safeText(profile.gmLoginId) : '',
+        approvedManagerLoginId: shouldShowManagerSig(mode, st) ? mgrId : '',
+        approvedGMLoginId: shouldShowGmSig(mode, st) ? gmId : '',
+        approvedCOOLoginId: shouldShowCooSig(mode, st) ? cooId : '',
 
-        // COO signature shows only after final approved
-        approvedCOOLoginId: st === 'APPROVED' ? safeText(profile.cooLoginId) : '',
-
-        // ✅ optional remark (your rowKey includes remark)
         remark: safeText(r.reason || r.note || r.remark || ''),
       })
-
-
     }
 
-
-        res.json({
+    return res.json({
       meta: {
         employeeId,
         name: metaName,
@@ -331,13 +367,15 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
 
         contract: contractMeta(selectedContract),
         contracts: listContractsMeta(profile),
+
+        // if caller doesn't pass asOf, include "today" for display only (does NOT filter)
         asOf: asOf || null,
+        generatedAt: nowYMD(),
       },
       rows,
     })
-
   } catch (e) {
     console.error('getEmployeeLeaveRecord error', e)
-    res.status(500).json({ message: e.message || 'Failed to load employee leave record' })
+    return res.status(500).json({ message: e.message || 'Failed to load employee leave record' })
   }
 }

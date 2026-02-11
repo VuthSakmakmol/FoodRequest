@@ -1,10 +1,21 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveProfiles.admin.controller.js
 //
-// ✅ IMPORTANT:
-// - Carry is PER-CONTRACT: stored in contracts[].carry (NOT profile.carry)
-// - profile.carry + alCarry remain ONLY for legacy compatibility / migration
-// - Balances calculation uses ACTIVE/LATEST contract carry by default
+// ✅ Admin leave profile management
+// ✅ Enforces ONLY 3 approval modes everywhere:
+//    - MANAGER_AND_GM
+//    - MANAGER_AND_COO
+//    - GM_AND_COO
+//
+// ✅ Password policy change (per Ant request):
+//    - NO auto-generated password formula
+//    - Admin MUST input password when creating profile (account creation step)
+//    - Admin can reset password any time (no old password)
+//
+// ✅ Contract-aware carry:
+//    - Each contract has its own carry
+//    - Renew contract creates closeSnapshot + new contract
+//    - Carry default behavior: clear positive AL on renew (but keep negative AL)
 
 const bcrypt = require('bcryptjs')
 const createError = require('http-errors')
@@ -17,25 +28,90 @@ const User = require('../../models/User')
 const { computeBalances } = require('../../utils/leave.rules')
 const { broadcastLeaveProfile } = require('../../utils/leave.realtime')
 
-const {
-  ensureContracts,
-  pickActiveContract,
-  pickLatestContract,
-  normalizeCarry,
-  getActiveCarry,
-  endFromStartYMD,
-  isValidYMD,
-} = require('../../utils/leave/leave.contracts')
+function s(v) {
+  return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
+}
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
 
-const DEFAULT_TZ = process.env.TIMEZONE || 'Asia/Phnom_Penh'
-const DEFAULT_PWD_POLICY = process.env.LEAVE_DEFAULT_PASSWORD || '123456'
+const APPROVAL_MODES = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
 
-const SEED_GM_LOGINID = String(process.env.LEAVE_GM_LOGINID || 'leave_gm').trim()
-const SEED_COO_LOGINID = String(process.env.LEAVE_COO_LOGINID || 'leave_coo').trim()
+function normalizeApprovalMode(v) {
+  // prefer model static if present
+  if (typeof LeaveProfile?.normalizeApprovalMode === 'function') {
+    return LeaveProfile.normalizeApprovalMode(v)
+  }
 
-/* ───────────────── helpers ───────────────── */
+  const raw = up(v)
+  if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
 
-const s = (v) => String(v ?? '').trim()
+  // legacy
+  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'GM_OR_COO') return 'GM_AND_COO'
+  if (raw === 'GM_COO') return 'GM_AND_COO'
+  if (raw === 'COO_AND_GM') return 'GM_AND_COO'
+  if (raw === 'GM_THEN_COO') return 'GM_AND_COO'
+
+  return 'MANAGER_AND_GM'
+}
+
+function validateModeApprovers(mode, { managerLoginId, gmLoginId, cooLoginId }) {
+  const m = normalizeApprovalMode(mode)
+
+  if (m === 'MANAGER_AND_GM') {
+    if (!s(managerLoginId)) throw createError(400, 'managerLoginId is required for MANAGER_AND_GM')
+    if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for MANAGER_AND_GM')
+    return
+  }
+  if (m === 'MANAGER_AND_COO') {
+    if (!s(managerLoginId)) throw createError(400, 'managerLoginId is required for MANAGER_AND_COO')
+    if (!s(cooLoginId)) throw createError(400, 'cooLoginId is required for MANAGER_AND_COO')
+    return
+  }
+  if (m === 'GM_AND_COO') {
+    if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for GM_AND_COO')
+    if (!s(cooLoginId)) throw createError(400, 'cooLoginId is required for GM_AND_COO')
+    return
+  }
+
+  throw createError(400, 'Invalid approvalMode')
+}
+
+function contractEndFromStart(startYMD) {
+  // same logic as model: end = start + 1 year - 1 day (UTC-safe)
+  const [y, m, d] = s(startYMD).split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCFullYear(dt.getUTCFullYear() + 1)
+  dt.setUTCDate(dt.getUTCDate() - 1)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+function isValidYMD(x) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(x))
+}
+
+function normalizeCarryObj(c) {
+  const src = c && typeof c === 'object' ? c : {}
+  return {
+    AL: num(src.AL),
+    SP: num(src.SP),
+    MC: num(src.MC),
+    MA: num(src.MA),
+    UL: num(src.UL),
+  }
+}
 
 function getIo(req) {
   return req.io || req.app?.get('io') || null
@@ -47,860 +123,583 @@ function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
     if (!io) return
     broadcastLeaveProfile(io, docOrPlain, event)
   } catch (e) {
-    console.warn('⚠️ emitProfile failed:', e?.message)
+    console.warn(`⚠️ realtime emitProfile(${event}) failed:`, e?.message)
   }
 }
 
-function nowYMD(tz = DEFAULT_TZ) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
-    .formatToParts(new Date())
-    .reduce((acc, p) => ((acc[p.type] = p.value), acc), {})
-  return `${parts.year}-${parts.month}-${parts.day}`
-}
-
-function assertYMD(v, label = 'date') {
-  const val = s(v)
-  if (!isValidYMD(val)) throw createError(400, `Invalid ${label}. Expected YYYY-MM-DD, got "${v}"`)
-  return val
-}
-
-function actorLoginId(req) {
-  return s(req.user?.loginId || req.user?.employeeId || req.user?.sub || req.user?.id || '')
-}
-
-/* ───────── approvalMode mapping ─────────
-   stored enum: GM_ONLY / GM_AND_COO
-   semantic:    MANAGER_AND_GM / GM_AND_COO
-*/
-
-function normalizeApprovalModeSemantic(v) {
-  const m = s(v).toUpperCase()
-  if (m === 'GM_AND_COO') return 'GM_AND_COO'
-  if (m === 'GM_OR_COO') return 'GM_AND_COO'
-  return 'MANAGER_AND_GM'
-}
-
-function toStoredApprovalMode(semanticMode) {
-  const sem = normalizeApprovalModeSemantic(semanticMode)
-  return sem === 'GM_AND_COO' ? 'GM_AND_COO' : 'GM_ONLY'
-}
-
-function toSemanticApprovalMode(storedMode) {
-  const m = s(storedMode).toUpperCase()
-  return m === 'GM_AND_COO' ? 'GM_AND_COO' : 'MANAGER_AND_GM'
-}
-
-function resolveSeededApprovers(semanticMode) {
-  if (!SEED_GM_LOGINID) throw createError(500, 'Seed GM missing. Set LEAVE_GM_LOGINID.')
-  if (semanticMode === 'GM_AND_COO' && !SEED_COO_LOGINID) {
-    throw createError(500, 'Seed COO missing. Set LEAVE_COO_LOGINID for GM_AND_COO mode.')
-  }
-  return {
-    gmLoginId: SEED_GM_LOGINID,
-    cooLoginId: semanticMode === 'GM_AND_COO' ? SEED_COO_LOGINID : '',
-  }
-}
-
-function validateModeAndChain({ approvalMode, managerEmployeeIdOrLogin }) {
-  const semantic = normalizeApprovalModeSemantic(approvalMode)
-  if (semantic === 'MANAGER_AND_GM') {
-    if (!s(managerEmployeeIdOrLogin)) throw createError(400, 'Manager is required for Manager + GM mode.')
-  }
-  return semantic
-}
-
-function pickEmployeeId(obj) {
-  return s(obj?.employeeId || obj?.employee?.employeeId || obj?.selectedEmployee?.employeeId || obj?.id || '')
-}
-
-function pickManagerId(obj) {
-  return s(obj?.managerEmployeeId || obj?.managerLoginId || obj?.manager?.employeeId || '')
-}
-
-/* ───────── directory + user upsert ───────── */
-
-async function getDirectory(employeeId) {
-  const eid = s(employeeId)
-  if (!eid) return null
-  return EmployeeDirectory.findOne({ employeeId: eid }).select('employeeId name department telegramChatId isActive').lean()
-}
-
+/**
+ * Password policy:
+ * - at least 13 chars
+ * - must include upper, lower, number, special
+ */
 function validateStrongPassword(pwd) {
-  const p = String(pwd || '')
-  if (p.length < 13) return { ok: false, message: 'Password must be at least 13 characters.' }
-  const hasUpper = /[A-Z]/.test(p)
-  const hasLower = /[a-z]/.test(p)
-  const hasNum = /\d/.test(p)
-  const hasSym = /[^A-Za-z0-9]/.test(p)
-  const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
-  if (score < 3) {
-    return { ok: false, message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.' }
-  }
-  return { ok: true }
+  const p = s(pwd)
+  if (p.length < 13) return 'Password must be at least 13 characters.'
+  if (!/[a-z]/.test(p)) return 'Password must include a lowercase letter.'
+  if (!/[A-Z]/.test(p)) return 'Password must include an uppercase letter.'
+  if (!/[0-9]/.test(p)) return 'Password must include a number.'
+  if (!/[^A-Za-z0-9]/.test(p)) return 'Password must include a special character.'
+  return ''
 }
 
-async function ensureUser({ loginId, name, role, roles, isActive = true, telegramChatId = '', password }) {
-  const id = s(loginId)
-  if (!id) return null
-  const cleanChatId = s(telegramChatId)
+async function ensureUserAccount({ loginId, password, createdBy }) {
+  const login = s(loginId)
+  if (!login) throw createError(400, 'employeeLoginId/loginId is required to create user account.')
 
-  const addRoles = [...(Array.isArray(roles) ? roles : roles ? [roles] : []), ...(role ? [role] : [])]
-    .map((r) => s(r).toUpperCase())
-    .filter(Boolean)
+  const pwd = s(password)
+  const err = validateStrongPassword(pwd)
+  if (err) throw createError(400, err)
 
-  const existing = await User.findOne({ loginId: id })
+  const existing = await User.findOne({ loginId: login })
   if (existing) {
-    const $set = {}
-    const $addToSet = {}
-
-    if (name && existing.name !== name) $set.name = name
-    if (typeof isActive === 'boolean' && existing.isActive !== isActive) $set.isActive = isActive
-    if (cleanChatId && s(existing.telegramChatId) !== cleanChatId) $set.telegramChatId = cleanChatId
-    if (addRoles.length) $addToSet.roles = { $each: addRoles }
-
-    const curRole = s(existing.role)
-    if (!curRole && addRoles.length) $set.role = addRoles[0]
-
-    if (password !== undefined) {
-      const check = validateStrongPassword(password)
-      if (!check.ok) throw createError(400, check.message)
-      $set.passwordHash = await bcrypt.hash(String(password), 10)
-    }
-
-    const update = {}
-    if (Object.keys($set).length) update.$set = $set
-    if (Object.keys($addToSet).length) update.$addToSet = $addToSet
-
-    if (Object.keys(update).length) {
-      return User.findOneAndUpdate({ _id: existing._id }, update, { new: true })
-    }
+    // We do NOT auto-change password here (admin reset endpoint exists).
     return existing
   }
 
-  let plainPwd = ''
-  if (password !== undefined) {
-    const check = validateStrongPassword(password)
-    if (!check.ok) throw createError(400, check.message)
-    plainPwd = String(password)
-  } else {
-    plainPwd = String(DEFAULT_PWD_POLICY || '123456')
+  const hash = await bcrypt.hash(pwd, 10)
+
+  // NOTE: adapt to your User schema fields as needed.
+  const user = await User.create({
+    loginId: login,
+    password: hash,
+    role: 'LEAVE_USER',
+    roles: ['LEAVE_USER'],
+    createdBy: s(createdBy || ''),
+  })
+
+  return user
+}
+
+async function attachEmployeeDirectory(profilePlain) {
+  const employeeId = s(profilePlain?.employeeId)
+  if (!employeeId) return profilePlain
+
+  const emp = await EmployeeDirectory.findOne(
+    { employeeId },
+    { employeeId: 1, name: 1, department: 1, loginId: 1 }
+  ).lean()
+
+  return {
+    ...profilePlain,
+    name: profilePlain?.name || emp?.name || '',
+    department: profilePlain?.department || emp?.department || '',
+    employeeLoginId: profilePlain?.employeeLoginId || s(emp?.loginId || ''),
   }
+}
 
-  const passwordHash = await bcrypt.hash(String(plainPwd), 10)
-  const mainRole = (addRoles[0] || 'LEAVE_USER').toUpperCase()
+function latestContract(contracts = []) {
+  const arr = Array.isArray(contracts) ? contracts : []
+  if (!arr.length) return null
+  const withStart = arr.filter((c) => isValidYMD(c?.startDate))
+  if (withStart.length) {
+    return withStart.sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)))[0]
+  }
+  return arr.slice().sort((a, b) => num(b.contractNo) - num(a.contractNo))[0]
+}
 
-  return User.create({
-    loginId: id,
-    name: name || id,
-    role: mainRole,
-    roles: addRoles.length ? addRoles : [mainRole],
-    passwordHash,
-    isActive: !!isActive,
-    ...(cleanChatId ? { telegramChatId: cleanChatId } : {}),
+function setPointersToLatest(profile) {
+  const latest = latestContract(profile.contracts || [])
+  if (!latest || !isValidYMD(latest.startDate)) return
+  profile.contractDate = latest.startDate
+  profile.contractEndDate = isValidYMD(latest.endDate) ? latest.endDate : contractEndFromStart(latest.startDate)
+}
+
+async function recomputeAndSaveBalances(profileDoc) {
+  const employeeId = s(profileDoc.employeeId)
+  const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' }).sort({ startDate: 1 }).lean()
+
+  const snap = computeBalances(profileDoc.toObject ? profileDoc.toObject() : profileDoc, approved, new Date())
+  const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
+  const nextAsOf = s(snap?.meta?.asOfYMD || profileDoc.balancesAsOf || '')
+  const nextEnd = s(snap?.meta?.contractYear?.endDate || profileDoc.contractEndDate || '')
+
+  profileDoc.balances = nextBalances
+  if (nextAsOf) profileDoc.balancesAsOf = nextAsOf
+  if (nextEnd) profileDoc.contractEndDate = nextEnd
+
+  await profileDoc.save()
+  return profileDoc
+}
+
+/* ─────────────────────────────────────────────────────────────
+   GET /admin/leave/approvers
+   Returns candidates for dropdowns
+───────────────────────────────────────────────────────────── */
+exports.getApprovers = async (req, res) => {
+  const gmUsers = await User.find(
+    { roles: { $in: ['LEAVE_GM'] } },
+    { loginId: 1, name: 1, username: 1 }
+  )
+    .sort({ loginId: 1 })
+    .lean()
+
+  const cooUsers = await User.find(
+    { roles: { $in: ['LEAVE_COO'] } },
+    { loginId: 1, name: 1, username: 1 }
+  )
+    .sort({ loginId: 1 })
+    .lean()
+
+  return res.json({
+    gm: (gmUsers || []).map((u) => ({ loginId: s(u.loginId), label: s(u.name || u.username || u.loginId) })),
+    coo: (cooUsers || []).map((u) => ({ loginId: s(u.loginId), label: s(u.name || u.username || u.loginId) })),
   })
 }
 
-/* ───────── balances helpers ───────── */
-
-function sameJSON(a, b) {
-  try {
-    return JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
-  } catch {
-    return false
-  }
-}
-
-/**
- * Apply carry to balances (display logic).
- *
- * ✅ NEW DISPLAY RULE:
- * - If carry is POSITIVE: it increases entitlement (extra days)
- * - If carry is NEGATIVE: it is debt → show as USED (adds to used)
- *
- * Example:
- *   UL carry = -2  => UL.used += 2
- *
- * ✅ UL policy:
- * - entitlement stays 0
- * - remaining stays 0
- * - BUT used can be >0 (from requests + debt)
- *
- * ✅ SP remaining capped by AL remaining (after carry effects)
- */
-function applyCarryToBalances(balances = [], carry = {}) {
-  const c = normalizeCarry(carry)
-  const out = (balances || []).map((b) => ({ ...(b || {}) }))
-
-  const row = (code) => out.find((x) => s(x.leaveTypeCode).toUpperCase() === code)
-
-  const applyOne = (code) => {
-    const r = row(code)
-    if (!r) return
-
-    const baseEnt = Number(r.yearlyEntitlement || 0)
-    const usedReq = Number(r.used || 0)
-    const delta = Number(c[code] || 0)
-
-    // carry < 0 is DEBT -> show as used
-    const debtUsed = delta < 0 ? Math.abs(delta) : 0
-
-    // carry > 0 increases entitlement
-    const extraEnt = delta > 0 ? delta : 0
-
-    if (code === 'UL') {
-      // UL entitlement remains 0 by policy, but we still show debt as used
-      r.yearlyEntitlement = 0
-      r.used = usedReq + debtUsed
-      r.remaining = 0
-      return
-    }
-
-    const ent = baseEnt + extraEnt
-    const used = usedReq + debtUsed
-
-    r.yearlyEntitlement = ent
-    r.used = used
-    r.remaining = ent - used
-  }
-
-  ;['AL', 'SP', 'MC', 'MA', 'UL'].forEach(applyOne)
-
-  // ✅ SP remaining capped by AL remaining (after carry effects)
-  const al = row('AL')
-  const sp = row('SP')
-  if (al && sp) {
-    sp.remaining = Math.min(Number(sp.remaining || 0), Number(al.remaining || 0))
-  }
-
-  return out
-}
-
-
-async function syncBalancesForProfile(doc, asOfYMD, opts = {}) {
-  if (!doc) return
-  const asOf = isValidYMD(asOfYMD) ? asOfYMD : nowYMD()
-  const employeeId = s(doc.employeeId)
-  if (!employeeId) return
-
-  ensureContracts(doc)
-
-  const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' }).sort({ startDate: 1 }).lean()
-
-  const base = typeof doc.toObject === 'function' ? doc.toObject() : doc
-  const snap = computeBalances(base, approved, new Date(asOf + 'T00:00:00Z'))
-
-  const raw = Array.isArray(snap?.balances) ? snap.balances : []
-  const carry = getActiveCarry(doc, opts)
-  const nextBalances = applyCarryToBalances(raw, carry)
-
-  const active = pickActiveContract(doc, opts) || pickLatestContract(doc)
-  const nextEnd =
-    (active && isValidYMD(active.endDate) && active.endDate) ||
-    (active && isValidYMD(active.startDate) ? endFromStartYMD(active.startDate) : '') ||
-    s(snap?.meta?.contractYear?.endDate || doc.contractEndDate || '')
-
-  if (!sameJSON(doc.balances, nextBalances)) doc.balances = nextBalances
-  if (s(doc.balancesAsOf) !== asOf) doc.balancesAsOf = asOf
-  if (nextEnd && s(doc.contractEndDate) !== nextEnd) doc.contractEndDate = nextEnd
-
-  // legacy mirror only
-  doc.alCarry = Number(normalizeCarry(carry).AL || 0)
-}
-
-/* ───────────────── controllers ───────────────── */
-
-exports.getApprovers = async (req, res) => {
-  try {
-    const wanted = ['LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN']
-    const docs = await User.find({
-      isActive: true,
-      $or: [{ role: { $in: wanted } }, { roles: { $in: wanted } }],
-    })
-      .select('loginId name role roles telegramChatId')
-      .lean()
-
-    res.json(
-      (docs || []).map((d) => ({
-        loginId: s(d.loginId),
-        name: d.name || '',
-        role: d.role || '',
-        roles: Array.isArray(d.roles) ? d.roles : [],
-        telegramChatId: s(d.telegramChatId),
-      }))
-    )
-  } catch (e) {
-    console.error('getApprovers error', e)
-    res.status(500).json({ message: 'Failed to load approvers.' })
-  }
-}
-
+/* GET /admin/leave/profiles/grouped?includeInactive=true|false */
 exports.getProfilesGrouped = async (req, res) => {
-  try {
-    const includeInactive = s(req.query?.includeInactive) === '1'
-    const query = includeInactive ? {} : { isActive: { $ne: false } }
+  const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true'
 
-    const profiles = await LeaveProfile.find(query)
-    const asOf = nowYMD()
+  const query = includeInactive ? {} : { isActive: true }
 
-    for (const doc of profiles || []) {
-      if (doc?.isActive === false) continue
-      if (!doc.joinDate || !isValidYMD(doc.joinDate)) continue
+  const rows = await LeaveProfile.find(query, { __v: 0 }).sort({ employeeId: 1 }).lean()
+  const enriched = await Promise.all((rows || []).map((p) => attachEmployeeDirectory(p)))
 
-      ensureContracts(doc)
-      await syncBalancesForProfile(doc, asOf)
+  const list = enriched.map((p) => ({
+    ...p,
+    approvalMode: normalizeApprovalMode(p.approvalMode),
+  }))
 
-      if (doc.isModified()) {
-        await doc.save()
-        emitProfile(req, doc, 'leave:profile:updated')
-      }
-    }
-
-    const fresh = await LeaveProfile.find(query).lean()
-
-    const byMgr = new Map()
-    for (const p of fresh || []) {
-      const mgrId = s(p.managerLoginId) || '—'
-      if (!byMgr.has(mgrId)) byMgr.set(mgrId, [])
-      byMgr.get(mgrId).push(p)
-    }
-
-    const managerIds = Array.from(byMgr.keys()).filter((x) => x && x !== '—')
-    const mgrDirs = await EmployeeDirectory.find({ employeeId: { $in: managerIds } }).select('employeeId name department').lean()
-    const mgrMap = new Map((mgrDirs || []).map((d) => [s(d.employeeId), d]))
-
-    const out = []
-    for (const [managerId, emps] of byMgr.entries()) {
-      const md = mgrMap.get(s(managerId)) || null
-
-      const employees = (emps || [])
-        .slice()
-        .sort((a, b) => s(a.employeeId).localeCompare(s(b.employeeId)))
-        .map((x) => {
-          const semanticMode = toSemanticApprovalMode(x.approvalMode)
-          const latest = Array.isArray(x.contracts) ? x.contracts[x.contracts.length - 1] : null
-          const carry = normalizeCarry(latest?.carry || {})
-
-          return {
-            employeeId: s(x.employeeId),
-            name: x.name || '',
-            department: x.department || '',
-            joinDate: x.joinDate || null,
-            contractDate: x.contractDate || null,
-            contractEndDate: x.contractEndDate || null,
-
-            managerLoginId: s(x.managerLoginId),
-            gmLoginId: s(x.gmLoginId),
-            cooLoginId: s(x.cooLoginId),
-
-            approvalMode: semanticMode,
-
-            isActive: x.isActive !== false,
-            balances: Array.isArray(x.balances) ? x.balances : [],
-            balancesAsOf: x.balancesAsOf || null,
-            contracts: Array.isArray(x.contracts) ? x.contracts : [],
-
-            carry,
-            alCarry: Number(x.alCarry || 0),
-          }
-        })
-
-      out.push({
-        manager: { employeeId: managerId, name: md?.name || '', department: md?.department || '' },
-        employees,
-      })
-    }
-
-    out.sort((a, b) => s(a.manager.employeeId).localeCompare(s(b.manager.employeeId)))
-    res.json(out)
-  } catch (e) {
-    console.error('getProfilesGrouped error', e)
-    res.status(500).json({ message: 'Failed to load grouped profiles.' })
+  // group by managerLoginId (or NO_MANAGER)
+  const map = new Map()
+  for (const p of list) {
+    const key = s(p.managerLoginId) || 'NO_MANAGER'
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(p)
   }
+
+  // lookup manager info from EmployeeDirectory by loginId (if you store it)
+  async function lookupManager(loginId) {
+    const key = s(loginId)
+    if (!key || key === 'NO_MANAGER') return null
+    const emp = await EmployeeDirectory.findOne(
+      { loginId: key },
+      { employeeId: 1, name: 1, department: 1, loginId: 1 }
+    ).lean()
+    if (!emp) return { loginId: key, employeeId: '', name: key, department: '' }
+    return {
+      loginId: s(emp.loginId),
+      employeeId: s(emp.employeeId),
+      name: s(emp.name),
+      department: s(emp.department),
+    }
+  }
+
+  const entries = [...map.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+
+  const out = []
+  for (const [managerLoginId, profiles] of entries) {
+    const manager = await lookupManager(managerLoginId)
+    out.push({
+      managerLoginId,
+      manager,
+      employees: profiles.sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId))),
+    })
+  }
+
+  return res.json(out)
 }
 
+/* ─────────────────────────────────────────────────────────────
+   GET /admin/leave/profiles/:employeeId
+───────────────────────────────────────────────────────────── */
 exports.getProfileOne = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
+  const employeeId = s(req.params.employeeId)
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
 
-    const prof = await LeaveProfile.findOne({ employeeId }).lean()
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
+  const plain = await attachEmployeeDirectory(doc.toObject())
+  plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
 
-    prof.approvalMode = toSemanticApprovalMode(prof.approvalMode)
-
-    const latest = Array.isArray(prof.contracts) ? prof.contracts[prof.contracts.length - 1] : null
-    prof.carry = normalizeCarry(latest?.carry || {})
-    prof.alCarry = Number(prof.alCarry || 0)
-
-    return res.json({ profile: prof })
-  } catch (e) {
-    console.error('getProfileOne error', e)
-    res.status(500).json({ message: 'Failed to load profile.' })
-  }
+  return res.json(plain)
 }
 
+/* ─────────────────────────────────────────────────────────────
+   POST /admin/leave/profiles
+   Create single profile + create user account (admin must input password)
+   body: {
+     employeeId, employeeLoginId,
+     managerLoginId, gmLoginId, cooLoginId,
+     approvalMode,
+     joinDate, contractDate, isActive,
+     password
+   }
+───────────────────────────────────────────────────────────── */
 exports.createProfileSingle = async (req, res) => {
-  try {
-    const body = req.body || {}
+  const body = req.body || {}
 
-    const employeeId = pickEmployeeId(body)
-    const managerId = pickManagerId(body)
+  const employeeId = s(body.employeeId)
+  if (!employeeId) throw createError(400, 'employeeId is required')
 
-    const joinDate = body.joinDate ? assertYMD(body.joinDate, 'joinDate') : ''
-    let contractDate = body.contractDate ? assertYMD(body.contractDate, 'contractDate') : ''
-    if (joinDate && !contractDate) contractDate = joinDate
+  // prevent duplicate
+  const existing = await LeaveProfile.findOne({ employeeId })
+  if (existing) throw createError(409, 'Leave profile already exists')
 
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-    if (!joinDate) return res.status(400).json({ message: 'joinDate is required.' })
+  const employeeLoginId = s(body.employeeLoginId || body.loginId)
+  if (!employeeLoginId) throw createError(400, 'employeeLoginId/loginId is required')
 
-    const semanticMode = validateModeAndChain({ approvalMode: body.approvalMode, managerEmployeeIdOrLogin: managerId })
-    const storedMode = toStoredApprovalMode(semanticMode)
+  const approvalMode = normalizeApprovalMode(body.approvalMode)
+  const managerLoginId = s(body.managerLoginId)
+  const gmLoginId = s(body.gmLoginId)
+  const cooLoginId = s(body.cooLoginId)
 
-    const { gmLoginId, cooLoginId } = resolveSeededApprovers(semanticMode)
-    const isActive = body.isActive !== false
+  validateModeApprovers(approvalMode, { managerLoginId, gmLoginId, cooLoginId })
 
-    const empDir = await getDirectory(employeeId)
-    const mgrDir = managerId ? await getDirectory(managerId) : null
+  // ✅ Create user (admin MUST input password)
+  await ensureUserAccount({
+    loginId: employeeLoginId,
+    password: body.password,
+    createdBy: s(req.user?.loginId || ''),
+  })
 
-    await ensureUser({
-      loginId: employeeId,
-      name: empDir?.name || body.name || employeeId,
-      role: 'LEAVE_USER',
-      isActive,
-      telegramChatId: empDir?.telegramChatId || '',
-      password: body.password,
-    })
+  const joinDate = s(body.joinDate)
+  const contractDate = s(body.contractDate || joinDate)
 
-    if (managerId) {
-      await ensureUser({
-        loginId: managerId,
-        name: mgrDir?.name || managerId,
-        role: 'LEAVE_MANAGER',
-        isActive: true,
-        telegramChatId: mgrDir?.telegramChatId || '',
-      })
-    }
+  const doc = await LeaveProfile.create({
+    employeeId,
+    employeeLoginId,
 
-    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
-    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
+    managerLoginId,
+    gmLoginId,
+    cooLoginId,
 
-    let prof = await LeaveProfile.findOne({ employeeId })
-    const existed = !!prof
-    if (!prof) prof = new LeaveProfile({ employeeId, employeeLoginId: employeeId })
+    approvalMode,
 
-    prof.approvalMode = storedMode
-    prof.managerLoginId = managerId || ''
-    prof.gmLoginId = gmLoginId
-    prof.cooLoginId = semanticMode === 'GM_AND_COO' ? cooLoginId : ''
+    joinDate,
+    contractDate: contractDate || '',
+    contractEndDate: isValidYMD(contractDate) ? contractEndFromStart(contractDate) : '',
 
-    prof.joinDate = joinDate
-    prof.contractDate = contractDate
-    prof.isActive = isActive
+    isActive: body.isActive === false ? false : true,
 
-    prof.name = empDir?.name || prof.name || ''
-    prof.department = empDir?.department || prof.department || ''
+    // contracts will be auto-initialized by model pre-validate if empty
+    contracts: Array.isArray(body.contracts) ? body.contracts : [],
+  })
 
-    const carry = body.carry !== undefined ? normalizeCarry(body.carry) : normalizeCarry({})
-    prof.carry = prof.carry || {}
-    prof.alCarry = Number(body.alCarry || carry.AL || 0)
+  const saved = await recomputeAndSaveBalances(doc)
+  emitProfile(req, saved, 'leave:profile:created')
 
-    ensureContracts(prof)
-    const latest = pickLatestContract(prof)
-    if (!latest) throw createError(500, 'Failed to initialize contract.')
+  const plain = await attachEmployeeDirectory(saved.toObject())
+  plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
 
-    latest.carry = normalizeCarry(carry)
-
-    // ✅ force persist nested changes
-    prof.markModified('contracts')
-
-    prof.contractDate = latest.startDate || prof.contractDate
-    prof.contractEndDate = latest.endDate || prof.contractEndDate
-    prof.alCarry = Number(normalizeCarry(latest.carry).AL || 0)
-
-    await syncBalancesForProfile(prof, nowYMD())
-    await prof.save()
-
-    emitProfile(req, prof, existed ? 'leave:profile:updated' : 'leave:profile:created')
-    res.json({ ok: true, profile: { ...prof.toObject(), approvalMode: semanticMode } })
-  } catch (e) {
-    console.error('createProfileSingle error', e)
-    res.status(e.status || 400).json({ message: e.message || 'Failed to create profile.' })
-  }
+  return res.status(201).json(plain)
 }
 
+/* ─────────────────────────────────────────────────────────────
+   POST /admin/leave/profiles/manager
+   Bulk create: manager + employees
+   body: {
+     managerEmployeeId? (optional for your old UI),
+     managerLoginId,
+     gmLoginId, cooLoginId,
+     approvalMode,
+     employees: [
+       { employeeId, employeeLoginId, joinDate, contractDate, isActive, password, carry? }
+     ]
+   }
+───────────────────────────────────────────────────────────── */
 exports.createManagerWithEmployees = async (req, res) => {
-  try {
-    const body = req.body || {}
-    const rows = Array.isArray(body.employees) ? body.employees : []
-    if (!rows.length) return res.status(400).json({ message: 'employees[] is required.' })
+  const body = req.body || {}
+  const approvalMode = normalizeApprovalMode(body.approvalMode)
 
-    const managerId = pickManagerId(body)
+  const managerLoginId = s(body.managerLoginId)
+  const gmLoginId = s(body.gmLoginId)
+  const cooLoginId = s(body.cooLoginId)
 
-    const semanticMode = validateModeAndChain({ approvalMode: body.approvalMode, managerEmployeeIdOrLogin: managerId })
-    const storedMode = toStoredApprovalMode(semanticMode)
-    const { gmLoginId, cooLoginId } = resolveSeededApprovers(semanticMode)
+  validateModeApprovers(approvalMode, { managerLoginId, gmLoginId, cooLoginId })
 
-    if (managerId) {
-      const mgrDir = await getDirectory(managerId)
-      await ensureUser({
-        loginId: managerId,
-        name: mgrDir?.name || managerId,
-        role: 'LEAVE_MANAGER',
-        isActive: true,
-        telegramChatId: mgrDir?.telegramChatId || '',
-      })
-    }
+  const employees = Array.isArray(body.employees) ? body.employees : []
+  if (!employees.length) throw createError(400, 'employees[] is required')
 
-    await ensureUser({ loginId: gmLoginId, name: gmLoginId, role: 'LEAVE_GM', isActive: true })
-    if (cooLoginId) await ensureUser({ loginId: cooLoginId, name: cooLoginId, role: 'LEAVE_COO', isActive: true })
-
-    let createdCount = 0
-    let updatedCount = 0
-
-    for (let i = 0; i < rows.length; i++) {
-      const r = rows[i] || {}
-      const empId = pickEmployeeId(r)
-      if (!empId) throw createError(400, `Employee #${i + 1}: employeeId is required.`)
-
-      const joinDate = assertYMD(r.joinDate, `joinDate (Employee #${i + 1})`)
-      const contractDate = r.contractDate ? assertYMD(r.contractDate, `contractDate (Employee #${i + 1})`) : joinDate
-      const isActive = r.isActive !== false
-
-      const empDir = await getDirectory(empId)
-
-      await ensureUser({
-        loginId: empId,
-        name: empDir?.name || empId,
-        role: 'LEAVE_USER',
-        isActive,
-        telegramChatId: empDir?.telegramChatId || '',
-        password: r.password,
-      })
-
-      let prof = await LeaveProfile.findOne({ employeeId: empId })
-      const existed = !!prof
-      if (!prof) prof = new LeaveProfile({ employeeId: empId, employeeLoginId: empId })
-
-      prof.approvalMode = storedMode
-      prof.managerLoginId = managerId || ''
-      prof.gmLoginId = gmLoginId
-      prof.cooLoginId = semanticMode === 'GM_AND_COO' ? cooLoginId : ''
-
-      prof.joinDate = joinDate
-      prof.contractDate = contractDate
-      prof.isActive = isActive
-
-      prof.name = empDir?.name || prof.name || ''
-      prof.department = empDir?.department || prof.department || ''
-
-      const carry = r.carry !== undefined ? normalizeCarry(r.carry) : normalizeCarry({})
-      prof.alCarry = Number(r.alCarry || carry.AL || 0)
-
-      ensureContracts(prof)
-      const latest = pickLatestContract(prof)
-      if (!latest) throw createError(500, 'Missing contract.')
-      latest.carry = normalizeCarry(carry)
-
-      // ✅ force persist nested changes
-      prof.markModified('contracts')
-
-      prof.contractDate = latest.startDate || prof.contractDate
-      prof.contractEndDate = latest.endDate || prof.contractEndDate
-      prof.alCarry = Number(normalizeCarry(latest.carry).AL || 0)
-
-      await syncBalancesForProfile(prof, nowYMD())
-      await prof.save()
-
-      emitProfile(req, prof, existed ? 'leave:profile:updated' : 'leave:profile:created')
-
-      if (existed) updatedCount++
-      else createdCount++
-    }
-
-    res.json({ ok: true, createdCount, updatedCount, approvalMode: semanticMode })
-  } catch (e) {
-    console.error('createManagerWithEmployees error', e)
-    res.status(e.status || 400).json({ message: e.message || 'Failed to create manager + employees.' })
+  // ✅ require password per employee
+  const missingPw = employees
+    .filter((e) => !s(e?.password))
+    .map((e) => s(e?.employeeId || e?.employeeLoginId || 'UNKNOWN'))
+  if (missingPw.length) {
+    throw createError(400, `Missing password for employees: ${missingPw.join(', ')}`)
   }
-}
 
-exports.updateProfile = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
+  const created = []
 
-    const prof = await LeaveProfile.findOne({ employeeId })
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
+  for (const e of employees) {
+    const employeeId = s(e.employeeId)
+    const employeeLoginId = s(e.employeeLoginId || e.loginId)
 
-    const body = req.body || {}
+    if (!employeeId) continue
+    if (!employeeLoginId) throw createError(400, `employeeLoginId missing for employeeId=${employeeId}`)
 
-    if (body.joinDate !== undefined) prof.joinDate = assertYMD(body.joinDate, 'joinDate')
-    if (body.isActive !== undefined) prof.isActive = body.isActive !== false
+    const exists = await LeaveProfile.findOne({ employeeId })
+    if (exists) continue // skip duplicates (safe)
 
-    const nextManagerId =
-      body.managerEmployeeId !== undefined || body.managerLoginId !== undefined ? pickManagerId(body) : s(prof.managerLoginId)
-
-    const currentSemantic = toSemanticApprovalMode(prof.approvalMode)
-    const nextSemantic = body.approvalMode !== undefined ? normalizeApprovalModeSemantic(body.approvalMode) : currentSemantic
-
-    validateModeAndChain({ approvalMode: nextSemantic, managerEmployeeIdOrLogin: nextManagerId })
-
-    const storedMode = toStoredApprovalMode(nextSemantic)
-    const { gmLoginId, cooLoginId } = resolveSeededApprovers(nextSemantic)
-
-    prof.approvalMode = storedMode
-    prof.managerLoginId = nextManagerId || ''
-    prof.gmLoginId = gmLoginId
-    prof.cooLoginId = nextSemantic === 'GM_AND_COO' ? cooLoginId : ''
-
-    ensureContracts(prof)
-    const latest = pickLatestContract(prof)
-    if (!latest) throw createError(500, 'Missing contract.')
-
-    if (body.contractDate !== undefined) {
-      const newStart = assertYMD(body.contractDate, 'contractDate')
-      latest.startDate = newStart
-      latest.endDate = endFromStartYMD(newStart)
-      prof.contractDate = latest.startDate
-      prof.contractEndDate = latest.endDate
-      prof.markModified('contracts')
-    } else {
-      prof.contractDate = latest.startDate || prof.contractDate
-      prof.contractEndDate = latest.endDate || prof.contractEndDate
-    }
-
-    if (body.carry !== undefined) {
-      latest.carry = normalizeCarry(body.carry)
-
-      // ✅ IMPORTANT: ensures UL/SP/MC/MA changes persist
-      prof.markModified('contracts')
-    }
-
-    if (body.alCarry !== undefined) {
-      prof.alCarry = Number(body.alCarry || 0)
-    } else if (body.carry !== undefined) {
-      prof.alCarry = Number(normalizeCarry(latest.carry).AL || 0)
-    }
-
-    await syncBalancesForProfile(prof, nowYMD())
-    await prof.save()
-
-    emitProfile(req, prof, 'leave:profile:updated')
-    res.json({ ok: true, profile: { ...prof.toObject(), approvalMode: nextSemantic } })
-  } catch (e) {
-    console.error('updateProfile error', e)
-    res.status(e.status || 400).json({ message: e.message || 'Failed to update profile.' })
-  }
-}
-
-exports.deactivateProfile = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-
-    const prof = await LeaveProfile.findOne({ employeeId })
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
-
-    prof.isActive = false
-    await prof.save()
-
-    emitProfile(req, prof, 'leave:profile:updated')
-    res.json({ ok: true, employeeId, isActive: false })
-  } catch (e) {
-    console.error('deactivateProfile error', e)
-    res.status(500).json({ message: 'Failed to deactivate profile.' })
-  }
-}
-
-exports.getContractHistory = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-
-    const prof = await LeaveProfile.findOne({ employeeId }).lean()
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
-
-    res.json({ ok: true, employeeId, contracts: Array.isArray(prof.contracts) ? prof.contracts : [] })
-  } catch (e) {
-    console.error('getContractHistory error', e)
-    res.status(500).json({ message: 'Failed to load contract history.' })
-  }
-}
-
-exports.recalculateBalances = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-
-    const prof = await LeaveProfile.findOne({ employeeId })
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
-
-    ensureContracts(prof)
-    await syncBalancesForProfile(prof, nowYMD())
-    await prof.save()
-
-    emitProfile(req, prof, 'leave:profile:updated')
-    res.json({ ok: true, profile: { ...prof.toObject(), approvalMode: toSemanticApprovalMode(prof.approvalMode) } })
-  } catch (e) {
-    console.error('recalculateBalances error', e)
-    res.status(e.status || 400).json({ message: e.message || 'Failed to recalculate balances.' })
-  }
-}
-
-exports.renewContract = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-
-    const prof = await LeaveProfile.findOne({ employeeId })
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
-
-    const body = req.body || {}
-    const newContractDate = assertYMD(body.newContractDate, 'newContractDate')
-    const note = s(body.note || 'Renew contract')
-    const clearUnusedAL = body.clearUnusedAL === true
-
-    ensureContracts(prof)
-
-    const last = pickLatestContract(prof)
-    if (!last) throw createError(500, 'Missing last contract.')
-
-    if (!last.closedAt) {
-      last.closedAt = new Date()
-      last.closedBy = actorLoginId(req)
-      last.note = last.note || 'Closed on renewal'
-      last.closeSnapshot = {
-        asOf: prof.balancesAsOf || null,
-        balances: Array.isArray(prof.balances) ? prof.balances : [],
-        contractDate: prof.contractDate || null,
-        contractEndDate: prof.contractEndDate || null,
-        carry: normalizeCarry(last.carry || {}),
-      }
-    }
-
-    let nextCarry
-    if (body.carry !== undefined) {
-      nextCarry = normalizeCarry(body.carry)
-    } else {
-      nextCarry = normalizeCarry(last.carry || {})
-      if (clearUnusedAL) {
-        if (Number(nextCarry.AL || 0) > 0) nextCarry.AL = 0
-      }
-    }
-
-    const nextNo = Number(last.contractNo || prof.contracts.length || 0) + 1
-    const endDate = endFromStartYMD(newContractDate)
-
-    prof.contracts.push({
-      contractNo: nextNo,
-      startDate: newContractDate,
-      endDate,
-      openedAt: new Date(),
-      closedAt: null,
-      openedBy: actorLoginId(req),
-      closedBy: '',
-      note,
-      closeSnapshot: null,
-      carry: nextCarry,
+    await ensureUserAccount({
+      loginId: employeeLoginId,
+      password: e.password,
+      createdBy: s(req.user?.loginId || ''),
     })
 
-    // ✅ ensure nested push is saved
-    prof.markModified('contracts')
+    const joinDate = s(e.joinDate)
+    const contractDate = s(e.contractDate || joinDate)
 
-    prof.contractDate = newContractDate
-    prof.contractEndDate = endDate
-    prof.alCarry = Number(normalizeCarry(nextCarry).AL || 0)
+    // allow initial carry to be set into first contract by providing legacy carry at root
+    const carry = normalizeCarryObj(e.carry)
 
-    await syncBalancesForProfile(prof, nowYMD())
-    await prof.save()
+    const doc = await LeaveProfile.create({
+      employeeId,
+      employeeLoginId,
 
-    emitProfile(req, prof, 'leave:profile:updated')
-    res.json({ ok: true, profile: { ...prof.toObject(), approvalMode: toSemanticApprovalMode(prof.approvalMode) } })
-  } catch (e) {
-    console.error('renewContract error', e)
-    res.status(e.status || 400).json({ message: e.message || 'Failed to renew contract.' })
+      managerLoginId,
+      gmLoginId,
+      cooLoginId,
+
+      approvalMode,
+
+      joinDate,
+      contractDate: contractDate || '',
+      contractEndDate: isValidYMD(contractDate) ? contractEndFromStart(contractDate) : '',
+
+      isActive: e.isActive === false ? false : true,
+
+      // legacy carry -> model will migrate into first contract
+      carry,
+    })
+
+    const saved = await recomputeAndSaveBalances(doc)
+    emitProfile(req, saved, 'leave:profile:created')
+
+    created.push(await attachEmployeeDirectory(saved.toObject()))
   }
+
+  return res.json({ ok: true, createdCount: created.length, created })
 }
 
-/**
- * ✅ Update carry for a specific contract number
- * PATCH /api/admin/leave/profiles/:employeeId/contracts/:contractNo
- * body: { carry: {AL,SP,MC,MA,UL} }
- */
+/* ─────────────────────────────────────────────────────────────
+   PATCH /admin/leave/profiles/:employeeId
+   Update profile settings (mode + approvers + joinDate + active)
+───────────────────────────────────────────────────────────── */
+exports.updateProfile = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const body = req.body || {}
+
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
+
+  // allow updating these safely
+  const nextApprovalMode = normalizeApprovalMode(body.approvalMode ?? doc.approvalMode)
+
+  const nextManager = s(body.managerLoginId ?? doc.managerLoginId)
+  const nextGm = s(body.gmLoginId ?? doc.gmLoginId)
+  const nextCoo = s(body.cooLoginId ?? doc.cooLoginId)
+
+  validateModeApprovers(nextApprovalMode, {
+    managerLoginId: nextManager,
+    gmLoginId: nextGm,
+    cooLoginId: nextCoo,
+  })
+
+  doc.approvalMode = nextApprovalMode
+  doc.managerLoginId = nextManager
+  doc.gmLoginId = nextGm
+  doc.cooLoginId = nextCoo
+
+  if (body.joinDate !== undefined) doc.joinDate = s(body.joinDate)
+  if (body.contractDate !== undefined) doc.contractDate = s(body.contractDate)
+  if (body.isActive !== undefined) doc.isActive = !!body.isActive
+
+  // optional meta
+  if (body.name !== undefined) doc.name = s(body.name)
+  if (body.department !== undefined) doc.department = s(body.department)
+  if (body.employeeLoginId !== undefined) doc.employeeLoginId = s(body.employeeLoginId)
+
+  // keep pointers aligned to latest contract (model pre-validate will also do this)
+  setPointersToLatest(doc)
+
+  const saved = await recomputeAndSaveBalances(doc)
+  emitProfile(req, saved, 'leave:profile:updated')
+
+  const plain = await attachEmployeeDirectory(saved.toObject())
+  plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
+
+  return res.json(plain)
+}
+
+/* ─────────────────────────────────────────────────────────────
+   DELETE /admin/leave/profiles/:employeeId
+   Deactivate (soft)
+───────────────────────────────────────────────────────────── */
+exports.deactivateProfile = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
+
+  doc.isActive = false
+  await doc.save()
+
+  emitProfile(req, doc, 'leave:profile:updated')
+  return res.json({ ok: true, employeeId, isActive: false })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   GET /admin/leave/profiles/:employeeId/contracts
+───────────────────────────────────────────────────────────── */
+exports.getContractHistory = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const doc = await LeaveProfile.findOne({ employeeId }).lean()
+  if (!doc) throw createError(404, 'Profile not found')
+
+  const contracts = Array.isArray(doc.contracts) ? doc.contracts : []
+  return res.json({ employeeId, contracts })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PATCH /admin/leave/profiles/:employeeId/contracts/:contractNo
+   Update carry for a specific contract
+   body: { carry: {AL,SP,MC,MA,UL} }
+───────────────────────────────────────────────────────────── */
 exports.updateContractCarry = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    const contractNo = Number(req.params?.contractNo || 0)
+  const employeeId = s(req.params.employeeId)
+  const contractNo = Number(req.params.contractNo)
+  if (!Number.isFinite(contractNo) || contractNo <= 0) throw createError(400, 'Invalid contractNo')
 
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
-    if (!Number.isFinite(contractNo) || contractNo <= 0) {
-      return res.status(400).json({ message: 'contractNo must be a positive number.' })
-    }
+  const body = req.body || {}
+  const carry = normalizeCarryObj(body.carry)
 
-    const prof = await LeaveProfile.findOne({ employeeId })
-    if (!prof) return res.status(404).json({ message: 'Profile not found.' })
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
 
-    const body = req.body || {}
-    if (body.carry === undefined) {
-      return res.status(400).json({ message: 'carry is required.' })
-    }
+  const idx = (doc.contracts || []).findIndex((c) => Number(c.contractNo) === contractNo)
+  if (idx < 0) throw createError(404, 'Contract not found')
 
-    ensureContracts(prof)
+  doc.contracts[idx].carry = carry
+  doc.contracts[idx].alCarry = num(carry.AL)
 
-    const idx = (prof.contracts || []).findIndex((c) => Number(c?.contractNo || 0) === contractNo)
-    if (idx < 0) return res.status(404).json({ message: `Contract #${contractNo} not found.` })
+  // align pointers
+  setPointersToLatest(doc)
 
-    const nextCarry = normalizeCarry(body.carry)
-    prof.contracts[idx].carry = nextCarry
+  const saved = await recomputeAndSaveBalances(doc)
+  emitProfile(req, saved, 'leave:profile:updated')
 
-    // ✅ THE FIX (UL/SP/MC/MA sometimes not persisted without this)
-    prof.markModified('contracts')
-    prof.markModified(`contracts.${idx}.carry`)
-
-    const latest = pickLatestContract(prof)
-    const isLatest = latest && Number(latest.contractNo || 0) === contractNo
-
-    if (isLatest) {
-      prof.contractDate = prof.contracts[idx].startDate || prof.contractDate
-      prof.contractEndDate = prof.contracts[idx].endDate || prof.contractEndDate
-      prof.alCarry = Number(nextCarry.AL || 0)
-      await syncBalancesForProfile(prof, nowYMD())
-    }
-
-    await prof.save()
-    emitProfile(req, prof, 'leave:profile:updated')
-
-    res.json({ ok: true, employeeId, contractNo, carry: nextCarry, isLatest })
-  } catch (e) {
-    console.error('updateContractCarry error', e)
-    res.status(e.status || 400).json({ message: e.message || 'Failed to update contract carry.' })
-  }
+  return res.json({
+    ok: true,
+    employeeId,
+    contractNo,
+    carry: saved.contracts[idx].carry,
+  })
 }
 
-exports.resetUserPassword = async (req, res) => {
-  try {
-    const employeeId = s(req.params?.employeeId)
-    const password = req.body?.password
+/* ─────────────────────────────────────────────────────────────
+   POST /admin/leave/profiles/:employeeId/contracts/renew
+   body: { newContractDate, clearUnusedAL?: boolean, note?: string }
+───────────────────────────────────────────────────────────── */
+exports.renewContract = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const { newContractDate, clearUnusedAL = true, note = '' } = req.body || {}
 
-    if (!employeeId) return res.status(400).json({ message: 'employeeId is required.' })
+  if (!isValidYMD(newContractDate)) throw createError(400, 'newContractDate must be YYYY-MM-DD')
 
-    const check = validateStrongPassword(password)
-    if (!check.ok) return res.status(400).json({ message: check.message })
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
 
-    const user = await User.findOne({ loginId: employeeId })
-    if (!user) return res.status(404).json({ message: 'User not found.' })
+  if (!Array.isArray(doc.contracts)) doc.contracts = []
+  const latest = latestContract(doc.contracts)
 
-    user.passwordHash = await bcrypt.hash(String(password), 10)
-    await user.save()
+  // close latest contract (snapshot)
+  if (latest && !latest.closedAt) {
+    // snapshot as of contract end date (or today if missing)
+    const asOf = isValidYMD(latest.endDate) ? latest.endDate : s(doc.contractEndDate)
 
-    res.json({ ok: true })
-  } catch (e) {
-    console.error('resetUserPassword error', e)
-    res.status(e.status || 500).json({ message: e.message || 'Failed to reset password.' })
+    const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' }).sort({ startDate: 1 }).lean()
+    const snap = computeBalances(doc.toObject ? doc.toObject() : doc, approved, new Date())
+
+    latest.closedAt = new Date()
+    latest.closedBy = s(req.user?.loginId || '')
+    latest.note = s(note || latest.note || '')
+    latest.closeSnapshot = {
+      asOf: asOf || s(snap?.meta?.asOfYMD || ''),
+      balances: Array.isArray(snap?.balances) ? snap.balances : [],
+      contractDate: s(latest.startDate || doc.contractDate || ''),
+      contractEndDate: s(latest.endDate || doc.contractEndDate || ''),
+      carry: normalizeCarryObj(latest.carry),
+    }
   }
+
+  // determine AL carry into new contract:
+  // - if clearUnusedAL: keep negative remaining only, clear positive
+  // - else: carry full remaining (including positive)
+  let alRemaining = 0
+  try {
+    const al = (doc.balances || []).find((b) => up(b.leaveTypeCode) === 'AL')
+    alRemaining = num(al?.remaining)
+  } catch {}
+
+  const nextALCarry = clearUnusedAL ? (alRemaining < 0 ? alRemaining : 0) : alRemaining
+
+  const nextContractNo = doc.contracts.length
+    ? Math.max(...doc.contracts.map((c) => num(c.contractNo))) + 1
+    : 1
+
+  doc.contracts.push({
+    contractNo: nextContractNo,
+    startDate: s(newContractDate),
+    endDate: contractEndFromStart(newContractDate),
+    carry: { AL: nextALCarry, SP: 0, MC: 0, MA: 0, UL: 0 },
+    alCarry: nextALCarry,
+    openedAt: new Date(),
+    openedBy: s(req.user?.loginId || ''),
+    note: s(note || ''),
+    closeSnapshot: null,
+  })
+
+  // align pointers to latest contract
+  setPointersToLatest(doc)
+
+  const saved = await recomputeAndSaveBalances(doc)
+  emitProfile(req, saved, 'leave:profile:updated')
+
+  return res.json({
+    ok: true,
+    employeeId,
+    contractDate: saved.contractDate,
+    contractEndDate: saved.contractEndDate,
+    contracts: saved.contracts,
+  })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   POST /admin/leave/profiles/:employeeId/recalculate
+───────────────────────────────────────────────────────────── */
+exports.recalculateBalances = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
+
+  const saved = await recomputeAndSaveBalances(doc)
+  emitProfile(req, saved, 'leave:profile:updated')
+
+  return res.json({ ok: true, employeeId, balances: saved.balances, balancesAsOf: saved.balancesAsOf })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PATCH /admin/leave/profiles/:employeeId/password
+   body: { password }
+   - Admin can set new password directly (no old password)
+───────────────────────────────────────────────────────────── */
+exports.resetUserPassword = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const { password } = req.body || {}
+
+  const prof = await LeaveProfile.findOne({ employeeId }).lean()
+  if (!prof) throw createError(404, 'Profile not found')
+
+  const loginId = s(prof.employeeLoginId)
+  if (!loginId) throw createError(400, 'Profile missing employeeLoginId')
+
+  const err = validateStrongPassword(password)
+  if (err) throw createError(400, err)
+
+  const user = await User.findOne({ loginId })
+  if (!user) throw createError(404, 'User account not found for this profile')
+
+  user.password = await bcrypt.hash(s(password), 10)
+  await user.save()
+
+  return res.json({ ok: true, loginId })
 }

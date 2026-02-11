@@ -1,5 +1,14 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveReport.admin.controller.js
+//
+// ✅ Updated to ONLY 3 approval modes (semantic):
+//    - MANAGER_AND_GM
+//    - MANAGER_AND_COO
+//    - GM_AND_COO
+//
+// ✅ Removes old "MANAGER_GM / GM_COO" reporting labels.
+// ✅ Filters + counts now use the 3 semantic modes.
+// ✅ Keeps everything else (balances, pending strict remaining, stats) the same.
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const LeaveRequest = require('../../models/leave/LeaveRequest')
@@ -23,8 +32,12 @@ function num(v) {
   return Number.isFinite(n) ? n : 0
 }
 
+function up(v) {
+  return safeText(v).toUpperCase()
+}
+
 function uniqUpper(arr) {
-  return [...new Set((arr || []).map((x) => String(x || '').toUpperCase().trim()))].filter(Boolean)
+  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
 function isValidYMD(s) {
@@ -115,7 +128,7 @@ function buildTypeOrder(leaveTypesRows = []) {
 function findBalanceRow(snapshot, code) {
   return (
     (snapshot?.balances || []).find(
-      (b) => String(b.leaveTypeCode || '').toUpperCase() === String(code || '').toUpperCase()
+      (b) => up(b.leaveTypeCode) === up(code)
     ) || null
   )
 }
@@ -134,7 +147,7 @@ function computePendingUsage(pendingDocs = [], yearMeta) {
 
   const sum = (code, docs) =>
     (docs || [])
-      .filter((r) => String(r.leaveTypeCode || '').toUpperCase() === code)
+      .filter((r) => up(r.leaveTypeCode) === up(code))
       .reduce((acc, r) => acc + Number(r.totalDays || 0), 0)
 
   const inRange = (pendingDocs || []).filter(inWindow)
@@ -151,6 +164,7 @@ function computeStrictRemaining(snapshot, pendingUsage) {
   const rem = (code) => Number(findBalanceRow(snapshot, code)?.remaining ?? 0)
 
   const strict = {
+    // ✅ AL strict must subtract pending AL + pending SP (SP borrows AL)
     AL: rem('AL') - (num(pendingUsage.pendingAL) + num(pendingUsage.pendingSP)),
     SP: rem('SP') - num(pendingUsage.pendingSP),
     MC: rem('MC') - num(pendingUsage.pendingMC),
@@ -184,25 +198,36 @@ async function loadDirectoryMap(employeeIds = []) {
 }
 
 /**
- * ✅ Normalize approval mode
+ * ✅ Normalize approval mode to the ONLY 3 semantic values
+ * (supports legacy values from older DB)
  */
-function normalizeApprovalMode(profileLike) {
-  const modeRaw = safeText(profileLike?.approvalMode) || safeText(profileLike?.meta?.approvalMode) || ''
-  const m = modeRaw.toUpperCase()
+function normalizeApprovalMode(v) {
+  const raw = up(v)
 
-  const cooId = safeText(profileLike?.cooLoginId || profileLike?.meta?.cooLoginId)
-  if (cooId) return 'GM_COO'
+  if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
 
-  if (m.includes('COO') || m.includes('GM_COO') || m.includes('GM+COO') || m.includes('GM_AND_COO')) return 'GM_COO'
-  return 'MANAGER_GM'
+  // legacy profile enums you had earlier:
+  // - GM_ONLY  => manager+gm
+  // - GM_AND_COO => gm+coo (sometimes stored)
+  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (raw === 'GM_COO') return 'GM_AND_COO'
+  if (raw === 'GM_OR_COO') return 'GM_AND_COO'
+  if (raw === 'COO_AND_GM') return 'GM_AND_COO'
+  if (raw === 'GM_THEN_COO') return 'GM_AND_COO'
+
+  // some old UIs used MANAGER_GM / GM_COO
+  if (raw === 'MANAGER_GM' || raw === 'MANAGER+GM') return 'MANAGER_AND_GM'
+  if (raw === 'GM_COO' || raw === 'GM+COO') return 'GM_AND_COO'
+
+  return 'MANAGER_AND_GM'
 }
 
 function parseApprovalModeFilter(v) {
-  const s = safeText(v).toUpperCase()
-  if (!s) return ''
-  if (s === 'MANAGER_GM' || s === 'MANAGER+GM' || s === 'MANAGER') return 'MANAGER_GM'
-  if (s === 'GM_COO' || s === 'GM+COO' || s === 'GM_AND_COO' || s === 'COO') return 'GM_COO'
-  return ''
+  const m = normalizeApprovalMode(v)
+  // if query is empty -> no filter
+  return safeText(v) ? m : ''
 }
 
 // ───────────────── controller ─────────────────
@@ -217,7 +242,7 @@ function parseApprovalModeFilter(v) {
  *  - dateFrom/dateTo (or from/to)
  *  - asOf
  *  - limit
- *  - approvalMode=MANAGER_GM|GM_COO
+ *  - approvalMode=MANAGER_AND_GM|MANAGER_AND_COO|GM_AND_COO
  */
 exports.getLeaveReportSummary = async (req, res) => {
   try {
@@ -281,8 +306,6 @@ exports.getLeaveReportSummary = async (req, res) => {
       const gmId = safeText(p.gmLoginId)
       const cooId = safeText(p.cooLoginId)
 
-      const approvalMode = normalizeApprovalMode({ approvalMode: p.approvalMode, cooLoginId: cooId })
-
       return {
         ...p,
         employeeId: empId,
@@ -291,14 +314,12 @@ exports.getLeaveReportSummary = async (req, res) => {
         managerLoginId: managerId,
         gmLoginId: gmId,
         cooLoginId: cooId,
-        approvalMode,
+        approvalMode: normalizeApprovalMode(p.approvalMode),
       }
     })
 
     if (approvalModeFilter) {
-      filteredProfiles = filteredProfiles.filter(
-        (p) => safeText(p.approvalMode).toUpperCase() === approvalModeFilter
-      )
+      filteredProfiles = filteredProfiles.filter((p) => normalizeApprovalMode(p.approvalMode) === approvalModeFilter)
     }
 
     if (departmentQ) {
@@ -371,7 +392,7 @@ exports.getLeaveReportSummary = async (req, res) => {
     }
 
     const employeeRows = []
-    const countsByApprovalMode = { MANAGER_GM: 0, GM_COO: 0 }
+    const countsByApprovalMode = { MANAGER_AND_GM: 0, MANAGER_AND_COO: 0, GM_AND_COO: 0 }
 
     for (const p of filteredProfiles) {
       const empId = safeText(p.employeeId)
@@ -379,21 +400,24 @@ exports.getLeaveReportSummary = async (req, res) => {
       const approved = approvedByEmp.get(empId) || approvedByEmp.get(String(Number(empId))) || []
       const pending = pendingByEmp.get(empId) || pendingByEmp.get(String(Number(empId))) || []
 
-      const snap = computeBalances(p, approved, asOfDate)
+      // ✅ IMPORTANT: pass a profile-like object with semantic approvalMode
+      const profileLike = { ...p, approvalMode: normalizeApprovalMode(p.approvalMode) }
+
+      const snap = computeBalances(profileLike, approved, asOfDate)
       const metaWindow = snap?.meta?.contractYear || snap?.meta?.joinYear || null
 
       const pend = computePendingUsage(pending, metaWindow)
       const strict = computeStrictRemaining(snap, pend)
 
-      const balMap = new Map((snap?.balances || []).map((b) => [String(b.leaveTypeCode || '').toUpperCase(), b]))
+      const balMap = new Map((snap?.balances || []).map((b) => [up(b.leaveTypeCode), b]))
       const balances = TYPE_ORDER.map((code) => {
-        const b = balMap.get(code) || { leaveTypeCode: code, yearlyEntitlement: 0, used: 0, remaining: 0 }
+        const b = balMap.get(up(code)) || { leaveTypeCode: code, yearlyEntitlement: 0, used: 0, remaining: 0 }
         return {
-          leaveTypeCode: code,
+          leaveTypeCode: up(code),
           yearlyEntitlement: num(b.yearlyEntitlement),
           used: num(b.used),
           remaining: num(b.remaining),
-          strictRemaining: num(strict[code]),
+          strictRemaining: num(strict[up(code)]),
         }
       })
 
@@ -414,9 +438,8 @@ exports.getLeaveReportSummary = async (req, res) => {
         t.strictRemaining += num(b.strictRemaining)
       }
 
-      const mode = safeText(p.approvalMode).toUpperCase() || 'MANAGER_GM'
-      if (mode === 'GM_COO') countsByApprovalMode.GM_COO += 1
-      else countsByApprovalMode.MANAGER_GM += 1
+      const mode = normalizeApprovalMode(p.approvalMode)
+      countsByApprovalMode[mode] = (countsByApprovalMode[mode] || 0) + 1
 
       employeeRows.push({
         employeeId: empId,
@@ -431,7 +454,9 @@ exports.getLeaveReportSummary = async (req, res) => {
         cooLoginId: p.cooLoginId || '',
 
         isActive: p.isActive !== false,
+        // legacy (keep output field if UI still reads it)
         alCarry: num(p.alCarry),
+
         balancesAsOf: asOf,
         balances,
         meta: snap?.meta || {},
@@ -451,7 +476,7 @@ exports.getLeaveReportSummary = async (req, res) => {
 
     for (const r of reqSummaryDocs || []) {
       const st = String(r.status || '—')
-      const code = String(r.leaveTypeCode || '—').toUpperCase()
+      const code = up(r.leaveTypeCode || '—')
 
       reqCountsByStatus[st] = (reqCountsByStatus[st] || 0) + 1
       reqCountsByType[code] = (reqCountsByType[code] || 0) + 1
@@ -466,7 +491,7 @@ exports.getLeaveReportSummary = async (req, res) => {
     // replace day stats
     const repCountsByStatus = {}
     const repByMonth = {}
-    let repEvidenceFiles = 0 // ✅ FIXED (no _ATTACH)
+    let repEvidenceFiles = 0
 
     for (const r of replaceDocs || []) {
       const st = String(r.status || '—')
@@ -482,11 +507,12 @@ exports.getLeaveReportSummary = async (req, res) => {
     const recentLeaveRequests = (reqSummaryDocs || []).slice(0, limit).map((r) => ({
       _id: String(r._id || ''),
       employeeId: safeText(r.employeeId),
-      leaveTypeCode: String(r.leaveTypeCode || '').toUpperCase(),
+      leaveTypeCode: up(r.leaveTypeCode),
       startDate: toYMD(r.startDate),
       endDate: toYMD(r.endDate),
       totalDays: num(r.totalDays),
       status: String(r.status || ''),
+      approvalMode: normalizeApprovalMode(r.approvalMode),
       createdAt: r.createdAt || null,
       managerLoginId: safeText(r.managerLoginId),
       gmLoginId: safeText(r.gmLoginId),

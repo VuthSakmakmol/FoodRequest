@@ -1,6 +1,6 @@
 <!-- src/views/expat/admin/profiles/AdminExpatProfile.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
@@ -11,10 +11,37 @@ defineOptions({ name: 'AdminExpatProfile' })
 const router = useRouter()
 const { showToast } = useToast()
 
+/* ─────────────────────────────────────────────────────────────
+   Helpers
+───────────────────────────────────────────────────────────── */
 function fmt(v) {
   const s = String(v ?? '').trim()
   return s || ''
 }
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+function safeTxt(v) {
+  const s = String(v ?? '').trim()
+  return s ? s : 'None'
+}
+function mustYmd(v) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
+}
+
+const showRowPwd = ref([])         
+const showSinglePwd = ref(false)  
+
+function ensurePwdToggles() {
+  const need = form.value.rows.length
+  while (showRowPwd.value.length < need) showRowPwd.value.push(false)
+  while (showRowPwd.value.length > need) showRowPwd.value.pop()
+}
+
 
 /* Excel sheet names cannot contain: \ / ? * [ ] : and max length 31 */
 function safeSheetName(name, fallback = 'Manager') {
@@ -26,229 +53,83 @@ function safeSheetName(name, fallback = 'Manager') {
   return s
 }
 
-/* ───────── helpers ───────── */
-function num(v) {
-  const n = Number(v ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-function safeTxt(v) {
-  const s = String(v ?? '').trim()
-  return s ? s : 'None'
-}
-function up(v) {
-  return String(v ?? '').trim().toUpperCase()
-}
-
-/* ───────── pickers (EmployeeSearch model) ───────── */
-function pickLoginId(emp) {
-  const e = emp || {}
-  return String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
-}
-function pickEmployeeId(emp) {
-  const e = emp || {}
-  return String(e.employeeId || e.empId || e.id || '').trim()
-}
-
-/**
- * Build a balance map by type code:
- * - ent = yearlyEntitlement (already includes carry effect from backend)
- * - used = used (+ abs(negative carry) as debt like your UI)
- * - remain = ent - used
- */
-function buildBalanceMap(balances) {
-  const arr = Array.isArray(balances) ? balances : []
-  const m = new Map()
-
-  for (const b of arr) {
-    const code = String(b?.leaveTypeCode || '').toUpperCase().trim()
-    if (!code) continue
-
-    const ent = num(b.yearlyEntitlement)
-    const used = num(b.used)
-    const remain = Number.isFinite(b.remaining) ? num(b.remaining) : ent - used
-
-    m.set(code, { ent, used, remain })
-  }
-
-  return m
-}
-
-function buildRow(e, managerName = '') {
-  const get = (code) => bm.get(code) || { used: 0, ent: 0, remain: 0 }
-
-  const AL = get('AL')
-  const SP = get('SP')
-  const MC = get('MC')
-  const MA = get('MA')
-  const UL = get('UL')
-
-  return {
-    Manager: fmt(managerName),
-    EmployeeID: fmt(e.employeeId),
-    Name: fmt(e.name),
-    Department: fmt(e.department),
-    JoinDate: fmt(e.joinDate),
-    ContractDate: fmt(e.contractDate),
-    ContractEnd: fmt(e.contractEndDate),
-    Mode: modeLabel(e.approvalMode),
-    Status: e.isActive ? 'Active' : 'Inactive',
-
-    // ✅ AL
-    AL_Used: AL.used,
-    AL_Ent: AL.ent,
-    AL_Remain: AL.remain,
-
-    // ✅ SP
-    SP_Used: SP.used,
-    SP_Ent: SP.ent,
-    SP_Remain: SP.remain,
-
-    // ✅ MC/MA/UL (used only)
-    MC_Used: MC.used,
-    MA_Used: MA.used,
-    UL_Used: UL.used,
-  }
-}
-
-/**
- * ✅ Export ALL filtered data grouped into sheets by manager (1 workbook)
- * - Uses filteredManagers (q + includeInactive already applied)
- * - Exports ALL rows (ignores pagination)
- * - Each manager becomes a sheet
- */
-function exportGroupedByManagerExcel() {
-  const base = Array.isArray(filteredManagers.value) ? filteredManagers.value : []
-  if (!base.length) {
-    showToast({ type: 'info', title: 'Export', message: 'No data to export.' })
-    return
-  }
-
-  const wb = XLSX.utils.book_new()
-
-  // Summary sheet
-  const summaryRows = base.map((g) => ({
-    Manager: fmt(g.manager?.name) || 'Unknown Manager',
-    ManagerEmployeeId: fmt(g.manager?.employeeId),
-    Department: fmt(g.manager?.department),
-    Employees: (g.employees || []).length,
-  }))
-  const wsSummary = XLSX.utils.json_to_sheet(summaryRows)
-  wsSummary['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }, { wch: 10 }]
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
-
-  // Avoid duplicate sheet names
-  const usedNames = new Map()
-
-  for (const g of base) {
-    const managerName = fmt(g.manager?.name) || 'Unknown Manager'
-    const list = Array.isArray(g.employees) ? g.employees : []
-    const rows = list.map((e) => buildRow(e, managerName))
-
-    let sheetName = safeSheetName(managerName, 'Manager')
-    const used = usedNames.get(sheetName) || 0
-    usedNames.set(sheetName, used + 1)
-    if (used > 0) {
-      const suffix = ` (${used + 1})`
-      sheetName = safeSheetName(sheetName.slice(0, 31 - suffix.length) + suffix)
-    }
-
-    const ws = XLSX.utils.json_to_sheet(rows)
-
-    ws['!cols'] = [
-      { wch: 22 }, // Manager
-      { wch: 12 }, // EmployeeID
-      { wch: 22 }, // Name
-      { wch: 22 }, // Department
-      { wch: 12 }, // JoinDate
-      { wch: 12 }, // ContractDate
-      { wch: 12 }, // ContractEnd
-      { wch: 14 }, // Mode
-      { wch: 10 }, // Status
-
-      { wch: 10 }, // AL_Used
-      { wch: 10 }, // AL_Ent
-      { wch: 12 }, // AL_Remain
-
-      { wch: 10 }, // SP_Used
-      { wch: 10 }, // SP_Ent
-      { wch: 12 }, // SP_Remain
-
-      { wch: 10 }, // MC_Used
-      { wch: 10 }, // MA_Used
-      { wch: 10 }, // UL_Used
-    ]
-
-    XLSX.utils.book_append_sheet(wb, ws, sheetName)
-  }
-
-  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-  const filename = `ExpatProfiles-GroupedByManager-${stamp}.xlsx`
-  XLSX.writeFile(wb, filename)
-
-  showToast({ type: 'success', title: 'Export', message: `Saved: ${filename}` })
-}
-
-/* ───────── responsive ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Responsive
+───────────────────────────────────────────────────────────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── main state ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Main state
+───────────────────────────────────────────────────────────── */
 const loading = ref(false)
 const error = ref('')
+
+/* ✅ smooth: checkbox is UI-only, appliedInactive triggers fetch only when clicking Apply */
 const includeInactive = ref(false)
+const appliedInactive = ref(false)
+
 const q = ref('')
 const groups = ref([])
 
-function compactBalances(balances) {
+/* ─────────────────────────────────────────────────────────────
+   Chips
+───────────────────────────────────────────────────────────── */
+function statusChipClasses(active) {
+  return active ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
+}
+function modeChipClasses(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO') return 'ui-badge ui-badge-indigo'
+  return 'ui-badge ui-badge-info'
+}
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  return 'Manager + GM'
+}
+
+/* balances compact chips */
+function compactBalances(balances, employeeRow) {
   const arr = Array.isArray(balances) ? balances : []
   const order = ['AL', 'SP', 'MC', 'MA', 'UL']
   const m = new Map(arr.map((x) => [String(x.leaveTypeCode || '').toUpperCase(), x]))
-  const out = []
 
+  const carryMap = getCarryMapFromEmployee(employeeRow)
+
+  const out = []
   for (const k of order) {
     const b = m.get(k)
     if (!b) continue
 
-    const ent = num(b.yearlyEntitlement)
     const used = num(b.used)
-    const remaining = Number.isFinite(b.remaining) ? num(b.remaining) : ent - used
+    const remaining = Number.isFinite(b.remaining) ? num(b.remaining) : num(b.yearlyEntitlement) - used
+
+    const carry = num(carryMap[k])
+    const usedDisplay = used + Math.max(0, -carry)
+    let remainingDisplay = remaining + carry
+    if (k === 'UL') remainingDisplay = Math.max(0, remainingDisplay)
 
     out.push({
       k,
-      used,
-      ent,
-      remaining,
-      pair: `${used}/${remaining}`,
+      used: usedDisplay,
+      remaining: remainingDisplay,
+      pair: `${usedDisplay}/${remainingDisplay}`,
     })
   }
-
   return out
 }
 
-
-function statusChipClasses(active) {
-  return active ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'
-}
-
-/**
- * ✅ approvalMode (2 modes only)
- * - MANAGER_AND_GM
- * - GM_AND_COO
- */
-function modeChipClasses(mode) {
-  const m = up(mode)
-  return m === 'GM_AND_COO' ? 'ui-badge ui-badge-indigo' : 'ui-badge ui-badge-info'
-}
-function modeLabel(mode) {
-  const m = up(mode)
-  return m === 'GM_AND_COO' ? 'GM + COO' : 'Manager + GM'
-}
-
 function pairChipClasses(remaining) {
-  if (Number(remaining) < 0) return 'ui-badge ui-badge-danger'
+  const r = num(remaining)
+
+  // ✅ red when remain is 0 (or below)
+  if (r <= 0) return 'ui-badge ui-badge-danger'
+
   return [
     'ui-badge',
     'border-slate-200 bg-white text-slate-800',
@@ -256,7 +137,11 @@ function pairChipClasses(remaining) {
   ].join(' ')
 }
 
-/* ───────── navigation ───────── */
+
+
+/* ─────────────────────────────────────────────────────────────
+   Navigation
+───────────────────────────────────────────────────────────── */
 function goProfile(employeeId) {
   const id = String(employeeId || '').trim()
   if (!id) return
@@ -268,30 +153,51 @@ function goEdit(employeeId) {
   router.push({ name: 'leave-admin-profile-edit', params: { employeeId: id } })
 }
 
-/* ───────── API ───────── */
+/* ─────────────────────────────────────────────────────────────
+   API: grouped list
+   ✅ smooth: fetch only on load / refresh / Apply
+───────────────────────────────────────────────────────────── */
 async function fetchGroups() {
   loading.value = true
   error.value = ''
   try {
     const res = await api.get('/admin/leave/profiles/grouped', {
-      params: { includeInactive: includeInactive.value ? '1' : '0' },
+      params: { includeInactive: appliedInactive.value ? 'true' : 'false' },
     })
-    groups.value = Array.isArray(res.data) ? res.data : []
+
+    const data = res.data
+    const arr =
+      Array.isArray(data) ? data
+      : Array.isArray(data?.groups) ? data.groups
+      : Array.isArray(data?.rows) ? data.rows
+      : Array.isArray(data?.data) ? data.data
+      : []
+
+    groups.value = arr
   } catch (e) {
     console.error('fetchGroups error', e)
-    error.value = e?.response?.data?.message || e.message || 'Failed to load profiles.'
+    error.value = e?.response?.data?.message || e?.message || 'Failed to load profiles.'
     showToast({ type: 'error', title: 'Failed to load', message: error.value })
+    groups.value = []
   } finally {
     loading.value = false
   }
 }
 
+async function applyFilters() {
+  appliedInactive.value = !!includeInactive.value
+  await fetchGroups()
+}
+
 function clearFilters() {
   q.value = ''
   includeInactive.value = false
+  // ✅ do NOT auto-fetch (no vibration)
 }
 
-/* ───────── filtering ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Filtering (client-side only; smooth typing)
+───────────────────────────────────────────────────────────── */
 const filteredManagers = computed(() => {
   const term = String(q.value || '').trim().toLowerCase()
   const base = Array.isArray(groups.value) ? groups.value : []
@@ -318,13 +224,17 @@ const filteredManagers = computed(() => {
     .filter((g) => (g.employees || []).length > 0)
 })
 
-const filteredCount = computed(() => filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0))
+const filteredCount = computed(() =>
+  filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
+)
 const managerCount = computed(() => filteredManagers.value.length)
 
-/* ───────── pagination (flatten -> slice -> regroup) ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Pagination (flatten -> slice -> regroup)
+───────────────────────────────────────────────────────────── */
 const page = ref(1)
 const pageSize = ref(10)
-const PAGE_SIZES = [ 10, 20, 50, 100, 500, 1000]
+const PAGE_SIZES = [10, 20, 50, 100, 500, 1000]
 
 const flatEmployees = computed(() => {
   const out = []
@@ -340,7 +250,6 @@ const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / pageSi
 watch([totalRows, pageSize], () => {
   page.value = 1
 })
-
 watch(page, () => {
   if (page.value > totalPages.value) page.value = totalPages.value
   if (page.value < 1) page.value = 1
@@ -359,7 +268,6 @@ const pagedEmployees = computed(() => {
 
 const pagedIdSet = computed(() => new Set(pagedEmployees.value.map((e) => String(e.employeeId || '').trim())))
 
-/* regroup managers but keep original order */
 const pagedManagers = computed(() => {
   const set = pagedIdSet.value
   return filteredManagers.value
@@ -377,16 +285,13 @@ function nextPage() {
   page.value = Math.min(totalPages.value, page.value + 1)
 }
 
-/* reset page when filters change */
-watch([q, includeInactive], () => {
-  page.value = 1
-})
-watch(includeInactive, () => fetchGroups())
+watch(q, () => (page.value = 1))
 
-/* ───────── default approvers (AUTO from seed) ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Approvers (auto from seed)
+───────────────────────────────────────────────────────────── */
 const approversLoading = ref(false)
 const approversError = ref('')
-
 const defaultGm = ref({ loginId: 'leave_gm', name: 'Expat GM', role: 'LEAVE_GM' })
 const defaultCoo = ref({ loginId: 'leave_coo', name: 'COO', role: 'LEAVE_COO' })
 
@@ -406,7 +311,6 @@ async function fetchDefaultApprovers() {
   try {
     const res = await api.get('/admin/leave/approvers')
     const arr = Array.isArray(res.data) ? res.data : []
-
     const gm = arr.find((a) => normRole(a) === 'LEAVE_GM')
     const coo = arr.find((a) => normRole(a) === 'LEAVE_COO')
 
@@ -417,7 +321,6 @@ async function fetchDefaultApprovers() {
         role: 'LEAVE_GM',
       }
     }
-
     if (coo) {
       defaultCoo.value = {
         loginId: normLoginId(coo) || defaultCoo.value.loginId,
@@ -434,19 +337,18 @@ async function fetchDefaultApprovers() {
   }
 }
 
-/* ───────── create modal ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Create modal + form
+───────────────────────────────────────────────────────────── */
 const createOpen = ref(false)
 const createTab = ref('bulk') // bulk | single
 const createError = ref('')
 const saving = ref(false)
-
-/* ✅ show/hide extra carry inputs */
 const showCarryAdvanced = ref(false)
 
 function emptyCarry() {
   return { AL: 0, SP: 0, MC: 0, MA: 0, UL: 0 }
 }
-
 function normalizeCarry(c) {
   const src = c || {}
   return {
@@ -458,78 +360,243 @@ function normalizeCarry(c) {
   }
 }
 
-/* ✅ strong password check (same rule as backend) */
+/* strong password rule */
 function validateStrongPassword(pwd) {
   const p = String(pwd || '')
-
-  // optional allowed; if you want REQUIRED, change this line:
-  if (!p) return { ok: true }
-
+  if (!p) return { ok: true } // optional
   if (p.length < 13) return { ok: false, message: 'Password must be at least 13 characters.' }
-
   const hasUpper = /[A-Z]/.test(p)
   const hasLower = /[a-z]/.test(p)
   const hasNum = /\d/.test(p)
   const hasSym = /[^A-Za-z0-9]/.test(p)
   const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
-
-  if (score < 3) {
-    return { ok: false, message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.' }
-  }
+  if (score < 3) return { ok: false, message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.' }
   return { ok: true }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   Employee search (SIMPLE + SMOOTH)
+   ✅ Type -> Enter (or click 🔍) -> dropdown results
+   ✅ No API calls while typing (no vibration)
+───────────────────────────────────────────────────────────── */
+function createSearchModel() {
+  return { query: '', open: false, loading: false, error: '', results: [], selected: null, activeIndex: 0 }
+}
+
+const mgrSearch = ref(createSearchModel())
+const singleMgrSearch = ref(createSearchModel())
+const singleEmpSearch = ref(createSearchModel())
+const rowSearches = ref([])
+
+function pickEmployeeId(emp) {
+  const e = emp || {}
+  return String(e.employeeId || e.empId || e.id || '').trim()
+}
+
+function pickLoginId(emp) {
+  const e = emp || {}
+
+  // ✅ First try real loginId fields
+  const login =
+    String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
+
+  if (login) return login
+
+  // ✅ Fallback: use employeeId as loginId (your system standard)
+  return String(e.employeeId || e.empId || e.id || '').trim()
+}
+
+function pickName(emp) {
+  const e = emp || {}
+  return String(e.name || e.fullName || `${e.firstName || ''} ${e.lastName || ''}` || '').trim()
+}
+
+function debounce(fn, wait = 300) {
+  let t = null
+  return (...args) => {
+    clearTimeout(t)
+    t = setTimeout(() => fn(...args), wait)
+  }
+}
+
+const debouncedRunSearch = debounce((model) => runSearchSimple(model), 300)
+
+
+async function searchEmployees(qText) {
+  const qv = String(qText || '').trim()
+  if (!qv) return []
+
+  // ✅ Always call the mounted backend route: /api/public/employees
+  // If your axios baseURL already includes "/api", this still works
+  // because we normalize below.
+  const url = (() => {
+    const base = String(api?.defaults?.baseURL || '').trim()
+    // if baseURL already ends with "/api", use "/public/employees"
+    if (base.endsWith('/api')) return '/public/employees'
+    // otherwise call absolute api path
+    return '/api/public/employees'
+  })()
+
+  const res = await api.get(url, { params: { q: qv } })
+
+  const data = res.data
+  const arr =
+    Array.isArray(data) ? data :
+    Array.isArray(data?.rows) ? data.rows :
+    Array.isArray(data?.data) ? data.data :
+    []
+
+  return arr
+}
+
+
+function displayOption(e) {
+  const id = pickEmployeeId(e)
+  const name = pickName(e)
+  const dept = String(e?.departmentName || e?.department || e?.dept || '').trim()
+  return `${id} — ${name}${dept ? ` • ${dept}` : ''}`
+}
+
+function setSelected(model, emp) {
+  model.selected = emp
+  model.query = emp ? displayOption(emp) : ''
+  model.results = []
+  model.error = ''
+  model.activeIndex = 0
+  model.open = false
+}
+function clearSelected(model) {
+  model.selected = null
+  model.query = ''
+  model.results = []
+  model.error = ''
+  model.activeIndex = 0
+  model.open = false
+}
+
+async function runSearchSimple(model) {
+const qv = String(model.query || '').split('—')[0].trim() || String(model.query || '').trim()
+  model.error = ''
+  model.results = []
+  model.open = false
+
+  if (!qv || qv.length < 2) {
+    model.open = true
+    model.error = 'Type at least 2 characters.'
+    return
+  }
+
+  model.loading = true
+  try {
+    const rows = await searchEmployees(qv)
+    model.results = rows
+    model.open = true
+    model.activeIndex = 0
+  } catch (e) {
+    model.error = e?.response?.data?.message || e?.message || 'Search failed'
+    model.open = true
+  } finally {
+    model.loading = false
+  }
+}
+
+/* ✅ IMPORTANT FIX: DO NOT use capture=true, or dropdown closes immediately */
+function onDocClick() {
+  ;[mgrSearch.value, singleMgrSearch.value, singleEmpSearch.value, ...rowSearches.value].forEach((m) => {
+    if (m) m.open = false
+  })
+}
+
+/* rows */
 function newRow() {
   return {
     key: Math.random().toString(16).slice(2),
-    employee: null,
     joinDate: '',
     contractDate: '',
     carry: emptyCarry(),
     isActive: true,
-
-    // ✅ NEW
     password: '',
   }
 }
 
 const form = ref({
   approvalMode: 'MANAGER_AND_GM',
-  manager: null,
   rows: [newRow()],
-
-  singleEmployee: null,
   singleJoinDate: '',
   singleContractDate: '',
   singleCarry: emptyCarry(),
   singleActive: true,
-  singleManager: null,
-
-  // ✅ NEW
   singlePassword: '',
+})
+
+function ensureRowSearchModels() {
+  const need = form.value.rows.length
+  while (rowSearches.value.length < need) rowSearches.value.push(createSearchModel())
+  while (rowSearches.value.length > need) rowSearches.value.pop()
+
+  ensurePwdToggles()
+}
+
+
+const needsCoo = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO'
+})
+const requiresManager = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO'
+})
+const approverReady = computed(() => {
+  const gmOk = !!String(defaultGm.value?.loginId || '').trim()
+  const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
+  return needsCoo.value ? gmOk && cooOk : gmOk
 })
 
 function openCreate() {
   createError.value = ''
   createTab.value = 'bulk'
   showCarryAdvanced.value = false
+
   form.value = {
     approvalMode: 'MANAGER_AND_GM',
-    manager: null,
     rows: [newRow()],
-
-    singleEmployee: null,
     singleJoinDate: '',
     singleContractDate: '',
     singleCarry: emptyCarry(),
     singleActive: true,
-    singleManager: null,
-
     singlePassword: '',
   }
+
+  // ✅ ADD HERE (reset password visibility)
+  showSinglePwd.value = false
+  showRowPwd.value = []
+  // (ensureRowSearchModels() will call ensurePwdToggles() if you added it)
+
+  mgrSearch.value = createSearchModel()
+  singleMgrSearch.value = createSearchModel()
+  singleEmpSearch.value = createSearchModel()
+  rowSearches.value = [createSearchModel()]
+  ensureRowSearchModels()
+
   createOpen.value = true
   fetchDefaultApprovers()
 }
+
+
+function getCarryMapFromEmployee(e) {
+  const list = Array.isArray(e?.contracts) ? e.contracts : []
+  const cur = list.find((x) => x.isCurrent) || list[0] || null
+  const c = cur?.carry || e?.carry || {}
+  return {
+    AL: num(c.AL),
+    SP: num(c.SP),
+    MC: num(c.MC),
+    MA: num(c.MA),
+    UL: num(c.UL),
+  }
+}
+
+
 function closeCreate() {
   if (saving.value) return
   createOpen.value = false
@@ -537,14 +604,16 @@ function closeCreate() {
 
 function addRow() {
   form.value.rows.push(newRow())
+  ensureRowSearchModels()
 }
 function removeRow(idx) {
   if (form.value.rows.length === 1) return
   form.value.rows.splice(idx, 1)
+  ensureRowSearchModels()
 }
 
-function syncContractFromJoin(row) {
-  if (!row.contractDate && row.joinDate) row.contractDate = row.joinDate
+function syncContractFromJoinRow(r) {
+  if (!r.contractDate && r.joinDate) r.contractDate = r.joinDate
 }
 function syncSingleContract() {
   if (!form.value.singleContractDate && form.value.singleJoinDate) {
@@ -552,29 +621,17 @@ function syncSingleContract() {
   }
 }
 
-function mustYmd(v) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
-}
-
-const needsCoo = computed(() => up(form.value.approvalMode) === 'GM_AND_COO')
-const requiresManager = computed(() => up(form.value.approvalMode) === 'MANAGER_AND_GM')
-
+/* approvalMode changes: clear manager selections if manager not required */
 watch(
   () => form.value.approvalMode,
   (v) => {
     const mode = up(v)
     if (mode === 'GM_AND_COO') {
-      form.value.manager = null
-      form.value.singleManager = null
+      clearSelected(mgrSearch.value)
+      clearSelected(singleMgrSearch.value)
     }
   }
 )
-
-const approverReady = computed(() => {
-  const gmOk = !!String(defaultGm.value?.loginId || '').trim()
-  const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
-  return needsCoo.value ? gmOk && cooOk : gmOk
-})
 
 async function submitCreate() {
   createError.value = ''
@@ -582,7 +639,7 @@ async function submitCreate() {
     saving.value = true
 
     const mode = up(form.value.approvalMode || '')
-    if (!['MANAGER_AND_GM', 'GM_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'].includes(mode)) {
       throw new Error('Invalid approval mode.')
     }
 
@@ -590,55 +647,71 @@ async function submitCreate() {
     const cooLoginId = String(defaultCoo.value?.loginId || '').trim()
 
     if (!gmLoginId) throw new Error('GM approver is missing (seed or /admin/leave/approvers).')
-    if (mode === 'GM_AND_COO' && !cooLoginId)
-      throw new Error('COO approver is missing (seed or /admin/leave/approvers).')
-
-    if (mode === 'MANAGER_AND_GM') {
-      const chosen = createTab.value === 'bulk' ? form.value.manager : form.value.singleManager || form.value.manager
-      const managerEmpId = pickEmployeeId(chosen)
-      if (!managerEmpId) throw new Error('Manager is required for Manager + GM mode.')
+    if ((mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') && !cooLoginId) {
+      throw new Error('COO approver is missing.')
     }
 
-    // BULK
+    // ✅ manager is required in manager modes
+    if (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO') {
+      const chosen = createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected
+      const managerEmpId = pickEmployeeId(chosen)
+      const managerLoginId = pickLoginId(chosen)
+
+      if (!managerEmpId) throw new Error('Manager is required for Manager modes.')
+      if (!managerLoginId) throw new Error('Manager loginId is missing in directory result.')
+    }
+
+    // ─────────────────────────────
+    // BULK: Manager + multiple employees
+    // ─────────────────────────────
     if (createTab.value === 'bulk') {
       const rows = form.value.rows || []
       if (!rows.length) throw new Error('Please add at least 1 employee.')
 
       const employees = rows.map((r, i) => {
-        const employeeId = pickEmployeeId(r.employee)
+        const emp = rowSearches.value[i]?.selected
+        const employeeId = pickEmployeeId(emp)
         if (!employeeId) throw new Error(`Employee #${i + 1} is required.`)
+
+        // ✅ FIX: must send employeeLoginId (backend requires)
+        const employeeLoginId = pickLoginId(emp) || employeeId
+
         if (!mustYmd(r.joinDate)) throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
         const contractDate = r.contractDate || r.joinDate
         if (!mustYmd(contractDate)) throw new Error(`Contract date (Employee #${i + 1}) must be YYYY-MM-DD.`)
 
-        const carry = normalizeCarry(r.carry)
-
         const pwdCheck = validateStrongPassword(r.password)
         if (!pwdCheck.ok) throw new Error(`Employee #${i + 1}: ${pwdCheck.message}`)
 
+        const carry = normalizeCarry(r.carry)
+
         return {
           employeeId,
+          employeeLoginId, // ✅ IMPORTANT
           joinDate: r.joinDate,
           contractDate,
           carry,
           alCarry: Number(carry.AL || 0),
           isActive: r.isActive !== false,
-
-          // ✅ NEW
           password: String(r.password || '').trim() || undefined,
         }
       })
 
-      const managerEmpId = mode === 'MANAGER_AND_GM' ? pickEmployeeId(form.value.manager) : ''
-      const managerLoginId = mode === 'MANAGER_AND_GM' ? pickLoginId(form.value.manager) : ''
+      const managerEmpId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
+        ? pickEmployeeId(mgrSearch.value.selected)
+        : ''
+
+      const managerLoginId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
+        ? pickLoginId(mgrSearch.value.selected)
+        : ''
 
       const payload = {
         approvalMode: mode,
         managerEmployeeId: managerEmpId,
         managerLoginId,
         gmLoginId,
-        cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
+        cooLoginId: (mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') ? cooLoginId : '',
         employees,
       }
 
@@ -655,37 +728,47 @@ async function submitCreate() {
       return
     }
 
-    // SINGLE
-    const employeeId = pickEmployeeId(form.value.singleEmployee)
+    // ─────────────────────────────
+    // SINGLE: one employee
+    // ─────────────────────────────
+    const emp = singleEmpSearch.value.selected
+    const employeeId = pickEmployeeId(emp)
     if (!employeeId) throw new Error('Employee is required.')
+
+    // ✅ FIX: must send employeeLoginId (backend requires)
+    const employeeLoginId = pickLoginId(emp) || employeeId
+
     if (!mustYmd(form.value.singleJoinDate)) throw new Error('Join date must be YYYY-MM-DD.')
 
     const contractDate = form.value.singleContractDate || form.value.singleJoinDate
     if (!mustYmd(contractDate)) throw new Error('Contract date must be YYYY-MM-DD.')
 
-    const chosenManager = form.value.singleManager || form.value.manager
-    const singleManagerEmpId = mode === 'MANAGER_AND_GM' ? pickEmployeeId(chosenManager) : ''
-    const singleManagerLoginId = mode === 'MANAGER_AND_GM' ? pickLoginId(chosenManager) : ''
-
-    const carry = normalizeCarry(form.value.singleCarry)
-
     const pwdCheck = validateStrongPassword(form.value.singlePassword)
     if (!pwdCheck.ok) throw new Error(pwdCheck.message)
+
+    const managerEmpId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
+      ? pickEmployeeId(singleMgrSearch.value.selected)
+      : ''
+
+    const managerLoginId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
+      ? pickLoginId(singleMgrSearch.value.selected)
+      : ''
+
+    const carry = normalizeCarry(form.value.singleCarry)
 
     const payload = {
       approvalMode: mode,
       employeeId,
+      employeeLoginId, // ✅ IMPORTANT
       joinDate: form.value.singleJoinDate,
       contractDate,
       carry,
       alCarry: Number(carry.AL || 0),
       isActive: form.value.singleActive !== false,
-      managerEmployeeId: singleManagerEmpId,
-      managerLoginId: singleManagerLoginId,
+      managerEmployeeId: managerEmpId,
+      managerLoginId,
       gmLoginId,
-      cooLoginId: mode === 'GM_AND_COO' ? cooLoginId : '',
-
-      // ✅ NEW
+      cooLoginId: (mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') ? cooLoginId : '',
       password: String(form.value.singlePassword || '').trim() || undefined,
     }
 
@@ -696,40 +779,147 @@ async function submitCreate() {
     await fetchGroups()
   } catch (e) {
     console.error('submitCreate error', e)
-    createError.value = e?.response?.data?.message || e.message || 'Failed to create.'
+    createError.value = e?.response?.data?.message || e?.message || 'Failed to create.'
     showToast({ type: 'error', title: 'Failed', message: createError.value })
   } finally {
     saving.value = false
   }
 }
 
-/* ✅ Lock background scroll when modal open */
+
+/* ─────────────────────────────────────────────────────────────
+   Export (Grouped by manager)
+───────────────────────────────────────────────────────────── */
+function buildBalanceMap(balances) {
+  const arr = Array.isArray(balances) ? balances : []
+  const m = new Map()
+  for (const b of arr) {
+    const code = String(b?.leaveTypeCode || '').toUpperCase().trim()
+    if (!code) continue
+    const ent = num(b.yearlyEntitlement)
+    const used = num(b.used)
+    const remain = Number.isFinite(b.remaining) ? num(b.remaining) : ent - used
+    m.set(code, { ent, used, remain })
+  }
+  return m
+}
+function buildRow(e, managerName = '') {
+  const bm = buildBalanceMap(e.balances)
+  const get = (code) => bm.get(code) || { used: 0, ent: 0, remain: 0 }
+  const AL = get('AL')
+  const SP = get('SP')
+  const MC = get('MC')
+  const MA = get('MA')
+  const UL = get('UL')
+
+  return {
+    Manager: fmt(managerName),
+    EmployeeID: fmt(e.employeeId),
+    Name: fmt(e.name),
+    Department: fmt(e.department),
+    JoinDate: fmt(e.joinDate),
+    ContractDate: fmt(e.contractDate),
+    ContractEnd: fmt(e.contractEndDate),
+    Mode: modeLabel(e.approvalMode),
+    Status: e.isActive ? 'Active' : 'Inactive',
+
+    AL_Used: AL.used,
+    AL_Ent: AL.ent,
+    AL_Remain: AL.remain,
+
+    SP_Used: SP.used,
+    SP_Ent: SP.ent,
+    SP_Remain: SP.remain,
+
+    MC_Used: MC.used,
+    MA_Used: MA.used,
+    UL_Used: UL.used,
+  }
+}
+function exportGroupedByManagerExcel() {
+  const base = Array.isArray(filteredManagers.value) ? filteredManagers.value : []
+  if (!base.length) {
+    showToast({ type: 'info', title: 'Export', message: 'No data to export.' })
+    return
+  }
+
+  const wb = XLSX.utils.book_new()
+
+  const summaryRows = base.map((g) => ({
+    Manager: fmt(g.manager?.name) || 'Unknown Manager',
+    ManagerEmployeeId: fmt(g.manager?.employeeId),
+    Department: fmt(g.manager?.department),
+    Employees: (g.employees || []).length,
+  }))
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows)
+  wsSummary['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }, { wch: 10 }]
+  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+
+  const usedNames = new Map()
+  for (const g of base) {
+    const managerName = fmt(g.manager?.name) || 'Unknown Manager'
+    const list = Array.isArray(g.employees) ? g.employees : []
+    const rows = list.map((e) => buildRow(e, managerName))
+
+    let sheetName = safeSheetName(managerName, 'Manager')
+    const used = usedNames.get(sheetName) || 0
+    usedNames.set(sheetName, used + 1)
+    if (used > 0) {
+      const suffix = ` (${used + 1})`
+      sheetName = safeSheetName(sheetName.slice(0, 31 - suffix.length) + suffix)
+    }
+
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [
+      { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 10 },
+      { wch: 10 }, { wch: 10 }, { wch: 12 },
+      { wch: 10 }, { wch: 10 }, { wch: 12 },
+      { wch: 10 }, { wch: 10 }, { wch: 10 },
+    ]
+    XLSX.utils.book_append_sheet(wb, ws, sheetName)
+  }
+
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const filename = `ExpatProfiles-GroupedByManager-${stamp}.xlsx`
+  XLSX.writeFile(wb, filename)
+  showToast({ type: 'success', title: 'Export', message: `Saved: ${filename}` })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Modal scroll lock
+───────────────────────────────────────────────────────────── */
 watch(createOpen, (open) => {
   if (typeof document === 'undefined') return
   document.body.classList.toggle('overflow-hidden', !!open)
 })
 
-/* ───────── lifecycle ───────── */
+/* ─────────────────────────────────────────────────────────────
+   Lifecycle
+───────────────────────────────────────────────────────────── */
 onMounted(() => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+
+  // ✅ IMPORTANT: no capture=true
+  if (typeof document !== 'undefined') document.addEventListener('click', onDocClick)
+
   fetchGroups()
   fetchDefaultApprovers()
+  ensureRowSearchModels()
 })
+
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  if (typeof document === 'undefined') return
-  document.body.classList.remove('overflow-hidden')
+  if (typeof document !== 'undefined') document.removeEventListener('click', onDocClick)
+  if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
 })
 </script>
 
 <template>
-  <!-- ✅ Full screen edge-to-edge shell -->
   <div class="ui-page min-h-screen w-full">
     <div class="w-full min-h-screen flex flex-col">
-      <!-- ✅ HERO -->
+      <!-- HERO -->
       <div class="ui-hero-gradient rounded-t-2xl border-x-0 border-t-0">
-        <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="min-w-[240px]">
             <div class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/85">Expat Leave</div>
@@ -755,6 +945,7 @@ onBeforeUnmount(() => {
                          focus:ring-2 focus:ring-white/25"
                 />
               </div>
+              <div class="mt-1 text-[10px] text-white/75">Smooth search (no reload).</div>
             </div>
 
             <div class="flex items-center gap-2 pt-5">
@@ -762,17 +953,27 @@ onBeforeUnmount(() => {
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
+
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
+                @click="applyFilters"
+                :disabled="loading"
+              >
+                <i class="fa-solid fa-filter text-[11px]"></i>
+                Apply
+              </button>
             </div>
 
             <div class="min-w-[140px]">
               <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Per page</div>
-                <select
-                  v-model.number="pageSize"
-                  class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px]
-                        text-slate-900 dark:text-white outline-none"
-                >
-                  <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
-                </select>
+              <select
+                v-model.number="pageSize"
+                class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px]
+                       text-slate-900 dark:text-white outline-none"
+              >
+                <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
+              </select>
             </div>
 
             <div class="flex items-center gap-2">
@@ -789,10 +990,28 @@ onBeforeUnmount(() => {
                 type="button"
                 class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
                 @click="exportGroupedByManagerExcel"
-                title="Export ALL filtered employees grouped by manager (each manager is a sheet)"
               >
                 <i class="fa-solid fa-file-excel text-[11px]" />
                 Export
+              </button>
+
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-broom text-[11px]"></i>
+                Clear
+              </button>
+
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
+                @click="fetchGroups"
+                :disabled="loading"
+              >
+                <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''"></i>
+                Refresh
               </button>
             </div>
           </div>
@@ -825,10 +1044,11 @@ onBeforeUnmount(() => {
                          focus:ring-2 focus:ring-white/25"
                 />
               </div>
+              <div class="mt-1 text-[10px] text-white/75">Smooth search (no reload).</div>
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-2">
-              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold_toggle text-white">
+              <label class="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
@@ -840,6 +1060,16 @@ onBeforeUnmount(() => {
                 >
                   <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}/page</option>
                 </select>
+
+                <button
+                  type="button"
+                  class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
+                  @click="applyFilters"
+                  :disabled="loading"
+                >
+                  <i class="fa-solid fa-filter text-[11px]"></i>
+                  Apply
+                </button>
 
                 <button
                   type="button"
@@ -862,7 +1092,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="flex justify-end">
+            <div class="flex justify-end gap-2">
               <button
                 type="button"
                 class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
@@ -876,9 +1106,8 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ✅ CONTENT AREA -->
+      <!-- CONTENT -->
       <div class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-3">
-        <!-- Error -->
         <div
           v-if="error"
           class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
@@ -887,7 +1116,6 @@ onBeforeUnmount(() => {
           <span class="font-semibold">Failed:</span> {{ error }}
         </div>
 
-        <!-- Loading -->
         <div
           v-if="loading && !pagedManagers.length"
           class="mt-2 ui-card !rounded-2xl border border-ui-border/70 bg-ui-bg-2/60 px-3 py-2 text-[11px] text-ui-muted"
@@ -895,7 +1123,6 @@ onBeforeUnmount(() => {
           Loading profiles...
         </div>
 
-        <!-- Empty -->
         <div v-if="!loading && !error && pagedManagers.length === 0" class="py-8 text-center text-[11px] text-ui-muted">
           No profiles found.
         </div>
@@ -957,10 +1184,10 @@ onBeforeUnmount(() => {
 
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
-                    v-for="b in compactBalances(e.balances)"
+                    v-for="b in compactBalances(e.balances, e)"
                     :key="b.k"
                     class="ui-badge"
-                    :class="pairChipClasses(b.remaining)"
+                    :class="pairChipClasses(b.used, b.remaining)"
                   >
                     {{ b.k }}: {{ b.pair }}
                   </span>
@@ -1018,7 +1245,7 @@ onBeforeUnmount(() => {
                     <th class="ui-th text-center">Join</th>
                     <th class="ui-th text-center">Contract</th>
                     <th class="ui-th text-center">Mode</th>
-                    <th class="ui-th text-center">Balances (U/E)</th>
+                    <th class="ui-th text-center">Balances (U/R)</th>
                     <th class="ui-th text-center">Status</th>
                     <th class="ui-th text-center">Actions</th>
                   </tr>
@@ -1063,14 +1290,13 @@ onBeforeUnmount(() => {
                     <td class="ui-td">
                       <div class="grid grid-cols-5 gap-2 justify-items-center">
                         <span
-                          v-for="b in compactBalances(e.balances)"
+                          v-for="b in compactBalances(e.balances, e)"
                           :key="b.k"
                           class="ui-badge whitespace-nowrap"
                           :class="pairChipClasses(b.remaining)"
                         >
                           {{ b.k }}: {{ b.pair }}
                         </span>
-
                         <span v-if="!e.balances?.length" class="text-[11px] text-ui-muted col-span-3 text-center">None</span>
                       </div>
                     </td>
@@ -1096,7 +1322,7 @@ onBeforeUnmount(() => {
           </section>
         </div>
 
-        <!-- Bottom pagination repeat -->
+        <!-- Bottom pagination -->
         <div
           v-if="!loading && totalRows"
           class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
@@ -1119,10 +1345,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ✅ Create modal -->
+      <!-- Create modal -->
       <transition name="modal-fade">
         <div v-if="createOpen" class="ui-modal-backdrop">
-          <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden">
+          <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden" @click.stop>
             <!-- Header -->
             <div class="ui-hero rounded-b-none px-4 py-3">
               <div class="flex items-start justify-between gap-2">
@@ -1168,24 +1394,114 @@ onBeforeUnmount(() => {
                 <div class="ui-label">Approval mode</div>
                 <select v-model="form.approvalMode" class="ui-select">
                   <option value="MANAGER_AND_GM">Manager + GM</option>
+                  <option value="MANAGER_AND_COO">Manager + COO</option>
                   <option value="GM_AND_COO">GM + COO</option>
                 </select>
-                <p class="mt-1 text-[11px] text-ui-muted">
-                  GM must approve first. If Manager exists, GM cannot see until Manager approves.
-                </p>
+                <p class="mt-1 text-[11px] text-ui-muted">GM must approve first. If Manager exists, GM cannot see until Manager approves.</p>
               </div>
 
+              <!-- Manager picker -->
               <div v-if="requiresManager">
                 <div class="ui-label">Direct manager <span class="text-rose-600">*</span></div>
-                <EmployeeSearch v-if="createTab === 'bulk'" v-model="form.manager" placeholder="Search manager…" />
-                <EmployeeSearch v-else v-model="form.singleManager" placeholder="Search manager…" />
-                <p class="mt-1 text-[11px] text-ui-muted">
-                  Required in <span class="font-semibold">Manager + GM</span> mode.
-                </p>
+
+                <!-- Bulk manager -->
+                <div v-if="createTab === 'bulk'" class="relative" @click.stop>
+                  <div class="relative">
+                    <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
+                    <input
+  v-model="mgrSearch.query"
+  type="text"
+  class="ui-input pl-8 pr-16"
+  placeholder="Type then press Enter..."
+  @input="debouncedRunSearch(mgrSearch)"
+  @keydown.enter.prevent="runSearchSimple(mgrSearch)"
+/>
+
+                    <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="runSearchSimple(mgrSearch)" title="Search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                      </button>
+                      <button v-if="mgrSearch.selected" type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="clearSelected(mgrSearch)" title="Clear">
+                        <i class="fa-solid fa-xmark"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="mgrSearch.open"
+                    class="absolute left-0 right-0 top-full z-50 mt-2 ui-card !rounded-2xl p-2 shadow-xl max-h-[260px] overflow-auto"
+                    @click.stop
+                  >
+                    <div v-if="mgrSearch.loading" class="text-[11px] text-ui-muted px-2 py-1">Searching…</div>
+                    <div v-else-if="mgrSearch.error" class="text-[11px] text-rose-600 px-2 py-1">{{ mgrSearch.error }}</div>
+                    <template v-else>
+                      <button
+                        v-for="(r, idx) in mgrSearch.results"
+                        :key="pickEmployeeId(r) + '_' + idx"
+                        type="button"
+                        class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
+                        :class="idx === (mgrSearch.activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
+                        @click="setSelected(mgrSearch, r)"
+                      >
+                        {{ displayOption(r) }}
+                      </button>
+                      <div v-if="!mgrSearch.results.length" class="text-[11px] text-ui-muted px-2 py-1">No results.</div>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Single manager -->
+                <div v-else class="relative" @click.stop>
+                  <div class="relative">
+                    <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
+                    <input
+                      v-model="singleMgrSearch.query"
+                      type="text"
+                      class="ui-input pl-8 pr-16"
+                      placeholder="Type then press Enter..."
+                      @focus="singleMgrSearch.open = true"
+                      @keydown.enter.prevent="runSearchSimple(singleMgrSearch)"
+                      @keydown.down.prevent="singleMgrSearch.activeIndex = Math.min((singleMgrSearch.activeIndex||0)+1, Math.max((singleMgrSearch.results?.length||1)-1,0))"
+                      @keydown.up.prevent="singleMgrSearch.activeIndex = Math.max((singleMgrSearch.activeIndex||0)-1, 0)"
+                      autocomplete="off"
+                    />
+                    <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="runSearchSimple(singleMgrSearch)" title="Search">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                      </button>
+                      <button v-if="singleMgrSearch.selected" type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="clearSelected(singleMgrSearch)" title="Clear">
+                        <i class="fa-solid fa-xmark"></i>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="singleMgrSearch.open"
+                    class="absolute left-0 right-0 top-full z-50 mt-2 ui-card !rounded-2xl p-2 shadow-xl max-h-[260px] overflow-auto"
+                    @click.stop
+                  >
+                    <div v-if="singleMgrSearch.loading" class="text-[11px] text-ui-muted px-2 py-1">Searching…</div>
+                    <div v-else-if="singleMgrSearch.error" class="text-[11px] text-rose-600 px-2 py-1">{{ singleMgrSearch.error }}</div>
+                    <template v-else>
+                      <button
+                        v-for="(r, idx) in singleMgrSearch.results"
+                        :key="pickEmployeeId(r) + '_' + idx"
+                        type="button"
+                        class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
+                        :class="idx === (singleMgrSearch.activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
+                        @click="setSelected(singleMgrSearch, r)"
+                      >
+                        {{ displayOption(r) }}
+                      </button>
+                      <div v-if="!singleMgrSearch.results.length" class="text-[11px] text-ui-muted px-2 py-1">No results.</div>
+                    </template>
+                  </div>
+                </div>
+
+                <p class="mt-1 text-[11px] text-ui-muted">Required for <span class="font-semibold">Manager</span> modes.</p>
               </div>
-              <div v-else class="text-[11px] text-ui-muted">
-                Manager is not needed in <span class="font-semibold">GM + COO</span> mode.
-              </div>
+
+              <div v-else class="text-[11px] text-ui-muted">Manager is not needed in <span class="font-semibold">GM + COO</span> mode.</div>
 
               <!-- Bulk -->
               <div v-if="createTab === 'bulk'" class="space-y-2">
@@ -1212,13 +1528,61 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
 
-                  <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div class="sm:col-span-2">
-                      <div class="ui-label">Employee *</div>
-                      <EmployeeSearch v-model="r.employee" placeholder="Search employee…" />
-                    </div>
+                  <!-- Employee picker -->
+                  <div class="mt-2">
+                    <div class="ui-label">Employee *</div>
+                    <div class="relative" @click.stop>
+                      <div class="relative">
+                        <i class="fa-solid fa-id-card absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
+                        <input
+                          v-model="rowSearches[i].query"
+                          type="text"
+                          class="ui-input pl-8 pr-16"
+                          placeholder="Type then press Enter..."
+                          @focus="rowSearches[i].open = true"
+                          @input="debouncedRunSearch(rowSearches[i])"
+                          @keydown.enter.prevent="runSearchSimple(rowSearches[i])"
+                          @keydown.down.prevent="rowSearches[i].activeIndex = Math.min((rowSearches[i].activeIndex||0)+1, Math.max((rowSearches[i].results?.length||1)-1,0))"
+                          @keydown.up.prevent="rowSearches[i].activeIndex = Math.max((rowSearches[i].activeIndex||0)-1, 0)"
+                          autocomplete="off"
+                        />
+                        <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                          <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="runSearchSimple(rowSearches[i])" title="Search">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                          </button>
+                          <button v-if="rowSearches[i].selected" type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="clearSelected(rowSearches[i])" title="Clear">
+                            <i class="fa-solid fa-xmark"></i>
+                          </button>
+                        </div>
+                      </div>
 
-                    <div class="flex items-center pt-5 sm:pt-6">
+                      <div
+                        v-if="rowSearches[i].open"
+                        class="absolute left-0 right-0 top-full z-50 mt-2 ui-card !rounded-2xl p-2 shadow-xl"
+                        style="max-height: 260px; overflow:auto;"
+                        @click.stop
+                      >
+                        <div v-if="rowSearches[i].loading" class="text-[11px] text-ui-muted px-2 py-1">Searching…</div>
+                        <div v-else-if="rowSearches[i].error" class="text-[11px] text-rose-600 px-2 py-1">{{ rowSearches[i].error }}</div>
+                        <template v-else>
+                          <button
+                            v-for="(rr, idx) in rowSearches[i].results"
+                            :key="pickEmployeeId(rr) + '_' + idx"
+                            type="button"
+                            class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
+                            :class="idx === (rowSearches[i].activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
+                            @click="setSelected(rowSearches[i], rr)"
+                          >
+                            {{ displayOption(rr) }}
+                          </button>
+                          <div v-if="!rowSearches[i].results.length" class="text-[11px] text-ui-muted px-2 py-1">No results.</div>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div class="flex items-center pt-1 sm:pt-6">
                       <label class="inline-flex items-center gap-2 text-[11px] text-ui-fg">
                         <input v-model="r.isActive" type="checkbox" class="h-4 w-4 rounded border-ui-border/70 bg-transparent" />
                         Active
@@ -1227,7 +1591,7 @@ onBeforeUnmount(() => {
 
                     <div>
                       <div class="ui-label">Join date *</div>
-                      <input v-model="r.joinDate" type="date" class="ui-date" @change="syncContractFromJoin(r)" />
+                      <input v-model="r.joinDate" type="date" class="ui-date" @change="syncContractFromJoinRow(r)" />
                     </div>
 
                     <div>
@@ -1235,22 +1599,28 @@ onBeforeUnmount(() => {
                       <input v-model="r.contractDate" type="date" class="ui-date" />
                     </div>
 
-                    <!-- ✅ Password -->
                     <div class="sm:col-span-3">
                       <div class="ui-label">Password (optional, 13+ strong)</div>
-                      <input
-                        v-model="r.password"
-                        type="password"
-                        autocomplete="new-password"
-                        placeholder="Enter strong password…"
-                        class="ui-input"
-                      />
-                      <p class="mt-1 text-[11px] text-ui-muted">
-                        Must be 13+ and contain at least 3 of: uppercase, lowercase, number, symbol.
-                      </p>
+                      <div class="relative">
+                        <input
+                          v-model="r.password"
+                          :type="showRowPwd[i] ? 'text' : 'password'"
+                          autocomplete="new-password"
+                          placeholder="Enter strong password…"
+                          class="ui-input pr-12"
+                        />
+                        <button
+                          type="button"
+                          class="absolute right-2 top-1/2 -translate-y-1/2 ui-btn ui-btn-ghost ui-btn-xs"
+                          @click="showRowPwd[i] = !showRowPwd[i]"
+                          :title="showRowPwd[i] ? 'Hide password' : 'Show password'"
+                        >
+                          <i class="fa-solid" :class="showRowPwd[i] ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                      </div>
+                      <p class="mt-1 text-[11px] text-ui-muted">Must be 13+ and contain at least 3 of: uppercase, lowercase, number, symbol.</p>
                     </div>
 
-                    <!-- ✅ Carry (AL always visible + optional advanced) -->
                     <div class="sm:col-span-3">
                       <div class="flex items-center justify-between">
                         <div class="ui-label">Carry</div>
@@ -1286,9 +1656,7 @@ onBeforeUnmount(() => {
                         </template>
                       </div>
 
-                      <p class="mt-1 text-[11px] text-ui-muted">
-                        Carry supports positive or negative. Negative values are shown as “debt used” in the list chips.
-                      </p>
+                      <p class="mt-1 text-[11px] text-ui-muted">Carry supports positive or negative.</p>
                     </div>
                   </div>
                 </div>
@@ -1299,7 +1667,54 @@ onBeforeUnmount(() => {
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div class="sm:col-span-2">
                     <div class="ui-label">Employee *</div>
-                    <EmployeeSearch v-model="form.singleEmployee" placeholder="Search employee…" />
+
+                    <div class="relative" @click.stop>
+                      <div class="relative">
+                        <i class="fa-solid fa-id-card absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
+                        <input
+                          v-model="singleEmpSearch.query"
+                          type="text"
+                          class="ui-input pl-8 pr-16"
+                          placeholder="Type then press Enter..."
+                          @focus="singleEmpSearch.open = true"
+                          @input="debouncedRunSearch(singleEmpSearch)"
+                          @keydown.enter.prevent="runSearchSimple(singleEmpSearch)"
+                          @keydown.down.prevent="singleEmpSearch.activeIndex = Math.min((singleEmpSearch.activeIndex||0)+1, Math.max((singleEmpSearch.results?.length||1)-1,0))"
+                          @keydown.up.prevent="singleEmpSearch.activeIndex = Math.max((singleEmpSearch.activeIndex||0)-1, 0)"
+                          autocomplete="off"
+                        />
+                        <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                          <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="runSearchSimple(singleEmpSearch)" title="Search">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                          </button>
+                          <button v-if="singleEmpSearch.selected" type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="clearSelected(singleEmpSearch)" title="Clear">
+                            <i class="fa-solid fa-xmark"></i>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="singleEmpSearch.open"
+                        class="absolute left-0 right-0 top-full z-50 mt-2 ui-card !rounded-2xl p-2 shadow-xl max-h-[260px] overflow-auto"
+                        @click.stop
+                      >
+                        <div v-if="singleEmpSearch.loading" class="text-[11px] text-ui-muted px-2 py-1">Searching…</div>
+                        <div v-else-if="singleEmpSearch.error" class="text-[11px] text-rose-600 px-2 py-1">{{ singleEmpSearch.error }}</div>
+                        <template v-else>
+                          <button
+                            v-for="(rr, idx) in singleEmpSearch.results"
+                            :key="pickEmployeeId(rr) + '_' + idx"
+                            type="button"
+                            class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
+                            :class="idx === (singleEmpSearch.activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
+                            @click="setSelected(singleEmpSearch, rr)"
+                          >
+                            {{ displayOption(rr) }}
+                          </button>
+                          <div v-if="!singleEmpSearch.results.length" class="text-[11px] text-ui-muted px-2 py-1">No results.</div>
+                        </template>
+                      </div>
+                    </div>
                   </div>
 
                   <div class="flex items-center pt-5 sm:pt-6">
@@ -1319,19 +1734,27 @@ onBeforeUnmount(() => {
                     <input v-model="form.singleContractDate" type="date" class="ui-date" />
                   </div>
 
-                  <!-- ✅ Password -->
                   <div class="sm:col-span-3">
                     <div class="ui-label">Password (optional, 13+ strong)</div>
-                    <input
-                      v-model="form.singlePassword"
-                      type="password"
-                      autocomplete="new-password"
-                      placeholder="Enter strong password…"
-                      class="ui-input"
-                    />
+                    <div class="relative">
+                      <input
+                        v-model="form.singlePassword"
+                        :type="showSinglePwd ? 'text' : 'password'"
+                        autocomplete="new-password"
+                        placeholder="Enter strong password…"
+                        class="ui-input pr-12"
+                      />
+                      <button
+                        type="button"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 ui-btn ui-btn-ghost ui-btn-xs"
+                        @click="showSinglePwd = !showSinglePwd"
+                        :title="showSinglePwd ? 'Hide password' : 'Show password'"
+                      >
+                        <i class="fa-solid" :class="showSinglePwd ? 'fa-eye-slash' : 'fa-eye'"></i>
+                      </button>
+                    </div>
                   </div>
 
-                  <!-- ✅ Carry (AL always visible + optional advanced) -->
                   <div class="sm:col-span-3">
                     <div class="flex items-center justify-between">
                       <div class="ui-label">Carry</div>
@@ -1348,28 +1771,14 @@ onBeforeUnmount(() => {
                       </div>
 
                       <template v-if="showCarryAdvanced">
-                        <div>
-                          <div class="ui-label">SP</div>
-                          <input v-model.number="form.singleCarry.SP" type="number" placeholder="0" class="ui-input" />
-                        </div>
-                        <div>
-                          <div class="ui-label">MC</div>
-                          <input v-model.number="form.singleCarry.MC" type="number" placeholder="0" class="ui-input" />
-                        </div>
-                        <div>
-                          <div class="ui-label">MA</div>
-                          <input v-model.number="form.singleCarry.MA" type="number" placeholder="0" class="ui-input" />
-                        </div>
-                        <div>
-                          <div class="ui-label">UL</div>
-                          <input v-model.number="form.singleCarry.UL" type="number" placeholder="0" class="ui-input" />
-                        </div>
+                        <div><div class="ui-label">SP</div><input v-model.number="form.singleCarry.SP" type="number" placeholder="0" class="ui-input" /></div>
+                        <div><div class="ui-label">MC</div><input v-model.number="form.singleCarry.MC" type="number" placeholder="0" class="ui-input" /></div>
+                        <div><div class="ui-label">MA</div><input v-model.number="form.singleCarry.MA" type="number" placeholder="0" class="ui-input" /></div>
+                        <div><div class="ui-label">UL</div><input v-model.number="form.singleCarry.UL" type="number" placeholder="0" class="ui-input" /></div>
                       </template>
                     </div>
 
-                    <p class="mt-1 text-[11px] text-ui-muted">
-                      Advanced carry is optional. If hidden, only AL carry is used.
-                    </p>
+                    <p class="mt-1 text-[11px] text-ui-muted">Advanced carry is optional. If hidden, only AL carry is used.</p>
                   </div>
                 </div>
               </div>
@@ -1393,9 +1802,7 @@ onBeforeUnmount(() => {
 
             <!-- Footer -->
             <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
-              <button type="button" class="ui-btn ui-btn-ghost" @click="closeCreate" :disabled="saving">
-                Cancel
-              </button>
+              <button type="button" class="ui-btn ui-btn-ghost" @click="closeCreate" :disabled="saving">Cancel</button>
 
               <button
                 type="button"
@@ -1425,16 +1832,4 @@ onBeforeUnmount(() => {
   opacity: 0;
   transform: translateY(6px) scale(0.98);
 }
-
-/* ✅ Fix native dropdown option visibility */
-:deep(select option) {
-  color: rgb(15 23 42);       /* slate-900 */
-  background: #ffffff;
-}
-
-:deep(html.dark select option) {
-  color: rgb(241 245 249);    /* slate-100 */
-  background: rgb(15 23 42);  /* slate-900 */
-}
-
 </style>

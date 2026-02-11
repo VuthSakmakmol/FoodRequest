@@ -9,9 +9,10 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 /* ───────────────── helpers ───────────────── */
 
 const s = (v) => String(v ?? '').trim()
+const up = (v) => s(v).toUpperCase()
 
 const uniqUpper = (arr) =>
-  [...new Set((arr || []).map((x) => String(x || '').toUpperCase().trim()))].filter(Boolean)
+  [...new Set((arr || []).map((x) => up(x)).filter(Boolean))].filter(Boolean)
 
 function getRoles(req) {
   const raw = Array.isArray(req.user?.roles) ? req.user.roles : []
@@ -29,8 +30,7 @@ function actorEmployeeId(req) {
   const emp = s(req.user?.employeeId || req.user?.empId || req.user?.employee || '')
   if (emp) return emp
 
-  // ✅ IMPORTANT FIX:
-  // In your system, user loginId is often numeric and equals employeeId
+  // In your system, loginId is often numeric and equals employeeId
   const loginId = actorLoginId(req)
   if (/^\d{4,}$/.test(loginId)) return loginId
 
@@ -53,10 +53,46 @@ function pickEmpName(emp) {
   ).trim()
 }
 
+/**
+ * ✅ Normalize profile approvalMode into ONLY 3 modes:
+ * - MANAGER_AND_GM
+ * - MANAGER_AND_COO
+ * - GM_AND_COO
+ *
+ * Supports legacy stored values:
+ * - GM_ONLY         -> MANAGER_AND_GM
+ * - GM_AND_COO      -> GM_AND_COO
+ * - GM_OR_COO, GM_COO, COO_AND_GM, GM_THEN_COO -> GM_AND_COO
+ */
+function normalizeApprovalMode(v) {
+  const raw = up(v)
+
+  if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+
+  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
+  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+
+  const legacy = ['GM_OR_COO', 'GM_COO', 'COO_AND_GM', 'GM_THEN_COO']
+  if (legacy.includes(raw)) return 'GM_AND_COO'
+
+  // safest default
+  return 'MANAGER_AND_GM'
+}
+
 async function findDirectoryByEmployeeId(employeeId) {
   const id = s(employeeId)
   if (!id) return null
   return EmployeeDirectory.findOne({ employeeId: id }).lean()
+}
+
+function sanitizeProfileForClient(profile) {
+  if (!profile) return profile
+  return {
+    ...profile,
+    approvalMode: normalizeApprovalMode(profile.approvalMode),
+  }
 }
 
 /* ───────────────── core: self profile ───────────────── */
@@ -69,32 +105,25 @@ exports.getMyLeaveProfile = async (req, res, next) => {
 
     if (!loginId && !employeeId) throw createError(401, 'Unauthorized')
 
-    // Helpful debug while integrating (remove if you want)
-    // console.log('JWT user:', req.user)
-    // console.log('actorLoginId:', loginId)
-    // console.log('actorEmployeeId:', employeeId)
+    // ✅ Match by employeeId OR employeeLoginId
+    const or = []
+    if (employeeId) or.push({ employeeId })
+    if (loginId) or.push({ employeeLoginId: loginId })
+    // fallback: if loginId numeric, it may equal employeeId
+    if (loginId && /^\d{4,}$/.test(loginId)) or.push({ employeeId: loginId })
 
-    // ✅ Match by either loginId or employeeId
-    const q = {
-      $or: [
-        loginId ? { loginId } : null,
-        employeeId ? { employeeId } : null,
-      ].filter(Boolean),
-    }
-
-    const profile = await LeaveProfile.findOne(q).lean()
+    const profile = await LeaveProfile.findOne({ $or: or }).lean()
     if (!profile) throw createError(404, 'Leave profile not found')
 
-    // Attach directory info (best effort)
     const dir = await findDirectoryByEmployeeId(profile.employeeId)
 
-    res.json({
-      profile,
+    return res.json({
+      profile: sanitizeProfileForClient(profile),
       employee: dir
         ? {
             employeeId: s(dir.employeeId),
             name: pickEmpName(dir),
-            department: s(dir.department || dir.dept),
+            department: s(dir.departmentName || dir.department || dir.dept),
             position: s(dir.position || dir.title),
             managerEmployeeId: s(dir.managerEmployeeId),
             managerName: s(dir.managerName),
@@ -106,20 +135,22 @@ exports.getMyLeaveProfile = async (req, res, next) => {
   }
 }
 
-/* ───────────────── team listing for Manager / GM ───────────────── */
+/* ───────────────── team listing for Manager / GM / COO ───────────────── */
 
 // GET /api/leave/user/team/profiles
-// Manager: profiles where profile.managerEmployeeId == actorEmployeeId
-// GM: profiles where profile.gmLoginId == actorLoginId
+// Manager: profiles where profile.managerLoginId == actorLoginId
+// GM:      profiles where profile.gmLoginId == actorLoginId
+// COO:     profiles where profile.cooLoginId == actorLoginId
 exports.getTeamLeaveProfiles = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
-    const employeeId = actorEmployeeId(req)
+    if (!loginId) throw createError(401, 'Unauthorized')
 
-    const isManager = hasAnyRole(req, ['MANAGER', 'LEAVE_MANAGER', 'DEPT_MANAGER'])
-    const isGm = hasAnyRole(req, ['GM', 'LEAVE_GM'])
+    const isManager = hasAnyRole(req, ['LEAVE_MANAGER', 'MANAGER', 'DEPT_MANAGER'])
+    const isGm = hasAnyRole(req, ['LEAVE_GM', 'GM'])
+    const isCoo = hasAnyRole(req, ['LEAVE_COO', 'COO'])
 
-    if (!isManager && !isGm) throw createError(403, 'Not allowed')
+    if (!isManager && !isGm && !isCoo) throw createError(403, 'Not allowed')
 
     const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true'
     const qText = s(req.query.q)
@@ -127,16 +158,14 @@ exports.getTeamLeaveProfiles = async (req, res, next) => {
     const filter = {}
     if (!includeInactive) filter.isActive = { $ne: false }
 
-    // scope
-    if (isGm) {
-      if (!loginId) throw createError(401, 'Unauthorized')
-      filter.gmLoginId = loginId
-    } else {
-      if (!employeeId) throw createError(401, 'Unauthorized')
-      filter.managerEmployeeId = employeeId
-    }
+    // scope priority: COO > GM > Manager (if user has multiple roles)
+    if (isCoo) filter.cooLoginId = loginId
+    else if (isGm) filter.gmLoginId = loginId
+    else filter.managerLoginId = loginId
 
-    // optional search (by employeeId-like string OR name/department from directory)
+    // optional search:
+    // - if looks like id -> regex on employeeId
+    // - else search directory -> map to employeeIds
     if (qText) {
       const looksId = /^[0-9A-Za-z_.-]+$/.test(qText)
       if (looksId) {
@@ -150,12 +179,13 @@ exports.getTeamLeaveProfiles = async (req, res, next) => {
             { lastName: { $regex: qText, $options: 'i' } },
             { department: { $regex: qText, $options: 'i' } },
             { dept: { $regex: qText, $options: 'i' } },
+            { departmentName: { $regex: qText, $options: 'i' } },
           ],
         })
           .select('employeeId')
           .lean()
 
-        const empIdsFromDir = dirs.map((d) => s(d.employeeId)).filter(Boolean)
+        const empIdsFromDir = (dirs || []).map((d) => s(d.employeeId)).filter(Boolean)
         filter.employeeId = { $in: empIdsFromDir.length ? empIdsFromDir : ['__NO_MATCH__'] }
       }
     }
@@ -163,27 +193,35 @@ exports.getTeamLeaveProfiles = async (req, res, next) => {
     const profiles = await LeaveProfile.find(filter).sort({ employeeId: 1 }).lean()
 
     // attach directory info in batch
-    const ids = profiles.map((p) => s(p.employeeId)).filter(Boolean)
-    const dirs = ids.length
-      ? await EmployeeDirectory.find({ employeeId: { $in: ids } }).lean()
-      : []
-    const dirMap = new Map(dirs.map((d) => [s(d.employeeId), d]))
+    const ids = (profiles || []).map((p) => s(p.employeeId)).filter(Boolean)
+    const dirs = ids.length ? await EmployeeDirectory.find({ employeeId: { $in: ids } }).lean() : []
+    const dirMap = new Map((dirs || []).map((d) => [s(d.employeeId), d]))
 
-    const rows = profiles.map((p) => {
+    const rows = (profiles || []).map((p) => {
       const d = dirMap.get(s(p.employeeId))
+      const profile = sanitizeProfileForClient(p)
+
       return {
-        employeeId: s(p.employeeId),
-        loginId: s(p.loginId),
-        isActive: p.isActive !== false,
-        joinDate: p.joinDate || null,
-        contractDate: p.contractDate || null,
-        balances: Array.isArray(p.balances) ? p.balances : [],
-        contracts: Array.isArray(p.contracts) ? p.contracts : [],
+        employeeId: s(profile.employeeId),
+        employeeLoginId: s(profile.employeeLoginId),
+        isActive: profile.isActive !== false,
+        joinDate: profile.joinDate || null,
+        contractDate: profile.contractDate || null,
+        contractEndDate: profile.contractEndDate || null,
+
+        approvalMode: profile.approvalMode,
+        managerLoginId: s(profile.managerLoginId),
+        gmLoginId: s(profile.gmLoginId),
+        cooLoginId: s(profile.cooLoginId),
+
+        balances: Array.isArray(profile.balances) ? profile.balances : [],
+        contracts: Array.isArray(profile.contracts) ? profile.contracts : [],
+
         employee: d
           ? {
               employeeId: s(d.employeeId),
               name: pickEmpName(d),
-              department: s(d.department || d.dept),
+              department: s(d.departmentName || d.department || d.dept),
               position: s(d.position || d.title),
               managerEmployeeId: s(d.managerEmployeeId),
               managerName: s(d.managerName),
@@ -192,8 +230,11 @@ exports.getTeamLeaveProfiles = async (req, res, next) => {
       }
     })
 
-    res.json({
-      meta: { scope: isGm ? 'GM' : 'MANAGER', actor: isGm ? loginId : employeeId },
+    return res.json({
+      meta: {
+        scope: isCoo ? 'COO' : isGm ? 'GM' : 'MANAGER',
+        actor: loginId,
+      },
       rows,
     })
   } catch (err) {
@@ -202,36 +243,39 @@ exports.getTeamLeaveProfiles = async (req, res, next) => {
 }
 
 // GET /api/leave/user/team/profiles/:employeeId
-// returns one profile (must be under manager/gm scope)
+// returns one profile (must be under manager/gm/coo scope)
 exports.getTeamEmployeeProfile = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
-    const employeeId = actorEmployeeId(req)
+    if (!loginId) throw createError(401, 'Unauthorized')
 
-    const isManager = hasAnyRole(req, ['MANAGER', 'LEAVE_MANAGER', 'DEPT_MANAGER'])
-    const isGm = hasAnyRole(req, ['GM', 'LEAVE_GM'])
+    const isManager = hasAnyRole(req, ['LEAVE_MANAGER', 'MANAGER', 'DEPT_MANAGER'])
+    const isGm = hasAnyRole(req, ['LEAVE_GM', 'GM'])
+    const isCoo = hasAnyRole(req, ['LEAVE_COO', 'COO'])
 
-    if (!isManager && !isGm) throw createError(403, 'Not allowed')
+    if (!isManager && !isGm && !isCoo) throw createError(403, 'Not allowed')
 
     const targetId = s(req.params.employeeId)
     if (!targetId) throw createError(400, 'employeeId is required')
 
-    const scopeFilter = isGm
-      ? { gmLoginId: loginId }
-      : { managerEmployeeId: employeeId }
+    const scopeFilter = isCoo
+      ? { cooLoginId: loginId }
+      : isGm
+        ? { gmLoginId: loginId }
+        : { managerLoginId: loginId }
 
     const profile = await LeaveProfile.findOne({ employeeId: targetId, ...scopeFilter }).lean()
-    if (!profile) throw createError(404, 'Leave profile not found (or not in your team)')
+    if (!profile) throw createError(404, 'Leave profile not found (or not in your scope)')
 
     const dir = await findDirectoryByEmployeeId(targetId)
 
-    res.json({
-      profile,
+    return res.json({
+      profile: sanitizeProfileForClient(profile),
       employee: dir
         ? {
             employeeId: s(dir.employeeId),
             name: pickEmpName(dir),
-            department: s(dir.department || dir.dept),
+            department: s(dir.departmentName || dir.department || dir.dept),
             position: s(dir.position || dir.title),
             managerEmployeeId: s(dir.managerEmployeeId),
             managerName: s(dir.managerName),

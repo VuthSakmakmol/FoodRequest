@@ -176,6 +176,50 @@ const contractHistory = computed(() => {
   })
 })
 
+function pickCurrentCarryMap() {
+  // 1) prefer current contract carry (most correct)
+  const cur =
+    contracts.value.find((c) => c.isCurrent) ||
+    contracts.value[0] ||
+    null
+
+  const c = cur?.carry || profile.value?.carry || {}
+  return {
+    AL: num(c.AL),
+    SP: num(c.SP),
+    MC: num(c.MC),
+    MA: num(c.MA),
+    UL: num(c.UL),
+  }
+}
+
+const carryMapForDisplay = computed(() => pickCurrentCarryMap())
+
+const balancesForDisplay = computed(() => {
+  const carryMap = carryMapForDisplay.value || {}
+
+  return normalizedBalances.value.map((b) => {
+    const code = String(b.leaveTypeCode || '').toUpperCase()
+    const carry = num(carryMap[code])
+
+    const used = num(b.used)
+    const remaining = num(b.remaining)
+
+    const usedDisplay = used + Math.max(0, -carry)
+    let remainingDisplay = remaining + carry
+
+    // UL: never show negative remaining (UL is unlimited)
+    if (code === 'UL') remainingDisplay = Math.max(0, remainingDisplay)
+
+    return {
+      ...b,
+      carry,
+      usedDisplay,
+      remainingDisplay,
+    }
+  })
+})
+
 /* ───────────────── contract-aware carry editing ───────────────── */
 const contractsLoading = ref(false)
 const contractsError = ref('')
@@ -221,7 +265,9 @@ function setSelectedContractDefault() {
   }
   const current = contracts.value.find((c) => c.isCurrent) || contracts.value[0]
   selectedContractNo.value = Number(current.contractNo)
+  fillContractCarryFormFromSelected()
 }
+
 
 function fillContractCarryFormFromSelected() {
   const c = selectedContract.value
@@ -240,19 +286,33 @@ async function fetchContracts() {
   if (!employeeId.value) return
   contractsLoading.value = true
   contractsError.value = ''
+
   try {
-    const res = await api.get(`/admin/leave/profiles/${employeeId.value}/contracts`)
-    contracts.value = normalizeContracts(res.data)
-    if (!selectedContractNo.value) setSelectedContractDefault()
+    const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
+
+    // ✅ ensure profile is always set too (same endpoint)
+    const p = res?.data?.profile ?? res?.data ?? null
+    profile.value = p
+    if (profile.value) fillFormFromProfile(profile.value)
+
+    // ✅ read contracts from profile + normalize
+    contracts.value = normalizeContracts(profile.value?.contracts || profile.value?.contractHistory || [])
+
+    // ✅ choose default contract (current or latest)
+    setSelectedContractDefault()
+
+    // ✅ fill editor
     fillContractCarryFormFromSelected()
   } catch (e) {
     console.error(e)
     contractsError.value = e?.response?.data?.message || 'Failed to load contracts.'
     contracts.value = []
+    selectedContractNo.value = null
   } finally {
     contractsLoading.value = false
   }
 }
+
 
 
 async function saveContractCarry() {
@@ -365,7 +425,9 @@ async function fetchProfile() {
   error.value = ''
   try {
     const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
-    profile.value = res?.data?.profile || null
+
+    profile.value = res?.data?.profile ?? res?.data ?? null
+
     if (profile.value) fillFormFromProfile(profile.value)
   } catch (e) {
     console.error(e)
@@ -375,6 +437,7 @@ async function fetchProfile() {
     loading.value = false
   }
 }
+
 
 function resetForm() {
   if (!profile.value) return
@@ -628,7 +691,7 @@ async function submitRenew() {
 }
 
 /* ✅ lock background scroll for ANY modal / drawer */
-const anyModalOpen = computed(() => !!renew.open || !!contractsOpen.value)
+const anyModalOpen = computed(() => !!renew.open || !!contractsOpen.value || !!pwd.open)
 watch(anyModalOpen, (open) => {
   if (typeof document === 'undefined') return
   document.body.classList.toggle('overflow-hidden', !!open)
@@ -638,10 +701,11 @@ watch(anyModalOpen, (open) => {
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+
   await fetchLeaveTypes()
-  await fetchProfile()
-  await fetchContracts()
+  await fetchContracts() 
 })
+
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
@@ -869,19 +933,19 @@ onBeforeUnmount(() => {
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="b in normalizedBalances" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
+                            <tr v-for="b in balancesForDisplay" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
                               <td class="px-3 py-2 font-extrabold text-ui-fg">{{ b.leaveTypeCode }}</td>
-                              <td class="px-3 py-2 text-right font-mono text-ui-fg">{{ fmt(b.used) }}</td>
+                              <td class="px-3 py-2 text-right font-mono text-ui-fg">{{ fmt(b.usedDisplay) }}</td>                              
                               <td class="px-3 py-2 text-right font-mono">
                                 <span
                                   class="inline-flex items-center rounded-full px-2 py-[1px] text-[10px] font-extrabold"
                                   :class="
-                                    num(b.remaining) < 0
+                                    num(b.remainingDisplay) <= 0
                                       ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
                                       : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
                                   "
                                 >
-                                  {{ fmt(b.remaining) }}
+                                  {{ fmt(b.remainingDisplay) }}
                                 </span>
                               </td>
                             </tr>
