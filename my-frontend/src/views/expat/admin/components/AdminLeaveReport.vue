@@ -17,16 +17,7 @@ const tab = ref('MANAGER_GM') // MANAGER_GM | GM_COO
       <div class="ui-hero-gradient rounded-t-2xl rounded-b-none">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/80">
-              Expat Leave
-            </p>
             <p class="text-sm font-semibold text-white">Admin Leave Report</p>
-            <p class="text-[11px] text-emerald-50/90">
-              Split by approval mode:
-              <span class="font-semibold">Manager + GM</span>
-              and
-              <span class="font-semibold">GM + COO</span>
-            </p>
           </div>
 
           <!-- ✅ Tabs: use global pills so LIGHT mode never turns white/gray -->

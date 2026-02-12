@@ -966,15 +966,6 @@ onBeforeUnmount(() => {
     <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <div class="border-b border-slate-200 bg-slate-50/80 px-3 py-2.5 dark:border-slate-800 dark:bg-slate-950/40">
         <div class="flex items-center justify-between gap-2">
-          <div>
-            <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400">
-              Preview generates Leave Record with signatures for the selected contract.
-            </div>
-          </div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees
-          </div>
         </div>
       </div>
 

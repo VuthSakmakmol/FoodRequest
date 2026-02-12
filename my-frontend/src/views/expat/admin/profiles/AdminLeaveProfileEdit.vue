@@ -611,9 +611,9 @@ onBeforeUnmount(() => {
 
           <template v-else>
             <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <InfoRow label="Employee ID" :value="profile.employeeId || '—'" hint="Read-only" />
-              <InfoRow label="Name" :value="profile.name || '—'" hint="Read-only" />
-              <InfoRow label="Department" :value="profile.department || '—'" hint="Read-only" />
+              <InfoRow label="Employee ID" :value="profile.employeeId || '—'"  />
+              <InfoRow label="Name" :value="profile.name || '—'"  />
+              <InfoRow label="Department" :value="profile.department || '—'"/>
             </section>
 
             <PasswordResetCard

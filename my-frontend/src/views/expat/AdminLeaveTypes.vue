@@ -122,9 +122,6 @@ onBeforeUnmount(() => {
                   Read-only
                 </span>
               </div>
-              <p class="mt-0.5 text-[11px] text-white/85">
-                System-defined leave types (managed by backend rules).
-              </p>
             </div>
 
             <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -345,14 +342,7 @@ onBeforeUnmount(() => {
             v-else
             class="overflow-x-auto rounded-3xl border border-slate-200/70 bg-white/85 dark:border-slate-800/70 dark:bg-slate-950/55"
           >
-            <div class="border-b border-slate-200/70 px-3 py-2 dark:border-slate-800/70">
-              <div class="flex items-center gap-2 text-[12px] font-semibold text-slate-700 dark:text-slate-200">
-                <span class="h-2 w-2 rounded-full bg-sky-500"></span>
-                <span class="h-2 w-2 rounded-full bg-indigo-500"></span>
-                <span class="h-2 w-2 rounded-full bg-emerald-500"></span>
-                <span class="ml-2">Types List</span>
-              </div>
-            </div>
+ 
 
             <table class="w-full min-w-[980px] table-fixed border-collapse text-[13px] text-slate-700 dark:text-slate-100">
               <colgroup>
@@ -368,7 +358,7 @@ onBeforeUnmount(() => {
                   <th class="px-3 py-3 text-left font-semibold">Code</th>
                   <th class="px-3 py-3 text-left font-semibold">Name</th>
                   <th class="px-3 py-3 text-left font-semibold">Requires Balance</th>
-                  <th class="px-3 py-3 text-right font-semibold">Yearly Entitlement</th>
+                  <th class="px-3 py-3 text-right font-semibold">Quata</th>
                   <th class="px-3 py-3 text-center font-semibold">Active</th>
                 </tr>
               </thead>
@@ -438,7 +428,6 @@ onBeforeUnmount(() => {
           <div class="mt-2 rounded-3xl border border-slate-200/70 bg-white/75 px-3 py-3 dark:border-slate-800/70 dark:bg-slate-950/55">
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div class="flex items-center gap-2 text-[12px] text-slate-600 dark:text-slate-300">
-                <span class="font-semibold">Rows per page</span>
                 <select
                   v-model="perPage"
                   class="rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-[12px] font-semibold
@@ -489,10 +478,6 @@ onBeforeUnmount(() => {
                   @click="page = pageCount"
                 >»</button>
               </div>
-            </div>
-
-            <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-              Leave types are managed by backend rules. Contact Admin/IT if anything looks incorrect.
             </div>
           </div>
         </div>

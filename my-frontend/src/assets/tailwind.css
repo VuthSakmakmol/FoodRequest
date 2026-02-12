@@ -7,6 +7,103 @@
 @tailwind components;
 @tailwind utilities;
 
+/* @font-face {
+  font-family: "Tenorite";
+  src: url("/fonts/tenorite/Tenorite-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tenorite";
+  src: url("/fonts/tenorite/Tenorite-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tenorite";
+  src: url("/fonts/tenorite/Tenorite-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tenorite";
+  src: url("/fonts/tenorite/Tenorite-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+} */
+
+
+/* ✅ Local font: Arial Nova (Vite public/) */
+@font-face {
+  font-family: "Arial Nova";
+  src: url("/fonts/ArialNova/ArialNova.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Arial Nova";
+  src: url("/fonts/ArialNova/ArialNova-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Arial Nova";
+  src: url("/fonts/ArialNova/ArialNova-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Arial Nova";
+  src: url("/fonts/ArialNova/ArialNova-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Optional: Light */
+@font-face {
+  font-family: "Arial Nova";
+  src: url("/fonts/ArialNova/ArialNova-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Arial Nova";
+  src: url("/fonts/ArialNova/ArialNova-LightItalic.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Optional: Condensed */
+@font-face {
+  font-family: "Arial Nova Condensed";
+  src: url("/fonts/ArialNova/ArialNovaCond.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Arial Nova Condensed";
+  src: url("/fonts/ArialNova/ArialNovaCond-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+
+
 /* ─────────────────────────────────────────────────────────────
    Base Tokens (Light/Dark)
    - Dark mode uses `.dark` on <html>
@@ -15,9 +112,14 @@
 @layer base {
   :root {
     /* Typography */
-    --ui-font: "Kantumruy Pro", "Be Vietnam Pro", "Manrope", ui-sans-serif, system-ui,
+    /* --ui-font: "Kantumruy Pro", "Be Vietnam Pro", "Manrope", ui-sans-serif, system-ui,
       -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Apple Color Emoji",
-      "Segoe UI Emoji";
+      "Segoe UI Emoji"; */
+
+    /* Tenorite */
+    /* --ui-font: "Tenorite", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans"; */
+     
+    --ui-font: "Arial Nova", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
 
     /* Radii */
     --ui-r-xs: 10px;

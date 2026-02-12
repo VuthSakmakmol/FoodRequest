@@ -426,6 +426,14 @@ function clearSelected(model) {
   model.open = false
 }
 
+function exportCurrentViewExcel() {
+  exportExcelFromGroups(pagedManagers.value, { scope: 'CurrentView' })
+}
+
+function exportAllFilteredExcel() {
+  exportExcelFromGroups(filteredManagers.value, { scope: 'AllFiltered' })
+}
+
 async function runSearchSimple(model) {
   const qv = String(model.query || '').split('—')[0].trim() || String(model.query || '').trim()
   model.error = ''
@@ -739,8 +747,13 @@ function buildRow(e, managerName = '') {
     UL_Used: UL.used,
   }
 }
-function exportGroupedByManagerExcel() {
-  const base = Array.isArray(filteredManagers.value) ? filteredManagers.value : []
+function balanceObj(bm, code) {
+  const b = bm.get(code) || { ent: 0, used: 0, remain: 0 }
+  return { ent: num(b.ent), used: num(b.used), remain: num(b.remain) }
+}
+
+function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
+  const base = Array.isArray(groupsToExport) ? groupsToExport : []
   if (!base.length) {
     showToast({ type: 'info', title: 'Export', message: 'No data to export.' })
     return
@@ -748,20 +761,92 @@ function exportGroupedByManagerExcel() {
 
   const wb = XLSX.utils.book_new()
 
+  // ✅ Summary sheet (FULL)
   const summaryRows = base.map((g) => ({
-    Manager: managerDisplayName(g),    ManagerEmployeeId: fmt(g.manager?.employeeId),
-    Department: fmt(g.manager?.department),
+    GroupLabel: managerBadgeLabel(g),
+    ManagerName: managerDisplayName(g),
+    ManagerEmployeeId: fmt(g.manager?.employeeId),
+    ManagerLoginId: fmt(g.manager?.loginId || g.manager?.managerLoginId),
+    ManagerDepartment: fmt(g.manager?.department),
     Employees: (g.employees || []).length,
   }))
   const wsSummary = XLSX.utils.json_to_sheet(summaryRows)
-  wsSummary['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }, { wch: 10 }]
+  wsSummary['!cols'] = [
+    { wch: 10 },
+    { wch: 26 },
+    { wch: 16 },
+    { wch: 18 },
+    { wch: 22 },
+    { wch: 10 },
+  ]
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
 
+  // ✅ One sheet per manager/GM group
   const usedNames = new Map()
+
   for (const g of base) {
-    const managerName = fmt(g.manager?.name) || 'Unknown Manager'
+    const managerName = managerDisplayName(g) // ✅ GM fallback
     const list = Array.isArray(g.employees) ? g.employees : []
-    const rows = list.map((e) => buildRow(e, managerName))
+
+    const rows = list.map((e) => {
+      const bm = buildBalanceMap(e.balances)
+
+      const AL = balanceObj(bm, 'AL')
+      const SP = balanceObj(bm, 'SP')
+      const MC = balanceObj(bm, 'MC')
+      const MA = balanceObj(bm, 'MA')
+      const UL = balanceObj(bm, 'UL')
+
+      return {
+        // Group info
+        GroupLabel: managerBadgeLabel(g),
+        GroupManagerName: fmt(managerName),
+        GroupManagerEmployeeId: fmt(g.manager?.employeeId),
+        GroupManagerDepartment: fmt(g.manager?.department),
+
+        // Employee identity
+        EmployeeID: fmt(e.employeeId),
+        // EmployeeLoginId: fmt(e.employeeLoginId || e.loginId),
+        Name: fmt(e.name),
+        Department: fmt(e.department),
+
+        // Dates
+        JoinDate: fmt(e.joinDate),
+        ContractDate: fmt(e.contractDate),
+        ContractEndDate: fmt(e.contractEndDate),
+
+        // Approvals
+        ApprovalMode: fmt(e.approvalMode),
+        // ApprovalModeLabel: modeLabel(e.approvalMode),
+        // ManagerLoginId: fmt(e.managerLoginId),
+        // GmLoginId: fmt(e.gmLoginId),
+        // CooLoginId: fmt(e.cooLoginId),
+
+        // Active
+        Status: e.isActive ? 'Active' : 'Inactive',
+
+        // Balances (FULL)
+        // AL_Ent: AL.ent,
+        AL_Used: AL.used,
+        AL_Remain: AL.remain,
+
+        // SP_Ent: SP.ent,
+        SP_Used: SP.used,
+        SP_Remain: SP.remain,
+
+        // MC_Ent: MC.ent,
+        MC_Used: MC.used,
+        MC_Remain: MC.remain,
+
+        // MA_Ent: MA.ent,
+        MA_Used: MA.used,
+        MA_Remain: MA.remain,
+
+        // UL_Ent: UL.ent,
+        UL_Used: UL.used,
+        UL_Remain: UL.remain,
+      }
+    })
 
     let sheetName = safeSheetName(managerName, 'Manager')
     const used = usedNames.get(sheetName) || 0
@@ -772,20 +857,47 @@ function exportGroupedByManagerExcel() {
     }
 
     const ws = XLSX.utils.json_to_sheet(rows)
+
     ws['!cols'] = [
-      { wch: 22 }, { wch: 12 }, { wch: 22 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 14 }, { wch: 10 },
-      { wch: 10 }, { wch: 10 }, { wch: 12 },
-      { wch: 10 }, { wch: 10 }, { wch: 12 },
-      { wch: 10 }, { wch: 10 }, { wch: 10 },
+      { wch: 10 }, // GroupLabel
+      { wch: 24 }, // GroupManagerName
+      { wch: 16 }, // GroupManagerEmployeeId
+      { wch: 22 }, // GroupManagerDepartment
+
+      { wch: 12 }, // EmployeeID
+      { wch: 14 }, // EmployeeLoginId
+      { wch: 22 }, // Name
+      { wch: 22 }, // Department
+
+      { wch: 12 }, // JoinDate
+      { wch: 12 }, // ContractDate
+      { wch: 12 }, // ContractEndDate
+
+      { wch: 16 }, // ApprovalMode
+      { wch: 16 }, // ApprovalModeLabel
+      { wch: 16 }, // ManagerLoginId
+      { wch: 16 }, // GmLoginId
+      { wch: 16 }, // CooLoginId
+
+      { wch: 10 }, // Status
+
+      { wch: 8 }, { wch: 8 }, { wch: 10 }, // AL
+      { wch: 8 }, { wch: 8 }, { wch: 10 }, // SP
+      { wch: 8 }, { wch: 8 }, { wch: 10 }, // MC
+      { wch: 8 }, { wch: 8 }, { wch: 10 }, // MA
+      { wch: 8 }, { wch: 8 }, { wch: 10 }, // UL
     ]
+
     XLSX.utils.book_append_sheet(wb, ws, sheetName)
   }
 
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
-  const filename = `ExpatProfiles-GroupedByManager-${stamp}.xlsx`
+  const filename = `ExpatProfiles-${scope}-${stamp}.xlsx`
   XLSX.writeFile(wb, filename)
+
   showToast({ type: 'success', title: 'Export', message: `Saved: ${filename}` })
 }
+
 
 /* ─────────────────────────────────────────────────────────────
    Modal scroll lock
@@ -863,7 +975,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
-                @click="exportGroupedByManagerExcel"
+                @click="exportCurrentViewExcel"
               >
                 <i class="fa-solid fa-file-excel text-[11px]" />
                 Export
@@ -1235,9 +1347,6 @@ onBeforeUnmount(() => {
               <div class="flex items-start justify-between gap-2">
                 <div>
                   <div class="text-[14px] font-extrabold text-ui-fg">New leave profile</div>
-                  <div class="text-[11px] text-ui-muted">
-                    Note: Manager is optional (you can assign later in Edit).
-                  </div>
                 </div>
 
                 <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" @click="closeCreate">
@@ -1274,15 +1383,11 @@ onBeforeUnmount(() => {
                   <option value="MANAGER_AND_COO">Manager + COO</option>
                   <option value="GM_AND_COO">GM + COO</option>
                 </select>
-                <p class="mt-1 text-[11px] text-ui-muted">
-                  If you don’t have manager yet, create employee now, assign manager later in Edit.
-                </p>
               </div>
 
               <!-- Manager picker (OPTIONAL now) -->
               <div>
-                <div class="ui-label">Direct manager (optional)</div>
-
+                <div class="ui-label">Direct manager</div>
                 <div v-if="createTab === 'bulk'" class="relative" @click.stop>
                   <div class="relative">
                     <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
@@ -1369,8 +1474,6 @@ onBeforeUnmount(() => {
                     </template>
                   </div>
                 </div>
-
-                <p class="mt-1 text-[11px] text-ui-muted">Optional. You can assign later in Edit.</p>
               </div>
 
               <!-- Bulk -->
@@ -1466,7 +1569,7 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div class="sm:col-span-3">
-                      <div class="ui-label">Password (optional, 13+ strong)</div>
+                      <div class="ui-label">Password</div>
                       <div class="relative">
                         <input
                           v-model="r.password"
@@ -1484,7 +1587,6 @@ onBeforeUnmount(() => {
                           <i class="fa-solid" :class="showRowPwd[i] ? 'fa-eye-slash' : 'fa-eye'"></i>
                         </button>
                       </div>
-                      <p class="mt-1 text-[11px] text-ui-muted">Must be 13+ and contain at least 3 of: uppercase, lowercase, number, symbol.</p>
                     </div>
 
                     <div class="sm:col-span-3">
@@ -1509,8 +1611,6 @@ onBeforeUnmount(() => {
                           <div><div class="ui-label">UL</div><input v-model.number="r.carry.UL" type="number" placeholder="0" class="ui-input" /></div>
                         </template>
                       </div>
-
-                      <p class="mt-1 text-[11px] text-ui-muted">Carry supports positive or negative.</p>
                     </div>
                   </div>
                 </div>
@@ -1585,7 +1685,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="sm:col-span-3">
-                    <div class="ui-label">Password (optional, 13+ strong)</div>
+                    <div class="ui-label">Password</div>
                     <div class="relative">
                       <input
                         v-model="form.singlePassword"
@@ -1627,8 +1727,6 @@ onBeforeUnmount(() => {
                         <div><div class="ui-label">UL</div><input v-model.number="form.singleCarry.UL" type="number" placeholder="0" class="ui-input" /></div>
                       </template>
                     </div>
-
-                    <p class="mt-1 text-[11px] text-ui-muted">Advanced carry is optional. If hidden, only AL carry is used.</p>
                   </div>
                 </div>
               </div>

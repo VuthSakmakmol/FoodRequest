@@ -332,9 +332,7 @@ const apprHasServer = computed(() => !!(approverServer.value.exists && approverS
     <div class="ui-hero-gradient rounded-t-2xl p-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <div class="ui-hero-kicker">Expat Leave · Admin</div>
           <div class="ui-hero-title mt-1">Signature Manager</div>
-          <div class="ui-hero-subtitle">Upload and preview employee & approver signatures in one place.</div>
         </div>
 
         <div class="flex flex-wrap items-center gap-2">
@@ -357,7 +355,6 @@ const apprHasServer = computed(() => !!(approverServer.value.exists && approverS
         <div class="flex items-start justify-between gap-2 pl-6">
           <div>
             <div class="ui-section-title">Employee</div>
-            <div class="ui-section-desc">Search → select employee → upload signature.</div>
           </div>
 
           <button
@@ -373,12 +370,7 @@ const apprHasServer = computed(() => !!(approverServer.value.exists && approverS
         </div>
 
         <div class="mt-4 ui-field pl-6">
-          <label class="ui-label">Search employee</label>
           <input v-model="empQuery" class="ui-input" placeholder="Type employee ID or name…" />
-          <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            Tip: type at least 2–3 characters.
-          </div>
-
           <div v-if="searchLoading" class="mt-2 text-[12px] text-slate-500">Searching…</div>
           <div v-if="searchError" class="mt-2 text-[12px] text-rose-600">{{ searchError }}</div>
         </div>
@@ -472,7 +464,6 @@ const apprHasServer = computed(() => !!(approverServer.value.exists && approverS
         <div class="flex items-start justify-between gap-2 pl-6">
           <div>
             <div class="ui-section-title">Employee Preview</div>
-            <div class="ui-section-desc">Local preview vs server preview.</div>
           </div>
 
           <span class="ui-badge" :class="empHasServer ? 'ui-badge-info' : 'ui-badge-warning'">
@@ -505,7 +496,6 @@ const apprHasServer = computed(() => !!(approverServer.value.exists && approverS
         <div class="flex flex-wrap items-start justify-between gap-3 pl-6">
           <div>
             <div class="ui-section-title">Approver</div>
-            <div class="ui-section-desc">Choose role → upload signature → preview.</div>
           </div>
 
           <div class="flex flex-wrap items-center gap-2">

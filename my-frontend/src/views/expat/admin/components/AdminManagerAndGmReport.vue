@@ -964,12 +964,6 @@ onBeforeUnmount(() => {
         <div class="flex items-center justify-between gap-2">
           <div>
             <div class="text-[12px] font-semibold text-slate-900 dark:text-slate-50">Employees</div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400">
-              Preview generates Leave Record with signatures for the selected contract.
-            </div>
-          </div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Page {{ page }} / {{ pageCount }} · {{ employeesAll.length }} employees
           </div>
         </div>
       </div>

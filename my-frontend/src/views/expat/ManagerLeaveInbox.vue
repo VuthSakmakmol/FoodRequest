@@ -360,6 +360,10 @@ onBeforeUnmount(() => {
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1 min-w-[240px]">
               <p class="text-[15px] font-extrabold">Manager Inbox</p>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+              </div>
             </div>
 
             <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -422,6 +426,10 @@ onBeforeUnmount(() => {
           <div v-else class="space-y-3">
             <div>
               <p class="text-[15px] font-extrabold">Manager Inbox</p>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+              </div>
             </div>
 
             <div class="space-y-2">

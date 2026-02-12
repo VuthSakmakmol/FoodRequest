@@ -382,10 +382,7 @@ onBeforeUnmount(() => {
           <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1 min-w-[240px]">
-              <p class="ui-hero-kicker text-white/80">Expat Leave</p>
               <p class="text-[15px] font-extrabold">GM Inbox</p>
-              <p class="text-[11px] text-white/90">Final approval queue for expatriate leave requests.</p>
-
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -732,7 +729,6 @@ onBeforeUnmount(() => {
           <!-- Pagination -->
           <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-2">
-              <span class="font-extrabold">Rows per page</span>
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
               </select>

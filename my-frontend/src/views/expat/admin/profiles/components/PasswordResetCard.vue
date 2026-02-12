@@ -26,14 +26,6 @@ const emit = defineEmits([
 <template>
   <section class="ui-card overflow-hidden">
     <div class="section-head section-head--slate">
-      <div>
-        <div class="section-title">Admin password reset</div>
-        <div class="text-[11px] text-ui-muted">
-          Set a new password directly (no old password required).
-          <span v-if="employeeId" class="ml-2 font-mono">({{ employeeId }})</span>
-          <span v-if="employeeName" class="ml-2 font-semibold">{{ employeeName }}</span>
-        </div>
-      </div>
 
       <div class="flex items-center gap-2">
         <button v-if="!open" type="button" class="ui-btn ui-btn-primary ui-btn-sm" @click="$emit('close'); $emit('submit');" style="display:none" />
@@ -154,7 +146,6 @@ const emit = defineEmits([
 
     <div class="p-3 lg:p-4">
       <div v-if="!open" class="text-[11px] text-ui-muted">
-        Click <b>Password</b> in the header to open the reset panel.
       </div>
 
       <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-3">

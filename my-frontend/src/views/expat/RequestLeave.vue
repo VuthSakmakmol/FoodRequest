@@ -1,7 +1,14 @@
 <!-- src/views/expat/RequestLeave.vue
-  ✅ MA (Maternity Leave): auto 90 days (calendar days), end date follows start date changes
-  ✅ End date input is disabled for MA
-  ✅ Works even if code is "MA" OR name contains "maternity"
+  ✅ Split screen (balances left, request right)
+  ✅ Desktop ratio: My Leave 6/10, Request Leave 4/10
+  ✅ Square balance cards, bigger numbers, 1-row
+  ✅ AL shows Used/Remain only
+  ✅ SP shows Used only (NO SP remaining)
+  ✅ Others show Used only
+  ✅ Half-day AM/PM small square beside its own date picker
+  ✅ AM/PM aligned at the end of Start + End rows (reserved slot)
+  ✅ My Leave shows Name, ID, Department
+  ✅ IMPORTANT: show ONLY name like "Annual Leave" (never "Annual Leave (AL)")
 -->
 
 <script setup>
@@ -27,6 +34,12 @@ const loadingTypes = ref(false)
 const leaveTypes = ref([])
 const typesError = ref('')
 
+/**
+ * ✅ Strip "(AL)" if backend stored name includes code in parentheses
+ * Examples:
+ *  - "Annual Leave (AL)" -> "Annual Leave"
+ *  - "Sick Leave ( SP )" -> "Sick Leave"
+ */
 function cleanTypeName(name, code) {
   const n = String(name || '').trim()
   const c = String(code || '').trim().toUpperCase()
@@ -43,11 +56,14 @@ async function fetchLeaveTypes() {
     const res = await api.get('/leave/types')
     let data = Array.isArray(res.data) ? res.data : []
     data = data.filter((t) => t.isActive !== false)
+
+    // ✅ normalize: ensure name is clean (no "(CODE)")
     data = data.map((t) => {
       const code = String(t?.code || '').trim().toUpperCase()
       const name = cleanTypeName(t?.name, code)
       return { ...t, code, name }
     })
+
     leaveTypes.value = data
     if (!data.length) typesError.value = 'No leave types configured. Please contact HR/Admin.'
   } catch (e) {
@@ -59,11 +75,12 @@ async function fetchLeaveTypes() {
   }
 }
 
-/* ───────── Profile balances ───────── */
+/* ───────── Profile balances (simple, no contract history UI) ───────── */
 const loadingProfile = ref(false)
 const profileError = ref('')
-const balancesRaw = ref([])
+const balancesRaw = ref([]) // array of { code, used, remaining, entitlement }
 
+/* ✅ employee info */
 const me = ref({
   name: '',
   employeeId: '',
@@ -73,7 +90,9 @@ const me = ref({
   telegramChatId: '',
 })
 
-function s(v) { return String(v ?? '').trim() }
+function s(v) {
+  return String(v ?? '').trim()
+}
 function n(v) {
   const x = Number(v ?? 0)
   return Number.isFinite(x) ? x : 0
@@ -82,6 +101,12 @@ function codeOf(x) {
   return String(x?.code || x?.leaveTypeCode || x?.typeCode || '').trim().toUpperCase()
 }
 
+/**
+ * Accepts many backend shapes:
+ * - profile.balances: [{code, used, remaining, entitlement}]
+ * - profile.leaveBalances: ...
+ * - profile.meta.balances: ...
+ */
 function extractBalances(profile) {
   const arr =
     (Array.isArray(profile?.balances) && profile.balances) ||
@@ -98,12 +123,13 @@ function extractBalances(profile) {
     .filter((b) => !!b.code)
 }
 
+/* ✅ map code -> clean name only */
 const typeNameByCode = computed(() => {
   const m = {}
   for (const t of leaveTypes.value || []) {
     const c = String(t?.code || '').trim().toUpperCase()
     if (!c) continue
-    const name = cleanTypeName(t?.name, c)
+    const name = cleanTypeName(t?.name, c) // ✅ double-safety
     m[c] = name || c
   }
   return m
@@ -114,6 +140,12 @@ function fullTypeName(code) {
   return typeNameByCode.value[c] || c
 }
 
+/**
+ * Apply carry to displayed balances (your rule):
+ * - if carry positive => add to remaining
+ * - if carry negative => used += abs(carry), remaining -= abs(carry)
+ * Remaining is clamped at >= 0 for display.
+ */
 function applyCarryForDisplay(profile, arr) {
   const carry = profile?.carry || {}
   return arr.map((b) => {
@@ -143,6 +175,7 @@ async function fetchMyProfile() {
   try {
     loadingProfile.value = true
     profileError.value = ''
+
     const res = await api.get('/leave/profile/me')
     const profile = res?.data || {}
 
@@ -185,11 +218,11 @@ const form = ref({
   endDate: '',
   reason: '',
   useHalf: false,
-  singleHalf: '',
+  singleHalf: '', // 'AM' | 'PM'
   halfStartEnabled: false,
-  halfStartPart: '',
+  halfStartPart: '', // 'AM' | 'PM'
   halfEndEnabled: false,
-  halfEndPart: '',
+  halfEndPart: '', // 'AM' | 'PM'
 })
 
 const submitting = ref(false)
@@ -201,34 +234,7 @@ const selectedType = computed(() => {
   return leaveTypes.value.find((t) => String(t.code || '').toUpperCase() === code) || null
 })
 
-/* ✅ Robust MA detection:
-   - by code === 'MA'
-   - OR name contains "maternity"
-*/
-const isMA = computed(() => {
-  const code = String(form.value.leaveTypeCode || '').toUpperCase()
-  if (code === 'MA') return true
-  const name = String(selectedType.value?.name || '').toLowerCase()
-  return name.includes('maternity')
-})
-
-/* ✅ MA duration: 90 calendar days inclusive => end = start + 89 */
-function addDaysYMD(ymd, addDays) {
-  const s = String(ymd || '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
-  const [y, m, d] = s.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
-  dt.setUTCDate(dt.getUTCDate() + Number(addDays || 0))
-  const yy = dt.getUTCFullYear()
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(dt.getUTCDate()).padStart(2, '0')
-  return `${yy}-${mm}-${dd}`
-}
-
-function computeMAEnd(startYMD) {
-  // inclusive 90 days => +89
-  return addDaysYMD(startYMD, 89)
-}
+const isMA = computed(() => String(form.value.leaveTypeCode || '').toUpperCase() === 'MA')
 
 const isMultiDay = computed(() => {
   if (!form.value.startDate || !form.value.endDate) return false
@@ -269,17 +275,14 @@ function resetForm() {
   formSuccess.value = ''
 }
 
-/* ───────── Keep dates safe + ✅ MA auto end date ───────── */
+/* ───────── Keep dates safe ───────── */
 watch(
   () => [form.value.startDate, form.value.leaveTypeCode],
   () => {
     if (!form.value.startDate) return
 
     if (isMA.value) {
-      // ✅ auto end date always follows start date change
-      form.value.endDate = computeMAEnd(form.value.startDate)
-
-      // ✅ MA never supports half
+      form.value.endDate = form.value.startDate
       form.value.useHalf = false
       form.value.singleHalf = ''
       form.value.halfStartEnabled = false
@@ -298,13 +301,8 @@ watch(
   () => form.value.endDate,
   () => {
     if (!form.value.startDate) return
-    if (isMA.value) {
-      // ✅ if user/dev tries to change end date, force it back
-      form.value.endDate = computeMAEnd(form.value.startDate)
-      return
-    }
     if (!form.value.endDate) form.value.endDate = form.value.startDate
-    if (form.value.endDate < form.value.startDate) form.value.endDate = form.value.startDate
+    if (!isMA.value && form.value.endDate < form.value.startDate) form.value.endDate = form.value.startDate
   }
 )
 
@@ -312,10 +310,6 @@ watch(
 watch(
   () => form.value.useHalf,
   (on) => {
-    if (isMA.value) {
-      form.value.useHalf = false
-      return
-    }
     if (!on) {
       form.value.singleHalf = ''
       form.value.halfStartEnabled = false
@@ -334,7 +328,6 @@ watch(
   () => [form.value.startDate, form.value.endDate],
   () => {
     if (!form.value.useHalf) return
-    if (isMA.value) return
     if (isMultiDay.value) {
       form.value.singleHalf = ''
       if (!form.value.halfStartEnabled && !form.value.halfEndEnabled) form.value.halfStartEnabled = true
@@ -396,8 +389,7 @@ async function submitRequest() {
     const payload = {
       leaveTypeCode: form.value.leaveTypeCode,
       startDate: form.value.startDate,
-      // ✅ Always send MA calculated end date
-      endDate: isMA.value ? computeMAEnd(form.value.startDate) : form.value.endDate,
+      endDate: isMA.value ? form.value.startDate : form.value.endDate,
       reason: form.value.reason || '',
     }
 
@@ -446,20 +438,30 @@ function ensureRealtime() {
   if (emp) subscribeEmployeeIfNeeded(emp)
   if (log) subscribeUserIfNeeded(log)
 }
+
 function isMine(payload = {}) {
   const emp = String(payload.employeeId || '').trim()
   const reqr = String(payload.requesterLoginId || '').trim()
   return (employeeId.value && emp === employeeId.value) || (loginId.value && reqr === loginId.value)
 }
+
 function setupRealtimeListeners() {
   offHandlers.push(
-    onSocket('leave:req:updated', (p = {}) => { if (isMine(p)) fetchMyProfile() }),
-    onSocket('leave:profile:updated', (p = {}) => { if (isMine(p)) fetchMyProfile() })
+    onSocket('leave:req:updated', (p = {}) => {
+      if (isMine(p)) fetchMyProfile()
+    }),
+    onSocket('leave:profile:updated', (p = {}) => {
+      if (isMine(p)) fetchMyProfile()
+    })
   )
 }
 
-watch(() => String(localStorage.getItem('employeeId') || '').trim(), (v) => { employeeId.value = v })
-watch(() => String(localStorage.getItem('loginId') || '').trim(), (v) => { loginId.value = v })
+watch(() => String(localStorage.getItem('employeeId') || '').trim(), (v) => {
+  employeeId.value = v
+})
+watch(() => String(localStorage.getItem('loginId') || '').trim(), (v) => {
+  loginId.value = v
+})
 
 onMounted(async () => {
   await fetchLeaveTypes()
@@ -469,15 +471,20 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  offHandlers.forEach((off) => { try { off && off() } catch {} })
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
 })
 </script>
 
 <template>
   <div class="ui-page">
     <div class="ui-container py-3">
-      <div class="grid gap-3 lg:grid-cols-10 lg:items-start">
-        <!-- LEFT -->
+      <!-- ✅ Split layout: 6/10 + 4/10 on desktop -->
+      <div class="grid gap-3 lg:grid-cols-10 lg:items-stretch">
+        <!-- LEFT: Balances (6/10) -->
         <div class="lg:col-span-6 ui-card overflow-hidden lg:sticky lg:top-3">
           <div class="ui-hero-gradient">
             <div class="flex items-center justify-between gap-3">
@@ -494,6 +501,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="p-3">
+            <!-- ✅ Employee info row -->
             <div
               class="mb-2 rounded-2xl border border-slate-200 bg-white/60 px-3 py-2 text-[13px]
                     dark:border-slate-800 dark:bg-slate-950/30"
@@ -501,15 +509,23 @@ onBeforeUnmount(() => {
               <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 <div class="min-w-0">
                   <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">Name</div>
-                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">{{ me.name || '—' }}</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">
+                    {{ me.name || '—' }}
+                  </div>
                 </div>
+
                 <div class="min-w-0">
                   <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">ID</div>
-                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">{{ me.employeeId || '—' }}</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">
+                    {{ me.employeeId || '—' }}
+                  </div>
                 </div>
+
                 <div class="min-w-0">
                   <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">Department</div>
-                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">{{ me.department || '—' }}</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">
+                    {{ me.department || '—' }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -522,9 +538,12 @@ onBeforeUnmount(() => {
               {{ profileError }}
             </div>
 
+            <!-- ONE ROW cards -->
             <div class="flex gap-2 overflow-x-auto pb-1">
               <div v-for="b in balancesForUI" :key="b.code" class="ui-balance-card shrink-0" :title="fullTypeName(b.code)">
-                <div class="ui-balance-code" :title="fullTypeName(b.code)">{{ fullTypeName(b.code) }}</div>
+                <div class="ui-balance-code" :title="fullTypeName(b.code)">
+                  {{ fullTypeName(b.code) }}
+                </div>
 
                 <template v-if="b.isAL">
                   <div class="ui-balance-two">
@@ -536,6 +555,13 @@ onBeforeUnmount(() => {
                       <div class="ui-balance-num">{{ b.remaining }}</div>
                       <div class="ui-balance-sub">Remain</div>
                     </div>
+                  </div>
+                </template>
+
+                <template v-else-if="b.isSP">
+                  <div class="ui-balance-one">
+                    <div class="ui-balance-num">{{ b.used }}</div>
+                    <div class="ui-balance-sub">Used</div>
                   </div>
                 </template>
 
@@ -554,7 +580,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- RIGHT -->
+        <!-- RIGHT: Request form (4/10) -->
         <div class="lg:col-span-4 ui-card overflow-hidden">
           <div class="ui-hero-gradient">
             <div class="flex items-center justify-between gap-3">
@@ -565,10 +591,11 @@ onBeforeUnmount(() => {
                 <div>
                   <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Request Leave</div>
                   <div class="text-[11px] font-semibold opacity-90">
-                    {{ isMA ? 'Maternity Leave: auto 90 days' : 'Create request' }}
+                    {{ isMA ? 'MA: 90 days auto' : 'Create request' }}
                   </div>
                 </div>
               </div>
+              <!-- <div class="text-[11px] font-semibold opacity-90">{{ isMultiDay ? 'Multi-day' : 'Single-day' }}</div> -->
             </div>
           </div>
 
@@ -582,6 +609,7 @@ onBeforeUnmount(() => {
             </div>
 
             <form class="space-y-2.5" @submit.prevent="submitRequest">
+              <!-- Leave type -->
               <div class="ui-card p-3">
                 <div class="ui-row">
                   <div class="ui-ico"><i class="fa-solid fa-layer-group" /></div>
@@ -589,12 +617,14 @@ onBeforeUnmount(() => {
                     <div class="ui-label">Leave Type</div>
                     <select v-model="form.leaveTypeCode" :disabled="loadingTypes || !leaveTypes.length" class="ui-select">
                       <option value="" disabled>{{ loadingTypes ? 'Loading…' : 'Select leave type' }}</option>
+                      <!-- ✅ show ONLY name (already cleaned) -->
                       <option v-for="t in leaveTypes" :key="t.code" :value="t.code">{{ t.name }}</option>
                     </select>
                   </div>
                 </div>
               </div>
 
+              <!-- Half-day toggle -->
               <div class="ui-card p-3">
                 <div class="flex items-center justify-between gap-2">
                   <div class="flex items-center gap-2">
@@ -603,9 +633,7 @@ onBeforeUnmount(() => {
                     </div>
                     <div>
                       <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Half-day</div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        {{ isMA ? 'Disabled for Maternity' : 'AM/PM aligned end' }}
-                      </div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">AM/PM aligned end</div>
                     </div>
                   </div>
 
@@ -621,13 +649,15 @@ onBeforeUnmount(() => {
                   </label>
                 </div>
 
-                <div v-if="isMA" class="mt-2 text-[11px] font-semibold text-amber-700 dark:text-amber-200">
-                  End date is auto-calculated (90 days). Half-day is not allowed.
+                <div v-if="isMA && form.useHalf" class="mt-2 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                  MA does not support half-day.
                 </div>
               </div>
 
+              <!-- Dates (AM/PM aligned using reserved slot) -->
               <div class="ui-card p-3">
                 <div class="grid gap-2">
+                  <!-- Start row -->
                   <div class="date-row">
                     <div class="ui-ico !h-10 !w-10"><i class="fa-solid fa-play" /></div>
 
@@ -636,53 +666,57 @@ onBeforeUnmount(() => {
                       <input v-model="form.startDate" type="date" class="ui-date" />
                     </div>
 
+                    <!-- reserved slot -->
                     <div class="date-right-slot">
+                      <!-- single-day -->
                       <div v-if="form.useHalf && !isMA && !isMultiDay" class="chip-row">
                         <button type="button" class="sq-chip" :class="form.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="pickPart('single','AM')">AM</button>
                         <button type="button" class="sq-chip" :class="form.singleHalf === 'PM' ? 'sq-chip-on' : ''" @click="pickPart('single','PM')">PM</button>
                       </div>
 
+                      <!-- multi-day start -->
                       <div v-else-if="form.useHalf && !isMA && isMultiDay" class="chip-row">
                         <button type="button" class="sq-edge" :class="form.halfStartEnabled ? 'sq-edge-on' : ''" @click="toggleStartEdge" title="Half of start date">½</button>
                         <button type="button" class="sq-chip" :class="form.halfStartPart === 'AM' ? 'sq-chip-on' : ''" :disabled="!form.halfStartEnabled" @click="pickPart('start','AM')">AM</button>
                         <button type="button" class="sq-chip" :class="form.halfStartPart === 'PM' ? 'sq-chip-on' : ''" :disabled="!form.halfStartEnabled" @click="pickPart('start','PM')">PM</button>
                       </div>
 
+                      <!-- placeholder -->
                       <div v-else class="slot-placeholder"></div>
                     </div>
                   </div>
 
+                  <!-- End row -->
                   <div class="date-row">
                     <div class="ui-ico !h-10 !w-10"><i class="fa-solid fa-flag-checkered" /></div>
 
                     <div class="flex-1">
                       <div class="ui-label">End Date</div>
-                      <input
-                        v-model="form.endDate"
-                        type="date"
-                        :disabled="isMA"
-                        class="ui-date disabled:opacity-70 disabled:cursor-not-allowed"
-                      />
+                      <input v-model="form.endDate" type="date" :disabled="isMA" class="ui-date disabled:opacity-70 disabled:cursor-not-allowed" />
                     </div>
 
+                    <!-- reserved slot -->
                     <div class="date-right-slot">
+                      <!-- multi-day end -->
                       <div v-if="form.useHalf && !isMA && isMultiDay" class="chip-row">
                         <button type="button" class="sq-edge" :class="form.halfEndEnabled ? 'sq-edge-on' : ''" @click="toggleEndEdge" title="Half of end date">½</button>
                         <button type="button" class="sq-chip" :class="form.halfEndPart === 'AM' ? 'sq-chip-on' : ''" :disabled="!form.halfEndEnabled" @click="pickPart('end','AM')">AM</button>
                         <button type="button" class="sq-chip" :class="form.halfEndPart === 'PM' ? 'sq-chip-on' : ''" :disabled="!form.halfEndEnabled" @click="pickPart('end','PM')">PM</button>
                       </div>
 
+                      <!-- placeholder -->
                       <div v-else class="slot-placeholder"></div>
                     </div>
                   </div>
 
-                  <div v-if="isMA && form.startDate" class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  <div v-if="isMA" class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
                     <span class="ui-badge ui-badge-warning">MA</span>
-                    Auto end date: <span class="font-extrabold">{{ form.endDate }}</span> (90 days inclusive)
+                    System will auto-calculate end date = start + 90 days.
                   </div>
                 </div>
               </div>
 
+              <!-- Reason -->
               <div class="ui-card p-3">
                 <div class="ui-row">
                   <div class="ui-ico"><i class="fa-solid fa-pen" /></div>
@@ -711,12 +745,13 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+      <!-- end split -->
     </div>
   </div>
 </template>
 
 <style scoped>
-/* keep your existing styles (unchanged) */
+/* Square balance cards */
 .ui-balance-card{
   @apply rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/40;
   width: 124px;
@@ -728,34 +763,70 @@ onBeforeUnmount(() => {
 .ui-balance-code{
   @apply text-[11px] font-extrabold tracking-wide text-slate-700 dark:text-slate-200;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 2; /* keep nice if long */
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.ui-balance-two{ display:grid; grid-template-columns:1fr 1fr; gap:6px; align-items:end; }
-.ui-balance-block{ @apply rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-center dark:border-slate-800 dark:bg-slate-900/40; }
-.ui-balance-one{ @apply rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-center dark:border-slate-800 dark:bg-slate-900/40; }
-.ui-balance-num{ @apply text-2xl font-black leading-none text-slate-900 dark:text-white; }
-.ui-balance-sub{ @apply mt-1 text-[11px] font-bold text-slate-500 dark:text-slate-400; }
+.ui-balance-two{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  align-items: end;
+}
+.ui-balance-block{
+  @apply rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-center dark:border-slate-800 dark:bg-slate-900/40;
+}
+.ui-balance-one{
+  @apply rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-center dark:border-slate-800 dark:bg-slate-900/40;
+}
+.ui-balance-num{
+  @apply text-2xl font-black leading-none text-slate-900 dark:text-white;
+}
+.ui-balance-sub{
+  @apply mt-1 text-[11px] font-bold text-slate-500 dark:text-slate-400;
+}
 
-.date-row{ display:flex; align-items:center; gap:8px; }
-.date-right-slot{ width:146px; display:flex; justify-content:flex-end; }
-.chip-row{ display:flex; gap:6px; align-items:center; justify-content:flex-end; }
-.slot-placeholder{ width:146px; height:42px; }
+/* ✅ aligned AM/PM: reserve same width on both rows */
+.date-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.date-right-slot{
+  width: 146px;
+  display: flex;
+  justify-content: flex-end;
+}
+.chip-row{
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.slot-placeholder{
+  width: 146px;
+  height: 42px;
+}
 
+/* Small square AM/PM chips beside date pickers */
 .sq-chip{
   @apply grid place-items-center rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700
          hover:bg-slate-50 active:translate-y-[0.5px] disabled:opacity-40 disabled:cursor-not-allowed
          dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/40;
-  width: 42px; height: 42px;
+  width: 42px;
+  height: 42px;
 }
-.sq-chip-on{ @apply border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200; }
+.sq-chip-on{
+  @apply border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200;
+}
 
+/* tiny square edge toggle (½) */
 .sq-edge{
   @apply grid place-items-center rounded-xl border border-slate-200 bg-white text-[13px] font-black text-slate-700
          hover:bg-slate-50 active:translate-y-[0.5px]
          dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/40;
-  width: 42px; height: 42px;
+  width: 42px;
+  height: 42px;
 }
 .sq-edge-on{
   @apply border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-200;
