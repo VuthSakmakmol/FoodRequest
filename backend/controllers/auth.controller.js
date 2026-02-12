@@ -1,4 +1,4 @@
-// controllers/auth.controller.js
+// backend/controllers/auth.controller.js
 const jwt = require('jsonwebtoken')
 const bcrypt = require('bcryptjs')
 const User = require('../models/User')
@@ -7,7 +7,7 @@ const EmployeeDirectory = require('../models/EmployeeDirectory')
 function userRoles(user) {
   const arr = Array.isArray(user?.roles) ? user.roles : []
   const one = user?.role ? [user.role] : []
-  return [...new Set([...arr, ...one].map(r => String(r || '').toUpperCase()))]
+  return [...new Set([...arr, ...one].map((r) => String(r || '').toUpperCase().trim()).filter(Boolean))]
 }
 
 /** ✅ Choose a stable “primary role” for legacy UI + routing */
@@ -28,7 +28,6 @@ function pickPrimaryRole(roles = []) {
     'MESSENGER',
     'EMPLOYEE',
   ]
-
   for (const p of PRIORITY) {
     if (roles.includes(p)) return p
   }
@@ -39,17 +38,16 @@ const signToken = (user) => {
   const roles = userRoles(user)
   const primary = pickPrimaryRole(roles) || String(user?.role || '').toUpperCase()
 
+  console.log('[AUTH] signToken roles=', roles, 'primary=', primary)
+
   return jwt.sign(
     {
       sub: String(user._id),
-
-      // ✅ keep your legacy fields
-      id: String(user.loginId),        // legacy usage
-      loginId: String(user.loginId),   // ✅ consistent usage everywhere
+      id: String(user.loginId), // legacy
+      loginId: String(user.loginId),
       name: user.name || '',
-
-      role: primary,  // ✅ primary role (legacy)
-      roles,          // ✅ multi-role
+      role: primary,
+      roles,
     },
     process.env.JWT_SECRET || 'dev_secret',
     { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
@@ -58,11 +56,18 @@ const signToken = (user) => {
 
 // Map portals -> allowed roles
 const PORTAL_ROLES = {
-  chef: new Set(['CHEF', 'ADMIN']),
-  leave: new Set(['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'LEAVE_COO', 'ADMIN']),
+  chef: new Set(['CHEF', 'ADMIN', 'ROOT_ADMIN']),
+  leave: new Set(['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'LEAVE_COO', 'ADMIN', 'ROOT_ADMIN']),
+
+  // ✅ add these
+  transport: new Set(['ADMIN', 'ROOT_ADMIN', 'DRIVER', 'MESSENGER']),
+  admin: new Set(['ADMIN', 'ROOT_ADMIN']),  // if your transport admin UI uses portal=admin
+  food: new Set(['ADMIN', 'ROOT_ADMIN', 'EMPLOYEE']), // optional if you have food employee portal
 }
 
+
 exports.login = async (req, res, next) => {
+  console.log('\n[AUTH] HIT login', req.method, req.originalUrl)
   try {
     const portal = (req.body?.portal || req.headers['x-portal'] || '')
       .toString()
@@ -71,62 +76,69 @@ exports.login = async (req, res, next) => {
 
     const rawId = req.body?.loginId ?? ''
     const password = req.body?.password ?? ''
-
     const loginId = String(rawId).trim()
+
+    console.log('[AUTH] portal=', portal || '(none)', 'loginId=', loginId)
+
     if (!loginId || !password) {
+      console.log('[AUTH] missing credentials')
       return res.status(400).json({ message: 'loginId and password required' })
     }
 
     const user = await User.findOne({ loginId })
+    console.log('[AUTH] user found?', !!user)
+
     if (!user) return res.status(401).json({ message: 'Invalid credentials' })
     if (user.isActive === false) return res.status(403).json({ message: 'Account disabled' })
 
     const ok = await user.verifyPassword(password)
+    console.log('[AUTH] password ok?', ok)
+
     if (!ok) return res.status(401).json({ message: 'Invalid credentials' })
 
     const roles = userRoles(user)
+    console.log('[AUTH] roles=', roles)
 
-    // ✅ portal allow: ANY role can enter the portal
+    // ✅ portal allow
     if (portal) {
       const allowed = PORTAL_ROLES[portal]
-      if (!allowed) return res.status(400).json({ message: 'Unknown portal' })
+      if (!allowed) {
+        console.log('[AUTH] unknown portal:', portal)
+        return res.status(400).json({ message: 'Unknown portal' })
+      }
 
-      const can = roles.some(r => allowed.has(r))
+      const can = roles.some((r) => allowed.has(r))
+      console.log('[AUTH] portal allowed?', can)
+
       if (!can) return res.status(403).json({ message: 'Not allowed for this portal' })
     }
 
     const token = signToken(user)
-    const primary = pickPrimaryRole(roles) || (roles[0] || user.role || '')
+    const primary = pickPrimaryRole(roles) || roles[0] || user.role || ''
+
+    console.log('[AUTH] ✅ LOGIN OK primary=', primary)
 
     return res.json({
       token,
       user: {
         id: String(user.loginId),
-        loginId: String(user.loginId),   // ✅ add for frontend consistency
+        loginId: String(user.loginId),
         name: user.name,
-        role: primary,                   // ✅ primary (legacy)
-        roles,                           // ✅ multi
+        role: primary,
+        roles,
       },
       portal: portal || null,
     })
   } catch (e) {
+    console.log('[AUTH] ERROR in login:', e?.message)
     next(e)
   }
 }
 
 exports.createUser = async (req, res, next) => {
+  console.log('\n[AUTH] HIT createUser', req.method, req.originalUrl)
   try {
-    const {
-      loginId,
-      name,
-      password,
-
-      // ✅ allow either role or roles
-      role,
-      roles,
-
-      telegramChatId: bodyChatId,
-    } = req.body || {}
+    const { loginId, name, password, role, roles, telegramChatId: bodyChatId } = req.body || {}
 
     if (!loginId || !name || !password) {
       return res.status(400).json({ message: 'loginId, name, password required' })
@@ -136,15 +148,13 @@ exports.createUser = async (req, res, next) => {
     const exists = await User.findOne({ loginId: cleanId })
     if (exists) return res.status(409).json({ message: 'loginId already exists' })
 
-    // ✅ normalize roles
     const rolesArr = (Array.isArray(roles) ? roles : roles ? [roles] : role ? [role] : ['LEAVE_USER'])
-      .map(r => String(r || '').toUpperCase().trim())
+      .map((r) => String(r || '').toUpperCase().trim())
       .filter(Boolean)
 
     const merged = [...new Set(rolesArr)]
     const mainRole = pickPrimaryRole(merged) || merged[0] || 'LEAVE_USER'
 
-    // ✅ auto fetch telegramChatId from EmployeeDirectory if not provided
     let telegramChatId = String(bodyChatId || '').trim()
     if (!telegramChatId) {
       const emp = await EmployeeDirectory.findOne({ employeeId: cleanId })
@@ -159,8 +169,8 @@ exports.createUser = async (req, res, next) => {
       loginId: cleanId,
       name: String(name).trim(),
       passwordHash,
-      role: mainRole,   // legacy
-      roles: merged,    // ✅ multi roles
+      role: mainRole,
+      roles: merged,
       isActive: true,
       ...(telegramChatId ? { telegramChatId } : {}),
     })
@@ -174,11 +184,13 @@ exports.createUser = async (req, res, next) => {
       telegramChatId: doc.telegramChatId || '',
     })
   } catch (e) {
+    console.log('[AUTH] ERROR in createUser:', e?.message)
     next(e)
   }
 }
 
 exports.me = async (req, res, next) => {
+  console.log('\n[AUTH] HIT me', req.method, req.originalUrl, 'user=', req.user?.loginId)
   try {
     const user = await User.findById(req.user.sub).select('loginId name role roles isActive')
     if (!user) return res.status(404).json({ message: 'Not found' })
@@ -191,6 +203,7 @@ exports.me = async (req, res, next) => {
       roles: userRoles(user),
     })
   } catch (e) {
+    console.log('[AUTH] ERROR in me:', e?.message)
     next(e)
   }
 }

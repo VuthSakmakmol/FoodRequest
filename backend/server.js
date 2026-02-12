@@ -22,7 +22,8 @@ const forceHTTPS = String(process.env.FORCE_HTTPS || '').toLowerCase() === 'true
 if (isProd) app.set('trust proxy', 1)
 
 /* ───────────────── Telegram polling toggle ───────────────── */
-const POLLING_ENABLED = String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
+const POLLING_ENABLED =
+  String(process.env.TELEGRAM_POLLING_ENABLED || 'false').toLowerCase() === 'true'
 
 /* ───────────────── CORS ───────────────── */
 const rawOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
@@ -31,7 +32,9 @@ const rawOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
   .filter(Boolean)
 
 const hasWildcard = rawOrigins.includes('*')
-const apiCorsOptions = hasWildcard ? { origin: true, credentials: false } : { origin: rawOrigins, credentials: true }
+const apiCorsOptions = hasWildcard
+  ? { origin: true, credentials: false }
+  : { origin: rawOrigins, credentials: true }
 
 /* ───────────────── HTTPS redirect (if enabled) ───────────────── */
 if (forceHTTPS) {
@@ -66,6 +69,16 @@ app.use(compression())
 /* ───────────────── Parsers & Limits ───────────────── */
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ limit: '5mb', extended: true }))
+
+/* ───────────────── DEBUG: request logger (VERY IMPORTANT) ───────────────── */
+app.use((req, _res, next) => {
+  console.log(
+    `\n[REQ] ${req.method} ${req.originalUrl} | origin=${req.headers.origin || ''} | auth=${
+      req.headers.authorization ? 'YES' : 'NO'
+    }`
+  )
+  next()
+})
 
 /* ───────────────── Health ───────────────── */
 app.get('/healthz', (_req, res) => res.json({ ok: true }))
@@ -115,10 +128,19 @@ app.use((req, _res, next) => {
 attachDebugEndpoints(app)
 
 /* ───────────────── Routes ───────────────── */
+/**
+ * ✅ IMPORTANT:
+ * Auth must be PUBLIC and mounted EARLY.
+ * If something blocks /api/auth/login with Forbidden, it means you have a global requireRole somewhere else.
+ */
+console.log('[BOOT] Mounting routes...')
+
+// ✅ Auth (PUBLIC)
+app.use('/api/auth', require('./routes/auth.routes'))
 
 // ========================== Leave module ==========================
 
-// Leave Requests (NOW includes MANAGER/GM/COO flows in ONE controller)
+// Leave Requests
 app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
 
 // Leave types
@@ -130,19 +152,13 @@ app.use('/api/leave/user', require('./routes/leave/leaveProfile.user.routes'))
 // Replace days
 app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
 
-// Admin leave (profiles, approvers, password reset, contracts)
+// Admin leave
 app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
 app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
 
 // Reports + signatures
 app.use('/api', require('./routes/leave/leaveReport-admin.routes'))
 app.use('/api', require('./routes/files/signature.admin.routes'))
-
-// ✅ IMPORTANT: COO controller routes removed (do NOT mount /api/coo/leave/...)
-// app.use('/api/coo/leave/requests', require('./routes/leave/leaveRequest.coo.routes')) // <-- KEEP REMOVED
-
-// Auth
-app.use('/api/auth', require('./routes/auth.routes'))
 
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
@@ -157,30 +173,26 @@ app.use('/uploads', express.static(path.resolve(process.cwd(), process.env.UPLOA
 
 // ========================== Transportation ==========================
 
-// ✅ Private (auth) routes
 app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'))
-
-// ✅ Public transport routes (keep only the truly public file)
 app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
-
 app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'))
 app.use('/api/admin', require('./routes/admin-user.routes'))
-
 app.use('/api/driver', require('./routes/transportation/carBooking-driver.routes'))
-
-// ✅ Messenger routes (mount once)
 app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.routes'))
-
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
 
 // ====================================== Holiday =================================
 app.use('/api/public', require('./routes/public-holidays.routes'))
 
 /* ───────────────── 404 for API ───────────────── */
-app.use('/api', (_req, res) => res.status(404).json({ message: 'Not found' }))
+app.use('/api', (req, res) => {
+  console.log('[404] API route not found:', req.method, req.originalUrl)
+  res.status(404).json({ message: 'Not found' })
+})
 
 /* ───────────────── Error handler ───────────────── */
-app.use((err, _req, res, _next) => {
+app.use((err, req, res, _next) => {
+  console.log('[ERR] path=', req.originalUrl, 'status=', err?.status, 'msg=', err?.message)
   if (!isProd) console.error(err)
   res.status(err.status || 500).json({
     message: err.message || 'Server error',
@@ -201,6 +213,7 @@ const PORT = Number(process.env.PORT || 4333)
 
 ;(async function boot() {
   try {
+    console.log('[BOOT] Connecting MongoDB...')
     await mongoose.connect(process.env.MONGO_URI, {
       dbName: process.env.MONGO_DB || undefined,
     })
@@ -216,6 +229,7 @@ const PORT = Number(process.env.PORT || 4333)
     server.listen(PORT, () => {
       const proto = forceHTTPS ? 'https' : 'http'
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`)
+      console.log('✅ Try login POST /api/auth/login')
     })
 
     const shutdown = async (sig) => {
