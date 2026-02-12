@@ -1,6 +1,8 @@
 // backend/utils/leave/leave.contracts.js
-// ✅ Contract helpers for Expat Leave
-// Goal: every contract has its own carry, and "current contract" is deterministic.
+// ✅ Contract helpers for Expat Leave (CLEAN VERSION)
+// Goal: every contract has its own carry, and "active contract" is deterministic.
+// ❌ NO legacy profile.carry / profile.alCarry
+// ❌ NO contract.alCarry
 
 function isValidYMD(s) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim())
@@ -43,6 +45,8 @@ function endFromStartYMD(startYMD) {
   return addDaysYMD(addYearsYMD(startYMD, 1), -1)
 }
 
+/* ───────────────── carry ───────────────── */
+
 function normalizeCarry(src) {
   const c = src && typeof src === 'object' ? src : {}
   return {
@@ -56,14 +60,10 @@ function normalizeCarry(src) {
 
 function isCarryEmpty(carry) {
   const c = normalizeCarry(carry)
-  return (
-    num(c.AL) === 0 &&
-    num(c.SP) === 0 &&
-    num(c.MC) === 0 &&
-    num(c.MA) === 0 &&
-    num(c.UL) === 0
-  )
+  return num(c.AL) === 0 && num(c.SP) === 0 && num(c.MC) === 0 && num(c.MA) === 0 && num(c.UL) === 0
 }
+
+/* ───────────────── sort + pick ───────────────── */
 
 /**
  * Sort contracts oldest -> newest (by startDate if possible, else by contractNo).
@@ -83,14 +83,14 @@ function sortContractsAsc(contracts = []) {
 }
 
 /**
- * Sort contracts newest -> oldest (by startDate if possible, else by contractNo).
+ * Sort contracts newest -> oldest.
  */
 function sortContractsDesc(contracts = []) {
   return sortContractsAsc(contracts).reverse()
 }
 
 /**
- * Return the "current/latest contract" (newest by startDate/contractNo).
+ * Return latest contract (newest by startDate/contractNo).
  */
 function pickLatestContract(profile) {
   const list = Array.isArray(profile?.contracts) ? profile.contracts : []
@@ -118,7 +118,7 @@ function findContractByAsOf(profile, asOfYMD) {
 }
 
 /**
- * Decide the active contract for calculations.
+ * Decide active contract for calculations.
  * Priority:
  *  1) contractId / contractNo if provided
  *  2) asOf date (belongs to which contract)
@@ -126,12 +126,7 @@ function findContractByAsOf(profile, asOfYMD) {
  *  4) latest contract
  */
 function pickActiveContract(profile, opts = {}) {
-  const {
-    contractId = null,
-    contractNo = null,
-    asOf = null,
-    contractDate = null,
-  } = opts || {}
+  const { contractId = null, contractNo = null, asOf = null, contractDate = null } = opts || {}
 
   const list = Array.isArray(profile?.contracts) ? profile.contracts : []
   if (!list.length) return null
@@ -169,25 +164,29 @@ function pickActiveContract(profile, opts = {}) {
   return pickLatestContract(profile)
 }
 
+/* ───────────────── ensure contracts (NO migration) ───────────────── */
+
 /**
- * Ensures contracts[] exists and at least 1 contract exists.
- * This is useful for migrations / seed scripts / “clean data recreate”.
+ * Ensure profile.contracts exists and has at least 1 contract.
+ * For NEW DB only (no legacy migration).
  *
+ * opts.initialCarry (optional) -> put into first contract carry.
  * Returns { changed, contracts, activeContract }
  */
-function ensureContracts(profile) {
+function ensureContracts(profile, opts = {}) {
   if (!profile || typeof profile !== 'object') {
     return { changed: false, contracts: [], activeContract: null }
   }
 
   let changed = false
+  const initialCarry = normalizeCarry(opts?.initialCarry)
 
   if (!Array.isArray(profile.contracts)) {
     profile.contracts = []
     changed = true
   }
 
-  // if empty, create initial contract from contractDate or joinDate
+  // create initial contract if empty
   if (profile.contracts.length === 0) {
     const start =
       isValidYMD(profile?.contractDate) ? String(profile.contractDate).trim()
@@ -195,20 +194,21 @@ function ensureContracts(profile) {
       : ''
 
     if (start) {
-      const legacyCarry = normalizeCarry(profile?.carry)
-      if (num(legacyCarry.AL) === 0 && typeof profile?.alCarry === 'number' && num(profile.alCarry) !== 0) {
-        legacyCarry.AL = num(profile.alCarry)
-      }
-
       profile.contracts.push({
         contractNo: 1,
         startDate: start,
         endDate: endFromStartYMD(start),
-        carry: legacyCarry,
-        alCarry: num(legacyCarry.AL),
+        carry: isCarryEmpty(initialCarry) ? normalizeCarry({}) : initialCarry,
         openedAt: new Date(),
         openedBy: 'ensureContracts',
         note: 'Initial contract auto-created',
+        openSnapshot: {
+          asOf: start,
+          contractDate: start,
+          contractEndDate: endFromStartYMD(start),
+          carry: isCarryEmpty(initialCarry) ? normalizeCarry({}) : initialCarry,
+          balances: [],
+        },
         closeSnapshot: null,
       })
       changed = true
@@ -220,30 +220,11 @@ function ensureContracts(profile) {
         c.endDate = endFromStartYMD(c.startDate)
         changed = true
       }
-      const before = c?.carry
       c.carry = normalizeCarry(c.carry)
-      c.alCarry = num(c.carry.AL)
-      if (before !== c.carry) changed = true
-    }
-
-    // migrate legacy profile.carry -> latest contract only if latest carry empty
-    const latest = pickLatestContract(profile)
-    if (latest && isCarryEmpty(latest.carry)) {
-      const legacyCarry = normalizeCarry(profile?.carry)
-      if (num(legacyCarry.AL) === 0 && typeof profile?.alCarry === 'number' && num(profile.alCarry) !== 0) {
-        legacyCarry.AL = num(profile.alCarry)
-      }
-
-      const hasLegacy = !isCarryEmpty(legacyCarry)
-      if (hasLegacy) {
-        latest.carry = legacyCarry
-        latest.alCarry = num(legacyCarry.AL)
-        changed = true
-      }
     }
   }
 
-  // keep profile "current pointers" aligned to latest
+  // align profile pointers to latest
   const latest = pickLatestContract(profile)
   if (latest && isValidYMD(latest.startDate)) {
     if (String(profile.contractDate || '').trim() !== String(latest.startDate).trim()) {

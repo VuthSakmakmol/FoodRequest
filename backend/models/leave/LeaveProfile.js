@@ -1,15 +1,25 @@
 // backend/models/leave/LeaveProfile.js
 const mongoose = require('mongoose')
 
-function isValidYMD(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim())
+/* ───────────────── helpers ───────────────── */
+function s(v) {
+  return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
+}
+function num(v) {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+function isValidYMD(x) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(x))
 }
 
 function ymdToUTCDate(ymd) {
-  const [y, m, d] = String(ymd).split('-').map(Number)
+  const [y, m, d] = s(ymd).split('-').map(Number)
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1))
 }
-
 function addDaysYMD(ymd, deltaDays) {
   const dt = ymdToUTCDate(ymd)
   dt.setUTCDate(dt.getUTCDate() + Number(deltaDays || 0))
@@ -18,7 +28,6 @@ function addDaysYMD(ymd, deltaDays) {
   const d = String(dt.getUTCDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 }
-
 function addYearsYMD(ymd, years) {
   const dt = ymdToUTCDate(ymd)
   dt.setUTCFullYear(dt.getUTCFullYear() + Number(years || 0))
@@ -27,17 +36,10 @@ function addYearsYMD(ymd, years) {
   const d = String(dt.getUTCDate()).padStart(2, '0')
   return `${y}-${m}-${d}`
 }
-
-function num(v) {
-  const n = Number(v ?? 0)
-  return Number.isFinite(n) ? n : 0
-}
-
-function s(v) {
-  return String(v ?? '').trim()
-}
-function up(v) {
-  return s(v).toUpperCase()
+function endFromStartYMD(startYMD) {
+  if (!isValidYMD(startYMD)) return ''
+  // end = start + 1 year - 1 day (UTC safe)
+  return addDaysYMD(addYearsYMD(startYMD, 1), -1)
 }
 
 /**
@@ -45,33 +47,27 @@ function up(v) {
  */
 const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
 
-/**
- * Normalize old/stored values to ONLY the 3 semantic values.
- * - Old profile schema used: GM_ONLY / GM_AND_COO (or variants)
- * - Some old code used: GM_OR_COO
- */
 function normalizeApprovalMode(v) {
   const raw = up(v)
-
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
-
-  // legacy profile values
-  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
-  if (raw === 'GM_AND_COO') return 'GM_AND_COO'
-  if (raw === 'GM_OR_COO') return 'GM_AND_COO'
-  if (raw === 'GM_COO') return 'GM_AND_COO'
-  if (raw === 'COO_AND_GM') return 'GM_AND_COO'
-  if (raw === 'GM_THEN_COO') return 'GM_AND_COO'
-
   // safest default
   return 'MANAGER_AND_GM'
 }
 
-// ─────────────────────────────────────────────────────────────
-// Schemas
-// ─────────────────────────────────────────────────────────────
+function normalizeCarryObj(c) {
+  const src = c && typeof c === 'object' ? c : {}
+  return {
+    AL: num(src.AL),
+    SP: num(src.SP),
+    MC: num(src.MC),
+    MA: num(src.MA),
+    UL: num(src.UL),
+  }
+}
+
+/* ───────────────── schemas ───────────────── */
 
 const BalanceSchema = new mongoose.Schema(
   {
@@ -83,7 +79,6 @@ const BalanceSchema = new mongoose.Schema(
   { _id: false }
 )
 
-// ✅ Carry schema (positive or negative allowed)
 const CarrySchema = new mongoose.Schema(
   {
     AL: { type: Number, default: 0 },
@@ -98,248 +93,189 @@ const CarrySchema = new mongoose.Schema(
 const ContractSnapshotSchema = new mongoose.Schema(
   {
     asOf: { type: String, default: '' }, // YYYY-MM-DD
-    balances: { type: [BalanceSchema], default: [] },
-
     contractDate: { type: String, default: '' }, // start
     contractEndDate: { type: String, default: '' }, // end
-
-    // ✅ snapshot carry (at close time)
     carry: { type: CarrySchema, default: () => ({}) },
+    balances: { type: [BalanceSchema], default: [] },
   },
   { _id: false }
 )
 
-const ContractHistorySchema = new mongoose.Schema(
+const ContractSchema = new mongoose.Schema(
   {
     contractNo: { type: Number, required: true },
-    startDate: { type: String, default: '' },
-    endDate: { type: String, default: '' },
 
-    // ✅ IMPORTANT: per-contract carry (this is what we edit)
+    startDate: { type: String, required: true }, // YYYY-MM-DD
+    endDate: { type: String, required: true }, // YYYY-MM-DD
+
+    // ✅ Source of truth: per-contract carry
     carry: { type: CarrySchema, default: () => ({}) },
 
     openedAt: { type: Date, default: Date.now },
-    closedAt: { type: Date, default: null },
     openedBy: { type: String, default: '' },
-    closedBy: { type: String, default: '' },
-    note: { type: String, default: '' },
-    closeSnapshot: { type: ContractSnapshotSchema, default: null },
 
-    // legacy mirror (keep if you already have data using it)
-    alCarry: { type: Number, default: undefined },
+    closedAt: { type: Date, default: null },
+    closedBy: { type: String, default: '' },
+
+    note: { type: String, default: '' },
+
+    // ✅ store balances snapshot (optional but recommended)
+    openSnapshot: { type: ContractSnapshotSchema, default: null },
+    closeSnapshot: { type: ContractSnapshotSchema, default: null },
   },
   { _id: false }
 )
 
-// ─────────────────────────────────────────────────────────────
-// Main Profile
-// ─────────────────────────────────────────────────────────────
+/* ───────────────── main profile ───────────────── */
 
 const LeaveProfileSchema = new mongoose.Schema(
   {
-    employeeId: { type: String, required: true, unique: true, index: true },
-    employeeLoginId: { type: String, default: '' },
+    employeeId: { type: String, required: true, unique: true, index: true }, // employeeId in EmployeeDirectory
+    employeeLoginId: { type: String, required: true, index: true }, // loginId for User account
 
-    // approver1 (optional)
+    // Approvers (by loginId)
     managerLoginId: { type: String, default: '' },
-
-    // approver2
     gmLoginId: { type: String, default: '' },
-
-    // approver3
     cooLoginId: { type: String, default: '' },
 
-    /**
-     * ✅ approval mode: ONLY 3 values
-     * - MANAGER_AND_GM
-     * - MANAGER_AND_COO
-     * - GM_AND_COO
-     */
     approvalMode: {
       type: String,
       enum: APPROVAL_MODE,
       default: 'MANAGER_AND_GM',
     },
 
+    // Optional denormalized info (UI convenience)
     name: { type: String, default: '' },
     department: { type: String, default: '' },
 
-    joinDate: { type: String, default: '' }, // YYYY-MM-DD
+    joinDate: { type: String, required: true }, // YYYY-MM-DD
 
-    // pointers for "current contract"
-    contractDate: { type: String, default: '' }, // current start
-    contractEndDate: { type: String, default: '' }, // current end
+    // Current contract pointers (always match latest contract)
+    contractDate: { type: String, required: true }, // current start
+    contractEndDate: { type: String, required: true }, // current end
 
     isActive: { type: Boolean, default: true },
 
+    // Current contract computed balances (for UI speed)
     balances: { type: [BalanceSchema], default: [] },
     balancesAsOf: { type: String, default: '' },
 
-    // ✅ contract history (each contract has its own carry)
-    contracts: { type: [ContractHistorySchema], default: [] },
+    // ✅ Contract history (each contract owns carry + snapshots)
+    contracts: { type: [ContractSchema], default: [] },
 
-    // ─────────────────────────────
-    // LEGACY ONLY (keep temporarily)
-    // ─────────────────────────────
-    carry: { type: CarrySchema, default: undefined },
-    alCarry: { type: Number, default: undefined },
-
-    // legacy profile enum (if old json still writes here) — keep but not required
-    // (if you don't have this field in DB, remove it)
-    // approvalModeLegacy: { type: String, default: undefined },
-
+    // Optional notifications
     contractExpiryNotifiedFor: { type: String, default: '' },
     contractExpiryNotifiedAt: { type: Date, default: null },
   },
   { timestamps: true }
 )
 
-// ─────────────────────────────────────────────────────────────
-// Helpers for contracts
-// ─────────────────────────────────────────────────────────────
+/* ───────────────── internal helpers ───────────────── */
 
-function normalizeCarryObj(c) {
-  const src = c && typeof c === 'object' ? c : {}
-  return {
-    AL: num(src.AL),
-    SP: num(src.SP),
-    MC: num(src.MC),
-    MA: num(src.MA),
-    UL: num(src.UL),
-  }
+function sortContractsAsc(list) {
+  const arr = Array.isArray(list) ? list.slice() : []
+  return arr.sort((a, b) => {
+    const sa = s(a?.startDate)
+    const sb = s(b?.startDate)
+    const va = isValidYMD(sa)
+    const vb = isValidYMD(sb)
+    if (va && vb) return sa.localeCompare(sb)
+    if (va && !vb) return -1
+    if (!va && vb) return 1
+    return num(a?.contractNo) - num(b?.contractNo)
+  })
 }
 
-function contractEndFromStart(startYMD) {
-  if (!isValidYMD(startYMD)) return ''
-  return addDaysYMD(addYearsYMD(startYMD, 1), -1)
+function pickLatestContract(list) {
+  const arr = sortContractsAsc(list)
+  return arr.length ? arr[arr.length - 1] : null
 }
 
-function pickLatestContract(contracts = []) {
-  const arr = Array.isArray(contracts) ? contracts : []
-  if (!arr.length) return null
-
-  const withStart = arr.filter((c) => isValidYMD(c?.startDate))
-  if (withStart.length) {
-    return withStart.sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)))[0]
-  }
-  return arr.slice().sort((a, b) => num(b.contractNo) - num(a.contractNo))[0]
-}
-
-function ensureContractNumbers(contracts = []) {
-  const arr = Array.isArray(contracts) ? contracts : []
-  const hasAny = arr.some((c) => typeof c?.contractNo === 'number' && Number.isFinite(c.contractNo))
-  if (!hasAny) {
-    const sorted = arr
-      .slice()
-      .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')))
-    sorted.forEach((c, idx) => {
-      c.contractNo = idx + 1
-    })
-    return sorted
-  }
-  return arr
-}
-
-// ─────────────────────────────────────────────────────────────
-// Pre-validate: ensure approvalMode + contract pointers + migrate legacy carry
-// ─────────────────────────────────────────────────────────────
+/* ───────────────── pre-validate (NO legacy migration) ─────────────────
+   Clean rules:
+   - approvalMode normalized
+   - contracts must exist
+   - contractNo auto-assigned if missing
+   - endDate auto-filled from startDate if missing
+   - contractDate/contractEndDate pointers always match latest contract
+───────────────────────────────────────────────────────────── */
 
 LeaveProfileSchema.pre('validate', function (next) {
   try {
-    // ✅ normalize approvalMode to ONLY 3 modes
+    // normalize approvalMode
     this.approvalMode = normalizeApprovalMode(this.approvalMode)
 
-    // If contractDate missing, use joinDate
-    if (!this.contractDate && this.joinDate) this.contractDate = this.joinDate
+    // normalize required strings
+    this.employeeId = s(this.employeeId)
+    this.employeeLoginId = s(this.employeeLoginId)
+    this.joinDate = s(this.joinDate)
 
-    // Ensure contractEndDate always matches contractDate (current pointer)
-    if (isValidYMD(this.contractDate)) {
-      this.contractEndDate = contractEndFromStart(this.contractDate)
+    if (!isValidYMD(this.joinDate)) {
+      return next(new Error('joinDate must be YYYY-MM-DD'))
     }
 
-    // Ensure contracts array exists
     if (!Array.isArray(this.contracts)) this.contracts = []
 
-    // Ensure contract numbers are sane
-    this.contracts = ensureContractNumbers(this.contracts)
-
-    // ─────────────────────────────────────────────
-    // ✅ Migration / Initialization
-    // If no contracts exist yet, create initial contract
-    // and move legacy carry into it.
-    // ─────────────────────────────────────────────
+    // if empty contracts, create the first contract from contractDate or joinDate
     if (this.contracts.length === 0) {
-      const start = isValidYMD(this.contractDate)
-        ? String(this.contractDate)
-        : isValidYMD(this.joinDate)
-          ? String(this.joinDate)
-          : ''
+      const start = isValidYMD(this.contractDate) ? s(this.contractDate) : s(this.joinDate)
+      const end = endFromStartYMD(start)
 
-      if (start) {
-        const legacyCarry = normalizeCarryObj(this.carry)
-        if (num(legacyCarry.AL) === 0 && typeof this.alCarry === 'number' && num(this.alCarry) !== 0) {
-          legacyCarry.AL = num(this.alCarry)
-        }
-
-        this.contracts.push({
-          contractNo: 1,
-          startDate: start,
-          endDate: contractEndFromStart(start),
-          carry: legacyCarry,
-          alCarry: num(legacyCarry.AL),
-          openedAt: new Date(),
-          openedBy: 'legacy-migration',
-          note: 'Initial contract (auto-created)',
-          closeSnapshot: null,
-        })
-      }
-    } else {
-      // If contracts exist, ensure each contract has endDate + carry initialized
-      this.contracts.forEach((c) => {
-        if (isValidYMD(c.startDate) && !isValidYMD(c.endDate)) {
-          c.endDate = contractEndFromStart(c.startDate)
-        }
-        c.carry = normalizeCarryObj(c.carry)
-        c.alCarry = num(c.carry.AL)
+      this.contracts.push({
+        contractNo: 1,
+        startDate: start,
+        endDate: end,
+        carry: normalizeCarryObj({}),
+        openedAt: new Date(),
+        openedBy: 'system',
+        note: 'Initial contract',
+        openSnapshot: null,
+        closeSnapshot: null,
       })
-
-      // ✅ Move legacy profile-level carry into latest contract ONLY if contract carry is empty
-      const latest = pickLatestContract(this.contracts)
-      if (latest) {
-        const latestCarry = normalizeCarryObj(latest.carry)
-        const isLatestCarryEmpty =
-          num(latestCarry.AL) === 0 &&
-          num(latestCarry.SP) === 0 &&
-          num(latestCarry.MC) === 0 &&
-          num(latestCarry.MA) === 0 &&
-          num(latestCarry.UL) === 0
-
-        if (isLatestCarryEmpty) {
-          const legacyCarry = normalizeCarryObj(this.carry)
-          if (num(legacyCarry.AL) === 0 && typeof this.alCarry === 'number' && num(this.alCarry) !== 0) {
-            legacyCarry.AL = num(this.alCarry)
-          }
-
-          const hasLegacy =
-            num(legacyCarry.AL) !== 0 ||
-            num(legacyCarry.SP) !== 0 ||
-            num(legacyCarry.MC) !== 0 ||
-            num(legacyCarry.MA) !== 0 ||
-            num(legacyCarry.UL) !== 0
-
-          if (hasLegacy) {
-            latest.carry = legacyCarry
-            latest.alCarry = num(legacyCarry.AL)
-          }
-        }
-
-        // Keep profile pointers aligned to latest contract for UI
-        if (isValidYMD(latest.startDate)) {
-          this.contractDate = latest.startDate
-          this.contractEndDate = isValidYMD(latest.endDate) ? latest.endDate : contractEndFromStart(latest.startDate)
-        }
-      }
     }
+
+    // normalize all contracts
+    const sorted = sortContractsAsc(this.contracts)
+
+    // assign contractNo if missing, based on ascending order
+    sorted.forEach((c, idx) => {
+      if (!Number.isFinite(Number(c.contractNo)) || Number(c.contractNo) <= 0) {
+        c.contractNo = idx + 1
+      } else {
+        c.contractNo = Number(c.contractNo)
+      }
+
+      c.startDate = s(c.startDate)
+      if (!isValidYMD(c.startDate)) {
+        throw new Error(`contracts[${idx}].startDate must be YYYY-MM-DD`)
+      }
+
+      // if endDate missing or invalid -> auto
+      c.endDate = isValidYMD(c.endDate) ? s(c.endDate) : endFromStartYMD(c.startDate)
+
+      // normalize carry
+      c.carry = normalizeCarryObj(c.carry)
+
+      // snapshots: if exist, ensure carry normalized too
+      if (c.openSnapshot) {
+        c.openSnapshot.carry = normalizeCarryObj(c.openSnapshot.carry)
+      }
+      if (c.closeSnapshot) {
+        c.closeSnapshot.carry = normalizeCarryObj(c.closeSnapshot.carry)
+      }
+    })
+
+    this.contracts = sorted
+
+    // pointers must follow latest contract
+    const latest = pickLatestContract(this.contracts)
+    if (!latest) throw new Error('contracts cannot be empty')
+
+    this.contractDate = s(latest.startDate)
+    this.contractEndDate = s(latest.endDate)
+
+    if (!isValidYMD(this.contractDate)) throw new Error('contractDate must be YYYY-MM-DD')
+    if (!isValidYMD(this.contractEndDate)) throw new Error('contractEndDate must be YYYY-MM-DD')
 
     next()
   } catch (e) {
@@ -347,6 +283,7 @@ LeaveProfileSchema.pre('validate', function (next) {
   }
 })
 
+/* ───────────────── statics ───────────────── */
 LeaveProfileSchema.statics.APPROVAL_MODE = APPROVAL_MODE
 LeaveProfileSchema.statics.normalizeApprovalMode = normalizeApprovalMode
 

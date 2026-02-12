@@ -3,8 +3,11 @@
   ✅ Profile settings edit (joinDate, approvalMode, approvers, active)
   ✅ Contract-aware carry edit (per contractNo)
   ✅ Logs + Renew contract modal (components)
-  ✅ NEW: Admin password reset (component)
-  ✅ CLEAN UI: consistent sections, header bars, spacing, responsive
+  ✅ Admin password reset (component)
+  ✅ IMPORTANT:
+     - Carry stored ONLY on contracts[].carry
+     - computeBalances() already applies carry into balances.used + balances.remaining
+     - Frontend must NOT apply carry again
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -108,31 +111,7 @@ function normApprovalMode(v) {
   return 'MANAGER_AND_GM'
 }
 
-/* ───────────────── carry helpers ───────────────── */
-const showCarryAdvanced = ref(false)
-function emptyCarry() {
-  return { AL: 0, SP: 0, MC: 0, MA: 0, UL: 0 }
-}
-function normalizeCarry(src) {
-  const c = src || {}
-  return {
-    AL: num(c.AL),
-    SP: num(c.SP),
-    MC: num(c.MC),
-    MA: num(c.MA),
-    UL: num(c.UL),
-  }
-}
-function readCarryFromProfile(p) {
-  // prefer new carry, fallback to legacy alCarry
-  const c = normalizeCarry(p?.carry)
-  if (num(c.AL) === 0 && typeof p?.alCarry === 'number' && num(p?.alCarry) !== 0) {
-    c.AL = num(p.alCarry)
-  }
-  return c
-}
-
-/* ───────────────── balances normalize ───────────────── */
+/* ───────────────── balances normalize (NO carry math here) ───────────────── */
 function normalizeBalances(rawBalances = []) {
   const map = new Map()
 
@@ -147,7 +126,6 @@ function normalizeBalances(rawBalances = []) {
     })
   }
 
-  // ensure all types exist
   for (const code of TYPE_ORDER.value) {
     if (!map.has(code)) {
       map.set(code, { leaveTypeCode: code, yearlyEntitlement: 0, used: 0, remaining: 0 })
@@ -158,65 +136,21 @@ function normalizeBalances(rawBalances = []) {
   arr.sort((a, b) => TYPE_ORDER.value.indexOf(a.leaveTypeCode) - TYPE_ORDER.value.indexOf(b.leaveTypeCode))
   return arr
 }
-const normalizedBalances = computed(() => normalizeBalances(profile.value?.balances || []))
+const balancesForDisplay = computed(() => normalizeBalances(profile.value?.balances || []))
 
 /* ───────────────── contract history (logs snapshot) ───────────────── */
 function readContractHistory(p) {
   if (!p) return []
-  if (Array.isArray(p.contractHistory)) return p.contractHistory
   if (Array.isArray(p.contracts)) return p.contracts
+  if (Array.isArray(p.contractHistory)) return p.contractHistory
   return []
 }
 const contractHistory = computed(() => {
   const arr = readContractHistory(profile.value).slice()
-  return arr.sort((x, y) => {
-    const tx = x?.createdAt ? new Date(x.createdAt).getTime() : 0
-    const ty = y?.createdAt ? new Date(y.createdAt).getTime() : 0
-    return ty - tx
-  })
-})
-
-function pickCurrentCarryMap() {
-  // 1) prefer current contract carry (most correct)
-  const cur =
-    contracts.value.find((c) => c.isCurrent) ||
-    contracts.value[0] ||
-    null
-
-  const c = cur?.carry || profile.value?.carry || {}
-  return {
-    AL: num(c.AL),
-    SP: num(c.SP),
-    MC: num(c.MC),
-    MA: num(c.MA),
-    UL: num(c.UL),
-  }
-}
-
-const carryMapForDisplay = computed(() => pickCurrentCarryMap())
-
-const balancesForDisplay = computed(() => {
-  const carryMap = carryMapForDisplay.value || {}
-
-  return normalizedBalances.value.map((b) => {
-    const code = String(b.leaveTypeCode || '').toUpperCase()
-    const carry = num(carryMap[code])
-
-    const used = num(b.used)
-    const remaining = num(b.remaining)
-
-    const usedDisplay = used + Math.max(0, -carry)
-    let remainingDisplay = remaining + carry
-
-    // UL: never show negative remaining (UL is unlimited)
-    if (code === 'UL') remainingDisplay = Math.max(0, remainingDisplay)
-
-    return {
-      ...b,
-      carry,
-      usedDisplay,
-      remainingDisplay,
-    }
+  return arr.sort((a, b) => {
+    const ta = a?.openedAt ? new Date(a.openedAt).getTime() : a?.createdAt ? new Date(a.createdAt).getTime() : 0
+    const tb = b?.openedAt ? new Date(b.openedAt).getTime() : b?.createdAt ? new Date(b.createdAt).getTime() : 0
+    return tb - ta
   })
 })
 
@@ -225,6 +159,14 @@ const contractsLoading = ref(false)
 const contractsError = ref('')
 const contracts = ref([])
 
+function emptyCarry() {
+  return { AL: 0, SP: 0, MC: 0, MA: 0, UL: 0 }
+}
+function normalizeCarry(src) {
+  const c = src || {}
+  return { AL: num(c.AL), SP: num(c.SP), MC: num(c.MC), MA: num(c.MA), UL: num(c.UL) }
+}
+
 function normalizeContracts(raw) {
   const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
   return arr
@@ -232,77 +174,67 @@ function normalizeContracts(raw) {
       const contractNo = c?.contractNo ?? c?.no ?? c?.index ?? idx + 1
       const start = c?.startDate || c?.from || c?.contractDate || c?.start || ''
       const end = c?.endDate || c?.to || c?.contractEndDate || c?.end || ''
-      const carry = normalizeCarry(c?.carry || c?.closeSnapshot?.carry || c?.openSnapshot?.carry || {})
+      const carry = normalizeCarry(c?.carry || {})
       const isCurrent = !!(c?.isCurrent || c?.current || c?.active)
-      return {
-        ...c,
-        contractNo: Number(contractNo),
-        startDate: start,
-        endDate: end,
-        carry,
-        isCurrent,
-      }
+      return { ...c, contractNo: Number(contractNo), startDate: start, endDate: end, carry, isCurrent }
     })
     .sort((a, b) => Number(b.contractNo) - Number(a.contractNo))
 }
 
 const selectedContractNo = ref(null)
-
 const selectedContract = computed(() => {
   const no = Number(selectedContractNo.value)
   if (!no) return null
   return contracts.value.find((c) => Number(c.contractNo) === no) || null
 })
 
-const contractCarryForm = reactive({
-  carry: emptyCarry(),
-})
+const contractCarryForm = reactive({ carry: emptyCarry() })
 
+function fillContractCarryFormFromSelected() {
+  const c = selectedContract.value
+  contractCarryForm.carry = c ? { ...normalizeCarry(c.carry) } : emptyCarry()
+}
 function setSelectedContractDefault() {
   if (!contracts.value.length) {
     selectedContractNo.value = null
+    contractCarryForm.carry = emptyCarry()
     return
   }
   const current = contracts.value.find((c) => c.isCurrent) || contracts.value[0]
   selectedContractNo.value = Number(current.contractNo)
   fillContractCarryFormFromSelected()
 }
+watch(selectedContractNo, () => fillContractCarryFormFromSelected())
 
-
-function fillContractCarryFormFromSelected() {
-  const c = selectedContract.value
-  if (!c) {
-    contractCarryForm.carry = emptyCarry()
-    return
+async function fetchProfile() {
+  if (!employeeId.value) return
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
+    profile.value = res?.data?.profile ?? res?.data ?? null
+    if (profile.value) fillFormFromProfile(profile.value)
+  } catch (e) {
+    console.error(e)
+    error.value = e?.response?.data?.message || 'Failed to load profile.'
+    showToast({ type: 'error', title: 'Load failed', message: error.value })
+  } finally {
+    loading.value = false
   }
-  contractCarryForm.carry = { ...normalizeCarry(c.carry) }
 }
-
-watch(selectedContractNo, () => {
-  fillContractCarryFormFromSelected()
-})
 
 async function fetchContracts() {
   if (!employeeId.value) return
   contractsLoading.value = true
   contractsError.value = ''
-
   try {
     const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
-
-    // ✅ ensure profile is always set too (same endpoint)
     const p = res?.data?.profile ?? res?.data ?? null
     profile.value = p
     if (profile.value) fillFormFromProfile(profile.value)
 
-    // ✅ read contracts from profile + normalize
     contracts.value = normalizeContracts(profile.value?.contracts || profile.value?.contractHistory || [])
-
-    // ✅ choose default contract (current or latest)
     setSelectedContractDefault()
-
-    // ✅ fill editor
-    fillContractCarryFormFromSelected()
   } catch (e) {
     console.error(e)
     contractsError.value = e?.response?.data?.message || 'Failed to load contracts.'
@@ -313,26 +245,15 @@ async function fetchContracts() {
   }
 }
 
-
-
 async function saveContractCarry() {
   if (!employeeId.value) return
   const no = Number(selectedContractNo.value)
-  if (!no) {
-    showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
-    return
-  }
+  if (!no) return showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
 
   saving.value = true
   try {
     const carry = normalizeCarry(contractCarryForm.carry)
-
-    // ✅ PATCH /admin/leave/profiles/:employeeId/contracts/:contractNo
-    await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${no}`, {
-      carry,
-      alCarry: num(carry.AL), // optional mirror
-    })
-
+    await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${no}`, { carry })
     showToast({ type: 'success', title: 'Saved', message: `Carry updated for contract #${no}.` })
     await fetchProfile()
     await fetchContracts()
@@ -352,42 +273,21 @@ const form = reactive({
   managerEmployeeId: '',
   gmLoginId: '',
   cooLoginId: '',
-  carry: emptyCarry(), // legacy only
-  alCarry: 0,
   isActive: true,
 })
-
 const formError = ref('')
 
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
   form.approvalMode = normApprovalMode(p?.approvalMode)
-
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
   form.gmLoginId = String(p?.gmLoginId || '')
   form.cooLoginId = String(p?.cooLoginId || '')
-
-  const c = readCarryFromProfile(p)
-  form.carry = { ...c }
-  form.alCarry = num(c.AL)
-
   form.isActive = p?.isActive === false ? false : true
   originalJoinDate.value = toInputDate(p?.joinDate)
 }
 
-watch(
-  () => form.carry.AL,
-  (v) => {
-    form.alCarry = num(v)
-  }
-)
-
-const joinDateChanged = computed(() => {
-  const a = String(originalJoinDate.value || '')
-  const b = String(form.joinDate || '')
-  return a !== b
-})
-
+const joinDateChanged = computed(() => String(originalJoinDate.value || '') !== String(form.joinDate || ''))
 const needManager = computed(() => String(form.approvalMode || '') === 'MANAGER_AND_GM')
 const needCoo = computed(() => String(form.approvalMode || '') === 'GM_AND_COO')
 
@@ -401,43 +301,18 @@ const isDirty = computed(() => {
     managerEmployeeId: String(p.managerEmployeeId || p.managerLoginId || ''),
     gmLoginId: String(p.gmLoginId || ''),
     cooLoginId: String(p.cooLoginId || ''),
-    carry: readCarryFromProfile(p),
     isActive: p.isActive === false ? false : true,
   }
-
   const b = {
     joinDate: String(form.joinDate || ''),
     approvalMode: normApprovalMode(form.approvalMode),
     managerEmployeeId: String(form.managerEmployeeId || ''),
     gmLoginId: String(form.gmLoginId || ''),
     cooLoginId: String(form.cooLoginId || ''),
-    carry: normalizeCarry(form.carry),
     isActive: !!form.isActive,
   }
-
   return JSON.stringify(a) !== JSON.stringify(b)
 })
-
-/* ───────────────── API: profile ───────────────── */
-async function fetchProfile() {
-  if (!employeeId.value) return
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
-
-    profile.value = res?.data?.profile ?? res?.data ?? null
-
-    if (profile.value) fillFormFromProfile(profile.value)
-  } catch (e) {
-    console.error(e)
-    error.value = e?.response?.data?.message || 'Failed to load profile.'
-    showToast({ type: 'error', title: 'Load failed', message: error.value })
-  } finally {
-    loading.value = false
-  }
-}
-
 
 function resetForm() {
   if (!profile.value) return
@@ -468,22 +343,16 @@ async function forceRecalcBalances() {
     () => api.post(`/admin/leave/profiles/${id}/balances/recalc`, payload),
   ]
 
-  let lastErr = null
   for (const fn of tries) {
     try {
       await fn()
       return true
     } catch (e) {
       const st = e?.response?.status
-      if (st === 404 || st === 405) {
-        lastErr = e
-        continue
-      }
+      if (st === 404 || st === 405) continue
       throw e
     }
   }
-
-  console.warn('No recalc endpoint found', lastErr)
   return false
 }
 
@@ -497,7 +366,6 @@ function validateApprovers() {
 
 async function saveProfile() {
   formError.value = ''
-
   if (!employeeId.value) return (formError.value = 'Missing employeeId.')
   if (form.joinDate && !isValidYMD(form.joinDate)) return (formError.value = 'Join Date is invalid.')
 
@@ -511,7 +379,6 @@ async function saveProfile() {
   saving.value = true
   try {
     const mode = normApprovalMode(form.approvalMode)
-    const carry = normalizeCarry(form.carry)
 
     await updateProfile(
       {
@@ -520,9 +387,6 @@ async function saveProfile() {
         managerEmployeeId: form.managerEmployeeId ? String(form.managerEmployeeId).trim() : null,
         gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
         cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
-        // legacy carry
-        carry,
-        alCarry: num(carry.AL),
         isActive: form.isActive !== false,
       },
       { recalc: joinDateChanged.value }
@@ -551,7 +415,7 @@ async function saveProfile() {
   }
 }
 
-/* ───────────────── password reset (NEW) ───────────────── */
+/* ───────────────── password reset (panel) ───────────────── */
 const pwd = reactive({
   open: false,
   show: false,
@@ -579,13 +443,11 @@ function resetPwdForm() {
   pwd.error = ''
   pwd.show = false
 }
-
 function openPwdPanel() {
   pwd.open = true
   pwd.error = ''
   pwd.show = false
 }
-
 function closePwdPanel() {
   if (pwd.submitting) return
   pwd.open = false
@@ -610,10 +472,7 @@ async function submitResetPassword() {
 
   pwd.submitting = true
   try {
-    await api.patch(`/admin/leave/profiles/${employeeId.value}/password`, {
-      password: String(pwd.password),
-    })
-
+    await api.patch(`/admin/leave/profiles/${employeeId.value}/password`, { password: String(pwd.password) })
     showToast({ type: 'success', title: 'Password updated', message: 'New password saved for this employee.' })
     closePwdPanel()
   } catch (e) {
@@ -631,7 +490,7 @@ function goBack() {
   router.back()
 }
 
-/* ───────────────── contracts modal ───────────────── */
+/* ───────────────── contracts logs modal ───────────────── */
 const contractsOpen = ref(false)
 function openContractsModal() {
   contractsOpen.value = true
@@ -658,6 +517,7 @@ function closeRenewModal() {
   if (renew.submitting) return
   renew.open = false
 }
+
 async function submitRenew() {
   renew.error = ''
   if (!employeeId.value) return (renew.error = 'Missing employeeId.')
@@ -703,7 +563,7 @@ onMounted(async () => {
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
   await fetchLeaveTypes()
-  await fetchContracts() 
+  await fetchContracts()
 })
 
 onBeforeUnmount(() => {
@@ -715,7 +575,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="ui-page min-h-screen w-full">
     <div class="min-h-screen w-full flex flex-col">
-      <!-- Page header (component) -->
       <EditPageHeader
         :employeeId="employeeId"
         :isDirty="isDirty"
@@ -729,12 +588,10 @@ onBeforeUnmount(() => {
         @openRenew="openRenewModal"
         @openPassword="openPwdPanel"
         @save="saveProfile"
-        @refresh="fetchProfile()"
+        @refresh="fetchProfile"
       />
 
-      <!-- Body -->
       <main class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-4 space-y-4">
-        <!-- Error -->
         <div
           v-if="error"
           class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
@@ -743,7 +600,6 @@ onBeforeUnmount(() => {
           <span class="font-semibold">Failed:</span> {{ error }}
         </div>
 
-        <!-- Loading -->
         <div v-if="loading" class="space-y-3">
           <div class="ui-card !rounded-2xl h-14 animate-pulse bg-ui-bg-2/60" />
           <div class="ui-card !rounded-2xl h-56 animate-pulse bg-ui-bg-2/60" />
@@ -754,14 +610,12 @@ onBeforeUnmount(() => {
           <div v-if="!profile" class="py-10 text-center text-[11px] text-ui-muted">Profile not loaded.</div>
 
           <template v-else>
-            <!-- Mini summary cards -->
             <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
               <InfoRow label="Employee ID" :value="profile.employeeId || '—'" hint="Read-only" />
               <InfoRow label="Name" :value="profile.name || '—'" hint="Read-only" />
               <InfoRow label="Department" :value="profile.department || '—'" hint="Read-only" />
             </section>
 
-            <!-- Password reset (component card) -->
             <PasswordResetCard
               :open="pwd.open"
               :submitting="pwd.submitting"
@@ -779,7 +633,6 @@ onBeforeUnmount(() => {
               @submit="submitResetPassword"
             />
 
-            <!-- SECTION: Profile Settings + Balances -->
             <section class="ui-card overflow-hidden">
               <div class="section-head section-head--indigo">
                 <div>
@@ -793,11 +646,12 @@ onBeforeUnmount(() => {
 
               <div class="p-3 lg:p-4">
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                  <!-- Left: settings form -->
                   <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <!-- Join Date -->
                     <div class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Controls AL accrual and service-year rules">
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        title="Controls AL accrual and service-year rules"
+                      >
                         Join date
                       </div>
                       <div class="mt-1">
@@ -809,15 +663,10 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- Contract start (read-only) -->
                     <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)" hint="To change contract date, use Renew" />
 
-                    <!-- Approval mode -->
                     <div class="ui-card !rounded-2xl px-2.5 py-2 sm:col-span-2">
-                      <div
-                        class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help"
-                        title="Approval chain for this employee profile"
-                      >
+                      <div class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help" title="Approval chain for this employee profile">
                         Approval mode
                       </div>
 
@@ -828,25 +677,15 @@ onBeforeUnmount(() => {
                           </option>
                         </select>
 
-                        <!-- Active mini box -->
                         <div class="ui-card !rounded-2xl px-2.5 py-2 bg-ui-bg-2/60">
-                          <div
-                            class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help"
-                            title="If inactive, employee cannot request leave"
-                          >
+                          <div class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help" title="If inactive, employee cannot request leave">
                             Active
                           </div>
 
                           <div class="mt-1.5 flex items-center justify-between gap-2">
-                            <div class="text-[11px] font-extrabold text-ui-fg">
-                              {{ form.isActive ? 'Yes' : 'No' }}
-                            </div>
+                            <div class="text-[11px] font-extrabold text-ui-fg">{{ form.isActive ? 'Yes' : 'No' }}</div>
 
-                            <button
-                              type="button"
-                              class="ui-btn ui-btn-soft ui-btn-xs !px-2 !py-1"
-                              @click="form.isActive = !form.isActive"
-                            >
+                            <button type="button" class="ui-btn ui-btn-soft ui-btn-xs !px-2 !py-1" @click="form.isActive = !form.isActive">
                               <i class="fa-solid text-[10px]" :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
                               Toggle
                             </button>
@@ -863,13 +702,8 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-
-                    <!-- Manager employeeId -->
                     <div class="ui-card !rounded-2xl px-3 py-2">
-                      <div
-                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                        :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'"
-                      >
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'">
                         Manager employee ID
                         <span v-if="needManager" class="ml-2 ui-badge">required</span>
                       </div>
@@ -881,7 +715,6 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- GM login -->
                     <div class="ui-card !rounded-2xl px-3 py-2">
                       <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM (required)">
                         GM login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
@@ -894,7 +727,6 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- COO login -->
                     <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
                       <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode is GM + COO">
                         COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
@@ -908,7 +740,6 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- Right: balances -->
                   <aside class="ui-card !rounded-2xl p-3">
                     <div class="flex items-end justify-between gap-3">
                       <div>
@@ -920,7 +751,7 @@ onBeforeUnmount(() => {
                       <span class="ui-badge ui-badge-emerald">Live</span>
                     </div>
 
-                    <div v-if="!normalizedBalances.length" class="mt-3 text-[11px] text-ui-muted">No balances yet.</div>
+                    <div v-if="!balancesForDisplay.length" class="mt-3 text-[11px] text-ui-muted">No balances yet.</div>
 
                     <div v-else class="mt-3">
                       <div class="overflow-x-auto ui-scrollbar rounded-xl border border-ui-border/60">
@@ -935,17 +766,17 @@ onBeforeUnmount(() => {
                           <tbody>
                             <tr v-for="b in balancesForDisplay" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
                               <td class="px-3 py-2 font-extrabold text-ui-fg">{{ b.leaveTypeCode }}</td>
-                              <td class="px-3 py-2 text-right font-mono text-ui-fg">{{ fmt(b.usedDisplay) }}</td>                              
+                              <td class="px-3 py-2 text-right font-mono text-ui-fg">{{ fmt(b.used) }}</td>
                               <td class="px-3 py-2 text-right font-mono">
                                 <span
                                   class="inline-flex items-center rounded-full px-2 py-[1px] text-[10px] font-extrabold"
                                   :class="
-                                    num(b.remainingDisplay) <= 0
+                                    num(b.remaining) <= 0
                                       ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-200'
                                       : 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
                                   "
                                 >
-                                  {{ fmt(b.remainingDisplay) }}
+                                  {{ fmt(b.remaining) }}
                                 </span>
                               </td>
                             </tr>
@@ -954,7 +785,7 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <div class="mt-2 text-[10px] text-ui-muted">Tip: If Join Date changed, Save will try to recalc balances.</div>
+                    <div class="mt-2 text-[10px] text-ui-muted">Note: carry is already included by backend computeBalances().</div>
                   </aside>
                 </div>
 
@@ -968,7 +799,6 @@ onBeforeUnmount(() => {
               </div>
             </section>
 
-            <!-- SECTION: Contract carry -->
             <section class="ui-card overflow-hidden">
               <div class="section-head section-head--emerald">
                 <div>
@@ -981,12 +811,7 @@ onBeforeUnmount(() => {
                     Refresh
                   </button>
 
-                  <button
-                    type="button"
-                    class="ui-btn ui-btn-primary ui-btn-sm"
-                    :disabled="saving || !selectedContract"
-                    @click="saveContractCarry"
-                  >
+                  <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" :disabled="saving || !selectedContract" @click="saveContractCarry">
                     <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
                     Save carry
                   </button>
@@ -1005,7 +830,6 @@ onBeforeUnmount(() => {
                 <div v-if="contractsLoading" class="mt-3 ui-card !rounded-2xl h-12 animate-pulse bg-ui-bg-2/60" />
 
                 <div v-else class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
-                  <!-- selector -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
                     <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Select contract</div>
 
@@ -1017,12 +841,10 @@ onBeforeUnmount(() => {
                     </select>
 
                     <div class="mt-2 text-[11px] text-ui-muted">
-                      Selected:
-                      <span class="font-mono font-semibold">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
+                      Selected: <span class="font-mono font-semibold">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
                     </div>
                   </div>
 
-                  <!-- period -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
                     <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Contract period</div>
                     <div class="mt-1 text-[12px] font-extrabold text-ui-fg">
@@ -1032,31 +854,16 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- carry editor -->
                   <div class="ui-card !rounded-2xl px-3 py-2">
-                    <div class="flex items-center justify-between">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Carry editor</div>
+                    <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase">Carry editor</div>
 
-                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="showCarryAdvanced = !showCarryAdvanced">
-                        <i class="fa-solid" :class="showCarryAdvanced ? 'fa-chevron-up' : 'fa-chevron-down'" />
-                        {{ showCarryAdvanced ? 'Basic' : 'Advanced' }}
-                      </button>
-                    </div>
-
-                    <div class="mt-2 grid grid-cols-1 sm:grid-cols-1 gap-2">
-                      <div class="sm:col-span-2">
+                    <div class="mt-2 grid grid-cols-1 gap-2">
+                      <div>
                         <div class="ui-label">AL</div>
-                        <input
-                          v-model.number="contractCarryForm.carry.AL"
-                          type="number"
-                          step="0.5"
-                          class="ui-input w-full"
-                          placeholder="0"
-                          :disabled="!selectedContract"
-                        />
+                        <input v-model.number="contractCarryForm.carry.AL" type="number" step="0.5" class="ui-input w-full" placeholder="0" :disabled="!selectedContract" />
                       </div>
 
-                      <template v-if="showCarryAdvanced">
+                      <div class="grid grid-cols-2 gap-2">
                         <div>
                           <div class="ui-label">SP</div>
                           <input v-model.number="contractCarryForm.carry.SP" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
@@ -1073,14 +880,15 @@ onBeforeUnmount(() => {
                           <div class="ui-label">UL</div>
                           <input v-model.number="contractCarryForm.carry.UL" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
                         </div>
-                      </template>
+                      </div>
+
+                      <p class="text-[11px] text-ui-muted">Carry supports positive or negative.</p>
                     </div>
                   </div>
                 </div>
               </div>
             </section>
 
-            <!-- Renew modal (component) -->
             <RenewModal
               :open="renew.open"
               :submitting="renew.submitting"
@@ -1097,7 +905,6 @@ onBeforeUnmount(() => {
               @update:note="renew.note = $event"
             />
 
-            <!-- Logs modal (component) -->
             <ContractsLogsModal
               :open="contractsOpen"
               :employeeId="profile?.employeeId || employeeId"
@@ -1114,7 +921,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* modal transition (used by component modals too) */
 :deep(.modal-fade-enter-active),
 :deep(.modal-fade-leave-active) {
   transition: opacity 0.18s ease-out, transform 0.18s ease-out;
@@ -1125,15 +931,11 @@ onBeforeUnmount(() => {
   transform: translateY(6px) scale(0.98);
 }
 
-/* ✅ section header system - make it work across child components */
 :deep(.section-head) {
   @apply flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between px-3 lg:px-4 py-3 border-b border-ui-border/60;
 }
 :deep(.section-title) {
   @apply text-[12px] font-extrabold text-ui-fg;
-}
-:deep(.section-sub) {
-  @apply text-[11px] text-ui-muted;
 }
 
 :deep(.section-head--indigo) {
@@ -1142,24 +944,11 @@ onBeforeUnmount(() => {
 :deep(.section-head--emerald) {
   background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(255, 255, 255, 0));
 }
-:deep(.section-head--slate) {
-  background: linear-gradient(90deg, rgba(100, 116, 139, 0.12), rgba(255, 255, 255, 0));
-}
-:deep(.section-head--amber) {
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(255, 255, 255, 0));
-}
 
-/* dark mode */
 :deep(.dark) .section-head--indigo {
   background: linear-gradient(90deg, rgba(99, 102, 241, 0.18), rgba(2, 6, 23, 0));
 }
 :deep(.dark) .section-head--emerald {
   background: linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(2, 6, 23, 0));
-}
-:deep(.dark) .section-head--slate {
-  background: linear-gradient(90deg, rgba(100, 116, 139, 0.18), rgba(2, 6, 23, 0));
-}
-:deep(.dark) .section-head--amber {
-  background: linear-gradient(90deg, rgba(245, 158, 11, 0.22), rgba(2, 6, 23, 0));
 }
 </style>

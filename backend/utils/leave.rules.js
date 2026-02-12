@@ -124,49 +124,52 @@ function computeALByServiceYears(joinYMD, asOfDate = new Date()) {
 
 /**
  * ✅ Contract-year window MUST follow the active contract
- * If contracts exist: use active contract start/end
- * Else fallback to profile.contractDate/joinDate logic
+ * With new model, contracts always exist and this will always return active contract range.
+ *
+ * opts supports: { asOfYMD, contractId, contractNo }
  */
-function computeContractYearPeriod(profile, now = new Date()) {
-  // If we have contracts, use active contract (by pointer or latest)
+function computeContractYearPeriod(profile, now = new Date(), opts = {}) {
+  const asOfYMD =
+    opts?.asOfYMD && isValidYMD(opts.asOfYMD) ? String(opts.asOfYMD).trim() : null
+
   const active = pickActiveContract(profile, {
-    contractDate: isValidYMD(profile?.contractDate) ? String(profile.contractDate).trim() : null,
+    contractId: opts?.contractId ?? null,
+    contractNo: opts?.contractNo ?? null,
+    asOf: asOfYMD,
+    contractDate: isValidYMD(profile?.contractDate)
+      ? String(profile.contractDate).trim()
+      : null,
   })
 
   if (active && isValidYMD2(active.startDate)) {
     const startYMD = String(active.startDate).trim()
-    const endYMD = isValidYMD2(active.endDate) ? String(active.endDate).trim() : endFromStartYMD(startYMD)
-    return { startYMD, endYMD }
+    const endYMD = isValidYMD2(active.endDate)
+      ? String(active.endDate).trim()
+      : endFromStartYMD(startYMD)
+    return { startYMD, endYMD, activeContract: active }
   }
 
-  // fallback (older profiles)
-  const join = String(profile?.joinDate || '').trim()
-  const contract = String(profile?.contractDate || '').trim()
-
-  const startYMD = isValidYMD(contract) ? contract : isValidYMD(join) ? join : ''
-
-  if (!startYMD) {
-    const n = dayjs(now)
-    const s = dayjs(`${n.year()}-01-01`, 'YYYY-MM-DD', true)
-    const e = dayjs(`${n.year()}-12-31`, 'YYYY-MM-DD', true)
-    return { startYMD: s.format('YYYY-MM-DD'), endYMD: e.format('YYYY-MM-DD') }
+  // fallback (should not happen for new clean data)
+  const n = dayjs(now)
+  const s = dayjs(`${n.year()}-01-01`, 'YYYY-MM-DD', true)
+  const e = dayjs(`${n.year()}-12-31`, 'YYYY-MM-DD', true)
+  return {
+    startYMD: s.format('YYYY-MM-DD'),
+    endYMD: e.format('YYYY-MM-DD'),
+    activeContract: null,
   }
-
-  const s = dayjs(startYMD, 'YYYY-MM-DD', true)
-  const end = s.add(1, 'year').subtract(1, 'day')
-  return { startYMD: s.format('YYYY-MM-DD'), endYMD: end.format('YYYY-MM-DD') }
 }
 
-/* ───────────────── request validator (unchanged) ───────────────── */
+/* ───────────────── request validator ───────────────── */
 
 function validateAndNormalizeRequest({
   leaveTypeCode,
   startDate,
   endDate,
-  isHalfDay = false,   // legacy
-  dayPart = null,      // legacy
-  startHalf = null,    // NEW
-  endHalf = null,      // NEW
+  isHalfDay = false, // legacy single-day half
+  dayPart = null, // legacy single-day half
+  startHalf = null, // NEW (AM/PM)
+  endHalf = null, // NEW (AM/PM)
 }) {
   const code = String(leaveTypeCode || '').trim().toUpperCase()
   const s = String(startDate || '').trim()
@@ -196,6 +199,7 @@ function validateAndNormalizeRequest({
     return { ok: false, message: 'endDate must be a working day (Mon–Sat, not holiday).' }
   }
 
+  // MA fixed 90 calendar days inclusive
   if (code === 'MA') {
     if (isHalfDay || startHalf || endHalf) {
       return { ok: false, message: 'MA does not support half-day.' }
@@ -219,9 +223,9 @@ function validateAndNormalizeRequest({
 
   const isSingleDay = s === e
 
+  // legacy half-day (single day)
   const legacyHalf = !!isHalfDay
   const dp = legacyHalf ? normalizeHalf(dayPart) : null
-
   if (legacyHalf) {
     if (!dp) return { ok: false, message: 'Half-day requires dayPart AM or PM.' }
     return {
@@ -240,10 +244,12 @@ function validateAndNormalizeRequest({
     }
   }
 
+  // new half edges
   let sh = normalizeHalf(startHalf)
   let eh = normalizeHalf(endHalf)
 
   if (isSingleDay) {
+    // if only endHalf provided for single day, treat it as startHalf
     if (eh && !sh) sh = eh
     eh = null
 
@@ -280,6 +286,7 @@ function validateAndNormalizeRequest({
     }
   }
 
+  // multi-day working days
   const workingDates = enumerateWorkingDates(s, e)
   const workingCount = workingDates.length
   if (!workingCount || workingCount <= 0) {
@@ -333,8 +340,14 @@ function applyCarry(ent, used, carry) {
  * IMPORTANT:
  * We count request usage if startDate is within the contract-year window.
  */
-function computeBalances(profile, approvedRequests = [], now = new Date()) {
-  const { startYMD, endYMD } = computeContractYearPeriod(profile, now)
+function computeBalances(profile, approvedRequests = [], now = new Date(), opts = {}) {
+  const asOfYMD = opts?.asOfYMD && isValidYMD(opts.asOfYMD) ? String(opts.asOfYMD).trim() : toYMD(now)
+
+  const { startYMD, endYMD, activeContract } = computeContractYearPeriod(profile, now, {
+    asOfYMD,
+    contractId: opts?.contractId ?? null,
+    contractNo: opts?.contractNo ?? null,
+  })
 
   const approvedInPeriod = (approvedRequests || []).filter((r) => {
     const s = String(r.startDate || '')
@@ -356,10 +369,15 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
   const SP_ENT = 7
   const MC_ENT = 90
   const MA_ENT = 90
+  const UL_ENT = 0 // unlimited
 
   // ✅ ACTIVE CONTRACT carry (single source of truth)
-  // (If no contract, it returns zeros)
-  const carry = getActiveCarry(profile, { contractDate: profile?.contractDate })
+  const carry = getActiveCarry(profile, {
+    contractId: opts?.contractId ?? null,
+    contractNo: opts?.contractNo ?? null,
+    asOf: asOfYMD,
+    contractDate: profile?.contractDate,
+  })
 
   // ✅ base request usage (SP always borrows from AL)
   const AL_USED_TOTAL = usedAL + usedSP
@@ -370,16 +388,17 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
   const alUsedDisplay = alCarryApplied.usedDisplay
 
   // ✅ SP remaining: (7 - usedSP) capped by max(0, AL remaining)
-  // If AL remaining is negative, SP remaining must be 0.
   const spEntRemaining = Number(SP_ENT - usedSP)
   const spRemaining = Math.max(0, Math.min(spEntRemaining, Math.max(0, alRemaining)))
 
-  // Optional: apply SP carry if you ever use it (normally 0)
+  // display SP used (carry normally 0, but supported)
   const spCarryApplied = applyCarry(SP_ENT, usedSP, carry.SP)
 
   const mcCarryApplied = applyCarry(MC_ENT, usedMC, carry.MC)
   const maCarryApplied = applyCarry(MA_ENT, usedMA, carry.MA)
-  const ulCarryApplied = applyCarry(0, usedUL, carry.UL)
+
+  // UL is unlimited -> remaining is always 0, but we still allow carry to affect “used display” if you store UL carry negative
+  const ulCarryApplied = applyCarry(UL_ENT, usedUL, carry.UL)
 
   return {
     balances: [
@@ -392,8 +411,8 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
       {
         leaveTypeCode: 'SP',
         yearlyEntitlement: SP_ENT,
-        used: spCarryApplied.usedDisplay, // mostly same as usedSP unless SP carry negative
-        remaining: spRemaining, // ✅ capped by AL remaining after carry
+        used: spCarryApplied.usedDisplay,
+        remaining: spRemaining,
       },
       {
         leaveTypeCode: 'MC',
@@ -411,16 +430,23 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
         leaveTypeCode: 'UL',
         yearlyEntitlement: 0,
         used: ulCarryApplied.usedDisplay,
-        remaining: 0 + num(carry.UL), // (UL is unlimited, but keep carry visible if you store it)
+        remaining: 0, // ✅ UL is unlimited
       },
     ],
     meta: {
-      asOfYMD: toYMD(now),
+      asOfYMD,
       contractYear: { startDate: startYMD, endDate: endYMD },
+      activeContract: activeContract
+        ? {
+            contractNo: activeContract.contractNo,
+            startDate: activeContract.startDate,
+            endDate: activeContract.endDate,
+          }
+        : null,
       contractDate: isValidYMD(profile?.contractDate) ? String(profile.contractDate) : null,
       joinDate: isValidYMD(profile?.joinDate) ? String(profile.joinDate) : null,
       serviceYears: serviceYearsFromJoin(profile?.joinDate, now),
-      carry, // helpful for debugging/UI if you want
+      carry, // helpful for debugging/UI
     },
   }
 }
@@ -428,6 +454,7 @@ function computeBalances(profile, approvedRequests = [], now = new Date()) {
 module.exports = {
   validateAndNormalizeRequest,
   computeBalances,
+  computeContractYearPeriod,
   enumerateWorkingDates,
   isWorkingDay,
   toYMD,

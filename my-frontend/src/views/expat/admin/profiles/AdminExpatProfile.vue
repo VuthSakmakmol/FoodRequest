@@ -1,6 +1,6 @@
 <!-- src/views/expat/admin/profiles/AdminExpatProfile.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
@@ -33,15 +33,14 @@ function mustYmd(v) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
 }
 
-const showRowPwd = ref([])         
-const showSinglePwd = ref(false)  
-
+/* password toggle */
+const showRowPwd = ref([])
+const showSinglePwd = ref(false)
 function ensurePwdToggles() {
   const need = form.value.rows.length
   while (showRowPwd.value.length < need) showRowPwd.value.push(false)
   while (showRowPwd.value.length > need) showRowPwd.value.pop()
 }
-
 
 /* Excel sheet names cannot contain: \ / ? * [ ] : and max length 31 */
 function safeSheetName(name, fallback = 'Manager') {
@@ -94,50 +93,31 @@ function modeLabel(mode) {
 }
 
 /* balances compact chips */
-function compactBalances(balances, employeeRow) {
+function compactBalances(balances) {
   const arr = Array.isArray(balances) ? balances : []
   const order = ['AL', 'SP', 'MC', 'MA', 'UL']
   const m = new Map(arr.map((x) => [String(x.leaveTypeCode || '').toUpperCase(), x]))
-
-  const carryMap = getCarryMapFromEmployee(employeeRow)
 
   const out = []
   for (const k of order) {
     const b = m.get(k)
     if (!b) continue
-
     const used = num(b.used)
-    const remaining = Number.isFinite(b.remaining) ? num(b.remaining) : num(b.yearlyEntitlement) - used
-
-    const carry = num(carryMap[k])
-    const usedDisplay = used + Math.max(0, -carry)
-    let remainingDisplay = remaining + carry
-    if (k === 'UL') remainingDisplay = Math.max(0, remainingDisplay)
-
-    out.push({
-      k,
-      used: usedDisplay,
-      remaining: remainingDisplay,
-      pair: `${usedDisplay}/${remainingDisplay}`,
-    })
+    const remaining = num(b.remaining) // ✅ backend already includes carry
+    out.push({ k, used, remaining, pair: `${used}/${remaining}` })
   }
   return out
 }
 
 function pairChipClasses(remaining) {
   const r = num(remaining)
-
-  // ✅ red when remain is 0 (or below)
   if (r <= 0) return 'ui-badge ui-badge-danger'
-
   return [
     'ui-badge',
     'border-slate-200 bg-white text-slate-800',
     'dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100',
   ].join(' ')
 }
-
-
 
 /* ─────────────────────────────────────────────────────────────
    Navigation
@@ -155,7 +135,6 @@ function goEdit(employeeId) {
 
 /* ─────────────────────────────────────────────────────────────
    API: grouped list
-   ✅ smooth: fetch only on load / refresh / Apply
 ───────────────────────────────────────────────────────────── */
 async function fetchGroups() {
   loading.value = true
@@ -166,12 +145,15 @@ async function fetchGroups() {
     })
 
     const data = res.data
-    const arr =
-      Array.isArray(data) ? data
-      : Array.isArray(data?.groups) ? data.groups
-      : Array.isArray(data?.rows) ? data.rows
-      : Array.isArray(data?.data) ? data.data
-      : []
+    const arr = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.groups)
+        ? data.groups
+        : Array.isArray(data?.rows)
+          ? data.rows
+          : Array.isArray(data?.data)
+            ? data.data
+            : []
 
     groups.value = arr
   } catch (e) {
@@ -188,11 +170,9 @@ async function applyFilters() {
   appliedInactive.value = !!includeInactive.value
   await fetchGroups()
 }
-
 function clearFilters() {
   q.value = ''
   includeInactive.value = false
-  // ✅ do NOT auto-fetch (no vibration)
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -284,49 +264,32 @@ function prevPage() {
 function nextPage() {
   page.value = Math.min(totalPages.value, page.value + 1)
 }
-
 watch(q, () => (page.value = 1))
 
 /* ─────────────────────────────────────────────────────────────
-   Approvers (auto from seed)
+   Approvers (backend returns { gm:[...], coo:[...] })
 ───────────────────────────────────────────────────────────── */
 const approversLoading = ref(false)
 const approversError = ref('')
 const defaultGm = ref({ loginId: 'leave_gm', name: 'Expat GM', role: 'LEAVE_GM' })
 const defaultCoo = ref({ loginId: 'leave_coo', name: 'COO', role: 'LEAVE_COO' })
 
-function normRole(x) {
-  return up(x?.role || x?.code || x?.type || x?.key || '')
-}
-function normLoginId(x) {
-  return String(x?.loginId || x?.loginID || x?.userLoginId || x?.username || x?._id || '').trim()
-}
-function normName(x) {
-  return String(x?.name || x?.displayName || x?.fullName || '').trim()
-}
-
 async function fetchDefaultApprovers() {
   approversLoading.value = true
   approversError.value = ''
   try {
     const res = await api.get('/admin/leave/approvers')
-    const arr = Array.isArray(res.data) ? res.data : []
-    const gm = arr.find((a) => normRole(a) === 'LEAVE_GM')
-    const coo = arr.find((a) => normRole(a) === 'LEAVE_COO')
+    const gmList = Array.isArray(res.data?.gm) ? res.data.gm : []
+    const cooList = Array.isArray(res.data?.coo) ? res.data.coo : []
 
-    if (gm) {
-      defaultGm.value = {
-        loginId: normLoginId(gm) || defaultGm.value.loginId,
-        name: normName(gm) || defaultGm.value.name,
-        role: 'LEAVE_GM',
-      }
+    // pick first if exists (or keep seeded fallback)
+    if (gmList.length) {
+      const a = gmList[0]
+      defaultGm.value = { loginId: String(a.loginId || '').trim() || defaultGm.value.loginId, name: String(a.label || a.name || '').trim() || defaultGm.value.name, role: 'LEAVE_GM' }
     }
-    if (coo) {
-      defaultCoo.value = {
-        loginId: normLoginId(coo) || defaultCoo.value.loginId,
-        name: normName(coo) || defaultCoo.value.name,
-        role: 'LEAVE_COO',
-      }
+    if (cooList.length) {
+      const a = cooList[0]
+      defaultCoo.value = { loginId: String(a.loginId || '').trim() || defaultCoo.value.loginId, name: String(a.label || a.name || '').trim() || defaultCoo.value.name, role: 'LEAVE_COO' }
     }
   } catch (e) {
     console.warn('fetchDefaultApprovers failed; using seed fallbacks', e)
@@ -360,7 +323,7 @@ function normalizeCarry(c) {
   }
 }
 
-/* strong password rule */
+/* strong password rule (OPTIONAL input) */
 function validateStrongPassword(pwd) {
   const p = String(pwd || '')
   if (!p) return { ok: true } // optional
@@ -376,8 +339,6 @@ function validateStrongPassword(pwd) {
 
 /* ─────────────────────────────────────────────────────────────
    Employee search (SIMPLE + SMOOTH)
-   ✅ Type -> Enter (or click 🔍) -> dropdown results
-   ✅ No API calls while typing (no vibration)
 ───────────────────────────────────────────────────────────── */
 function createSearchModel() {
   return { query: '', open: false, loading: false, error: '', results: [], selected: null, activeIndex: 0 }
@@ -392,20 +353,12 @@ function pickEmployeeId(emp) {
   const e = emp || {}
   return String(e.employeeId || e.empId || e.id || '').trim()
 }
-
 function pickLoginId(emp) {
   const e = emp || {}
-
-  // ✅ First try real loginId fields
-  const login =
-    String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
-
+  const login = String(e.loginId || e.loginID || e.userLoginId || e.username || '').trim()
   if (login) return login
-
-  // ✅ Fallback: use employeeId as loginId (your system standard)
   return String(e.employeeId || e.empId || e.id || '').trim()
 }
-
 function pickName(emp) {
   const e = emp || {}
   return String(e.name || e.fullName || `${e.firstName || ''} ${e.lastName || ''}` || '').trim()
@@ -418,26 +371,14 @@ function debounce(fn, wait = 300) {
     t = setTimeout(() => fn(...args), wait)
   }
 }
-
 const debouncedRunSearch = debounce((model) => runSearchSimple(model), 300)
-
 
 async function searchEmployees(qText) {
   const qv = String(qText || '').trim()
   if (!qv) return []
 
-  // ✅ Always call the mounted backend route: /api/public/employees
-  // If your axios baseURL already includes "/api", this still works
-  // because we normalize below.
-  const url = (() => {
-    const base = String(api?.defaults?.baseURL || '').trim()
-    // if baseURL already ends with "/api", use "/public/employees"
-    if (base.endsWith('/api')) return '/public/employees'
-    // otherwise call absolute api path
-    return '/api/public/employees'
-  })()
-
-  const res = await api.get(url, { params: { q: qv } })
+  // ✅ Keep it simple: your api wrapper already uses baseURL; this should be correct
+  const res = await api.get('/public/employees', { params: { q: qv } })
 
   const data = res.data
   const arr =
@@ -448,7 +389,6 @@ async function searchEmployees(qText) {
 
   return arr
 }
-
 
 function displayOption(e) {
   const id = pickEmployeeId(e)
@@ -475,7 +415,7 @@ function clearSelected(model) {
 }
 
 async function runSearchSimple(model) {
-const qv = String(model.query || '').split('—')[0].trim() || String(model.query || '').trim()
+  const qv = String(model.query || '').split('—')[0].trim() || String(model.query || '').trim()
   model.error = ''
   model.results = []
   model.open = false
@@ -500,7 +440,7 @@ const qv = String(model.query || '').split('—')[0].trim() || String(model.quer
   }
 }
 
-/* ✅ IMPORTANT FIX: DO NOT use capture=true, or dropdown closes immediately */
+/* ✅ IMPORTANT: no capture=true */
 function onDocClick() {
   ;[mgrSearch.value, singleMgrSearch.value, singleEmpSearch.value, ...rowSearches.value].forEach((m) => {
     if (m) m.open = false
@@ -533,18 +473,12 @@ function ensureRowSearchModels() {
   const need = form.value.rows.length
   while (rowSearches.value.length < need) rowSearches.value.push(createSearchModel())
   while (rowSearches.value.length > need) rowSearches.value.pop()
-
   ensurePwdToggles()
 }
-
 
 const needsCoo = computed(() => {
   const m = up(form.value.approvalMode)
   return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO'
-})
-const requiresManager = computed(() => {
-  const m = up(form.value.approvalMode)
-  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO'
 })
 const approverReady = computed(() => {
   const gmOk = !!String(defaultGm.value?.loginId || '').trim()
@@ -567,10 +501,8 @@ function openCreate() {
     singlePassword: '',
   }
 
-  // ✅ ADD HERE (reset password visibility)
   showSinglePwd.value = false
   showRowPwd.value = []
-  // (ensureRowSearchModels() will call ensurePwdToggles() if you added it)
 
   mgrSearch.value = createSearchModel()
   singleMgrSearch.value = createSearchModel()
@@ -581,21 +513,6 @@ function openCreate() {
   createOpen.value = true
   fetchDefaultApprovers()
 }
-
-
-function getCarryMapFromEmployee(e) {
-  const list = Array.isArray(e?.contracts) ? e.contracts : []
-  const cur = list.find((x) => x.isCurrent) || list[0] || null
-  const c = cur?.carry || e?.carry || {}
-  return {
-    AL: num(c.AL),
-    SP: num(c.SP),
-    MC: num(c.MC),
-    MA: num(c.MA),
-    UL: num(c.UL),
-  }
-}
-
 
 function closeCreate() {
   if (saving.value) return
@@ -621,18 +538,18 @@ function syncSingleContract() {
   }
 }
 
-/* approvalMode changes: clear manager selections if manager not required */
-watch(
-  () => form.value.approvalMode,
-  (v) => {
-    const mode = up(v)
-    if (mode === 'GM_AND_COO') {
-      clearSelected(mgrSearch.value)
-      clearSelected(singleMgrSearch.value)
-    }
-  }
-)
+/**
+ * ✅ YOUR CONCEPT FIX:
+ * - When creating profile, create ONLY employee account.
+ * - Manager is OPTIONAL (even in manager modes) because manager may be created later.
+ * - So we do NOT block submit when manager is missing.
+ */
 
+/* ─────────────────────────────────────────────────────────────
+   Submit Create
+   ✅ Bulk -> POST /admin/leave/profiles/manager
+   ✅ Single -> POST /admin/leave/profiles
+───────────────────────────────────────────────────────────── */
 async function submitCreate() {
   createError.value = ''
   try {
@@ -651,18 +568,14 @@ async function submitCreate() {
       throw new Error('COO approver is missing.')
     }
 
-    // ✅ manager is required in manager modes
-    if (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO') {
-      const chosen = createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected
-      const managerEmpId = pickEmployeeId(chosen)
-      const managerLoginId = pickLoginId(chosen)
-
-      if (!managerEmpId) throw new Error('Manager is required for Manager modes.')
-      if (!managerLoginId) throw new Error('Manager loginId is missing in directory result.')
-    }
+    // ✅ Manager is OPTIONAL now:
+    const managerLoginId =
+      (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
+        ? String(pickLoginId(createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected) || '').trim()
+        : ''
 
     // ─────────────────────────────
-    // BULK: Manager + multiple employees
+    // BULK
     // ─────────────────────────────
     if (createTab.value === 'bulk') {
       const rows = form.value.rows || []
@@ -673,7 +586,6 @@ async function submitCreate() {
         const employeeId = pickEmployeeId(emp)
         if (!employeeId) throw new Error(`Employee #${i + 1} is required.`)
 
-        // ✅ FIX: must send employeeLoginId (backend requires)
         const employeeLoginId = pickLoginId(emp) || employeeId
 
         if (!mustYmd(r.joinDate)) throw new Error(`Join date (Employee #${i + 1}) must be YYYY-MM-DD.`)
@@ -688,39 +600,30 @@ async function submitCreate() {
 
         return {
           employeeId,
-          employeeLoginId, // ✅ IMPORTANT
+          employeeLoginId,
           joinDate: r.joinDate,
           contractDate,
           carry,
-          alCarry: Number(carry.AL || 0),
           isActive: r.isActive !== false,
-          password: String(r.password || '').trim() || undefined,
+          password: String(r.password || '').trim() || undefined, // optional
         }
       })
 
-      const managerEmpId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
-        ? pickEmployeeId(mgrSearch.value.selected)
-        : ''
-
-      const managerLoginId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
-        ? pickLoginId(mgrSearch.value.selected)
-        : ''
-
       const payload = {
         approvalMode: mode,
-        managerEmployeeId: managerEmpId,
-        managerLoginId,
+        managerLoginId: managerLoginId || '', // ✅ optional
         gmLoginId,
         cooLoginId: (mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') ? cooLoginId : '',
         employees,
       }
 
-      const res = await api.post('/admin/leave/managers', payload)
+      // ✅ correct endpoint for controller
+      const res = await api.post('/admin/leave/profiles/manager', payload)
 
       showToast({
         type: 'success',
         title: 'Created',
-        message: `Created ${res.data?.createdCount ?? 0}, updated ${res.data?.updatedCount ?? 0}.`,
+        message: `Created ${res.data?.createdCount ?? res.data?.created?.length ?? 0}.`,
       })
 
       createOpen.value = false
@@ -729,13 +632,12 @@ async function submitCreate() {
     }
 
     // ─────────────────────────────
-    // SINGLE: one employee
+    // SINGLE
     // ─────────────────────────────
     const emp = singleEmpSearch.value.selected
     const employeeId = pickEmployeeId(emp)
     if (!employeeId) throw new Error('Employee is required.')
 
-    // ✅ FIX: must send employeeLoginId (backend requires)
     const employeeLoginId = pickLoginId(emp) || employeeId
 
     if (!mustYmd(form.value.singleJoinDate)) throw new Error('Join date must be YYYY-MM-DD.')
@@ -746,30 +648,20 @@ async function submitCreate() {
     const pwdCheck = validateStrongPassword(form.value.singlePassword)
     if (!pwdCheck.ok) throw new Error(pwdCheck.message)
 
-    const managerEmpId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
-      ? pickEmployeeId(singleMgrSearch.value.selected)
-      : ''
-
-    const managerLoginId = (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
-      ? pickLoginId(singleMgrSearch.value.selected)
-      : ''
-
     const carry = normalizeCarry(form.value.singleCarry)
 
     const payload = {
       approvalMode: mode,
       employeeId,
-      employeeLoginId, // ✅ IMPORTANT
+      employeeLoginId,
       joinDate: form.value.singleJoinDate,
       contractDate,
       carry,
-      alCarry: Number(carry.AL || 0),
       isActive: form.value.singleActive !== false,
-      managerEmployeeId: managerEmpId,
-      managerLoginId,
+      managerLoginId: managerLoginId || '', // ✅ optional
       gmLoginId,
       cooLoginId: (mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') ? cooLoginId : '',
-      password: String(form.value.singlePassword || '').trim() || undefined,
+      password: String(form.value.singlePassword || '').trim() || undefined, // optional
     }
 
     await api.post('/admin/leave/profiles', payload)
@@ -785,7 +677,6 @@ async function submitCreate() {
     saving.value = false
   }
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    Export (Grouped by manager)
@@ -899,8 +790,6 @@ watch(createOpen, (open) => {
 onMounted(() => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
-
-  // ✅ IMPORTANT: no capture=true
   if (typeof document !== 'undefined') document.addEventListener('click', onDocClick)
 
   fetchGroups()
@@ -1184,10 +1073,10 @@ onBeforeUnmount(() => {
 
                 <div class="mt-2 flex flex-wrap gap-2">
                   <span
-                    v-for="b in compactBalances(e.balances, e)"
+                    v-for="b in compactBalances(e.balances)"
                     :key="b.k"
                     class="ui-badge"
-                    :class="pairChipClasses(b.used, b.remaining)"
+                    :class="pairChipClasses(b.remaining)"
                   >
                     {{ b.k }}: {{ b.pair }}
                   </span>
@@ -1290,7 +1179,7 @@ onBeforeUnmount(() => {
                     <td class="ui-td">
                       <div class="grid grid-cols-5 gap-2 justify-items-center">
                         <span
-                          v-for="b in compactBalances(e.balances, e)"
+                          v-for="b in compactBalances(e.balances)"
                           :key="b.k"
                           class="ui-badge whitespace-nowrap"
                           :class="pairChipClasses(b.remaining)"
@@ -1355,11 +1244,7 @@ onBeforeUnmount(() => {
                 <div>
                   <div class="text-[14px] font-extrabold text-ui-fg">New leave profile</div>
                   <div class="text-[11px] text-ui-muted">
-                    Approval chain:
-                    <span class="font-semibold" v-if="requiresManager">Manager</span>
-                    <span class="font-semibold" v-if="requiresManager"> → </span>
-                    <span class="font-semibold">GM</span>
-                    <span v-if="needsCoo"> → <span class="font-semibold">COO</span></span>
+                    Note: Manager is optional (you can assign later in Edit).
                   </div>
                 </div>
 
@@ -1397,26 +1282,26 @@ onBeforeUnmount(() => {
                   <option value="MANAGER_AND_COO">Manager + COO</option>
                   <option value="GM_AND_COO">GM + COO</option>
                 </select>
-                <p class="mt-1 text-[11px] text-ui-muted">GM must approve first. If Manager exists, GM cannot see until Manager approves.</p>
+                <p class="mt-1 text-[11px] text-ui-muted">
+                  If you don’t have manager yet, create employee now, assign manager later in Edit.
+                </p>
               </div>
 
-              <!-- Manager picker -->
-              <div v-if="requiresManager">
-                <div class="ui-label">Direct manager <span class="text-rose-600">*</span></div>
+              <!-- Manager picker (OPTIONAL now) -->
+              <div>
+                <div class="ui-label">Direct manager (optional)</div>
 
-                <!-- Bulk manager -->
                 <div v-if="createTab === 'bulk'" class="relative" @click.stop>
                   <div class="relative">
                     <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
                     <input
-  v-model="mgrSearch.query"
-  type="text"
-  class="ui-input pl-8 pr-16"
-  placeholder="Type then press Enter..."
-  @input="debouncedRunSearch(mgrSearch)"
-  @keydown.enter.prevent="runSearchSimple(mgrSearch)"
-/>
-
+                      v-model="mgrSearch.query"
+                      type="text"
+                      class="ui-input pl-8 pr-16"
+                      placeholder="Type then press Enter..."
+                      @input="debouncedRunSearch(mgrSearch)"
+                      @keydown.enter.prevent="runSearchSimple(mgrSearch)"
+                    />
                     <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                       <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="runSearchSimple(mgrSearch)" title="Search">
                         <i class="fa-solid fa-magnifying-glass"></i>
@@ -1440,7 +1325,6 @@ onBeforeUnmount(() => {
                         :key="pickEmployeeId(r) + '_' + idx"
                         type="button"
                         class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
-                        :class="idx === (mgrSearch.activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
                         @click="setSelected(mgrSearch, r)"
                       >
                         {{ displayOption(r) }}
@@ -1450,7 +1334,6 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <!-- Single manager -->
                 <div v-else class="relative" @click.stop>
                   <div class="relative">
                     <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
@@ -1459,10 +1342,8 @@ onBeforeUnmount(() => {
                       type="text"
                       class="ui-input pl-8 pr-16"
                       placeholder="Type then press Enter..."
-                      @focus="singleMgrSearch.open = true"
+                      @input="debouncedRunSearch(singleMgrSearch)"
                       @keydown.enter.prevent="runSearchSimple(singleMgrSearch)"
-                      @keydown.down.prevent="singleMgrSearch.activeIndex = Math.min((singleMgrSearch.activeIndex||0)+1, Math.max((singleMgrSearch.results?.length||1)-1,0))"
-                      @keydown.up.prevent="singleMgrSearch.activeIndex = Math.max((singleMgrSearch.activeIndex||0)-1, 0)"
                       autocomplete="off"
                     />
                     <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1488,7 +1369,6 @@ onBeforeUnmount(() => {
                         :key="pickEmployeeId(r) + '_' + idx"
                         type="button"
                         class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
-                        :class="idx === (singleMgrSearch.activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
                         @click="setSelected(singleMgrSearch, r)"
                       >
                         {{ displayOption(r) }}
@@ -1498,10 +1378,8 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <p class="mt-1 text-[11px] text-ui-muted">Required for <span class="font-semibold">Manager</span> modes.</p>
+                <p class="mt-1 text-[11px] text-ui-muted">Optional. You can assign later in Edit.</p>
               </div>
-
-              <div v-else class="text-[11px] text-ui-muted">Manager is not needed in <span class="font-semibold">GM + COO</span> mode.</div>
 
               <!-- Bulk -->
               <div v-if="createTab === 'bulk'" class="space-y-2">
@@ -1539,11 +1417,8 @@ onBeforeUnmount(() => {
                           type="text"
                           class="ui-input pl-8 pr-16"
                           placeholder="Type then press Enter..."
-                          @focus="rowSearches[i].open = true"
                           @input="debouncedRunSearch(rowSearches[i])"
                           @keydown.enter.prevent="runSearchSimple(rowSearches[i])"
-                          @keydown.down.prevent="rowSearches[i].activeIndex = Math.min((rowSearches[i].activeIndex||0)+1, Math.max((rowSearches[i].results?.length||1)-1,0))"
-                          @keydown.up.prevent="rowSearches[i].activeIndex = Math.max((rowSearches[i].activeIndex||0)-1, 0)"
                           autocomplete="off"
                         />
                         <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1570,7 +1445,6 @@ onBeforeUnmount(() => {
                             :key="pickEmployeeId(rr) + '_' + idx"
                             type="button"
                             class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
-                            :class="idx === (rowSearches[i].activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
                             @click="setSelected(rowSearches[i], rr)"
                           >
                             {{ displayOption(rr) }}
@@ -1637,22 +1511,10 @@ onBeforeUnmount(() => {
                         </div>
 
                         <template v-if="showCarryAdvanced">
-                          <div>
-                            <div class="ui-label">SP</div>
-                            <input v-model.number="r.carry.SP" type="number" placeholder="0" class="ui-input" />
-                          </div>
-                          <div>
-                            <div class="ui-label">MC</div>
-                            <input v-model.number="r.carry.MC" type="number" placeholder="0" class="ui-input" />
-                          </div>
-                          <div>
-                            <div class="ui-label">MA</div>
-                            <input v-model.number="r.carry.MA" type="number" placeholder="0" class="ui-input" />
-                          </div>
-                          <div>
-                            <div class="ui-label">UL</div>
-                            <input v-model.number="r.carry.UL" type="number" placeholder="0" class="ui-input" />
-                          </div>
+                          <div><div class="ui-label">SP</div><input v-model.number="r.carry.SP" type="number" placeholder="0" class="ui-input" /></div>
+                          <div><div class="ui-label">MC</div><input v-model.number="r.carry.MC" type="number" placeholder="0" class="ui-input" /></div>
+                          <div><div class="ui-label">MA</div><input v-model.number="r.carry.MA" type="number" placeholder="0" class="ui-input" /></div>
+                          <div><div class="ui-label">UL</div><input v-model.number="r.carry.UL" type="number" placeholder="0" class="ui-input" /></div>
                         </template>
                       </div>
 
@@ -1676,11 +1538,8 @@ onBeforeUnmount(() => {
                           type="text"
                           class="ui-input pl-8 pr-16"
                           placeholder="Type then press Enter..."
-                          @focus="singleEmpSearch.open = true"
                           @input="debouncedRunSearch(singleEmpSearch)"
                           @keydown.enter.prevent="runSearchSimple(singleEmpSearch)"
-                          @keydown.down.prevent="singleEmpSearch.activeIndex = Math.min((singleEmpSearch.activeIndex||0)+1, Math.max((singleEmpSearch.results?.length||1)-1,0))"
-                          @keydown.up.prevent="singleEmpSearch.activeIndex = Math.max((singleEmpSearch.activeIndex||0)-1, 0)"
                           autocomplete="off"
                         />
                         <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1706,7 +1565,6 @@ onBeforeUnmount(() => {
                             :key="pickEmployeeId(rr) + '_' + idx"
                             type="button"
                             class="w-full text-left rounded-xl px-2 py-2 text-[12px] hover:bg-ui-bg-2/60"
-                            :class="idx === (singleEmpSearch.activeIndex||0) ? 'bg-ui-bg-2/60' : ''"
                             @click="setSelected(singleEmpSearch, rr)"
                           >
                             {{ displayOption(rr) }}
