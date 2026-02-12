@@ -2091,6 +2091,14 @@ function loadEmployees() {
     "telegramChatId": "",
     "isActive": true
   },
+                        {
+    "employeeId": "52610001",
+    "name": "Fuerte Nelcie Grace Jamelo",
+    "department": "Quality Assurance",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
   
   
 ]

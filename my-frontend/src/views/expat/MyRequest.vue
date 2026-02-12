@@ -257,7 +257,6 @@ onBeforeUnmount(() => {
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div class="min-w-[220px]">
               <div class="text-sm font-extrabold">My Leave Requests</div>
-              <div class="text-[11px] text-white/90">Track your submitted leave requests and status.</div>
             </div>
 
             <!-- Controls: fit nicely, no overflow -->
@@ -458,7 +457,6 @@ onBeforeUnmount(() => {
                      dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
             >
               <div class="flex items-center gap-2">
-                <span>Rows per page</span>
                 <select v-model="perPage" class="ui-select !py-1.5 !text-[11px] !rounded-full">
                   <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
                 </select>

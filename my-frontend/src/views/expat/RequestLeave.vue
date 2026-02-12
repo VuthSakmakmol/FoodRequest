@@ -1,15 +1,7 @@
 <!-- src/views/expat/RequestLeave.vue
-  ✅ Uses your global design system from:
-     - src/assets/main.css (Kantumruy Pro for all)
-     - src/assets/tailwind.css (ui-* components/tokens)
-  ✅ Compact “app-like” cards with icons
-  ✅ Supports:
-     - Single-day half: AM/PM
-     - Multi-day half edges: startHalf/endHalf
-  ✅ Payload rules:
-     - multi-day => startHalf/endHalf
-     - single-day half => legacy isHalfDay/dayPart + also startHalf (safe)
-  ✅ After success -> redirect to MyRequests (by PATH, not name)
+  ✅ MA (Maternity Leave): auto 90 days (calendar days), end date follows start date changes
+  ✅ End date input is disabled for MA
+  ✅ Works even if code is "MA" OR name contains "maternity"
 -->
 
 <script setup>
@@ -18,32 +10,30 @@ import { useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
-import UserLeaveProfile from '@/views/expat/user/UserLeaveProfile.vue'
 
 defineOptions({ name: 'RequestLeave' })
 
 const router = useRouter()
 const { showToast } = useToast()
 
-// ✅ CHANGE to your real route path
 const MY_REQUESTS_PATH = '/leave/user/my-requests'
 
-/* ───────── Identity (for realtime only, NOT required to submit) ───────── */
+/* ───────── Identity (for realtime only) ───────── */
 const employeeId = ref(String(localStorage.getItem('employeeId') || '').trim())
 const loginId = ref(String(localStorage.getItem('loginId') || '').trim())
-const realtimeReady = ref(false)
 
 /* ───────── Leave types ───────── */
 const loadingTypes = ref(false)
 const leaveTypes = ref([])
 const typesError = ref('')
 
-function typeLabel(t) {
-  const name = String(t?.name || '').trim()
-  const code = String(t?.code || '').trim().toUpperCase()
-  if (!code) return name
-  const endsWithCode = new RegExp(`\\(\\s*${code}\\s*\\)$`, 'i').test(name)
-  return endsWithCode ? name : `${name} (${code})`
+function cleanTypeName(name, code) {
+  const n = String(name || '').trim()
+  const c = String(code || '').trim().toUpperCase()
+  if (!n) return c || ''
+  if (!c) return n
+  const re = new RegExp(`\\s*\\(\\s*${c}\\s*\\)\\s*$`, 'i')
+  return n.replace(re, '').trim() || n
 }
 
 async function fetchLeaveTypes() {
@@ -53,6 +43,11 @@ async function fetchLeaveTypes() {
     const res = await api.get('/leave/types')
     let data = Array.isArray(res.data) ? res.data : []
     data = data.filter((t) => t.isActive !== false)
+    data = data.map((t) => {
+      const code = String(t?.code || '').trim().toUpperCase()
+      const name = cleanTypeName(t?.name, code)
+      return { ...t, code, name }
+    })
     leaveTypes.value = data
     if (!data.length) typesError.value = 'No leave types configured. Please contact HR/Admin.'
   } catch (e) {
@@ -64,24 +59,137 @@ async function fetchLeaveTypes() {
   }
 }
 
+/* ───────── Profile balances ───────── */
+const loadingProfile = ref(false)
+const profileError = ref('')
+const balancesRaw = ref([])
+
+const me = ref({
+  name: '',
+  employeeId: '',
+  department: '',
+  position: '',
+  contactNumber: '',
+  telegramChatId: '',
+})
+
+function s(v) { return String(v ?? '').trim() }
+function n(v) {
+  const x = Number(v ?? 0)
+  return Number.isFinite(x) ? x : 0
+}
+function codeOf(x) {
+  return String(x?.code || x?.leaveTypeCode || x?.typeCode || '').trim().toUpperCase()
+}
+
+function extractBalances(profile) {
+  const arr =
+    (Array.isArray(profile?.balances) && profile.balances) ||
+    (Array.isArray(profile?.leaveBalances) && profile.leaveBalances) ||
+    (Array.isArray(profile?.meta?.balances) && profile.meta.balances) ||
+    []
+  return arr
+    .map((b) => ({
+      code: codeOf(b),
+      used: n(b?.used),
+      remaining: n(b?.remaining),
+      entitlement: n(b?.entitlement),
+    }))
+    .filter((b) => !!b.code)
+}
+
+const typeNameByCode = computed(() => {
+  const m = {}
+  for (const t of leaveTypes.value || []) {
+    const c = String(t?.code || '').trim().toUpperCase()
+    if (!c) continue
+    const name = cleanTypeName(t?.name, c)
+    m[c] = name || c
+  }
+  return m
+})
+
+function fullTypeName(code) {
+  const c = String(code || '').trim().toUpperCase()
+  return typeNameByCode.value[c] || c
+}
+
+function applyCarryForDisplay(profile, arr) {
+  const carry = profile?.carry || {}
+  return arr.map((b) => {
+    const c = n(carry?.[b.code])
+    if (!c) return { ...b, remaining: Math.max(0, b.remaining) }
+    if (c > 0) return { ...b, remaining: Math.max(0, b.remaining + c) }
+    const abs = Math.abs(c)
+    return { ...b, used: b.used + abs, remaining: Math.max(0, b.remaining - abs) }
+  })
+}
+
+function extractEmployeeInfo(profile) {
+  const p = profile || {}
+  const emp = p.employee || p.employeeInfo || p.employeeDirectory || p.meta?.employee || {}
+  const fallbackId = s(p.employeeId) || s(emp.employeeId) || s(emp._id) || employeeId.value || loginId.value
+  return {
+    employeeId: s(emp.employeeId || emp._id || p.employeeId || fallbackId),
+    name: s(emp.name || p.name),
+    department: s(emp.department || p.department),
+    position: s(emp.position || p.position || p.jobTitle || p.title),
+    contactNumber: s(emp.contactNumber || p.contactNumber),
+    telegramChatId: s(emp.telegramChatId || p.telegramChatId),
+  }
+}
+
+async function fetchMyProfile() {
+  try {
+    loadingProfile.value = true
+    profileError.value = ''
+    const res = await api.get('/leave/profile/me')
+    const profile = res?.data || {}
+
+    me.value = extractEmployeeInfo(profile)
+
+    let arr = extractBalances(profile)
+    arr = applyCarryForDisplay(profile, arr)
+
+    const order = (leaveTypes.value || []).map((t) => String(t.code || '').toUpperCase()).filter(Boolean)
+    if (order.length) {
+      const idx = (c) => {
+        const i = order.indexOf(c)
+        return i >= 0 ? i : 9999
+      }
+      arr.sort((a, b) => idx(a.code) - idx(b.code))
+    }
+
+    balancesRaw.value = arr
+  } catch (e) {
+    console.error('fetchMyProfile error', e)
+    profileError.value = e?.response?.data?.message || 'Unable to load your leave profile.'
+    balancesRaw.value = []
+  } finally {
+    loadingProfile.value = false
+  }
+}
+
+const balancesForUI = computed(() => {
+  const arr = Array.isArray(balancesRaw.value) ? balancesRaw.value : []
+  return arr.map((b) => {
+    const code = String(b.code || '').toUpperCase()
+    return { ...b, isAL: code === 'AL', isSP: code === 'SP' }
+  })
+})
+
 /* ───────── Form ───────── */
 const form = ref({
   leaveTypeCode: '',
   startDate: '',
   endDate: '',
   reason: '',
-
-  // half mode
   useHalf: false,
-
-  // single-day half
-  singleHalf: '', // 'AM' | 'PM'
-
-  // multi-day half edges
+  singleHalf: '',
   halfStartEnabled: false,
-  halfStartPart: '', // 'AM' | 'PM'
+  halfStartPart: '',
   halfEndEnabled: false,
-  halfEndPart: '', // 'AM' | 'PM'
+  halfEndPart: '',
 })
 
 const submitting = ref(false)
@@ -93,7 +201,34 @@ const selectedType = computed(() => {
   return leaveTypes.value.find((t) => String(t.code || '').toUpperCase() === code) || null
 })
 
-const isMA = computed(() => String(form.value.leaveTypeCode || '').toUpperCase() === 'MA')
+/* ✅ Robust MA detection:
+   - by code === 'MA'
+   - OR name contains "maternity"
+*/
+const isMA = computed(() => {
+  const code = String(form.value.leaveTypeCode || '').toUpperCase()
+  if (code === 'MA') return true
+  const name = String(selectedType.value?.name || '').toLowerCase()
+  return name.includes('maternity')
+})
+
+/* ✅ MA duration: 90 calendar days inclusive => end = start + 89 */
+function addDaysYMD(ymd, addDays) {
+  const s = String(ymd || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
+  const [y, m, d] = s.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1))
+  dt.setUTCDate(dt.getUTCDate() + Number(addDays || 0))
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
+function computeMAEnd(startYMD) {
+  // inclusive 90 days => +89
+  return addDaysYMD(startYMD, 89)
+}
 
 const isMultiDay = computed(() => {
   if (!form.value.startDate || !form.value.endDate) return false
@@ -108,17 +243,9 @@ const canSubmit = computed(() => {
   if (!isMA.value && form.value.endDate < form.value.startDate) return false
 
   if (!form.value.useHalf) return true
-
-  // MA: half not allowed
   if (isMA.value) return false
+  if (!isMultiDay.value) return !!form.value.singleHalf
 
-  // half enabled
-  if (!isMultiDay.value) {
-    // single-day: require AM/PM
-    return !!form.value.singleHalf
-  }
-
-  // multi-day: require at least one edge enabled
   if (!form.value.halfStartEnabled && !form.value.halfEndEnabled) return false
   if (form.value.halfStartEnabled && !form.value.halfStartPart) return false
   if (form.value.halfEndEnabled && !form.value.halfEndPart) return false
@@ -142,17 +269,17 @@ function resetForm() {
   formSuccess.value = ''
 }
 
-/* ───────── Keep dates safe ───────── */
+/* ───────── Keep dates safe + ✅ MA auto end date ───────── */
 watch(
   () => [form.value.startDate, form.value.leaveTypeCode],
   () => {
     if (!form.value.startDate) return
 
     if (isMA.value) {
-      // MA: fixed start day input; backend computes +90 days
-      form.value.endDate = form.value.startDate
+      // ✅ auto end date always follows start date change
+      form.value.endDate = computeMAEnd(form.value.startDate)
 
-      // MA: half not allowed
+      // ✅ MA never supports half
       form.value.useHalf = false
       form.value.singleHalf = ''
       form.value.halfStartEnabled = false
@@ -171,8 +298,13 @@ watch(
   () => form.value.endDate,
   () => {
     if (!form.value.startDate) return
+    if (isMA.value) {
+      // ✅ if user/dev tries to change end date, force it back
+      form.value.endDate = computeMAEnd(form.value.startDate)
+      return
+    }
     if (!form.value.endDate) form.value.endDate = form.value.startDate
-    if (!isMA.value && form.value.endDate < form.value.startDate) form.value.endDate = form.value.startDate
+    if (form.value.endDate < form.value.startDate) form.value.endDate = form.value.startDate
   }
 )
 
@@ -180,6 +312,10 @@ watch(
 watch(
   () => form.value.useHalf,
   (on) => {
+    if (isMA.value) {
+      form.value.useHalf = false
+      return
+    }
     if (!on) {
       form.value.singleHalf = ''
       form.value.halfStartEnabled = false
@@ -188,8 +324,6 @@ watch(
       form.value.halfEndPart = ''
       return
     }
-
-    // if turning on while multi-day, enable start edge by default
     if (isMultiDay.value && !form.value.halfStartEnabled && !form.value.halfEndEnabled) {
       form.value.halfStartEnabled = true
     }
@@ -200,12 +334,11 @@ watch(
   () => [form.value.startDate, form.value.endDate],
   () => {
     if (!form.value.useHalf) return
+    if (isMA.value) return
     if (isMultiDay.value) {
-      // multi-day mode: disable single half
       form.value.singleHalf = ''
       if (!form.value.halfStartEnabled && !form.value.halfEndEnabled) form.value.halfStartEnabled = true
     } else {
-      // single-day mode: disable edges
       form.value.halfStartEnabled = false
       form.value.halfStartPart = ''
       form.value.halfEndEnabled = false
@@ -214,21 +347,19 @@ watch(
   }
 )
 
-function toggleEdge(edge) {
-  if (edge === 'start') {
-    form.value.halfStartEnabled = !form.value.halfStartEnabled
-    if (!form.value.halfStartEnabled) form.value.halfStartPart = ''
-  }
-  if (edge === 'end') {
-    form.value.halfEndEnabled = !form.value.halfEndEnabled
-    if (!form.value.halfEndEnabled) form.value.halfEndPart = ''
-  }
-}
-
 function pickPart(target, val) {
-  if (target === 'single') form.value.singleHalf = val
-  if (target === 'start') form.value.halfStartPart = val
-  if (target === 'end') form.value.halfEndPart = val
+  const v = String(val || '').toUpperCase()
+  if (target === 'single') form.value.singleHalf = v
+  if (target === 'start') form.value.halfStartPart = v
+  if (target === 'end') form.value.halfEndPart = v
+}
+function toggleStartEdge() {
+  form.value.halfStartEnabled = !form.value.halfStartEnabled
+  if (!form.value.halfStartEnabled) form.value.halfStartPart = ''
+}
+function toggleEndEdge() {
+  form.value.halfEndEnabled = !form.value.halfEndEnabled
+  if (!form.value.halfEndEnabled) form.value.halfEndPart = ''
 }
 
 /* ───────── Submit ───────── */
@@ -241,19 +372,22 @@ async function submitRequest() {
   formError.value = ''
   formSuccess.value = ''
 
-  // friendly checks
   if (!form.value.leaveTypeCode) return (formError.value = 'Please select leave type.')
   if (!form.value.startDate) return (formError.value = 'Please select start date.')
   if (!form.value.endDate) return (formError.value = 'Please select end date.')
-  if (!isMA.value && form.value.endDate < form.value.startDate) return (formError.value = 'End date cannot be earlier than start date.')
+  if (!isMA.value && form.value.endDate < form.value.startDate)
+    return (formError.value = 'End date cannot be earlier than start date.')
 
   if (form.value.useHalf && !isMA.value) {
     if (!isMultiDay.value) {
       if (!form.value.singleHalf) return (formError.value = 'Please choose AM or PM.')
     } else {
-      if (!form.value.halfStartEnabled && !form.value.halfEndEnabled) return (formError.value = 'Choose half on Start day or End day.')
-      if (form.value.halfStartEnabled && !form.value.halfStartPart) return (formError.value = 'Choose AM/PM for Start day half.')
-      if (form.value.halfEndEnabled && !form.value.halfEndPart) return (formError.value = 'Choose AM/PM for End day half.')
+      if (!form.value.halfStartEnabled && !form.value.halfEndEnabled)
+        return (formError.value = 'Choose half on Start day or End day.')
+      if (form.value.halfStartEnabled && !form.value.halfStartPart)
+        return (formError.value = 'Choose AM/PM for Start day half.')
+      if (form.value.halfEndEnabled && !form.value.halfEndPart)
+        return (formError.value = 'Choose AM/PM for End day half.')
     }
   }
 
@@ -262,20 +396,19 @@ async function submitRequest() {
     const payload = {
       leaveTypeCode: form.value.leaveTypeCode,
       startDate: form.value.startDate,
-      endDate: isMA.value ? form.value.startDate : form.value.endDate,
+      // ✅ Always send MA calculated end date
+      endDate: isMA.value ? computeMAEnd(form.value.startDate) : form.value.endDate,
       reason: form.value.reason || '',
     }
 
     if (!isMA.value && form.value.useHalf) {
       if (!isMultiDay.value) {
-        // single-day half (legacy + new-safe)
         const part = String(form.value.singleHalf || '').toUpperCase()
         payload.isHalfDay = true
         payload.dayPart = part
         payload.startHalf = part
         payload.endHalf = null
       } else {
-        // multi-day edges
         payload.isHalfDay = false
         payload.dayPart = ''
         payload.startHalf = form.value.halfStartEnabled ? String(form.value.halfStartPart || '').toUpperCase() : null
@@ -288,14 +421,11 @@ async function submitRequest() {
       payload.endHalf = null
     }
 
-    console.log('[RequestLeave] submit payload:', payload)
-
     await api.post('/leave/requests', payload)
 
     showToast({ type: 'success', title: 'Submitted', message: 'Your request has been sent for approval.' })
     formSuccess.value = 'Submitted successfully.'
     resetForm()
-
     router.push(MY_REQUESTS_PATH)
   } catch (e) {
     console.error('submitRequest error', e)
@@ -313,23 +443,18 @@ const offHandlers = []
 function ensureRealtime() {
   const emp = String(employeeId.value || '').trim()
   const log = String(loginId.value || '').trim()
-
   if (emp) subscribeEmployeeIfNeeded(emp)
   if (log) subscribeUserIfNeeded(log)
-
-  realtimeReady.value = !!(emp || log)
 }
-
 function isMine(payload = {}) {
   const emp = String(payload.employeeId || '').trim()
   const reqr = String(payload.requesterLoginId || '').trim()
   return (employeeId.value && emp === employeeId.value) || (loginId.value && reqr === loginId.value)
 }
-
 function setupRealtimeListeners() {
   offHandlers.push(
-    onSocket('leave:req:updated', (p = {}) => { if (isMine(p)) {/* no-op */} }),
-    onSocket('leave:profile:updated', (p = {}) => { if (isMine(p)) {/* no-op */} })
+    onSocket('leave:req:updated', (p = {}) => { if (isMine(p)) fetchMyProfile() }),
+    onSocket('leave:profile:updated', (p = {}) => { if (isMine(p)) fetchMyProfile() })
   )
 }
 
@@ -338,6 +463,7 @@ watch(() => String(localStorage.getItem('loginId') || '').trim(), (v) => { login
 
 onMounted(async () => {
   await fetchLeaveTypes()
+  await fetchMyProfile()
   ensureRealtime()
   setupRealtimeListeners()
 })
@@ -349,190 +475,240 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ui-page">
-    <div class="ui-container py-2">
-            <div class="mb-2">
-        <UserLeaveProfile />
-      </div>
-
-      <!-- Main container card -->
-      <div class="ui-card overflow-hidden">
-        <!-- uses your existing gradient header -->
-        <div class="ui-hero-gradient">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <div class="grid h-9 w-9 place-items-center rounded-2xl bg-white/15">
-                <i class="fa-solid fa-wand-magic-sparkles" />
-              </div>
-              <div>
-                <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Request Leave</div>
+    <div class="ui-container py-3">
+      <div class="grid gap-3 lg:grid-cols-10 lg:items-start">
+        <!-- LEFT -->
+        <div class="lg:col-span-6 ui-card overflow-hidden lg:sticky lg:top-3">
+          <div class="ui-hero-gradient">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <div class="grid h-9 w-9 place-items-center rounded-2xl bg-white/15">
+                  <i class="fa-solid fa-chart-pie" />
+                </div>
+                <div>
+                  <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">My Leave</div>
+                  <div class="text-[11px] font-semibold opacity-90">Balances</div>
+                </div>
               </div>
             </div>
-            <div class="text-[11px] font-semibold opacity-90">
-              {{ isMA ? 'MA: 90 days auto' : 'Select dates' }}
+          </div>
+
+          <div class="p-3">
+            <div
+              class="mb-2 rounded-2xl border border-slate-200 bg-white/60 px-3 py-2 text-[13px]
+                    dark:border-slate-800 dark:bg-slate-950/30"
+            >
+              <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="min-w-0">
+                  <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">Name</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">{{ me.name || '—' }}</div>
+                </div>
+                <div class="min-w-0">
+                  <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">ID</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">{{ me.employeeId || '—' }}</div>
+                </div>
+                <div class="min-w-0">
+                  <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">Department</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">{{ me.department || '—' }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="profileError"
+              class="mb-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800
+                     dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+            >
+              {{ profileError }}
+            </div>
+
+            <div class="flex gap-2 overflow-x-auto pb-1">
+              <div v-for="b in balancesForUI" :key="b.code" class="ui-balance-card shrink-0" :title="fullTypeName(b.code)">
+                <div class="ui-balance-code" :title="fullTypeName(b.code)">{{ fullTypeName(b.code) }}</div>
+
+                <template v-if="b.isAL">
+                  <div class="ui-balance-two">
+                    <div class="ui-balance-block">
+                      <div class="ui-balance-num">{{ b.used }}</div>
+                      <div class="ui-balance-sub">Used</div>
+                    </div>
+                    <div class="ui-balance-block">
+                      <div class="ui-balance-num">{{ b.remaining }}</div>
+                      <div class="ui-balance-sub">Remain</div>
+                    </div>
+                  </div>
+                </template>
+
+                <template v-else>
+                  <div class="ui-balance-one">
+                    <div class="ui-balance-num">{{ b.used }}</div>
+                    <div class="ui-balance-sub">Used</div>
+                  </div>
+                </template>
+              </div>
+
+              <div v-if="!balancesForUI.length && !loadingProfile" class="text-[11px] text-slate-500 dark:text-slate-400">
+                No balances found.
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="p-3">
-          <div
-            v-if="typesError"
-            class="mb-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-900
-                   dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
-          >
-            {{ typesError }}
+        <!-- RIGHT -->
+        <div class="lg:col-span-4 ui-card overflow-hidden">
+          <div class="ui-hero-gradient">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <div class="grid h-9 w-9 place-items-center rounded-2xl bg-white/15">
+                  <i class="fa-solid fa-wand-magic-sparkles" />
+                </div>
+                <div>
+                  <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Request Leave</div>
+                  <div class="text-[11px] font-semibold opacity-90">
+                    {{ isMA ? 'Maternity Leave: auto 90 days' : 'Create request' }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <form class="space-y-2.5" @submit.prevent="submitRequest">
-            <!-- Leave type -->
-            <div class="ui-card p-3">
-              <div class="ui-row">
-                <div class="ui-ico"><i class="fa-solid fa-layer-group" /></div>
-                <div class="flex-1">
-                  <div class="ui-label">Leave Type</div>
-                  <select v-model="form.leaveTypeCode" :disabled="loadingTypes || !leaveTypes.length" class="ui-select">
-                    <option value="" disabled>{{ loadingTypes ? 'Loading…' : 'Select leave type' }}</option>
-                    <option v-for="t in leaveTypes" :key="t.code" :value="t.code">{{ typeLabel(t) }}</option>
-                  </select>
-                </div>
-              </div>
+          <div class="p-3">
+            <div
+              v-if="typesError"
+              class="mb-2 rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-900
+                     dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+            >
+              {{ typesError }}
             </div>
 
-            <!-- Dates -->
-            <div class="ui-card p-3">
-              <div class="grid gap-2 sm:grid-cols-2">
+            <form class="space-y-2.5" @submit.prevent="submitRequest">
+              <div class="ui-card p-3">
                 <div class="ui-row">
-                  <div class="ui-ico"><i class="fa-solid fa-play" /></div>
+                  <div class="ui-ico"><i class="fa-solid fa-layer-group" /></div>
                   <div class="flex-1">
-                    <div class="ui-label">Start Date</div>
-
-                    <!-- ✅ use your date picker style -->
-                    <input
-                      v-model="form.startDate"
-                      type="date"
-                      class="ui-date"
-                    />
-                  </div>
-                </div>
-
-                <div class="ui-row">
-                  <div class="ui-ico"><i class="fa-solid fa-flag-checkered" /></div>
-                  <div class="flex-1">
-                    <div class="ui-label">End Date</div>
-
-                    <!-- ✅ use your date picker style + MA disabled behavior -->
-                    <input
-                      v-model="form.endDate"
-                      type="date"
-                      :disabled="isMA"
-                      class="ui-date disabled:opacity-70 disabled:cursor-not-allowed"
-                    />
+                    <div class="ui-label">Leave Type</div>
+                    <select v-model="form.leaveTypeCode" :disabled="loadingTypes || !leaveTypes.length" class="ui-select">
+                      <option value="" disabled>{{ loadingTypes ? 'Loading…' : 'Select leave type' }}</option>
+                      <option v-for="t in leaveTypes" :key="t.code" :value="t.code">{{ t.name }}</option>
+                    </select>
                   </div>
                 </div>
               </div>
 
-              <div v-if="isMA" class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-                <span class="ui-badge ui-badge-warning">MA</span>
-                System will auto-calculate end date = start + 90 days.
-              </div>
-            </div>
-
-
-            <!-- Half options -->
-            <div class="ui-card p-3">
-              <div class="ui-row">
-                <div class="ui-ico"><i class="fa-solid fa-clock" /></div>
-
-                <div class="flex-1">
-                  <div class="flex items-center justify-between gap-2">
+              <div class="ui-card p-3">
+                <div class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <div class="grid h-9 w-9 place-items-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                      <i class="fa-solid fa-clock" />
+                    </div>
                     <div>
-                      <div class="ui-label">Half-day</div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">Choose AM/PM</div>
+                      <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Half-day</div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                        {{ isMA ? 'Disabled for Maternity' : 'AM/PM aligned end' }}
+                      </div>
+                    </div>
+                  </div>
+
+                  <label class="inline-flex items-center gap-2 text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                    <input
+                      v-model="form.useHalf"
+                      type="checkbox"
+                      :disabled="isMA"
+                      class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:opacity-60
+                             dark:border-slate-700 dark:bg-slate-900"
+                    />
+                    Enable
+                  </label>
+                </div>
+
+                <div v-if="isMA" class="mt-2 text-[11px] font-semibold text-amber-700 dark:text-amber-200">
+                  End date is auto-calculated (90 days). Half-day is not allowed.
+                </div>
+              </div>
+
+              <div class="ui-card p-3">
+                <div class="grid gap-2">
+                  <div class="date-row">
+                    <div class="ui-ico !h-10 !w-10"><i class="fa-solid fa-play" /></div>
+
+                    <div class="flex-1">
+                      <div class="ui-label">Start Date</div>
+                      <input v-model="form.startDate" type="date" class="ui-date" />
                     </div>
 
-                    <label class="inline-flex items-center gap-2 text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
+                    <div class="date-right-slot">
+                      <div v-if="form.useHalf && !isMA && !isMultiDay" class="chip-row">
+                        <button type="button" class="sq-chip" :class="form.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="pickPart('single','AM')">AM</button>
+                        <button type="button" class="sq-chip" :class="form.singleHalf === 'PM' ? 'sq-chip-on' : ''" @click="pickPart('single','PM')">PM</button>
+                      </div>
+
+                      <div v-else-if="form.useHalf && !isMA && isMultiDay" class="chip-row">
+                        <button type="button" class="sq-edge" :class="form.halfStartEnabled ? 'sq-edge-on' : ''" @click="toggleStartEdge" title="Half of start date">½</button>
+                        <button type="button" class="sq-chip" :class="form.halfStartPart === 'AM' ? 'sq-chip-on' : ''" :disabled="!form.halfStartEnabled" @click="pickPart('start','AM')">AM</button>
+                        <button type="button" class="sq-chip" :class="form.halfStartPart === 'PM' ? 'sq-chip-on' : ''" :disabled="!form.halfStartEnabled" @click="pickPart('start','PM')">PM</button>
+                      </div>
+
+                      <div v-else class="slot-placeholder"></div>
+                    </div>
+                  </div>
+
+                  <div class="date-row">
+                    <div class="ui-ico !h-10 !w-10"><i class="fa-solid fa-flag-checkered" /></div>
+
+                    <div class="flex-1">
+                      <div class="ui-label">End Date</div>
                       <input
-                        v-model="form.useHalf"
-                        type="checkbox"
+                        v-model="form.endDate"
+                        type="date"
                         :disabled="isMA"
-                        class="h-4 w-4 rounded border-slate-300 text-sky-600 focus:ring-sky-500 disabled:opacity-60
-                               dark:border-slate-700 dark:bg-slate-900"
+                        class="ui-date disabled:opacity-70 disabled:cursor-not-allowed"
                       />
-                      Enable
-                    </label>
-                  </div>
-
-                  <!-- single-day AM/PM -->
-                  <div v-if="form.useHalf && !isMA && !isMultiDay" class="mt-2 grid grid-cols-2 gap-2">
-                    <button type="button" class="ui-chip" :class="form.singleHalf === 'AM' ? 'ui-chip-am' : ''" @click="pickPart('single','AM')">
-                      <i class="fa-solid fa-sun" /> AM
-                    </button>
-                    <button type="button" class="ui-chip" :class="form.singleHalf === 'PM' ? 'ui-chip-pm' : ''" @click="pickPart('single','PM')">
-                      <i class="fa-solid fa-moon" /> PM
-                    </button>
-                  </div>
-
-                  <!-- multi-day edges -->
-                  <div v-if="form.useHalf && !isMA && isMultiDay" class="mt-2 space-y-2">
-                    <div class="grid grid-cols-2 gap-2">
-                      <button type="button" class="ui-chip" :class="form.halfStartEnabled ? 'ui-chip-on' : ''" @click="toggleEdge('start')">
-                        <i class="fa-solid fa-play" /> Half of Start Date
-                      </button>
-                      <button type="button" class="ui-chip" :class="form.halfEndEnabled ? 'ui-chip-on' : ''" @click="toggleEdge('end')">
-                        <i class="fa-solid fa-flag" /> Half of End Date
-                      </button>
                     </div>
 
-                    <div v-if="form.halfStartEnabled" class="grid grid-cols-2 gap-2">
-                      <button type="button" class="ui-chip" :class="form.halfStartPart === 'AM' ? 'ui-chip-am' : ''" @click="pickPart('start','AM')">AM</button>
-                      <button type="button" class="ui-chip" :class="form.halfStartPart === 'PM' ? 'ui-chip-pm' : ''" @click="pickPart('start','PM')">PM</button>
-                    </div>
+                    <div class="date-right-slot">
+                      <div v-if="form.useHalf && !isMA && isMultiDay" class="chip-row">
+                        <button type="button" class="sq-edge" :class="form.halfEndEnabled ? 'sq-edge-on' : ''" @click="toggleEndEdge" title="Half of end date">½</button>
+                        <button type="button" class="sq-chip" :class="form.halfEndPart === 'AM' ? 'sq-chip-on' : ''" :disabled="!form.halfEndEnabled" @click="pickPart('end','AM')">AM</button>
+                        <button type="button" class="sq-chip" :class="form.halfEndPart === 'PM' ? 'sq-chip-on' : ''" :disabled="!form.halfEndEnabled" @click="pickPart('end','PM')">PM</button>
+                      </div>
 
-                    <div v-if="form.halfEndEnabled" class="grid grid-cols-2 gap-2">
-                      <button type="button" class="ui-chip" :class="form.halfEndPart === 'AM' ? 'ui-chip-am' : ''" @click="pickPart('end','AM')">AM</button>
-                      <button type="button" class="ui-chip" :class="form.halfEndPart === 'PM' ? 'ui-chip-pm' : ''" @click="pickPart('end','PM')">PM</button>
+                      <div v-else class="slot-placeholder"></div>
                     </div>
                   </div>
 
-                  <div v-if="isMA && form.useHalf" class="mt-2 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
-                    MA does not support half-day.
+                  <div v-if="isMA && form.startDate" class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                    <span class="ui-badge ui-badge-warning">MA</span>
+                    Auto end date: <span class="font-extrabold">{{ form.endDate }}</span> (90 days inclusive)
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- Reason -->
-            <div class="ui-card p-3">
-              <div class="ui-row">
-                <div class="ui-ico"><i class="fa-solid fa-pen" /></div>
-                <div class="flex-1">
-                  <div class="ui-label">Reason</div>
-                  <textarea v-model="form.reason" rows="2" class="ui-textarea" placeholder="Optional…" />
+              <div class="ui-card p-3">
+                <div class="ui-row">
+                  <div class="ui-ico"><i class="fa-solid fa-pen" /></div>
+                  <div class="flex-1">
+                    <div class="ui-label">Reason</div>
+                    <textarea v-model="form.reason" rows="2" class="ui-textarea" placeholder="Optional…" />
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <!-- messages -->
-            <div v-if="formError" class="text-[11px] font-extrabold text-rose-600 dark:text-rose-400">{{ formError }}</div>
-            <div v-if="formSuccess" class="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-300">{{ formSuccess }}</div>
+              <div v-if="formError" class="text-[11px] font-extrabold text-rose-600 dark:text-rose-400">{{ formError }}</div>
+              <div v-if="formSuccess" class="text-[11px] font-extrabold text-emerald-600 dark:text-emerald-300">{{ formSuccess }}</div>
 
-            <!-- actions -->
-            <div class="mt-2 flex items-center justify-end gap-2">
-              <button type="button" class="ui-btn ui-btn-soft" :disabled="submitting" @click="resetForm">
-                <i class="fa-solid fa-arrow-rotate-left" /> Reset
-              </button>
+              <div class="mt-2 flex items-center justify-end gap-2">
+                <button type="button" class="ui-btn ui-btn-soft" :disabled="submitting" @click="resetForm">
+                  <i class="fa-solid fa-arrow-rotate-left" /> Reset
+                </button>
 
-              <button type="submit" class="ui-btn ui-btn-primary" :disabled="!canSubmit">
-                <i v-if="submitting" class="fa-solid fa-spinner animate-spin" />
-                <i v-else class="fa-solid fa-paper-plane" />
-                Submit
-              </button>
-            </div>
-
-            <div v-if="selectedType" class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-              <span class="font-extrabold text-slate-800 dark:text-slate-100">{{ selectedType.name }}</span>
-              <span class="opacity-80"> — {{ selectedType.description || 'Follow company policy.' }}</span>
-            </div>
-          </form>
+                <button type="submit" class="ui-btn ui-btn-primary" :disabled="!canSubmit">
+                  <i v-if="submitting" class="fa-solid fa-spinner animate-spin" />
+                  <i v-else class="fa-solid fa-paper-plane" />
+                  Submit
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </div>
@@ -540,5 +716,48 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* Keep empty: this view relies on main.css + tailwind.css ui-* */
+/* keep your existing styles (unchanged) */
+.ui-balance-card{
+  @apply rounded-2xl border border-slate-200 bg-white p-2 shadow-sm dark:border-slate-800 dark:bg-slate-950/40;
+  width: 124px;
+  height: 124px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.ui-balance-code{
+  @apply text-[11px] font-extrabold tracking-wide text-slate-700 dark:text-slate-200;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ui-balance-two{ display:grid; grid-template-columns:1fr 1fr; gap:6px; align-items:end; }
+.ui-balance-block{ @apply rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-center dark:border-slate-800 dark:bg-slate-900/40; }
+.ui-balance-one{ @apply rounded-xl border border-slate-200 bg-slate-50 px-2 py-2 text-center dark:border-slate-800 dark:bg-slate-900/40; }
+.ui-balance-num{ @apply text-2xl font-black leading-none text-slate-900 dark:text-white; }
+.ui-balance-sub{ @apply mt-1 text-[11px] font-bold text-slate-500 dark:text-slate-400; }
+
+.date-row{ display:flex; align-items:center; gap:8px; }
+.date-right-slot{ width:146px; display:flex; justify-content:flex-end; }
+.chip-row{ display:flex; gap:6px; align-items:center; justify-content:flex-end; }
+.slot-placeholder{ width:146px; height:42px; }
+
+.sq-chip{
+  @apply grid place-items-center rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700
+         hover:bg-slate-50 active:translate-y-[0.5px] disabled:opacity-40 disabled:cursor-not-allowed
+         dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/40;
+  width: 42px; height: 42px;
+}
+.sq-chip-on{ @apply border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200; }
+
+.sq-edge{
+  @apply grid place-items-center rounded-xl border border-slate-200 bg-white text-[13px] font-black text-slate-700
+         hover:bg-slate-50 active:translate-y-[0.5px]
+         dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/40;
+  width: 42px; height: 42px;
+}
+.sq-edge-on{
+  @apply border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-200;
+}
 </style>

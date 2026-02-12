@@ -113,7 +113,7 @@ function clearFilters() {
 async function fetchInbox() {
   try {
     loading.value = true
-    const res = await api.get('/leave/requests/gm/inbox')
+    const res = await api.get('/leave/requests/gm/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('fetchInbox error', e)

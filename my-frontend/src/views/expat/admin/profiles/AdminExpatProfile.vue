@@ -166,10 +166,6 @@ async function fetchGroups() {
   }
 }
 
-async function applyFilters() {
-  appliedInactive.value = !!includeInactive.value
-  await fetchGroups()
-}
 function clearFilters() {
   q.value = ''
   includeInactive.value = false
@@ -322,6 +318,22 @@ function normalizeCarry(c) {
     UL: Number(src.UL || 0),
   }
 }
+
+function hasValue(v) {
+  return String(v ?? '').trim().length > 0
+}
+
+function managerDisplayName(g) {
+  // If manager missing => show GM
+  // priority: manager.name -> "GM"
+  return hasValue(g?.manager?.name) ? String(g.manager.name).trim() : 'GM'
+}
+
+function managerBadgeLabel(g) {
+  // Badge label: MANAGER or GM
+  return hasValue(g?.manager?.name) ? 'MANAGER' : 'GM'
+}
+
 
 /* strong password rule (OPTIONAL input) */
 function validateStrongPassword(pwd) {
@@ -737,8 +749,7 @@ function exportGroupedByManagerExcel() {
   const wb = XLSX.utils.book_new()
 
   const summaryRows = base.map((g) => ({
-    Manager: fmt(g.manager?.name) || 'Unknown Manager',
-    ManagerEmployeeId: fmt(g.manager?.employeeId),
+    Manager: managerDisplayName(g),    ManagerEmployeeId: fmt(g.manager?.employeeId),
     Department: fmt(g.manager?.department),
     Employees: (g.employees || []).length,
   }))
@@ -811,10 +822,7 @@ onBeforeUnmount(() => {
       <div class="ui-hero-gradient rounded-t-2xl border-x-0 border-t-0">
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="min-w-[240px]">
-            <div class="text-[10px] uppercase tracking-[0.25em] text-emerald-100/85">Expat Leave</div>
             <div class="text-[18px] sm:text-[22px] font-extrabold tracking-tight">Expat Profiles</div>
-            <div class="text-[12px] sm:text-[13px] text-emerald-50/90">Profiles grouped by manager.</div>
-
             <div class="mt-2 flex flex-wrap items-center gap-2">
               <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
               <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
@@ -834,7 +842,6 @@ onBeforeUnmount(() => {
                          focus:ring-2 focus:ring-white/25"
                 />
               </div>
-              <div class="mt-1 text-[10px] text-white/75">Smooth search (no reload).</div>
             </div>
 
             <div class="flex items-center gap-2 pt-5">
@@ -842,29 +849,7 @@ onBeforeUnmount(() => {
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
-
-              <button
-                type="button"
-                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
-                @click="applyFilters"
-                :disabled="loading"
-              >
-                <i class="fa-solid fa-filter text-[11px]"></i>
-                Apply
-              </button>
             </div>
-
-            <div class="min-w-[140px]">
-              <div class="text-[11px] font-extrabold uppercase tracking-[0.20em] text-emerald-50/90">Per page</div>
-              <select
-                v-model.number="pageSize"
-                class="mt-1 w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px]
-                       text-slate-900 dark:text-white outline-none"
-              >
-                <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
-              </select>
-            </div>
-
             <div class="flex items-center gap-2">
               <button
                 type="button"
@@ -949,17 +934,6 @@ onBeforeUnmount(() => {
                 >
                   <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}/page</option>
                 </select>
-
-                <button
-                  type="button"
-                  class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
-                  @click="applyFilters"
-                  :disabled="loading"
-                >
-                  <i class="fa-solid fa-filter text-[11px]"></i>
-                  Apply
-                </button>
-
                 <button
                   type="button"
                   class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
@@ -1023,9 +997,14 @@ onBeforeUnmount(() => {
               <div class="flex items-start justify-between gap-2">
                 <div class="min-w-0">
                   <div class="truncate text-[12px] font-extrabold text-ui-fg">
-                    <span class="ui-badge ui-badge-indigo mr-2">MANAGER</span>
-                    {{ safeTxt(g.manager?.name) }}
-                    <span class="ml-1 font-mono text-[11px] text-ui-muted">({{ safeTxt(g.manager?.employeeId) }})</span>
+                    <span class="ui-badge ui-badge-indigo mr-2">{{ managerBadgeLabel(g) }}</span>
+                      {{ managerDisplayName(g) }}
+                      <span
+                        v-if="String(g.manager?.employeeId || '').trim()"
+                        class="ml-1 font-mono text-[11px] text-ui-muted"
+                      >
+                        ({{ safeTxt(g.manager?.employeeId) }})
+                      </span>
                   </div>
                   <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
@@ -1103,9 +1082,14 @@ onBeforeUnmount(() => {
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <div class="truncate text-[12px] font-extrabold text-ui-fg">
-                    <span class="ui-badge ui-badge-indigo mr-2">MANAGER</span>
-                    {{ safeTxt(g.manager?.name) }}
-                    <span class="ml-1 font-mono text-[11px] text-ui-muted">({{ safeTxt(g.manager?.employeeId) }})</span>
+                    <span class="ui-badge ui-badge-indigo mr-2">{{ managerBadgeLabel(g) }}</span>
+                      {{ managerDisplayName(g) }}
+                      <span
+                        v-if="String(g.manager?.employeeId || '').trim()"
+                        class="ml-1 font-mono text-[11px] text-ui-muted"
+                      >
+                        ({{ safeTxt(g.manager?.employeeId) }})
+                      </span>
                   </div>
                   <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
@@ -1216,11 +1200,19 @@ onBeforeUnmount(() => {
           v-if="!loading && totalRows"
           class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
         >
-          <div>
-            Showing <span class="font-semibold text-ui-fg">{{ pageFrom }}</span>–
-            <span class="font-semibold text-ui-fg">{{ pageTo }}</span>
-            of <span class="font-semibold text-ui-fg">{{ totalRows }}</span>
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Rows per page (moved here) -->
+            <div class="flex items-center gap-2">
+              <select
+                v-model.number="pageSize"
+                class="h-8 rounded-xl border border-ui-border/70 bg-ui-card/70 px-2 text-[11px] text-ui-fg outline-none
+                      focus:ring-2 focus:ring-ui-ring/30"
+              >
+                <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
+              </select>
+            </div>
           </div>
+
 
           <div class="flex items-center gap-2">
             <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="prevPage">

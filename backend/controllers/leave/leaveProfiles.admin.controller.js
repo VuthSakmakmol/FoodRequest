@@ -144,6 +144,37 @@ function validateStrongPassword(pwd) {
   return ''
 }
 
+async function ensureUserHasRoles(loginId, addRoles = []) {
+  const login = s(loginId)
+  const rolesToAdd = [...new Set((addRoles || []).map((r) => up(r)).filter(Boolean))]
+  if (!login || !rolesToAdd.length) return null
+
+  const user = await User.findOne({ loginId: login })
+  if (!user) return null
+
+  const current = []
+  if (Array.isArray(user.roles)) current.push(...user.roles)
+  if (user.role) current.push(user.role)
+
+  const merged = [...new Set([...current.map(up), ...rolesToAdd])].filter(Boolean)
+
+  // keep "role" as primary (for legacy code). Prefer LEAVE_ADMIN/ADMIN/GM/COO/MANAGER over USER.
+  const priority = ['ADMIN', 'LEAVE_ADMIN', 'LEAVE_COO', 'LEAVE_GM', 'LEAVE_MANAGER', 'LEAVE_USER']
+  const primary = merged.slice().sort((a, b) => priority.indexOf(a) - priority.indexOf(b))[0] || 'LEAVE_USER'
+
+  user.roles = merged
+  user.role = primary
+  await user.save()
+  return user
+}
+
+async function ensureManagerRole(managerLoginId) {
+  const id = s(managerLoginId)
+  if (!id) return
+  await ensureUserHasRoles(id, ['LEAVE_MANAGER'])
+}
+
+
 /**
  * ✅ Creates ONLY the employee account (User) when needed.
  * - If user exists -> return it (password not required)
@@ -358,6 +389,7 @@ exports.createProfileSingle = async (req, res) => {
 
   const approvalMode = normalizeApprovalMode(body.approvalMode)
   const managerLoginId = s(body.managerLoginId) // ✅ optional
+  if (managerLoginId) await ensureManagerRole(managerLoginId)
   const gmLoginId = s(body.gmLoginId)
   const cooLoginId = s(body.cooLoginId)
 
@@ -449,6 +481,7 @@ exports.createManagerWithEmployees = async (req, res) => {
     if (exists) continue
 
     const employeeLoginId = s(e.employeeLoginId || e.loginId || employeeId)
+    if (managerLoginId) await ensureManagerRole(managerLoginId)
     if (!employeeLoginId) throw createError(400, `employeeLoginId missing for employeeId=${employeeId}`)
 
     // ✅ Create ONLY employee account
@@ -528,6 +561,7 @@ exports.updateProfile = async (req, res) => {
 
   doc.approvalMode = nextApprovalMode
   doc.managerLoginId = nextManager
+  if (nextManager) await ensureManagerRole(nextManager)
   doc.gmLoginId = nextGm
   doc.cooLoginId = nextCoo
 

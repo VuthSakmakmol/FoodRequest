@@ -83,7 +83,7 @@ function statusChipClasses(status) {
 async function fetchInbox(silent = false) {
   try {
     loading.value = true
-    const res = await api.get('/coo/leave/requests/inbox')
+    const res = await api.get('/leave/requests/coo/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('fetchInbox COO error', e)
@@ -316,7 +316,6 @@ async function submitDecision() {
     closeDecisionDialog(true)
     return
   }
-
   if (action === 'REJECT' && !comment) {
     rejectError.value = 'Reject reason is required.'
     return
@@ -324,7 +323,7 @@ async function submitDecision() {
 
   try {
     loading.value = true
-    await api.post(`/coo/leave/requests/${row._id}/decision`, {
+    await api.post(`/leave/requests/${row._id}/coo-decision`, {
       action,
       ...(action === 'REJECT' ? { comment } : {}),
     })
@@ -335,7 +334,6 @@ async function submitDecision() {
       message: 'COO decision has been saved.',
     })
 
-    // ✅ auto close
     closeDecisionDialog(true)
     await fetchInbox(true)
   } catch (e) {
@@ -349,6 +347,8 @@ async function submitDecision() {
     loading.value = false
   }
 }
+
+
 
 /* ───────── Realtime ───────── */
 const offHandlers = []
@@ -404,14 +404,7 @@ onBeforeUnmount(() => {
         <!-- Desktop -->
         <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
           <div class="flex flex-col gap-1 min-w-[220px]">
-            <p class="text-[10px] uppercase tracking-[0.25em] text-white/80">Expat Leave</p>
             <p class="text-sm font-semibold">COO Inbox</p>
-            <p class="text-[11px] text-white/90">Shared final approval queue (GM or COO).</p>
-
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge ui-badge-info">Total: {{ rows.length }}</span>
-              <span class="ui-badge ui-badge-info">Showing: {{ filteredRows.length }}</span>
-            </div>
           </div>
 
           <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
@@ -429,30 +422,37 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- Requested at range -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-white/80">Requested</span>
-              <input
-                v-model="fromDate"
-                type="date"
-                class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
-              />
-              <span class="text-white/80">to</span>
-              <input
-                v-model="toDate"
-                type="date"
-                class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
-              />
+            <!-- Requested at range (label on top like Search) -->
+            <div class="min-w-[260px]">
+              <label class="mb-1 block text-[11px] font-medium text-white/90">Requested</label>
+
+              <div class="flex items-center gap-1 text-[11px]">
+                <input
+                  v-model="fromDate"
+                  type="date"
+                  class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none
+                        focus:border-white focus:ring-1 focus:ring-white/60"
+                />
+                <span class="text-white/80">to</span>
+                <input
+                  v-model="toDate"
+                  type="date"
+                  class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none
+                        focus:border-white focus:ring-1 focus:ring-white/60"
+                />
+              </div>
             </div>
 
-            <!-- Expat ID filter -->
-            <div class="flex items-center gap-1 text-[11px]">
-              <span class="text-white/80">Expat ID</span>
+
+            <!-- Expat ID filter (label on top like Search) -->
+            <div class="min-w-[120px]">
+              <label class="mb-1 block text-[11px] font-medium text-white/90">Expat ID</label>
               <input
                 v-model="employeeFilter"
                 type="text"
                 placeholder="EMP..."
-                class="w-28 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
+                class="w-28 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none
+                      placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
               />
             </div>
 
@@ -474,14 +474,7 @@ onBeforeUnmount(() => {
         <!-- Mobile -->
         <div v-else class="space-y-2">
           <div>
-            <p class="text-[10px] uppercase tracking-[0.25em] text-white/80">Expat Leave</p>
             <p class="text-sm font-semibold">COO Inbox</p>
-            <p class="text-[11px] text-white/90">Shared final approval queue (GM or COO).</p>
-
-            <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge ui-badge-info">Total: {{ rows.length }}</span>
-              <span class="ui-badge ui-badge-info">Showing: {{ filteredRows.length }}</span>
-            </div>
           </div>
 
           <div class="space-y-2">
@@ -602,7 +595,7 @@ onBeforeUnmount(() => {
             <div class="mt-2 h-px bg-slate-200 dark:bg-slate-800" />
 
             <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-              <span class="font-medium">Request reason:</span>
+              <span class="font-medium">Reason:</span>
               <span class="text-truncate-2 inline-block align-top">{{ row.reason || '—' }}</span>
             </div>
 
@@ -662,9 +655,9 @@ onBeforeUnmount(() => {
                 <th class="table-th text-left">Requested at</th>
                 <th class="table-th text-left">Employee</th>
                 <th class="table-th text-left">Type</th>
-                <th class="table-th text-left">Date range</th>
+                <th class="table-th text-left">Leave Date</th>
                 <th class="table-th text-right">Days</th>
-                <th class="table-th text-left">Request reason</th>
+                <th class="table-th text-left">Reason</th>
                 <th class="table-th text-center">Status</th>
                 <th class="table-th text-center">Actions</th>
               </tr>
@@ -768,7 +761,6 @@ onBeforeUnmount(() => {
           class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
         >
           <div class="flex items-center gap-2">
-            <span>Rows per page</span>
             <select
               v-model="perPage"
               class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900"
@@ -833,7 +825,7 @@ onBeforeUnmount(() => {
                   {{ Number(confirmDialog.row.totalDays || 0).toLocaleString() }}
                 </div>
                 <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
-                  <span class="font-semibold">Request reason:</span>
+                  <span class="font-semibold">Reason:</span>
                   <span class="ml-1">{{ confirmDialog.row.reason || '—' }}</span>
                 </div>
               </div>

@@ -2,12 +2,17 @@
 const express = require('express')
 const router = express.Router()
 
-const { requireAuth } = require('../../middlewares/auth')
-const userCtrl = require('../../controllers/leave/leaveProfile.user.controller')
+const auth = require('../../middlewares/auth')
+const ctrl = require('../../controllers/leave/leaveProfile.user.controller')
 
-router.get('/profile', requireAuth, userCtrl.getMyLeaveProfile)
+// user auth
+router.use(auth.requireAuth)
 
-router.get('/team/profiles', requireAuth, userCtrl.getTeamLeaveProfiles)
-router.get('/team/profiles/:employeeId', requireAuth, userCtrl.getTeamEmployeeProfile)
+// ✅ allow LEAVE_USER and above
+router.get(
+  '/me',
+  auth.requireRole('LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
+  ctrl.getMyLeaveProfile
+)
 
 module.exports = router

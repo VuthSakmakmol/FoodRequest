@@ -154,6 +154,9 @@ app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
 
 // Admin leave
 app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
+
+app.use('/api/leave', require('./routes/leave/leaveUser.routes'))       // ✅ user endpoints
+
 app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
 
 // Reports + signatures
