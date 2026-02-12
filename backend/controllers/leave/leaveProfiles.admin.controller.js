@@ -104,14 +104,21 @@ function contractEndFromStart(startYMD) {
 
 function normalizeCarryObj(c) {
   const src = c && typeof c === 'object' ? c : {}
-  return {
+
+  const out = {
     AL: num(src.AL),
     SP: num(src.SP),
     MC: num(src.MC),
     MA: num(src.MA),
     UL: num(src.UL),
   }
+
+  out.AL = num(out.AL) + num(out.SP)
+  out.SP = 0
+
+  return out
 }
+
 
 function getIo(req) {
   return req.io || req.app?.get('io') || null
@@ -183,9 +190,9 @@ async function ensureManagerRole(managerLoginId) {
  * NOTE: Your EmployeeDirectory schema has NO loginId, only employeeId.
  * We will use EmployeeDirectory.findOne({ employeeId: loginId }) to fetch name.
  */
-async function ensureUserAccount({ loginId, password }) {
+async function ensureUserAccount({ loginId, employeeId, password }) {
   const login = s(loginId)
-  if (!login) throw createError(400, 'employeeLoginId/loginId is required to create user account.')
+  if (!login) throw createError(400, 'loginId is required')
 
   const existing = await User.findOne({ loginId: login })
   if (existing) return existing
@@ -196,18 +203,16 @@ async function ensureUserAccount({ loginId, password }) {
   const err = validateStrongPassword(pwd)
   if (err) throw createError(400, err)
 
-  // get employee name from directory
   let name = ''
   try {
-    const emp = await EmployeeDirectory.findOne({ employeeId: login }, { name: 1 }).lean()
+    const emp = await EmployeeDirectory.findOne({ employeeId: s(employeeId || login) }, { name: 1 }).lean()
     name = s(emp?.name)
   } catch {}
   if (!name) name = login
 
   const passwordHash = await bcrypt.hash(pwd, 10)
 
-  // Only employee user role
-  const user = await User.create({
+  return User.create({
     loginId: login,
     name,
     passwordHash,
@@ -215,9 +220,8 @@ async function ensureUserAccount({ loginId, password }) {
     roles: ['LEAVE_USER'],
     isActive: true,
   })
-
-  return user
 }
+
 
 async function attachEmployeeDirectory(profilePlain) {
   const employeeId = s(profilePlain?.employeeId)

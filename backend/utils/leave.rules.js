@@ -371,13 +371,21 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
   const MA_ENT = 90
   const UL_ENT = 0 // unlimited
 
-  // ✅ ACTIVE CONTRACT carry (single source of truth)
-  const carry = getActiveCarry(profile, {
+  const carryRaw = getActiveCarry(profile, {
     contractId: opts?.contractId ?? null,
     contractNo: opts?.contractNo ?? null,
     asOf: asOfYMD,
     contractDate: profile?.contractDate,
   })
+
+  // ✅ SP and AL are the same pool (SP borrows from AL)
+  // Any SP carry must be treated as AL carry.
+  const carry = {
+    ...carryRaw,
+    AL: num(carryRaw.AL) + num(carryRaw.SP),
+    SP: 0,
+  }
+
 
   // ✅ base request usage (SP always borrows from AL)
   const AL_USED_TOTAL = usedAL + usedSP

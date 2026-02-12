@@ -8,6 +8,11 @@
      - Carry stored ONLY on contracts[].carry
      - computeBalances() already applies carry into balances.used + balances.remaining
      - Frontend must NOT apply carry again
+
+  ✅ FIXED:
+     - Added MANAGER_AND_COO to dropdown
+     - GM_AND_COO hides manager input
+     - MANAGER_AND_COO requires manager + coo
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -98,18 +103,32 @@ function up(v) {
 /* ───────────────── approval mode helpers ───────────────── */
 const APPROVAL_MODES = [
   { value: 'MANAGER_AND_GM', label: 'Manager + GM', hint: 'Manager approves first, then GM.' },
+  { value: 'MANAGER_AND_COO', label: 'Manager + COO', hint: 'Manager approves first, then COO.' },
   { value: 'GM_AND_COO', label: 'GM + COO', hint: 'GM approves first, then COO.' },
 ]
+
 function normApprovalMode(v) {
   const s = up(v)
   if (s === 'GM_AND_COO') return 'GM_AND_COO'
+  if (s === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (s === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
-  // backward aliases
+
+  // backward aliases (keep safe)
   if (s === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
   if (s === 'GM_ONLY') return 'MANAGER_AND_GM'
   if (s === 'MANAGER+GM') return 'MANAGER_AND_GM'
   return 'MANAGER_AND_GM'
 }
+
+/* Derived requirements */
+const needManager = computed(() => {
+  const m = normApprovalMode(form.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO'
+})
+const needCoo = computed(() => {
+  const m = normApprovalMode(form.approvalMode)
+  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO'
+})
 
 /* ───────────────── balances normalize (NO carry math here) ───────────────── */
 function normalizeBalances(rawBalances = []) {
@@ -287,9 +306,17 @@ function fillFormFromProfile(p) {
   originalJoinDate.value = toInputDate(p?.joinDate)
 }
 
+/* If switching to GM_AND_COO, manager is irrelevant — clear it (optional but clean) */
+watch(
+  () => form.approvalMode,
+  () => {
+    const m = normApprovalMode(form.approvalMode)
+    if (m === 'GM_AND_COO') form.managerEmployeeId = ''
+    if (m === 'MANAGER_AND_GM') form.cooLoginId = '' // optional: clear COO on mode switch
+  }
+)
+
 const joinDateChanged = computed(() => String(originalJoinDate.value || '') !== String(form.joinDate || ''))
-const needManager = computed(() => String(form.approvalMode || '') === 'MANAGER_AND_GM')
-const needCoo = computed(() => String(form.approvalMode || '') === 'GM_AND_COO')
 
 const isDirty = computed(() => {
   const p = profile.value
@@ -358,9 +385,17 @@ async function forceRecalcBalances() {
 
 function validateApprovers() {
   const mode = normApprovalMode(form.approvalMode)
+
   if (!String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
-  if (mode === 'MANAGER_AND_GM' && !String(form.managerEmployeeId || '').trim()) return 'Manager Employee ID is required.'
-  if (mode === 'GM_AND_COO' && !String(form.cooLoginId || '').trim()) return 'COO Login ID is required.'
+
+  if ((mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO') && !String(form.managerEmployeeId || '').trim()) {
+    return 'Manager Employee ID is required.'
+  }
+
+  if ((mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') && !String(form.cooLoginId || '').trim()) {
+    return 'COO Login ID is required.'
+  }
+
   return ''
 }
 
@@ -384,9 +419,16 @@ async function saveProfile() {
       {
         joinDate: form.joinDate ? String(form.joinDate) : null,
         approvalMode: mode,
-        managerEmployeeId: form.managerEmployeeId ? String(form.managerEmployeeId).trim() : null,
-        gmLoginId: form.gmLoginId ? String(form.gmLoginId).trim() : null,
-        cooLoginId: mode === 'GM_AND_COO' ? String(form.cooLoginId || '').trim() || null : null,
+
+        // ✅ only send manager when needed, else null
+        managerEmployeeId: needManager.value ? String(form.managerEmployeeId || '').trim() || null : null,
+
+        // ✅ GM always required
+        gmLoginId: String(form.gmLoginId || '').trim() || null,
+
+        // ✅ only send COO when needed, else null
+        cooLoginId: needCoo.value ? String(form.cooLoginId || '').trim() || null : null,
+
         isActive: form.isActive !== false,
       },
       { recalc: joinDateChanged.value }
@@ -611,9 +653,9 @@ onBeforeUnmount(() => {
 
           <template v-else>
             <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <InfoRow label="Employee ID" :value="profile.employeeId || '—'"  />
-              <InfoRow label="Name" :value="profile.name || '—'"  />
-              <InfoRow label="Department" :value="profile.department || '—'"/>
+              <InfoRow label="Employee ID" :value="profile.employeeId || '—'" />
+              <InfoRow label="Name" :value="profile.name || '—'" />
+              <InfoRow label="Department" :value="profile.department || '—'" />
             </section>
 
             <PasswordResetCard
@@ -648,10 +690,7 @@ onBeforeUnmount(() => {
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
                   <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div class="ui-card !rounded-2xl px-3 py-2">
-                      <div
-                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
-                        title="Controls AL accrual and service-year rules"
-                      >
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Controls AL accrual and service-year rules">
                         Join date
                       </div>
                       <div class="mt-1">
@@ -702,10 +741,10 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <div class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" :title="needManager ? 'Required for Manager + GM' : 'Optional (skipped if empty)'">
-                        Manager employee ID
-                        <span v-if="needManager" class="ml-2 ui-badge">required</span>
+                    <!-- ✅ show only if mode needs manager -->
+                    <div v-if="needManager" class="ui-card !rounded-2xl px-3 py-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required for Manager modes">
+                        Manager employee ID <span class="ml-2 ui-badge">required</span>
                       </div>
                       <div class="mt-1">
                         <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
@@ -727,8 +766,9 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
+                    <!-- ✅ show COO when needed (GM+COO and Manager+COO) -->
                     <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode is GM + COO">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode includes COO">
                         COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
                       </div>
                       <div class="mt-1">
