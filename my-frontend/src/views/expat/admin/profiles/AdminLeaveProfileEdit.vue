@@ -4,6 +4,7 @@
   ✅ Contract-aware carry edit (per contractNo)
   ✅ Logs + Renew contract modal (components)
   ✅ Admin password reset (component)
+
   ✅ IMPORTANT:
      - Carry stored ONLY on contracts[].carry
      - computeBalances() already applies carry into balances.used + balances.remaining
@@ -12,7 +13,7 @@
   ✅ FIXED:
      - Added MANAGER_AND_COO to dropdown
      - GM_AND_COO hides manager input
-     - MANAGER_AND_COO requires manager + coo
+     - If mode does NOT involve manager => managerLoginId will be cleared (null)
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -21,7 +22,7 @@ import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 
-/* components (same path) */
+/* components */
 import InfoRow from './components/InfoRow.vue'
 import EditPageHeader from './components/EditPageHeader.vue'
 import PasswordResetCard from './components/PasswordResetCard.vue'
@@ -67,8 +68,6 @@ const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const profile = ref(null)
-
-/* store original joinDate to detect changes */
 const originalJoinDate = ref('')
 
 /* ───────────────── helpers ───────────────── */
@@ -100,7 +99,7 @@ function up(v) {
   return String(v || '').trim().toUpperCase()
 }
 
-/* ───────────────── approval mode helpers ───────────────── */
+/* ───────────────── approval mode ───────────────── */
 const APPROVAL_MODES = [
   { value: 'MANAGER_AND_GM', label: 'Manager + GM', hint: 'Manager approves first, then GM.' },
   { value: 'MANAGER_AND_COO', label: 'Manager + COO', hint: 'Manager approves first, then COO.' },
@@ -112,15 +111,13 @@ function normApprovalMode(v) {
   if (s === 'GM_AND_COO') return 'GM_AND_COO'
   if (s === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (s === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
-
-  // backward aliases (keep safe)
+  // backward aliases
   if (s === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
   if (s === 'GM_ONLY') return 'MANAGER_AND_GM'
   if (s === 'MANAGER+GM') return 'MANAGER_AND_GM'
   return 'MANAGER_AND_GM'
 }
 
-/* Derived requirements */
 const needManager = computed(() => {
   const m = normApprovalMode(form.approvalMode)
   return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO'
@@ -133,7 +130,6 @@ const needCoo = computed(() => {
 /* ───────────────── balances normalize (NO carry math here) ───────────────── */
 function normalizeBalances(rawBalances = []) {
   const map = new Map()
-
   for (const b of rawBalances || []) {
     const code = safeStr(b?.leaveTypeCode).toUpperCase()
     if (!code) continue
@@ -146,9 +142,7 @@ function normalizeBalances(rawBalances = []) {
   }
 
   for (const code of TYPE_ORDER.value) {
-    if (!map.has(code)) {
-      map.set(code, { leaveTypeCode: code, yearlyEntitlement: 0, used: 0, remaining: 0 })
-    }
+    if (!map.has(code)) map.set(code, { leaveTypeCode: code, yearlyEntitlement: 0, used: 0, remaining: 0 })
   }
 
   const arr = Array.from(map.values())
@@ -157,7 +151,7 @@ function normalizeBalances(rawBalances = []) {
 }
 const balancesForDisplay = computed(() => normalizeBalances(profile.value?.balances || []))
 
-/* ───────────────── contract history (logs snapshot) ───────────────── */
+/* ───────────────── contract history ───────────────── */
 function readContractHistory(p) {
   if (!p) return []
   if (Array.isArray(p.contracts)) return p.contracts
@@ -173,7 +167,7 @@ const contractHistory = computed(() => {
   })
 })
 
-/* ───────────────── contract-aware carry editing ───────────────── */
+/* ───────────────── contract carry editing ───────────────── */
 const contractsLoading = ref(false)
 const contractsError = ref('')
 const contracts = ref([])
@@ -185,7 +179,6 @@ function normalizeCarry(src) {
   const c = src || {}
   return { AL: num(c.AL), SP: num(c.SP), MC: num(c.MC), MA: num(c.MA), UL: num(c.UL) }
 }
-
 function normalizeContracts(raw) {
   const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
   return arr
@@ -206,7 +199,6 @@ const selectedContract = computed(() => {
   if (!no) return null
   return contracts.value.find((c) => Number(c.contractNo) === no) || null
 })
-
 const contractCarryForm = reactive({ carry: emptyCarry() })
 
 function fillContractCarryFormFromSelected() {
@@ -289,7 +281,10 @@ async function saveContractCarry() {
 const form = reactive({
   joinDate: '',
   approvalMode: 'MANAGER_AND_GM',
+
+  // IMPORTANT: backend uses managerLoginId; we keep UI name managerEmployeeId but will map -> managerLoginId.
   managerEmployeeId: '',
+
   gmLoginId: '',
   cooLoginId: '',
   isActive: true,
@@ -299,20 +294,29 @@ const formError = ref('')
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
   form.approvalMode = normApprovalMode(p?.approvalMode)
+
+  // accept either key from backend
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
+
   form.gmLoginId = String(p?.gmLoginId || '')
   form.cooLoginId = String(p?.cooLoginId || '')
   form.isActive = p?.isActive === false ? false : true
   originalJoinDate.value = toInputDate(p?.joinDate)
 }
 
-/* If switching to GM_AND_COO, manager is irrelevant — clear it (optional but clean) */
+/* If switching to a mode that doesn't involve manager => clear manager value */
 watch(
   () => form.approvalMode,
   () => {
     const m = normApprovalMode(form.approvalMode)
-    if (m === 'GM_AND_COO') form.managerEmployeeId = ''
-    if (m === 'MANAGER_AND_GM') form.cooLoginId = '' // optional: clear COO on mode switch
+
+    if (m === 'GM_AND_COO') {
+      form.managerEmployeeId = ''
+    }
+    if (m === 'MANAGER_AND_GM') {
+      // optional: clear COO on mode switch
+      form.cooLoginId = ''
+    }
   }
 )
 
@@ -386,6 +390,7 @@ async function forceRecalcBalances() {
 function validateApprovers() {
   const mode = normApprovalMode(form.approvalMode)
 
+  // your backend requires GM in all modes (validateModeApprovers)
   if (!String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
 
   if ((mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO') && !String(form.managerEmployeeId || '').trim()) {
@@ -420,13 +425,11 @@ async function saveProfile() {
         joinDate: form.joinDate ? String(form.joinDate) : null,
         approvalMode: mode,
 
-        // ✅ only send manager when needed, else null
-        managerEmployeeId: needManager.value ? String(form.managerEmployeeId || '').trim() || null : null,
+        // ✅ KEY FIX: backend expects managerLoginId, not managerEmployeeId
+        // ✅ If mode doesn't involve manager => null removes it from manager grouping
+        managerLoginId: needManager.value ? String(form.managerEmployeeId || '').trim() || null : null,
 
-        // ✅ GM always required
         gmLoginId: String(form.gmLoginId || '').trim() || null,
-
-        // ✅ only send COO when needed, else null
         cooLoginId: needCoo.value ? String(form.cooLoginId || '').trim() || null : null,
 
         isActive: form.isActive !== false,
@@ -457,7 +460,7 @@ async function saveProfile() {
   }
 }
 
-/* ───────────────── password reset (panel) ───────────────── */
+/* ───────────────── password reset ───────────────── */
 const pwd = reactive({
   open: false,
   show: false,
@@ -700,7 +703,7 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)"/>
+                    <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)" />
 
                     <div class="ui-card !rounded-2xl px-2.5 py-2 sm:col-span-2">
                       <div class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help" title="Approval chain for this employee profile">
@@ -754,7 +757,7 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- ✅ show COO when needed (GM+COO and Manager+COO) -->
+                    <!-- ✅ show COO when needed -->
                     <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
                       <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode includes COO">
                         COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>

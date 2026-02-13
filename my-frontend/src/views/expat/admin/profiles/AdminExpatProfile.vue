@@ -430,9 +430,6 @@ function exportCurrentViewExcel() {
   exportExcelFromGroups(pagedManagers.value, { scope: 'CurrentView' })
 }
 
-function exportAllFilteredExcel() {
-  exportExcelFromGroups(filteredManagers.value, { scope: 'AllFiltered' })
-}
 
 async function runSearchSimple(model) {
   const qv = String(model.query || '').split('—')[0].trim() || String(model.query || '').trim()
@@ -761,7 +758,7 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
 
   const wb = XLSX.utils.book_new()
 
-  // ✅ Summary sheet (FULL)
+  // ✅ Sheet 1: Summary
   const summaryRows = base.map((g) => ({
     GroupLabel: managerBadgeLabel(g),
     ManagerName: managerDisplayName(g),
@@ -781,7 +778,41 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
   ]
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
 
-  // ✅ One sheet per manager/GM group
+  // ✅ Sheet 2: All employees in ONE sheet (wrapped / unified)
+  const allEmployeesRows = []
+  for (const g of base) {
+    const managerName = managerDisplayName(g)
+    const list = Array.isArray(g.employees) ? g.employees : []
+    for (const e of list) {
+      // uses your helper so output stays consistent
+      allEmployeesRows.push(buildRow(e, managerName))
+    }
+  }
+
+  const wsAll = XLSX.utils.json_to_sheet(allEmployeesRows)
+
+  // optional: nice column widths for the unified sheet
+  wsAll['!cols'] = [
+    { wch: 22 }, // Manager
+    { wch: 12 }, // EmployeeID
+    { wch: 22 }, // Name
+    { wch: 20 }, // Department
+    { wch: 12 }, // JoinDate
+    { wch: 12 }, // ContractDate
+    { wch: 12 }, // ContractEnd
+    { wch: 12 }, // Mode
+    { wch: 10 }, // Status
+
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, // AL Used/Ent/Remain
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, // SP Used/Ent/Remain
+    { wch: 10 }, // MC_Used
+    { wch: 10 }, // MA_Used
+    { wch: 10 }, // UL_Used
+  ]
+
+  XLSX.utils.book_append_sheet(wb, wsAll, 'AllEmployees')
+
+  // ✅ Existing: One sheet per manager/GM group
   const usedNames = new Map()
 
   for (const g of base) {
@@ -798,51 +829,32 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
       const UL = balanceObj(bm, 'UL')
 
       return {
-        // Group info
         GroupLabel: managerBadgeLabel(g),
         GroupManagerName: fmt(managerName),
-        // GroupManagerEmployeeId: fmt(g.manager?.employeeId),
-        // GroupManagerDepartment: fmt(g.manager?.department),
 
-        // Employee identity
         EmployeeID: fmt(e.employeeId),
-        // EmployeeLoginId: fmt(e.employeeLoginId || e.loginId),
         Name: fmt(e.name),
         Department: fmt(e.department),
 
-        // Dates
         JoinDate: fmt(e.joinDate),
         ContractDate: fmt(e.contractDate),
         ContractEndDate: fmt(e.contractEndDate),
 
-        // Approvals
         ApprovalMode: fmt(e.approvalMode),
-        // ApprovalModeLabel: modeLabel(e.approvalMode),
-        // ManagerLoginId: fmt(e.managerLoginId),
-        // GmLoginId: fmt(e.gmLoginId),
-        // CooLoginId: fmt(e.cooLoginId),
-
-        // Active
         Status: e.isActive ? 'Active' : 'Inactive',
 
-        // Balances (FULL)
-        // AL_Ent: AL.ent,
         AL_Used: AL.used,
         AL_Remain: AL.remain,
 
-        // SP_Ent: SP.ent,
         SP_Used: SP.used,
         SP_Remain: SP.remain,
 
-        // MC_Ent: MC.ent,
         MC_Used: MC.used,
         MC_Remain: MC.remain,
 
-        // MA_Ent: MA.ent,
         MA_Used: MA.used,
         MA_Remain: MA.remain,
 
-        // UL_Ent: UL.ent,
         UL_Used: UL.used,
         UL_Remain: UL.remain,
       }
@@ -861,11 +873,8 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
     ws['!cols'] = [
       { wch: 10 }, // GroupLabel
       { wch: 24 }, // GroupManagerName
-      // { wch: 16 }, // GroupManagerEmployeeId
-      // { wch: 22 }, // GroupManagerDepartment
 
       { wch: 12 }, // EmployeeID
-      { wch: 14 }, // EmployeeLoginId
       { wch: 22 }, // Name
       { wch: 22 }, // Department
 
@@ -874,18 +883,13 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
       { wch: 12 }, // ContractEndDate
 
       { wch: 16 }, // ApprovalMode
-      { wch: 16 }, // ApprovalModeLabel
-      { wch: 16 }, // ManagerLoginId
-      { wch: 16 }, // GmLoginId
-      { wch: 16 }, // CooLoginId
-
       { wch: 10 }, // Status
 
-      { wch: 8 }, { wch: 8 }, { wch: 10 }, // AL
-      { wch: 8 }, { wch: 8 }, { wch: 10 }, // SP
-      { wch: 8 }, { wch: 8 }, { wch: 10 }, // MC
-      { wch: 8 }, { wch: 8 }, { wch: 10 }, // MA
-      { wch: 8 }, { wch: 8 }, { wch: 10 }, // UL
+      { wch: 8 }, { wch: 10 }, // AL
+      { wch: 8 }, { wch: 10 }, // SP
+      { wch: 8 }, { wch: 10 }, // MC
+      { wch: 8 }, { wch: 10 }, // MA
+      { wch: 8 }, { wch: 10 }, // UL
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, sheetName)

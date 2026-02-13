@@ -175,6 +175,25 @@ async function ensureUserHasRoles(loginId, addRoles = []) {
   return user
 }
 
+async function inferRolesFromProfiles(loginId) {
+  const id = s(loginId)
+  if (!id) return []
+
+  const roles = []
+
+  // If anyone references this loginId as manager => manager role
+  const isManager = await LeaveProfile.exists({ managerLoginId: id })
+  if (isManager) roles.push('LEAVE_MANAGER')
+
+  // (Optional for future)
+  // const isGm = await LeaveProfile.exists({ gmLoginId: id })
+  // if (isGm) roles.push('LEAVE_GM')
+  // const isCoo = await LeaveProfile.exists({ cooLoginId: id })
+  // if (isCoo) roles.push('LEAVE_COO')
+
+  return roles
+}
+
 async function ensureManagerRole(managerLoginId) {
   const id = s(managerLoginId)
   if (!id) return
@@ -194,8 +213,13 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
   const login = s(loginId)
   if (!login) throw createError(400, 'loginId is required')
 
+  // ✅ If user exists, still auto-upgrade roles from profiles
   const existing = await User.findOne({ loginId: login })
-  if (existing) return existing
+  if (existing) {
+    const inferred = await inferRolesFromProfiles(login)
+    if (inferred.length) await ensureUserHasRoles(login, inferred)
+    return existing
+  }
 
   const pwd = s(password)
   if (!pwd) throw createError(400, 'Password is required to create a new user account.')
@@ -212,7 +236,7 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
 
   const passwordHash = await bcrypt.hash(pwd, 10)
 
-  return User.create({
+  const user = await User.create({
     loginId: login,
     name,
     passwordHash,
@@ -220,6 +244,12 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
     roles: ['LEAVE_USER'],
     isActive: true,
   })
+
+  // ✅ NEW: after creating user, auto-upgrade roles from existing profiles
+  const inferred = await inferRolesFromProfiles(login)
+  if (inferred.length) await ensureUserHasRoles(login, inferred)
+
+  return user
 }
 
 
@@ -557,7 +587,14 @@ exports.updateProfile = async (req, res) => {
   if (!doc) throw createError(404, 'Profile not found')
 
   const nextApprovalMode = normalizeApprovalMode(body.approvalMode ?? doc.approvalMode)
-  const nextManager = s(body.managerLoginId ?? doc.managerLoginId) // optional
+
+  // ✅ manager is allowed ONLY in manager modes
+  const managerAllowed =
+    nextApprovalMode === 'MANAGER_AND_GM' || nextApprovalMode === 'MANAGER_AND_COO'
+
+  // ✅ If mode doesn't involve manager -> force remove managerLoginId
+  const nextManager = managerAllowed ? s(body.managerLoginId ?? doc.managerLoginId) : ''
+
   const nextGm = s(body.gmLoginId ?? doc.gmLoginId)
   const nextCoo = s(body.cooLoginId ?? doc.cooLoginId)
 
