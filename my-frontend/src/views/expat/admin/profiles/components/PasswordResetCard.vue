@@ -203,9 +203,7 @@ const emit = defineEmits([
             {{ submitting ? 'Saving…' : 'Set new password' }}
           </button>
 
-          <button type="button" class="ui-btn ui-btn-soft w-full" :disabled="submitting" @click="$emit('close')">
-            <i class="fa-solid fa-xmark text-[11px]" /> Close panel
-          </button>
+
         </div>
       </div>
     </div>

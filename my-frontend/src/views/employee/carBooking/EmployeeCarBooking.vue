@@ -279,9 +279,11 @@ async function submit() {
       const file = form.value.ticketFile
       if (!file) throw new Error('Airplane ticket is required.')
       fd.append('ticket', file)
-      await api.post('/public/car-bookings', fd)
+      await api.post('/public/transport/car-bookings', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })    
     } else {
-      await api.post('/public/car-bookings', payload)
+      await api.post('/public/transport/car-bookings', payload)
     }
 
     showToast({ type: 'success', title: 'Submitted', message: 'Your car booking has been submitted.' })

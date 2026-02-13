@@ -681,7 +681,6 @@ onBeforeUnmount(() => {
                   <div class="section-title">Profile settings</div>
                 </div>
                 <div class="hidden sm:flex items-center gap-2">
-                  <span class="ui-badge">Mode: {{ normApprovalMode(profile.approvalMode) }}</span>
                   <span class="ui-badge">Active: {{ profile.isActive === false ? 'No' : 'Yes' }}</span>
                 </div>
               </div>
@@ -696,13 +695,12 @@ onBeforeUnmount(() => {
                       <div class="mt-1">
                         <input v-model="form.joinDate" type="date" class="ui-date w-full" />
                         <div class="mt-1 text-[11px] text-ui-muted">
-                          Current: <span class="font-mono">{{ fmtYMD(profile.joinDate) }}</span>
-                          <span v-if="joinDateChanged" class="ml-2 ui-badge">Changed → will recalc</span>
+                          <span v-if="joinDateChanged" class="ml-2 ui-badge">Changed date, will recalculate</span>
                         </div>
                       </div>
                     </div>
 
-                    <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)" hint="To change contract date, use Renew" />
+                    <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)"/>
 
                     <div class="ui-card !rounded-2xl px-2.5 py-2 sm:col-span-2">
                       <div class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help" title="Approval chain for this employee profile">
@@ -735,10 +733,6 @@ onBeforeUnmount(() => {
                           </div>
                         </div>
                       </div>
-
-                      <div class="mt-1 text-[10px] text-ui-muted">
-                        Current: <span class="font-mono">{{ normApprovalMode(profile.approvalMode) }}</span>
-                      </div>
                     </div>
 
                     <!-- ✅ show only if mode needs manager -->
@@ -748,9 +742,6 @@ onBeforeUnmount(() => {
                       </div>
                       <div class="mt-1">
                         <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
-                        <div class="mt-1 text-[11px] text-ui-muted">
-                          Current: <span class="font-mono">{{ profile.managerEmployeeId || profile.managerLoginId || '—' }}</span>
-                        </div>
                       </div>
                     </div>
 
@@ -760,9 +751,6 @@ onBeforeUnmount(() => {
                       </div>
                       <div class="mt-1">
                         <input v-model="form.gmLoginId" type="text" placeholder="Example: leave_gm" class="ui-input w-full" />
-                        <div class="mt-1 text-[11px] text-ui-muted">
-                          Current: <span class="font-mono">{{ profile.gmLoginId || '—' }}</span>
-                        </div>
                       </div>
                     </div>
 
@@ -785,10 +773,9 @@ onBeforeUnmount(() => {
                       <div>
                         <div class="text-[12px] font-extrabold text-ui-fg">Balances</div>
                         <div class="text-[11px] text-ui-muted">
-                          As of <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
+                          <span class="font-mono">{{ profile.balancesAsOf || '—' }}</span>
                         </div>
                       </div>
-                      <span class="ui-badge ui-badge-emerald">Live</span>
                     </div>
 
                     <div v-if="!balancesForDisplay.length" class="mt-3 text-[11px] text-ui-muted">No balances yet.</div>
@@ -824,8 +811,6 @@ onBeforeUnmount(() => {
                         </table>
                       </div>
                     </div>
-
-                    <div class="mt-2 text-[10px] text-ui-muted">Note: carry is already included by backend computeBalances().</div>
                   </aside>
                 </div>
 

@@ -79,6 +79,19 @@ function errMsg(e, fallback = 'Request failed') {
   return e?.response?.data?.message || e?.message || fallback
 }
 
+function isBlobUrl(u) {
+  return String(u || '').startsWith('blob:')
+}
+
+async function fetchAuthedBlobUrl(absoluteUrl) {
+  const t = token()
+  const res = await axios.get(absoluteUrl, {
+    responseType: 'blob',
+    headers: { Authorization: t ? `Bearer ${t}` : undefined },
+  })
+  return URL.createObjectURL(res.data)
+}
+
 /* -----------------------------
   Debounced search
 ----------------------------- */
@@ -139,15 +152,25 @@ async function refreshApproverPreview() {
   const loginId = String(roleId.value || '').trim()
   if (!loginId) return
 
-  approverServer.value = { exists: false, url: '', loading: true }
+  approverServer.value = { ...approverServer.value, loading: true }
+
   try {
     const { data } = await api.get(`/admin/signatures/users/${encodeURIComponent(loginId)}`)
+
+    const exists = !!data?.exists
+    const contentAbs = absUrl(data?.url || '')
+
+    if (isBlobUrl(approverServer.value.url)) revoke(approverServer.value.url)
+
+    const blobUrl = exists && contentAbs ? await fetchAuthedBlobUrl(contentAbs) : ''
+
     approverServer.value = {
       loading: false,
-      exists: !!data?.exists,
-      url: absUrl(data?.url || ''),
+      exists,
+      url: blobUrl,
     }
   } catch {
+    if (isBlobUrl(approverServer.value.url)) revoke(approverServer.value.url)
     approverServer.value = { exists: false, url: '', loading: false }
   }
 }
@@ -155,19 +178,32 @@ async function refreshApproverPreview() {
 async function refreshEmployeePreview() {
   const empId = String(empSelected.value?.employeeId || '').trim()
   if (!empId) {
+    // cleanup old blob if any
+    if (isBlobUrl(empServer.value.url)) revoke(empServer.value.url)
     empServer.value = { exists: false, url: '', loading: false }
     return
   }
 
-  empServer.value = { exists: false, url: '', loading: true }
+  empServer.value = { ...empServer.value, loading: true }
+
   try {
     const { data } = await api.get(`/admin/signatures/employees/${encodeURIComponent(empId)}`)
+
+    const exists = !!data?.exists
+    const contentAbs = absUrl(data?.url || '')
+
+    // cleanup old blob before setting new one
+    if (isBlobUrl(empServer.value.url)) revoke(empServer.value.url)
+
+    const blobUrl = exists && contentAbs ? await fetchAuthedBlobUrl(contentAbs) : ''
+
     empServer.value = {
       loading: false,
-      exists: !!data?.exists,
-      url: absUrl(data?.url || ''),
+      exists,
+      url: blobUrl, // ✅ blob:... so <img> works
     }
   } catch {
+    if (isBlobUrl(empServer.value.url)) revoke(empServer.value.url)
     empServer.value = { exists: false, url: '', loading: false }
   }
 }
@@ -192,8 +228,10 @@ watch(showApprover, async (on) => {
 onBeforeUnmount(() => {
   revoke(approverLocalUrl.value)
   revoke(empLocalUrl.value)
-})
 
+  if (isBlobUrl(empServer.value.url)) revoke(empServer.value.url)
+  if (isBlobUrl(approverServer.value.url)) revoke(approverServer.value.url)
+})
 /* -----------------------------
   File pick
 ----------------------------- */
