@@ -169,8 +169,8 @@ async function exportEmployeesExcel() {
         department: safeText(emp.department),
         joinDate: fmtYMD(emp.joinDate),
         contractDate: fmtYMD(emp.contractDate),
-        managerLoginId: safeText(emp.managerLoginId),
-        gmLoginId: safeText(emp.gmLoginId),
+        // managerLoginId: safeText(emp.managerLoginId),
+        // gmLoginId: safeText(emp.gmLoginId),
         approvalMode: safeText(emp.approvalMode) || MODE,
         isActive: emp.isActive ? 'YES' : 'NO',
       }
@@ -178,7 +178,7 @@ async function exportEmployeesExcel() {
         const b = balOf(emp, code) || {}
         base[`${code}_Used`] = num(b.used)
         base[`${code}_Remaining`] = num(b.remaining)
-        base[`${code}_StrictRemaining`] = num(b.strictRemaining)
+        // base[`${code}_StrictRemaining`] = num(b.strictRemaining)
       }
       return base
     })

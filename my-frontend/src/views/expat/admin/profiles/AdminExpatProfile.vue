@@ -801,8 +801,8 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
         // Group info
         GroupLabel: managerBadgeLabel(g),
         GroupManagerName: fmt(managerName),
-        GroupManagerEmployeeId: fmt(g.manager?.employeeId),
-        GroupManagerDepartment: fmt(g.manager?.department),
+        // GroupManagerEmployeeId: fmt(g.manager?.employeeId),
+        // GroupManagerDepartment: fmt(g.manager?.department),
 
         // Employee identity
         EmployeeID: fmt(e.employeeId),
@@ -861,8 +861,8 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
     ws['!cols'] = [
       { wch: 10 }, // GroupLabel
       { wch: 24 }, // GroupManagerName
-      { wch: 16 }, // GroupManagerEmployeeId
-      { wch: 22 }, // GroupManagerDepartment
+      // { wch: 16 }, // GroupManagerEmployeeId
+      // { wch: 22 }, // GroupManagerDepartment
 
       { wch: 12 }, // EmployeeID
       { wch: 14 }, // EmployeeLoginId
