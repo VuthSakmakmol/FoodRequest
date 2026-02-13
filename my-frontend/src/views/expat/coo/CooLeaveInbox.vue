@@ -1,9 +1,12 @@
 <!-- src/views/expat/CooLeaveInbox.vue
-  ✅ Column aligned (fixed widths + colgroup)
-  ✅ Removed status tabs (Pending/Finished)
+  ✅ Same UI system as GM inbox (ui-page / ui-container-edge / ui-card / ui-hero-gradient / ui-table / ui-table-wrap)
+  ✅ Edge-to-edge (no wasted edges)
+  ✅ Responsive: mobile cards + desktop fixed table (scroll inside table wrap, not page overflow)
   ✅ Filters: search + requested date range + expat id
-  ✅ Export CSV (Excel compatible): Filtered + ALL
+  ✅ Export CSV (Excel compatible): Filtered + Export ALL (mobile)
   ✅ Approve/Reject with confirm modal (auto close on success)
+  ✅ Attachments: READ-ONLY (preview/download like GM inbox)
+  ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included via api instance)
 -->
 
 <script setup>
@@ -25,22 +28,20 @@ const roles = computed(() => {
   const base = auth.user?.role ? [auth.user.role] : []
   return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
-const canCooDecide = computed(() => roles.value.includes('LEAVE_COO'))
+const canCooDecide = computed(() => roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER'))
 
-/* ───────── Responsive flag ───────── */
+/* ───────── responsive flag ───────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── State ───────── */
+/* ───────── STATE ───────── */
 const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-
-/* ✅ Filters (default ALL) */
 const fromDate = ref('') // Requested at (createdAt)
 const toDate = ref('') // Requested at (createdAt)
 const employeeFilter = ref('')
@@ -77,32 +78,9 @@ function statusChipClasses(status) {
   }
 }
 
-/**
- * ✅ COO inbox endpoint (your current)
- */
-async function fetchInbox(silent = false) {
-  try {
-    loading.value = true
-    const res = await api.get('/leave/requests/coo/inbox?scope=ALL')
-    rows.value = Array.isArray(res.data) ? res.data : []
-  } catch (e) {
-    console.error('fetchInbox COO error', e)
-    if (!silent) {
-      showToast({
-        type: 'error',
-        title: 'Failed to load',
-        message: e?.response?.data?.message || 'Unable to load COO inbox.',
-      })
-    }
-  } finally {
-    loading.value = false
-  }
-}
-
-/* Sort order */
+/* Sort: COO pending first, then GM/Manager pending, then finished */
 function statusWeight(s) {
-  const st = String(s || '').toUpperCase()
-  switch (st) {
+  switch (String(s || '').toUpperCase()) {
     case 'PENDING_COO':
       return 0
     case 'PENDING_GM':
@@ -137,11 +115,38 @@ function rejectedByLabel(row) {
   return 'Rejected'
 }
 
-/* ✅ Filters (NO status tab) */
+function clearFilters() {
+  search.value = ''
+  employeeFilter.value = ''
+  fromDate.value = ''
+  toDate.value = ''
+}
+
+/* ✅ COO inbox endpoint */
+async function fetchInbox(silent = false) {
+  try {
+    loading.value = true
+    const res = await api.get('/leave/requests/coo/inbox?scope=ALL')
+    rows.value = Array.isArray(res.data) ? res.data : []
+  } catch (e) {
+    console.error('fetchInbox COO error', e)
+    if (!silent) {
+      showToast({
+        type: 'error',
+        title: 'Failed to load',
+        message: e?.response?.data?.message || 'Unable to load COO inbox.',
+      })
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+const totalCount = computed(() => rows.value.length)
+
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
-
   let list = [...rows.value]
 
   if (empQ) list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
@@ -161,6 +166,7 @@ const filteredRows = computed(() => {
     )
   }
 
+  // Requested date filter by createdAt
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
   const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
 
@@ -183,6 +189,8 @@ const filteredRows = computed(() => {
   return list
 })
 
+const filteredCount = computed(() => filteredRows.value.length)
+
 const pagedRows = computed(() => {
   if (perPage.value === 'All') return filteredRows.value
   const per = Number(perPage.value || 20)
@@ -198,7 +206,9 @@ const pageCount = computed(() => {
 
 watch(
   () => [search.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
-  () => (page.value = 1)
+  () => {
+    page.value = 1
+  }
 )
 
 /* ───────── Export CSV (Excel compatible) ───────── */
@@ -264,91 +274,199 @@ function exportExcel(scope = 'FILTERED') {
   }
 }
 
-/* ───────── Confirm dialog ───────── */
-const confirmDialog = ref({
-  open: false,
-  action: 'APPROVE', // 'APPROVE' | 'REJECT'
-  row: null,
-  comment: '',
-})
-const rejectError = ref('')
+/* ───────── COO Approve / Reject ───────── */
+const deciding = ref(false)
+const decideRow = ref(null)
+const decideAction = ref('') // 'APPROVE' | 'REJECT'
+const rejectNote = ref('')
 
-function openDecisionDialog(row, action) {
-  if (!canCooDecide.value) {
-    showToast({ type: 'error', title: 'Not allowed', message: 'You do not have permission to approve or reject as COO.' })
-    return
-  }
-  confirmDialog.value.open = true
-  confirmDialog.value.row = row
-  confirmDialog.value.action = action
-  confirmDialog.value.comment = ''
-  rejectError.value = ''
+const canDecide = (row) =>
+  canCooDecide.value && String(row?.status || '').toUpperCase() === 'PENDING_COO'
+
+function openApprove(row) {
+  if (!row?._id) return
+  decideRow.value = row
+  decideAction.value = 'APPROVE'
+  rejectNote.value = ''
 }
 
-function closeDecisionDialog(force = false) {
-  if (!force && loading.value) return
-  confirmDialog.value.open = false
-  confirmDialog.value.row = null
-  confirmDialog.value.comment = ''
-  rejectError.value = ''
+function openReject(row) {
+  if (!row?._id) return
+  decideRow.value = row
+  decideAction.value = 'REJECT'
+  rejectNote.value = ''
 }
 
-const confirmTitle = computed(() =>
-  confirmDialog.value.action === 'APPROVE' ? 'Approve this leave request?' : 'Reject this leave request?'
-)
+function closeDecisionModal(force = false) {
+  if (!force && deciding.value) return
+  decideRow.value = null
+  decideAction.value = ''
+  rejectNote.value = ''
+}
 
-const confirmPrimaryLabel = computed(() => (confirmDialog.value.action === 'APPROVE' ? 'Approve' : 'Reject'))
+async function confirmDecision() {
+  if (!decideRow.value?._id || !decideAction.value) return
 
-const confirmPrimaryClasses = computed(() =>
-  confirmDialog.value.action === 'APPROVE'
-    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-    : 'bg-rose-600 hover:bg-rose-700 text-white'
-)
+  const action = decideAction.value === 'APPROVE' ? 'APPROVE' : 'REJECT'
+  const comment = action === 'REJECT' ? rejectNote.value.trim() : ''
 
-/**
- * ✅ COO decision endpoint
- */
-async function submitDecision() {
-  const { row, action } = confirmDialog.value
-  const comment = String(confirmDialog.value.comment || '').trim()
-
-  if (!row || !action) {
-    closeDecisionDialog(true)
-    return
-  }
   if (action === 'REJECT' && !comment) {
-    rejectError.value = 'Reject reason is required.'
+    showToast({ type: 'warning', title: 'Reject reason required', message: 'Please enter a short reason to reject.' })
     return
   }
 
   try {
-    loading.value = true
-    await api.post(`/leave/requests/${row._id}/coo-decision`, {
-      action,
-      ...(action === 'REJECT' ? { comment } : {}),
-    })
+    deciding.value = true
+    await api.post(`/leave/requests/${decideRow.value._id}/coo-decision`, { action, ...(action === 'REJECT' ? { comment } : {}) })
 
     showToast({
       type: 'success',
       title: action === 'APPROVE' ? 'Approved' : 'Rejected',
-      message: 'COO decision has been saved.',
+      message: 'COO decision saved.',
     })
 
-    closeDecisionDialog(true)
+    closeDecisionModal(true)
     await fetchInbox(true)
   } catch (e) {
-    console.error('cooDecision error', e)
+    console.error('confirmDecision COO error', e)
     showToast({
       type: 'error',
-      title: 'Update failed',
-      message: e?.response?.data?.message || 'Unable to update this leave request.',
+      title: 'Action failed',
+      message: e?.response?.data?.message || 'Unable to update request. Please try again.',
     })
   } finally {
-    loading.value = false
+    deciding.value = false
   }
 }
 
+/* ───────── Attachments (READ ONLY like GM Inbox) ───────── */
+const attOpen = ref(false)
+const attLoading = ref(false)
+const attError = ref('')
+const attReq = ref(null)
+const attItems = ref([]) // { attId, filename, contentType, size, uploadedAt, url }
 
+function niceBytes(n) {
+  const v = Number(n || 0)
+  if (!Number.isFinite(v) || v <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let idx = 0
+  let val = v
+  while (val >= 1024 && idx < units.length - 1) {
+    val /= 1024
+    idx++
+  }
+  return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`
+}
+
+function iconForMime(m) {
+  const s = String(m || '').toLowerCase()
+  if (s.includes('pdf')) return 'fa-file-pdf'
+  if (s.includes('word')) return 'fa-file-word'
+  if (s.includes('excel') || s.includes('spreadsheet')) return 'fa-file-excel'
+  if (s.includes('image')) return 'fa-file-image'
+  return 'fa-file'
+}
+
+function canPreviewInline(m) {
+  const s = String(m || '').toLowerCase()
+  return s.startsWith('image/') || s.includes('pdf')
+}
+
+/* Preview uses blob URLs to avoid 401 */
+const previewOpen = ref(false)
+const previewUrl = ref('')
+const previewType = ref('')
+const previewName = ref('')
+
+function revokeBlobUrl(url) {
+  try {
+    if (url && String(url).startsWith('blob:')) URL.revokeObjectURL(url)
+  } catch {}
+}
+
+async function openPreview(item) {
+  if (!item?.url) return
+  try {
+    const res = await api.request({
+      url: item.url,
+      method: 'GET',
+      responseType: 'blob',
+    })
+    const blobUrl = URL.createObjectURL(res.data)
+    previewUrl.value = blobUrl
+    previewType.value = String(item.contentType || '')
+    previewName.value = item.filename || 'Attachment'
+    previewOpen.value = true
+  } catch (e) {
+    console.error('openPreview error', e)
+    showToast({
+      type: 'error',
+      title: 'Preview failed',
+      message: e?.response?.data?.message || e?.message || 'Unable to preview file.',
+    })
+  }
+}
+
+async function downloadAttachment(it) {
+  if (!it?.url) return
+  try {
+    const res = await api.request({
+      url: it.url,
+      method: 'GET',
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = it.filename || 'attachment'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  } catch (e) {
+    console.error('downloadAttachment error', e)
+    showToast({ type: 'error', title: 'Download failed', message: e?.message || 'Unable to download.' })
+  }
+}
+
+function closePreview() {
+  revokeBlobUrl(previewUrl.value)
+  previewOpen.value = false
+  previewUrl.value = ''
+  previewType.value = ''
+  previewName.value = ''
+}
+
+async function openAttachments(row) {
+  if (!row?._id) return
+  attOpen.value = true
+  attReq.value = row
+  attItems.value = []
+  attError.value = ''
+  closePreview()
+
+  try {
+    attLoading.value = true
+    const res = await api.get(`/leave/requests/${row._id}/attachments`)
+    const items = Array.isArray(res?.data?.items) ? res.data.items : []
+    attItems.value = items
+  } catch (e) {
+    console.error('openAttachments error', e)
+    attError.value = e?.response?.data?.message || 'Unable to load attachments.'
+  } finally {
+    attLoading.value = false
+  }
+}
+
+function closeAttachments() {
+  if (attLoading.value) return
+  closePreview()
+  attOpen.value = false
+  attReq.value = null
+  attItems.value = []
+  attError.value = ''
+}
 
 /* ───────── Realtime ───────── */
 const offHandlers = []
@@ -360,7 +478,13 @@ function triggerRealtimeRefresh() {
 }
 
 function setupRealtime() {
-  subscribeRoleIfNeeded()
+  subscribeRoleIfNeeded({
+    role: auth.user?.role,
+    employeeId: auth.user?.employeeId,
+    loginId: auth.user?.loginId || auth.user?.employeeId || auth.user?.id,
+    company: auth.user?.companyCode,
+  })
+
   offHandlers.push(
     onSocket('leave:req:created', () => triggerRealtimeRefresh()),
     onSocket('leave:req:updated', () => triggerRealtimeRefresh()),
@@ -381,7 +505,6 @@ function teardownRealtime() {
   offHandlers.length = 0
 }
 
-/* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
@@ -393,113 +516,111 @@ onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
   teardownRealtime()
+  closePreview()
 })
 </script>
 
 <template>
-  <div class="px-1 py-1 sm:px-3">
-    <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-      <!-- Header -->
-      <div class="rounded-t-2xl ui-hero-gradient">
-        <!-- Desktop -->
-        <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-          <div class="flex flex-col gap-1 min-w-[220px]">
-            <p class="text-sm font-semibold">COO Inbox</p>
-          </div>
-
-          <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-            <!-- Search -->
-            <div class="min-w-[220px] max-w-xs">
-              <label class="mb-1 block text-[11px] font-medium text-white/90">Search</label>
-              <div class="flex items-center rounded-xl border border-white/35 bg-black/15 px-2.5 py-1.5 text-xs">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-white/80" />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Employee / type / reason / status / note..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-white/70"
-                />
+  <div class="ui-page min-h-screen w-full">
+    <div class="ui-container-edge">
+      <div class="ui-card rounded-none border-x-0 border-t-0">
+        <div class="ui-hero-gradient">
+          <!-- Desktop header -->
+          <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
+            <div class="flex flex-col gap-1 min-w-[240px]">
+              <p class="text-[15px] font-extrabold">COO Inbox</p>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
               </div>
             </div>
 
-            <!-- Requested at range (label on top like Search) -->
-            <div class="min-w-[260px]">
-              <label class="mb-1 block text-[11px] font-medium text-white/90">Requested</label>
-
-              <div class="flex items-center gap-1 text-[11px]">
-                <input
-                  v-model="fromDate"
-                  type="date"
-                  class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none
-                        focus:border-white focus:ring-1 focus:ring-white/60"
-                />
-                <span class="text-white/80">to</span>
-                <input
-                  v-model="toDate"
-                  type="date"
-                  class="rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none
-                        focus:border-white focus:ring-1 focus:ring-white/60"
-                />
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
+              <!-- Search -->
+              <div class="min-w-[240px] max-w-xs">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Search</label>
+                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                    <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
+                    <input
+                      v-model="search"
+                      type="text"
+                      placeholder="Employee / type / reason / status / note..."
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
 
-
-            <!-- Expat ID filter (label on top like Search) -->
-            <div class="min-w-[120px]">
-              <label class="mb-1 block text-[11px] font-medium text-white/90">Expat ID</label>
-              <input
-                v-model="employeeFilter"
-                type="text"
-                placeholder="EMP..."
-                class="w-28 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none
-                      placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
-              />
-            </div>
-
-            <!-- Export buttons -->
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="ui-btn ui-btn-sm ui-btn-indigo"
-                @click="exportExcel('FILTERED')"
-                :disabled="loading || !filteredRows.length"
-              >
-                <i class="fa-solid fa-file-excel text-[11px]" />
-                Export
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Mobile -->
-        <div v-else class="space-y-2">
-          <div>
-            <p class="text-sm font-semibold">COO Inbox</p>
-          </div>
-
-          <div class="space-y-2">
-            <div class="space-y-1">
-              <label class="mb-1 block text-[11px] font-medium text-white/90">Search</label>
-              <div class="flex items-center rounded-xl border border-white/35 bg-black/15 px-2.5 py-1.5 text-[11px]">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-xs text-white/80" />
-                <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Employee / type / reason / status..."
-                  class="flex-1 bg-transparent text-[11px] outline-none placeholder:text-white/70"
-                />
+              <!-- Requested at range -->
+              <div class="flex items-end gap-2">
+                <div class="ui-field w-[150px]">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date" />
+                </div>
+                <div class="ui-field w-[150px]">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date" />
+                </div>
               </div>
-            </div>
 
-            <div class="flex items-center justify-between gap-2">
-              <input
-                v-model="employeeFilter"
-                type="text"
-                placeholder="Expat ID..."
-                class="w-28 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none placeholder:text-white/70 focus:border-white focus:ring-1 focus:ring-white/60"
-              />
-
+              <!-- Actions -->
               <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  @click="exportExcel('FILTERED')"
+                  :disabled="loading || !filteredRows.length"
+                  title="Export filtered list to CSV"
+                >
+                  <i class="fa-solid fa-file-excel text-[11px]" />
+                  Export
+                </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading">
+                  Clear
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mobile header -->
+          <div v-else class="space-y-3">
+            <div>
+              <p class="text-[15px] font-extrabold">COO Inbox</p>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+              </div>
+            </div>
+
+            <div class="space-y-2">
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Search</label>
+                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Employee / type / reason / status..."
+                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date" />
+                </div>
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date" />
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between">
+                              <div class="flex items-center justify-between gap-2">
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"
@@ -509,407 +630,447 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-sm ui-btn-ghost"
-                  @click="exportExcel('ALL')"
-                  :disabled="loading || !rows.length"
-                >
-                  ALL
+              </div>
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading">
+                  Clear
                 </button>
               </div>
-            </div>
-
-            <div class="flex flex-wrap items-center gap-2 text-[11px]">
-              <span class="text-white/80">Requested</span>
-              <input
-                v-model="fromDate"
-                type="date"
-                class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
-              />
-              <span class="text-white/80">to</span>
-              <input
-                v-model="toDate"
-                type="date"
-                class="flex-1 rounded-lg border border-white/35 bg-black/15 px-2 py-1 text-[11px] text-white outline-none focus:border-white focus:ring-1 focus:ring-white/60"
-              />
             </div>
           </div>
         </div>
-      </div>
 
-      <!-- Body -->
-      <div class="px-2 pb-2 pt-3 sm:px-3 sm:pb-3">
-        <div
-          v-if="loading && !filteredRows.length"
-          class="mb-2 rounded-md border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] text-orange-700
-                 dark:border-orange-700/70 dark:bg-orange-950/40 dark:text-orange-100"
-        >
-          Loading COO inbox...
-        </div>
-
-        <!-- Mobile cards -->
-        <div v-if="isMobile" class="space-y-2">
-          <p v-if="!pagedRows.length && !loading" class="py-4 text-center text-[11px] text-slate-500 dark:text-slate-400">
-            No leave requests in your COO queue.
-          </p>
-
-          <article
-            v-for="row in pagedRows"
-            :key="row._id"
-            class="rounded-2xl border border-slate-200 bg-white/95 p-3 text-xs shadow-[0_10px_24px_rgba(15,23,42,0.12)]
-                   dark:border-slate-700 dark:bg-slate-900/95"
+        <!-- Body -->
+        <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
+          <div
+            v-if="loading && !filteredRows.length"
+            class="mb-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] text-orange-700
+                   dark:border-orange-700/70 dark:bg-orange-950/40 dark:text-orange-100"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div class="space-y-1">
-                <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border" :class="statusChipClasses(row.status)">
-                  {{ row.status }}
-                </span>
+            Loading COO inbox...
+          </div>
 
-                <div class="text-xs font-mono text-slate-800 dark:text-slate-100">
-                  {{ row.employeeId || '—' }}
-                </div>
+          <!-- Mobile cards -->
+          <div v-if="isMobile" class="space-y-2">
+            <p v-if="!pagedRows.length && !loading" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              No leave requests in your COO queue.
+            </p>
 
-                <div v-if="row.employeeName || row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                  {{ row.employeeName || '' }} <span v-if="row.department">· {{ row.department }}</span>
-                </div>
+            <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="space-y-1">
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    Requested:
+                    <span class="font-semibold text-slate-900 dark:text-slate-50">
+                      {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                    </span>
+                  </div>
 
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                  Date: <span class="font-medium">{{ formatRange(row) }}</span>
-                  · Days: <span class="font-semibold">{{ Number(row.totalDays || 0).toLocaleString() }}</span>
-                </div>
-              </div>
-
-              <div class="text-right text-[11px] text-slate-500 dark:text-slate-400">
-                <div class="whitespace-nowrap">
-                  {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                </div>
-                <div class="mt-1">
-                  <span class="inline-flex items-center rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700 border border-orange-100 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800/80">
-                    {{ row.leaveTypeCode || '—' }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-2 h-px bg-slate-200 dark:bg-slate-800" />
-
-            <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
-              <span class="font-medium">Reason:</span>
-              <span class="text-truncate-2 inline-block align-top">{{ row.reason || '—' }}</span>
-            </div>
-
-            <div
-              v-if="String(row.status || '').toUpperCase() === 'REJECTED'"
-              class="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
-                     dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
-            >
-              <span class="font-semibold">{{ rejectedByLabel(row) }}:</span>
-              <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
-            </div>
-
-            <div class="mt-3 flex flex-wrap justify-end gap-2">
-              <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_COO'">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-3 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-emerald-700"
-                  @click="openDecisionDialog(row, 'APPROVE')"
-                >
-                  <i class="fa-solid fa-check text-[10px]" />
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-3 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50
-                         dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                  @click="openDecisionDialog(row, 'REJECT')"
-                >
-                  <i class="fa-solid fa-xmark text-[10px]" />
-                  Reject
-                </button>
-              </template>
-
-              <template v-else>
-                <span class="text-[11px] text-slate-400 dark:text-slate-500">No action available</span>
-              </template>
-            </div>
-          </article>
-        </div>
-
-        <!-- Desktop table (✅ aligned columns) -->
-        <div v-else class="overflow-x-auto">
-          <table class="min-w-[1240px] w-full border-collapse text-xs sm:text-[13px] text-slate-700 dark:text-slate-100">
-            <colgroup>
-              <col class="w-[160px]" />
-              <col class="w-[280px]" />
-              <col class="w-[110px]" />
-              <col class="w-[170px]" />
-              <col class="w-[80px]" />
-              <col />
-              <col class="w-[130px]" />
-              <col class="w-[180px]" />
-            </colgroup>
-
-            <thead class="bg-slate-100/90 text-[11px] uppercase tracking-wide text-slate-500 border-b border-slate-200 dark:bg-slate-800/80 dark:border-slate-700 dark:text-slate-300">
-              <tr>
-                <th class="table-th text-left">Requested at</th>
-                <th class="table-th text-left">Employee</th>
-                <th class="table-th text-left">Type</th>
-                <th class="table-th text-left">Leave Date</th>
-                <th class="table-th text-right">Days</th>
-                <th class="table-th text-left">Reason</th>
-                <th class="table-th text-center">Status</th>
-                <th class="table-th text-center">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr v-if="!loading && !filteredRows.length">
-                <td colspan="8" class="px-3 py-6 text-center text-[12px] text-slate-500 border-t border-slate-200 dark:border-slate-700 dark:text-slate-400">
-                  No leave requests in your COO queue.
-                </td>
-              </tr>
-
-              <tr
-                v-for="row in pagedRows"
-                :key="row._id"
-                class="border-b border-slate-200 text-[12px] hover:bg-slate-50/80 dark:border-slate-700 dark:hover:bg-slate-900/70"
-              >
-                <td class="table-td whitespace-nowrap align-top">
-                  {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                </td>
-
-                <td class="table-td align-top">
                   <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
                     {{ row.employeeId || '—' }}
                   </div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ row.employeeName || '—' }} <span v-if="row.department">· {{ row.department }}</span>
+                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ row.employeeName || '—' }}
                   </div>
-                </td>
 
-                <td class="table-td align-top">
-                  <span class="inline-flex items-center justify-center rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700 border border-orange-100 dark:bg-orange-900/40 dark:text-orange-200 dark:border-orange-800/80">
-                    {{ row.leaveTypeCode || '—' }}
-                  </span>
-                </td>
-
-                <td class="table-td whitespace-nowrap align-top">
-                  {{ formatRange(row) }}
-                </td>
-
-                <td class="table-td text-right align-top tabular-nums">
-                  {{ Number(row.totalDays || 0).toLocaleString() }}
-                </td>
-
-                <td class="table-td align-top">
-                  <p class="text-truncate-2 text-xs sm:text-[13px]">{{ row.reason || '—' }}</p>
-
-                  <div
-                    v-if="String(row.status || '').toUpperCase() === 'REJECTED' && getRejectReason(row)"
-                    class="mt-2 inline-flex max-w-[620px] items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-[11px] text-rose-700
-                           dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
-                  >
-                    <span class="font-semibold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
-                    <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
+                  <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                    {{ row.department }}
                   </div>
-                </td>
 
-                <td class="table-td text-center align-top">
-                  <span
-                    class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold border"
-                    :class="statusChipClasses(row.status)"
-                  >
-                    {{ row.status }}
-                  </span>
-                </td>
-
-                <td class="table-td text-center align-top">
-                  <div class="inline-flex flex-wrap justify-center gap-2">
-                    <template v-if="canCooDecide && String(row.status || '').toUpperCase() === 'PENDING_COO'">
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-emerald-700"
-                        @click="openDecisionDialog(row, 'APPROVE')"
-                      >
-                        <i class="fa-solid fa-check text-[10px]" />
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex items-center gap-1 rounded-full border border-rose-500 px-2.5 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50
-                               dark:border-rose-500 dark:text-rose-300 dark:hover:bg-rose-950/60"
-                        @click="openDecisionDialog(row, 'REJECT')"
-                      >
-                        <i class="fa-solid fa-xmark text-[10px]" />
-                        Reject
-                      </button>
-                    </template>
-
-                    <template v-else>
-                      <span class="text-[11px] text-slate-400 dark:text-slate-500">—</span>
-                    </template>
+                  <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                    Date: <span class="font-semibold">{{ formatRange(row) }}</span>
+                    · Days: <span class="font-extrabold">{{ Number(row.totalDays || 0).toLocaleString() }}</span>
                   </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                </div>
 
-        <!-- Pagination -->
-        <div
-          class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div class="flex items-center gap-2">
-            <select
-              v-model="perPage"
-              class="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] dark:border-slate-600 dark:bg-slate-900"
-            >
-              <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-            </select>
+                <div class="text-right space-y-1 text-[11px]">
+                  <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
+                  <div>
+                    <span
+                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
+                      :class="statusChipClasses(row.status)"
+                    >
+                      {{ row.status }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
+                <span class="font-semibold">Reason:</span> <span>{{ row.reason || '—' }}</span>
+              </div>
+
+              <div
+                v-if="String(row.status || '').toUpperCase() === 'REJECTED'"
+                class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                       dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+              >
+                <span class="font-extrabold">{{ rejectedByLabel(row) }}:</span>
+                <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
+              </div>
+
+              <!-- ✅ Actions row: attachments left, approve/reject right -->
+              <div class="mt-3 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-soft"
+                  @click="openAttachments(row)"
+                  :disabled="loading"
+                  title="View attachments"
+                >
+                  <i class="fa-solid fa-paperclip text-[11px]" />
+                  Attachments
+                </button>
+
+                <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
+                  <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
+                    <i class="fa-solid fa-circle-check text-[11px]" />
+                  </button>
+                  <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
+                    <i class="fa-solid fa-circle-xmark text-[11px]" />
+                  </button>
+                </div>
+              </div>
+            </article>
           </div>
 
-          <div class="flex items-center justify-end gap-1">
-            <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = 1">«</button>
-            <button type="button" class="pagination-btn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
-            <span class="px-2">Page {{ page }} / {{ pageCount }}</span>
-            <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
-            <button type="button" class="pagination-btn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+          <!-- Desktop table (scroll within ui-table-wrap so it never overflows laptop screen) -->
+          <div v-else class="ui-table-wrap">
+            <table class="ui-table text-left min-w-[1280px]">
+              <colgroup>
+                <col class="w-[150px]" />
+                <col class="w-[260px]" />
+                <col class="w-[58px]" />
+                <col class="w-[160px]" />
+                <col class="w-[80px]" />
+                <col />
+                <col class="w-[130px]" />
+                <col class="w-[120px]" />
+                <col class="w-[120px]" />
+              </colgroup>
+
+              <thead>
+                <tr>
+                  <th class="ui-th text-left">Requested at</th>
+                  <th class="ui-th text-left">Employee</th>
+                  <th class="ui-th text-left">Type</th>
+                  <th class="ui-th text-left">Leave Date</th>
+                  <th class="ui-th text-right">Days</th>
+                  <th class="ui-th text-left">Reason</th>
+                  <th class="ui-th">Status</th>
+                  <th class="ui-th text-center">Files</th>
+                  <th class="ui-th text-center">Actions</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                <tr v-if="!loading && !filteredRows.length">
+                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                    No leave requests in your COO queue.
+                  </td>
+                </tr>
+
+                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover">
+                  <td class="ui-td text-left whitespace-nowrap align-top">
+                    {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                  </td>
+
+                  <td class="ui-td text-left align-top">
+                    <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
+                      {{ row.employeeId || '—' }}
+                    </div>
+                    <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                      {{ row.employeeName || '—' }}
+                    </div>
+                    <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                      {{ row.department }}
+                    </div>
+                  </td>
+
+                  <td class="ui-td text-left align-top">
+                    <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
+                  </td>
+
+                  <td class="ui-td text-left whitespace-nowrap align-top">
+                    {{ formatRange(row) }}
+                  </td>
+
+                  <td class="ui-td text-right align-top tabular-nums">
+                    {{ Number(row.totalDays || 0).toLocaleString() }}
+                  </td>
+
+                  <td class="ui-td text-left align-top">
+                    <p class="reason-cell">{{ row.reason || '—' }}</p>
+
+                    <div
+                      v-if="String(row.status || '').toUpperCase() === 'REJECTED' && getRejectReason(row)"
+                      class="mt-2 inline-flex max-w-[640px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                    >
+                      <span class="font-extrabold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
+                      <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
+                    </div>
+                  </td>
+
+                  <td class="ui-td align-top">
+                    <span
+                      class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
+                      :class="statusChipClasses(row.status)"
+                    >
+                      {{ row.status }}
+                    </span>
+                  </td>
+
+                  <!-- Files -->
+                  <td class="ui-td align-top text-center">
+                    <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading">
+                      <i class="fa-solid fa-paperclip text-[11px]" />
+                      View
+                    </button>
+                  </td>
+
+                  <!-- Actions -->
+                  <td class="ui-td align-top text-center">
+                    <div v-if="canDecide(row)" class="flex items-center justify-center gap-2">
+                      <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
+                        <i class="fa-solid fa-circle-check text-[11px]" />
+                      </button>
+                      <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
+                        <i class="fa-solid fa-circle-xmark text-[11px]" />
+                      </button>
+                    </div>
+                    <span v-else class="text-[11px] text-slate-400">—</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pagination -->
+          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex items-center gap-2">
+              <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
+                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
+              </select>
+            </div>
+
+            <div class="flex items-center justify-end gap-1">
+              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
+              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
+              <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
+              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
+              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Confirm dialog -->
-    <transition name="modal-fade">
-      <div v-if="confirmDialog.open" class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 px-2">
-        <div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-950">
-          <div class="border-b border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/80">
-            <div class="flex items-start justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <div class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900/60 dark:text-orange-200">
-                  <i v-if="confirmDialog.action === 'APPROVE'" class="fa-solid fa-check text-sm" />
-                  <i v-else class="fa-solid fa-xmark text-sm" />
-                </div>
-                <div>
-                  <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">{{ confirmTitle }}</div>
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                    <span v-if="confirmDialog.action === 'APPROVE'">No comment needed for approve.</span>
-                    <span v-else>Reject requires a reason.</span>
-                  </div>
-                </div>
-              </div>
+    <!-- ✅ Confirm modal (Approve / Reject) -->
+    <div v-if="!!decideAction" class="fixed inset-0 z-[60]">
+      <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal()" />
+      <div class="absolute inset-0 flex items-center justify-center p-3">
+        <div class="ui-card w-full max-w-lg p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                {{ decideAction === 'APPROVE' ? 'Approve request' : 'Reject request' }}
+              </p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                This will update the request status immediately.
+              </p>
+            </div>
+            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
+              <i class="fa-solid fa-xmark" />
+            </button>
+          </div>
+
+          <div class="mt-3 space-y-2">
+            <div
+              v-if="decideAction === 'REJECT'"
+              class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
+            >
+              <label class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Reject reason</label>
+              <textarea
+                v-model="rejectNote"
+                rows="3"
+                class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-900 outline-none
+                       placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                placeholder="Example: Not enough coverage during that period..."
+              />
+              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                Required. This reason will be visible in request history.
+              </p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2 pt-1">
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
+                Cancel
+              </button>
 
               <button
+                v-if="decideAction === 'APPROVE'"
                 type="button"
-                class="inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-slate-800/80"
-                @click="closeDecisionDialog()"
-                :disabled="loading"
+                class="ui-btn ui-btn-sm ui-btn-emerald"
+                @click="confirmDecision"
+                :disabled="deciding"
               >
-                <i class="fa-solid fa-xmark text-xs" />
+                <i class="fa-solid fa-circle-check text-[11px]" />
+                {{ deciding ? 'Approving...' : 'Approve' }}
+              </button>
+
+              <button
+                v-else
+                type="button"
+                class="ui-btn ui-btn-sm ui-btn-rose"
+                @click="confirmDecision"
+                :disabled="deciding"
+              >
+                <i class="fa-solid fa-circle-xmark text-[11px]" />
+                {{ deciding ? 'Rejecting...' : 'Reject' }}
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
 
-          <div class="px-4 py-3">
-            <div class="text-[12px] text-slate-700 dark:text-slate-100">
-              <div v-if="confirmDialog.row" class="mb-2 text-[11px]">
-                <div class="font-semibold">
-                  {{ confirmDialog.row.employeeId }} — {{ confirmDialog.row.employeeName || '—' }}
-                  <span v-if="confirmDialog.row.department" class="font-normal text-slate-500 dark:text-slate-400">
-                    · {{ confirmDialog.row.department }}
-                  </span>
-                </div>
-                <div class="text-slate-500 dark:text-slate-400">
-                  {{ formatRange(confirmDialog.row) }} · {{ confirmDialog.row.leaveTypeCode }} · Days:
-                  {{ Number(confirmDialog.row.totalDays || 0).toLocaleString() }}
-                </div>
-                <div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-[11px] text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-100">
-                  <span class="font-semibold">Reason:</span>
-                  <span class="ml-1">{{ confirmDialog.row.reason || '—' }}</span>
+    <!-- ✅ Attachments modal (READ ONLY) -->
+    <div v-if="attOpen" class="fixed inset-0 z-[70]">
+      <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeAttachments" />
+      <div class="absolute inset-0 flex items-center justify-center p-3">
+        <div class="ui-card w-full max-w-3xl p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                Attachments
+                <span class="ml-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  {{ attReq?.employeeId }} · {{ attReq?.employeeName }}
+                </span>
+              </p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">Read only. You can preview or download.</p>
+            </div>
+
+            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">
+              <i class="fa-solid fa-xmark" />
+            </button>
+          </div>
+
+          <div class="mt-3">
+            <div
+              v-if="attLoading"
+              class="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] text-orange-700
+                     dark:border-orange-700/70 dark:bg-orange-950/40 dark:text-orange-100"
+            >
+              Loading attachments...
+            </div>
+
+            <div
+              v-else-if="attError"
+              class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                     dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+            >
+              {{ attError }}
+            </div>
+
+            <div v-else-if="!attItems.length" class="py-8 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              No attachments.
+            </div>
+
+            <div v-else class="ui-frame">
+              <div class="divide-y divide-slate-200/70 dark:divide-slate-700/70">
+                <div v-for="it in attItems" :key="it.attId" class="flex items-center justify-between gap-3 px-3 py-2">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="ui-ico !w-[36px] !h-[36px]">
+                      <i class="fa-solid" :class="iconForMime(it.contentType)" />
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                        {{ it.filename || 'Attachment' }}
+                      </p>
+                      <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                        {{ niceBytes(it.size) }}
+                        <span v-if="it.uploadedAt"> · {{ dayjs(it.uploadedAt).format('YYYY-MM-DD HH:mm') }}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button
+                      v-if="canPreviewInline(it.contentType)"
+                      type="button"
+                      class="ui-btn ui-btn-xs ui-btn-soft"
+                      @click="openPreview(it)"
+                    >
+                      <i class="fa-solid fa-eye text-[11px]" />
+                      Preview
+                    </button>
+
+                    <button type="button" class="ui-btn ui-btn-xs ui-btn-indigo" @click="downloadAttachment(it)">
+                      <i class="fa-solid fa-download text-[11px]" />
+                      Download
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div v-if="confirmDialog.action === 'REJECT'" class="mt-3">
-              <label class="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                Reject reason <span class="text-rose-600">*</span>
-              </label>
-              <textarea
-                v-model="confirmDialog.comment"
-                rows="3"
-                class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs shadow-sm
-                       focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-500
-                       dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-                placeholder="Write reject reason..."
-                @input="rejectError = ''"
-              ></textarea>
-
-              <p v-if="rejectError" class="mt-1 text-[11px] font-semibold text-rose-600">
-                {{ rejectError }}
-              </p>
+            <div class="mt-3 flex justify-end">
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">
+                Close
+              </button>
             </div>
-          </div>
-
-          <div class="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/80 px-4 py-2.5 dark:border-slate-700 dark:bg-slate-900/80">
-            <button
-              type="button"
-              class="rounded-full px-3 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-200/70 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="closeDecisionDialog()"
-              :disabled="loading"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              class="inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold shadow-sm
-                     focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-offset-slate-50 dark:focus:ring-offset-slate-900"
-              :class="confirmPrimaryClasses"
-              :disabled="loading"
-              @click="submitDecision"
-            >
-              <i class="fa-solid mr-1 text-[10px]" :class="confirmDialog.action === 'APPROVE' ? 'fa-check' : 'fa-xmark'" />
-              <span>{{ confirmPrimaryLabel }}</span>
-            </button>
           </div>
         </div>
       </div>
-    </transition>
+
+      <!-- Inline preview (image/pdf) -->
+      <div v-if="previewOpen" class="fixed inset-0 z-[80]">
+        <div class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" @click="closePreview" />
+        <div class="absolute inset-0 flex items-center justify-center p-3">
+          <div class="ui-card w-full max-w-5xl p-3">
+            <div class="flex items-center justify-between gap-3 px-2 pb-2">
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">Preview: {{ previewName }}</p>
+              <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closePreview">
+                <i class="fa-solid fa-xmark" />
+              </button>
+            </div>
+
+            <div class="ui-frame bg-white dark:bg-slate-950">
+              <div class="p-2">
+                <iframe
+                  v-if="String(previewType || '').toLowerCase().includes('pdf')"
+                  :src="previewUrl"
+                  class="h-[72vh] w-full rounded-xl border border-slate-200 dark:border-slate-700"
+                />
+                <img
+                  v-else
+                  :src="previewUrl"
+                  class="max-h-[72vh] w-full object-contain rounded-xl border border-slate-200 dark:border-slate-700 bg-white"
+                  alt="preview"
+                />
+              </div>
+            </div>
+
+            <div class="mt-2 flex justify-end gap-2">
+              <a class="ui-btn ui-btn-sm ui-btn-indigo" :href="previewUrl" target="_blank" rel="noopener" :download="previewName || undefined">
+                <i class="fa-solid fa-up-right-from-square text-[11px]" />
+                Open
+              </a>
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closePreview">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.text-truncate-2,
-.text-truncate-2-inline {
+.reason-cell {
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-.text-truncate-2-inline { display: inline-block; }
-
-.table-th { padding: 8px 10px; text-align: left; font-size: 11px; font-weight: 700; }
-.table-td { padding: 8px 10px; vertical-align: top; }
-
-.pagination-btn {
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1.5px solid rgba(100, 116, 139, 0.95);
-  background: white;
-  font-size: 11px;
-  color: #0f172a;
-}
-.pagination-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.pagination-btn:not(:disabled):hover { background: #fff7ed; }
-.dark .pagination-btn { background: #020617; color: #e5e7eb; border-color: rgba(148, 163, 184, 0.9); }
-.dark .pagination-btn:not(:disabled):hover { background: #1e293b; }
-
-.modal-fade-enter-active, .modal-fade-leave-active {
-  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
-}
-.modal-fade-enter-from, .modal-fade-leave-to {
-  opacity: 0;
-  transform: translateY(6px) scale(0.98);
+  line-height: 1.35;
 }
 </style>

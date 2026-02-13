@@ -311,18 +311,12 @@ onBeforeUnmount(() => {
 
                 <div class="text-right text-[12px] text-slate-600 dark:text-slate-300">
                   <div>
-                    Entitlement:
+                    Quata:
                     <span class="font-semibold text-slate-900 dark:text-slate-50">
                       {{ Number(t.yearlyEntitlement || 0).toLocaleString() }} days
                     </span>
                   </div>
-                  <div class="mt-0.5">
-                    Order:
-                    <span class="font-semibold text-slate-900 dark:text-slate-50">
-                      {{ Number(t.order ?? 0) }}
-                    </span>
-                  </div>
-                  <div class="mt-1">
+                  <!-- <div class="mt-1">
                     <span
                       class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                       :class="t.requiresBalance
@@ -331,7 +325,7 @@ onBeforeUnmount(() => {
                     >
                       {{ t.requiresBalance ? 'Requires Balance' : 'No Balance Check' }}
                     </span>
-                  </div>
+                  </div> -->
                 </div>
               </div>
             </article>

@@ -2,7 +2,7 @@
 const mongoose = require('mongoose')
 const { GridFSBucket, ObjectId } = require('mongodb')
 
-// cache bucket by dbName (safe even if you add more connections later)
+// cache bucket by dbName + bucketName
 const buckets = new Map()
 
 function pickReadyConnection() {
@@ -16,7 +16,12 @@ function pickReadyConnection() {
   return null
 }
 
-function getBucket() {
+function bucketKey(dbName, bucketName) {
+  return `${dbName}::${bucketName}`
+}
+
+// ✅ default bucket stays "signatures" so existing code works
+function getBucket(bucketName = 'signatures') {
   const conn = pickReadyConnection()
   if (!conn?.db) {
     throw new Error(
@@ -27,10 +32,13 @@ function getBucket() {
   }
 
   const dbName = conn.db.databaseName || 'default'
-  if (!buckets.has(dbName)) {
-    buckets.set(dbName, new GridFSBucket(conn.db, { bucketName: 'signatures' }))
+  const bName = String(bucketName || 'signatures').trim() || 'signatures'
+  const key = bucketKey(dbName, bName)
+
+  if (!buckets.has(key)) {
+    buckets.set(key, new GridFSBucket(conn.db, { bucketName: bName }))
   }
-  return buckets.get(dbName)
+  return buckets.get(key)
 }
 
 function toObjectId(id) {
@@ -43,9 +51,8 @@ function toObjectId(id) {
   }
 }
 
-// ✅ IMPORTANT: return the actual file document (with uploadDate/length/etc.)
-async function uploadBuffer({ buffer, filename, contentType, metadata }) {
-  const b = getBucket()
+async function uploadBuffer({ buffer, filename, contentType, metadata, bucketName }) {
+  const b = getBucket(bucketName)
 
   const fileId = await new Promise((resolve, reject) => {
     const stream = b.openUploadStream(filename, {
@@ -53,19 +60,18 @@ async function uploadBuffer({ buffer, filename, contentType, metadata }) {
       metadata: metadata || {},
     })
     stream.on('error', reject)
-    stream.on('finish', () => resolve(stream.id)) // finish has no args → use stream.id
+    stream.on('finish', () => resolve(stream.id))
     stream.end(buffer)
   })
 
-  // fetch the stored file doc so controller can read uploadDate, length, contentType...
   const doc = await b.find({ _id: fileId }).limit(1).toArray()
   return doc?.[0] || { _id: fileId, filename, contentType, metadata }
 }
 
-async function deleteFile(fileId) {
+async function deleteFile(fileId, bucketName) {
   const oid = toObjectId(fileId)
   if (!oid) return
-  const b = getBucket()
+  const b = getBucket(bucketName)
   await b.delete(oid)
 }
 

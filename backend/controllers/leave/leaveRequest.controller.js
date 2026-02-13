@@ -721,3 +721,81 @@ exports.cooDecision = async (req, res, next) => {
     next(e)
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   UPDATE MY REQUEST (only before any approval happened)
+   PATCH /api/leave/requests/:id
+   body: { leaveTypeCode, startDate, endDate, startHalf, endHalf, isHalfDay, dayPart, reason }
+───────────────────────────────────────────────────────────── */
+exports.updateMyRequest = async (req, res, next) => {
+  try {
+    const meLoginId = actorLoginId(req)
+    if (!meLoginId) throw createError(400, 'Missing user identity')
+
+    const { id } = req.params
+    const existing = await LeaveRequest.findById(id)
+    if (!existing) throw createError(404, 'Request not found')
+
+    // ✅ only owner can edit (admins can extend later if you want)
+    if (s(existing.requesterLoginId) !== meLoginId) {
+      throw createError(403, 'Not your request')
+    }
+
+    // ✅ must still be pending somewhere
+    const st = up(existing.status)
+    if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) {
+      throw createError(400, `Request is ${existing.status}. Cannot edit.`)
+    }
+
+    // ✅ "edit only when not yet got any approved"
+    const approvals = Array.isArray(existing.approvals) ? existing.approvals : []
+    const anyApproved = approvals.some((a) => up(a.status) === 'APPROVED')
+    const anyRejected = approvals.some((a) => up(a.status) === 'REJECTED')
+    const anyActed = approvals.some((a) => !!a.actedAt)
+
+    if (anyApproved || anyRejected || anyActed) {
+      throw createError(400, 'This request has already been processed. Cannot edit.')
+    }
+
+    // ✅ validate new dates/type/half using the same rules
+    const vr = validateAndNormalizeRequest({
+      leaveTypeCode: req.body?.leaveTypeCode ?? existing.leaveTypeCode,
+      startDate: req.body?.startDate ?? existing.startDate,
+      endDate: req.body?.endDate ?? existing.endDate,
+      startHalf: req.body?.startHalf,
+      endHalf: req.body?.endHalf,
+      isHalfDay: req.body?.isHalfDay,
+      dayPart: req.body?.dayPart,
+    })
+
+    if (!vr || vr.ok === false) {
+      throw createError(400, vr?.message || 'Invalid leave request')
+    }
+
+    const normalized = vr.normalized
+
+    // ✅ update allowed fields
+    existing.leaveTypeCode = normalized.leaveTypeCode
+    existing.startDate = normalized.startDate
+    existing.endDate = normalized.endDate
+
+    existing.startHalf = normalized.startHalf ?? null
+    existing.endHalf = normalized.endHalf ?? null
+
+    existing.isHalfDay = !!normalized.isHalfDay
+    existing.dayPart = normalized.dayPart ?? null
+
+    existing.totalDays = Number(normalized.totalDays)
+    existing.reason = s(req.body?.reason ?? existing.reason)
+
+    // keep status/mode/approvers same
+    await existing.save()
+
+    const payload = await attachEmployeeInfoToOne(existing)
+    emitReq(req, payload, 'leave:req:updated')
+
+    return res.json(payload)
+  } catch (e) {
+    next(e)
+  }
+}

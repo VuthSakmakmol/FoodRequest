@@ -1,12 +1,13 @@
 <!-- src/views/expat/ManagerLeaveInbox.vue
-  ✅ Same UI system as ManagerLeaveInbox.vue (ui-page / ui-card / ui-hero-gradient / ui-table)
-  ✅ Edge-to-edge (no wasted edges)
-  ✅ Responsive: mobile cards + desktop fixed table with aligned columns
-  ✅ Filters: search + requested date range (+ optional expat id)
-  ✅ Actions: Export CSV (Excel compatible) + Refresh + Clear
-  ✅ NOW: Approve + Reject buttons (Manager action)
-  ✅ Keep realtime refresh
-  ✅ NO SweetAlert / NO window.alert (custom confirm modal)
+  ✅ Same UI system (ui-page / ui-card / ui-hero-gradient / ui-table)
+  ✅ TRUE FULL WIDTH on laptop (no container max-width)
+  ✅ Responsive: mobile cards + desktop table
+  ✅ Filters: search + requested date range + optional expat id
+  ✅ Actions: Export CSV + Refresh + Clear
+  ✅ Approve + Reject (Manager) = ICON ONLY (save column width)
+  ✅ Realtime refresh
+  ✅ Attachments: READ-ONLY + blob preview (fix 401)
+  ✅ NO SweetAlert / NO window.alert (custom modals)
 -->
 
 <script setup>
@@ -34,8 +35,6 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-
-/* ✅ Filters (default empty = show all) */
 const fromDate = ref('') // Requested at (createdAt)
 const toDate = ref('') // Requested at (createdAt)
 const employeeFilter = ref('') // optional expat id filter
@@ -45,7 +44,7 @@ const page = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
-/* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
+/* ───────── helpers ───────── */
 function formatRange(row) {
   const s = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
   const e = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
@@ -55,11 +54,13 @@ function formatRange(row) {
 }
 
 function statusChipClasses(status) {
-  switch (status) {
+  switch (String(status || '').toUpperCase()) {
     case 'PENDING_MANAGER':
       return 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
     case 'PENDING_GM':
       return 'bg-indigo-100 text-indigo-700 border border-indigo-200 dark:bg-indigo-900/40 dark:text-indigo-200 dark:border-indigo-700/80'
+    case 'PENDING_COO':
+      return 'bg-sky-100 text-sky-700 border border-sky-200 dark:bg-sky-900/40 dark:text-sky-200 dark:border-sky-700/80'
     case 'APPROVED':
       return 'bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/80'
     case 'REJECTED':
@@ -71,24 +72,32 @@ function statusChipClasses(status) {
 }
 
 function statusWeight(s) {
-  switch (s) {
+  switch (String(s || '').toUpperCase()) {
     case 'PENDING_MANAGER':
       return 0
     case 'PENDING_GM':
       return 1
-    case 'APPROVED':
+    case 'PENDING_COO':
       return 2
-    case 'REJECTED':
+    case 'APPROVED':
       return 3
-    case 'CANCELLED':
+    case 'REJECTED':
       return 4
+    case 'CANCELLED':
+      return 5
     default:
       return 99
   }
 }
 
-/* quick tools */
+function clearFilters() {
+  search.value = ''
+  fromDate.value = ''
+  toDate.value = ''
+  employeeFilter.value = ''
+}
 
+/* ───────── API ───────── */
 async function fetchInbox() {
   try {
     loading.value = true
@@ -106,6 +115,7 @@ async function fetchInbox() {
   }
 }
 
+/* ───────── Filters ───────── */
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   const empQ = employeeFilter.value.trim().toLowerCase()
@@ -126,7 +136,6 @@ const filteredRows = computed(() => {
     )
   }
 
-  // ✅ Date filter by REQUEST DATE (createdAt)
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
   const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
 
@@ -172,7 +181,7 @@ watch(
   }
 )
 
-/* ───────── Export to Excel (CSV download; works without extra libs) ───────── */
+/* ───────── Export CSV ───────── */
 function csvEscape(v) {
   const s = String(v ?? '')
   const needs = /[",\n\r]/.test(s)
@@ -229,7 +238,6 @@ function exportExcel(scope = 'FILTERED') {
         : `${fromDate.value ? `_${fromDate.value}` : ''}${toDate.value ? `_${toDate.value}` : ''}` || 'FILTERED'
 
     downloadTextFile(`ManagerInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.csv`, csv)
-
     showToast({ type: 'success', title: 'Exported', message: 'Downloaded CSV (Excel compatible).' })
   } catch (e) {
     console.error('exportExcel error', e)
@@ -239,7 +247,7 @@ function exportExcel(scope = 'FILTERED') {
 
 /* ───────── Approve / Reject ───────── */
 const deciding = ref(false)
-const decideId = ref('') // request _id
+const decideId = ref('')
 const decideAction = ref('') // 'APPROVE' | 'REJECT'
 const rejectNote = ref('')
 
@@ -266,7 +274,6 @@ function closeDecisionModal(force = false) {
   rejectNote.value = ''
 }
 
-
 async function confirmDecision() {
   if (!decideId.value || !decideAction.value) return
 
@@ -280,7 +287,6 @@ async function confirmDecision() {
 
   try {
     deciding.value = true
-
     await api.post(`/leave/requests/${decideId.value}/manager-decision`, { action, comment })
 
     showToast({
@@ -289,9 +295,7 @@ async function confirmDecision() {
       message: action === 'APPROVE' ? 'Sent to GM queue.' : 'Request rejected.',
     })
 
-    // ✅ AUTO CLOSE immediately after success
     closeDecisionModal(true)
-
     await fetchInbox()
   } catch (e) {
     console.error('confirmDecision error', e)
@@ -305,8 +309,136 @@ async function confirmDecision() {
   }
 }
 
+/* ───────── Attachments (READ ONLY) ───────── */
+const attOpen = ref(false)
+const attLoading = ref(false)
+const attError = ref('')
+const attReq = ref(null)
+const attItems = ref([])
 
+function niceBytes(n) {
+  const v = Number(n || 0)
+  if (!Number.isFinite(v) || v <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let idx = 0
+  let val = v
+  while (val >= 1024 && idx < units.length - 1) {
+    val /= 1024
+    idx++
+  }
+  return `${val.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`
+}
 
+function iconForMime(m) {
+  const s = String(m || '').toLowerCase()
+  if (s.includes('pdf')) return 'fa-file-pdf'
+  if (s.includes('word')) return 'fa-file-word'
+  if (s.includes('excel') || s.includes('spreadsheet')) return 'fa-file-excel'
+  if (s.includes('image')) return 'fa-file-image'
+  return 'fa-file'
+}
+
+function canPreviewInline(m) {
+  const s = String(m || '').toLowerCase()
+  return s.startsWith('image/') || s.includes('pdf')
+}
+
+/* Preview uses blob URLs to avoid 401 */
+const previewOpen = ref(false)
+const previewUrl = ref('')
+const previewType = ref('')
+const previewName = ref('')
+
+function revokeBlobUrl(url) {
+  try {
+    if (url && String(url).startsWith('blob:')) URL.revokeObjectURL(url)
+  } catch {}
+}
+
+function closePreview() {
+  revokeBlobUrl(previewUrl.value)
+  previewOpen.value = false
+  previewUrl.value = ''
+  previewType.value = ''
+  previewName.value = ''
+}
+
+async function openPreview(item) {
+  if (!item?.url) return
+  try {
+    const res = await api.request({
+      url: item.url, // backend returns /api/leave/...
+      method: 'GET',
+      responseType: 'blob',
+    })
+
+    const blobUrl = URL.createObjectURL(res.data)
+    previewUrl.value = blobUrl
+    previewType.value = String(item.contentType || '')
+    previewName.value = item.filename || 'Attachment'
+    previewOpen.value = true
+  } catch (e) {
+    console.error('openPreview error', e)
+    showToast({
+      type: 'error',
+      title: 'Preview failed',
+      message: e?.response?.data?.message || e?.message || 'Unable to preview file.',
+    })
+  }
+}
+
+async function downloadAttachment(it) {
+  if (!it?.url) return
+  try {
+    const res = await api.request({
+      url: it.url,
+      method: 'GET',
+      responseType: 'blob',
+    })
+
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = it.filename || 'attachment'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  } catch (e) {
+    console.error('downloadAttachment error', e)
+    showToast({ type: 'error', title: 'Download failed', message: e?.message || 'Unable to download.' })
+  }
+}
+
+async function openAttachments(row) {
+  if (!row?._id) return
+  attOpen.value = true
+  attReq.value = row
+  attItems.value = []
+  attError.value = ''
+  closePreview()
+
+  try {
+    attLoading.value = true
+    const res = await api.get(`/leave/requests/${row._id}/attachments`)
+    const items = Array.isArray(res?.data?.items) ? res.data.items : []
+    attItems.value = items
+  } catch (e) {
+    console.error('openAttachments error', e)
+    attError.value = e?.response?.data?.message || 'Unable to load attachments.'
+  } finally {
+    attLoading.value = false
+  }
+}
+
+function closeAttachments() {
+  if (attLoading.value) return
+  closePreview()
+  attOpen.value = false
+  attReq.value = null
+  attItems.value = []
+  attError.value = ''
+}
 
 /* ───────── Realtime ───────── */
 const offHandlers = []
@@ -329,8 +461,9 @@ function setupRealtime() {
   const offUpdated = onSocket('leave:req:updated', () => triggerRealtimeRefresh())
   const offManager = onSocket('leave:req:manager-decision', () => triggerRealtimeRefresh())
   const offGm = onSocket('leave:req:gm-decision', () => triggerRealtimeRefresh())
+  const offCoo = onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh())
 
-  offHandlers.push(offCreated, offUpdated, offManager, offGm)
+  offHandlers.push(offCreated, offUpdated, offManager, offGm, offCoo)
 }
 
 onMounted(async () => {
@@ -348,12 +481,14 @@ onBeforeUnmount(() => {
       off && off()
     } catch {}
   })
+  closePreview()
 })
 </script>
 
 <template>
   <div class="ui-page min-h-screen w-full">
-    <div class="ui-container-edge">
+    <!-- ✅ FULL WIDTH FIX (no max-width container) -->
+    <div class="w-full">
       <div class="ui-card rounded-none border-x-0 border-t-0">
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
@@ -394,18 +529,6 @@ onBeforeUnmount(() => {
                   <input v-model="toDate" type="date" class="ui-date" />
                 </div>
               </div>
-
-              <!-- Expat ID filter -->
-              <div class="ui-field w-[140px]">
-                <label class="text-[11px] font-extrabold text-white/90">Expat ID</label>
-                <input
-                  v-model="employeeFilter"
-                  type="text"
-                  placeholder="001..."
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none placeholder:text-white/70"
-                />
-              </div>
-
               <!-- Actions -->
               <div class="flex items-center gap-2">
                 <button
@@ -413,10 +536,18 @@ onBeforeUnmount(() => {
                   class="ui-btn ui-btn-sm ui-btn-indigo"
                   @click="exportExcel('FILTERED')"
                   :disabled="loading || !filteredRows.length"
-                  title="Export filtered list to Excel"
+                  title="Export filtered list"
                 >
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
+                </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading" title="Refresh">
+                  <i class="fa-solid fa-rotate text-[11px]" />
+                </button>
+
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading" title="Clear filters">
+                  <i class="fa-solid fa-broom text-[11px]" />
                 </button>
               </div>
             </div>
@@ -446,16 +577,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="ui-field">
-                <label class="text-[11px] font-extrabold text-white/90">Expat ID</label>
-                <input
-                  v-model="employeeFilter"
-                  type="text"
-                  placeholder="001..."
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] text-white outline-none placeholder:text-white/70"
-                />
-              </div>
-
               <div class="grid grid-cols-2 gap-2">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
@@ -478,17 +599,12 @@ onBeforeUnmount(() => {
                   Export
                 </button>
 
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading" title="Refresh">
+                  <i class="fa-solid fa-rotate text-[11px]" />
+                </button>
 
-              </div>
-
-              <div class="flex justify-end">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-ghost"
-                  @click="exportExcel('ALL')"
-                  :disabled="loading || !rows.length"
-                >
-                  Export ALL
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading" title="Clear">
+                  <i class="fa-solid fa-broom text-[11px]" />
                 </button>
               </div>
             </div>
@@ -555,33 +671,43 @@ onBeforeUnmount(() => {
                 <span class="font-semibold">Reason:</span> <span>{{ row.reason || '—' }}</span>
               </div>
 
-              <!-- ✅ Actions (only if PENDING_MANAGER) -->
-              <div v-if="canDecide(row)" class="mt-3 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-emerald"
-                  :disabled="loading || deciding"
-                  @click="openApprove(row)"
-                >
-                  <i class="fa-solid fa-circle-check text-[11px]" />
-                  Approve
+              <div class="mt-3 flex items-center justify-between gap-2">
+                <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading" title="View attachments">
+                  <i class="fa-solid fa-paperclip text-[11px]" />
                 </button>
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-rose"
-                  :disabled="loading || deciding"
-                  @click="openReject(row)"
-                >
-                  <i class="fa-solid fa-circle-xmark text-[11px]" />
-                  Reject
-                </button>
+
+                <!-- ✅ ICON ONLY actions on mobile too -->
+                <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
+                    :disabled="loading || deciding"
+                    @click="openApprove(row)"
+                    title="Approve"
+                    aria-label="Approve"
+                  >
+                    <i class="fa-solid fa-circle-check text-[12px]" />
+                  </button>
+
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
+                    :disabled="loading || deciding"
+                    @click="openReject(row)"
+                    title="Reject"
+                    aria-label="Reject"
+                  >
+                    <i class="fa-solid fa-circle-xmark text-[12px]" />
+                  </button>
+                </div>
               </div>
             </article>
           </div>
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left min-w-[1240px]">
+            <!-- ✅ Use full-width responsive table (no overflow unless needed) -->
+            <table class="ui-table text-left w-full min-w-[1100px]">
               <colgroup>
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
@@ -590,7 +716,8 @@ onBeforeUnmount(() => {
                 <col class="w-[80px]" />
                 <col />
                 <col class="w-[170px]" />
-                <col class="w-[170px]" />
+                <col class="w-[96px]" />
+                <col class="w-[92px]" />
               </colgroup>
 
               <thead>
@@ -602,13 +729,14 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-right">Days</th>
                   <th class="ui-th text-left">Reason</th>
                   <th class="ui-th">Status</th>
-                  <th class="ui-th text-center">Actions</th>
+                  <th class="ui-th text-center">Files</th>
+                  <th class="ui-th text-center">Act</th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No leave requests in your manager queue.
                   </td>
                 </tr>
@@ -651,26 +779,43 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <!-- ✅ Actions -->
+                  <!-- Files (icon only) -->
                   <td class="ui-td align-top text-center">
-                    <div v-if="canDecide(row)" class="flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                      @click="openAttachments(row)"
+                      :disabled="loading"
+                      title="View attachments"
+                      aria-label="View attachments"
+                    >
+                      <i class="fa-solid fa-paperclip text-[12px]" />
+                    </button>
+                  </td>
+
+                  <!-- ✅ Actions (ICON ONLY) -->
+                  <td class="ui-td align-top text-center">
+                    <div v-if="canDecide(row)" class="flex items-center justify-center gap-1">
                       <button
                         type="button"
-                        class="ui-btn ui-btn-xs ui-btn-emerald"
+                        class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
                         :disabled="loading || deciding"
                         @click="openApprove(row)"
+                        title="Approve"
+                        aria-label="Approve"
                       >
-                        <i class="fa-solid fa-circle-check text-[11px]" />
-                        Approve
+                        <i class="fa-solid fa-circle-check text-[12px]" />
                       </button>
+
                       <button
                         type="button"
-                        class="ui-btn ui-btn-xs ui-btn-rose"
+                        class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
                         :disabled="loading || deciding"
                         @click="openReject(row)"
+                        title="Reject"
+                        aria-label="Reject"
                       >
-                        <i class="fa-solid fa-circle-xmark text-[11px]" />
-                        Reject
+                        <i class="fa-solid fa-circle-xmark text-[12px]" />
                       </button>
                     </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
@@ -714,7 +859,7 @@ onBeforeUnmount(() => {
                 This will update the request status immediately.
               </p>
             </div>
-            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal" :disabled="deciding">
+            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal" :disabled="deciding" aria-label="Close">
               <i class="fa-solid fa-xmark" />
             </button>
           </div>
@@ -753,16 +898,137 @@ onBeforeUnmount(() => {
                 {{ deciding ? 'Approving...' : 'Approve' }}
               </button>
 
-              <button
-                v-else
-                type="button"
-                class="ui-btn ui-btn-sm ui-btn-rose"
-                @click="confirmDecision"
-                :disabled="deciding"
-              >
+              <button v-else type="button" class="ui-btn ui-btn-sm ui-btn-rose" @click="confirmDecision" :disabled="deciding">
                 <i class="fa-solid fa-circle-xmark text-[11px]" />
                 {{ deciding ? 'Rejecting...' : 'Reject' }}
               </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ✅ Attachments modal (READ ONLY) -->
+    <div v-if="attOpen" class="fixed inset-0 z-[70]">
+      <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeAttachments" />
+      <div class="absolute inset-0 flex items-center justify-center p-3">
+        <div class="ui-card w-full max-w-3xl p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                Attachments
+                <span class="ml-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  {{ attReq?.employeeId }} · {{ attReq?.employeeName }}
+                </span>
+              </p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">Read only. You can preview or download.</p>
+            </div>
+
+            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeAttachments" :disabled="attLoading" aria-label="Close attachments">
+              <i class="fa-solid fa-xmark" />
+            </button>
+          </div>
+
+          <div class="mt-3">
+            <div
+              v-if="attLoading"
+              class="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700
+                     dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
+            >
+              Loading attachments...
+            </div>
+
+            <div
+              v-else-if="attError"
+              class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                     dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+            >
+              {{ attError }}
+            </div>
+
+            <div v-else-if="!attItems.length" class="py-8 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              No attachments.
+            </div>
+
+            <div v-else class="ui-frame">
+              <div class="divide-y divide-slate-200/70 dark:divide-slate-700/70">
+                <div v-for="it in attItems" :key="it.attId" class="flex items-center justify-between gap-3 px-3 py-2">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <div class="ui-ico !w-[36px] !h-[36px]">
+                      <i class="fa-solid" :class="iconForMime(it.contentType)" />
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                        {{ it.filename || 'Attachment' }}
+                      </p>
+                      <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                        {{ niceBytes(it.size) }}
+                        <span v-if="it.uploadedAt"> · {{ dayjs(it.uploadedAt).format('YYYY-MM-DD HH:mm') }}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button
+                      v-if="canPreviewInline(it.contentType)"
+                      type="button"
+                      class="ui-btn ui-btn-xs ui-btn-soft"
+                      @click="openPreview(it)"
+                    >
+                      <i class="fa-solid fa-eye text-[11px]" />
+                      Preview
+                    </button>
+
+                    <button type="button" class="ui-btn ui-btn-xs ui-btn-indigo" @click="downloadAttachment(it)">
+                      <i class="fa-solid fa-download text-[11px]" />
+                      Download
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-3 flex justify-end">
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">Close</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inline preview (image/pdf) -->
+      <div v-if="previewOpen" class="fixed inset-0 z-[80]">
+        <div class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" @click="closePreview" />
+        <div class="absolute inset-0 flex items-center justify-center p-3">
+          <div class="ui-card w-full max-w-5xl p-3">
+            <div class="flex items-center justify-between gap-3 px-2 pb-2">
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">Preview: {{ previewName }}</p>
+              <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closePreview" aria-label="Close preview">
+                <i class="fa-solid fa-xmark" />
+              </button>
+            </div>
+
+            <div class="ui-frame bg-white dark:bg-slate-950">
+              <div class="p-2">
+                <iframe
+                  v-if="String(previewType || '').toLowerCase().includes('pdf')"
+                  :src="previewUrl"
+                  class="h-[72vh] w-full rounded-xl border border-slate-200 dark:border-slate-700"
+                />
+                <img
+                  v-else
+                  :src="previewUrl"
+                  class="max-h-[72vh] w-full object-contain rounded-xl border border-slate-200 dark:border-slate-700 bg-white"
+                  alt="preview"
+                />
+              </div>
+            </div>
+
+            <div class="mt-2 flex justify-end gap-2">
+              <a class="ui-btn ui-btn-sm ui-btn-indigo" :href="previewUrl" target="_blank" rel="noopener" :download="previewName || undefined">
+                <i class="fa-solid fa-up-right-from-square text-[11px]" />
+                Open
+              </a>
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closePreview">Close</button>
             </div>
           </div>
         </div>
@@ -772,6 +1038,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* ✅ icon-only buttons keep column narrow & consistent */
+.ui-icon-btn {
+  padding-left: 0.55rem !important;
+  padding-right: 0.55rem !important;
+}
+
+/* Reason clamp */
 .reason-cell {
   display: -webkit-box;
   -webkit-line-clamp: 3;

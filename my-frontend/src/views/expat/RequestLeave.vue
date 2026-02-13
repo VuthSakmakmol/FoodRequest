@@ -225,6 +225,73 @@ const form = ref({
   halfEndPart: '', // 'AM' | 'PM'
 })
 
+/* ───────── Evidence (Optional Attachments) ───────── */
+const evidenceFiles = ref([]) // [{ file, previewUrl }]
+const evidenceError = ref('')
+
+function isAllowedEvidence(file) {
+  const t = String(file?.type || '').toLowerCase()
+  return [
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ].includes(t)
+}
+
+function onPickEvidence(ev) {
+  const files = Array.from(ev?.target?.files || [])
+  evidenceError.value = ''
+
+  for (const f of files) {
+    if (!isAllowedEvidence(f)) {
+      evidenceError.value = `File type not allowed: ${f.type || 'unknown'}`
+      continue
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      evidenceError.value = `File too large (max 5MB): ${f.name}`
+      continue
+    }
+
+    const previewUrl =
+      f.type.startsWith('image/') ? URL.createObjectURL(f) : null
+
+    evidenceFiles.value.push({
+      id: cryptoRandom(),
+      file: f,
+      previewUrl,
+    })
+  }
+
+  // reset input value so same file can be picked again
+  ev.target.value = ''
+}
+
+function removeEvidence(id) {
+  const idx = evidenceFiles.value.findIndex((x) => x.id === id)
+  if (idx >= 0) {
+    const item = evidenceFiles.value[idx]
+    if (item.previewUrl) URL.revokeObjectURL(item.previewUrl)
+    evidenceFiles.value.splice(idx, 1)
+  }
+}
+
+function resetEvidence() {
+  evidenceFiles.value.forEach((x) => {
+    if (x.previewUrl) URL.revokeObjectURL(x.previewUrl)
+  })
+  evidenceFiles.value = []
+  evidenceError.value = ''
+}
+
+function cryptoRandom() {
+  return Math.random().toString(36).slice(2)
+}
+
 const submitting = ref(false)
 const formError = ref('')
 const formSuccess = ref('')
@@ -413,11 +480,23 @@ async function submitRequest() {
       payload.endHalf = null
     }
 
-    await api.post('/leave/requests', payload)
+    const res = await api.post('/leave/requests', payload)
+    const requestId = res?.data?._id
+
+    // ✅ If user selected evidence → upload after request created
+    if (requestId && evidenceFiles.value.length) {
+      const fd = new FormData()
+      evidenceFiles.value.forEach((e) => {
+        fd.append('files', e.file)
+      })
+
+      await api.post(`/leave/requests/${requestId}/attachments`, fd)
+    }
 
     showToast({ type: 'success', title: 'Submitted', message: 'Your request has been sent for approval.' })
     formSuccess.value = 'Submitted successfully.'
     resetForm()
+    resetEvidence()
     router.push(MY_REQUESTS_PATH)
   } catch (e) {
     console.error('submitRequest error', e)
@@ -712,6 +791,86 @@ onBeforeUnmount(() => {
                   <div v-if="isMA" class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
                     <span class="ui-badge ui-badge-warning">MA</span>
                     System will auto-calculate end date = start + 90 days.
+                  </div>
+                </div>
+              </div>
+              <!-- Evidence Attachments (Optional) -->
+              <div class="ui-card p-3">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <div class="grid h-9 w-9 place-items-center rounded-2xl bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                      <i class="fa-solid fa-paperclip" />
+                    </div>
+                    <div>
+                      <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">
+                        Evidence (Optional)
+                      </div>
+                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                        Images, PDF, Word, Excel (max 5MB each)
+                      </div>
+                    </div>
+                  </div>
+
+                  <span class="ui-badge ui-badge-info text-[10px]">
+                    {{ evidenceFiles.length }} file(s)
+                  </span>
+                </div>
+
+                <div class="mt-3">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".png,.jpg,.jpeg,.webp,.pdf,.doc,.docx,.xls,.xlsx"
+                    class="block w-full text-[12px]
+                          file:mr-3 file:rounded-xl file:border-0 file:bg-sky-50 file:px-4 file:py-2
+                          file:text-[12px] file:font-semibold file:text-slate-800 hover:file:bg-sky-100
+                          dark:file:bg-white/10 dark:file:text-white dark:hover:file:bg-white/15"
+                    @change="onPickEvidence"
+                  />
+                </div>
+
+                <div v-if="evidenceError" class="mt-2 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                  {{ evidenceError }}
+                </div>
+
+                <!-- Preview list -->
+                <div v-if="evidenceFiles.length" class="mt-3 space-y-2">
+                  <div
+                    v-for="e in evidenceFiles"
+                    :key="e.id"
+                    class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2
+                          dark:border-slate-800 dark:bg-slate-900/40"
+                  >
+                    <div class="flex items-center gap-3 min-w-0">
+                      <!-- Image preview -->
+                      <img
+                        v-if="e.previewUrl"
+                        :src="e.previewUrl"
+                        class="h-10 w-10 rounded-lg object-cover border border-slate-200 dark:border-slate-800"
+                      />
+
+                      <!-- File icon -->
+                      <div v-else class="grid h-10 w-10 place-items-center rounded-lg bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        <i class="fa-solid fa-file" />
+                      </div>
+
+                      <div class="min-w-0">
+                        <div class="truncate text-[12px] font-semibold text-slate-900 dark:text-slate-50">
+                          {{ e.file.name }}
+                        </div>
+                        <div class="text-[10px] text-slate-500 dark:text-slate-400">
+                          {{ (e.file.size / 1024).toFixed(1) }} KB
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      class="ui-btn ui-btn-ghost ui-btn-xs"
+                      @click="removeEvidence(e.id)"
+                    >
+                      <i class="fa-solid fa-xmark" />
+                    </button>
                   </div>
                 </div>
               </div>

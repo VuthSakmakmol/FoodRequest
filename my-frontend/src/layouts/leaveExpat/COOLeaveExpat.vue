@@ -1,6 +1,15 @@
-<!-- src/layouts/LeaveExpat/COOLeaveExpat.vue -->
+<!-- src/layouts/LeaveExpat/COOLeaveExpat.vue
+  ✅ Works with your layout system (desktop sidebar + mobile overlay + topbar)
+  ✅ Mobile: sidebar is overlay ONLY (desktop sidebar stays visible on md+)
+  ✅ Desktop: sidebar can collapse (64 <-> 16)
+  ✅ Route-based accordion open state (keeps the right group open)
+  ✅ Uses ONE ToastContainer
+  ✅ No repeated hard-coded "COO" (ROLE_LABEL controls wording)
+  ✅ Safe initials + display name fallbacks
+-->
+
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
 import ToastContainer from '@/components/AppToast.vue'
@@ -15,10 +24,26 @@ const auth = useAuth()
 const ROLE_LABEL = 'COO'
 const PORTAL_TITLE = 'Expat Leave Portal'
 
-/* ───────── Sidebar state ───────── */
-const sidebarOpen = ref(true)
+/* ───────── Responsive / Sidebar state ───────── */
+const isMobile = ref(false)
+function updateIsMobile() {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
 
-/* Nav groups */
+/* Desktop collapse + Mobile overlay */
+const desktopCollapsed = ref(false) // md+ collapse toggle
+const mobileOpen = ref(false) // <md drawer open
+
+function toggleSidebar() {
+  if (isMobile.value) mobileOpen.value = !mobileOpen.value
+  else desktopCollapsed.value = !desktopCollapsed.value
+}
+function closeMobile() {
+  mobileOpen.value = false
+}
+
+/* ───────── Nav groups ───────── */
 const groups = [
   {
     key: 'approvals',
@@ -28,31 +53,52 @@ const groups = [
   },
 ]
 
-/* Open/close state (accordion) */
-const open = reactive(
-  Object.fromEntries(groups.map((g) => [g.key, g.children.some((c) => c.to?.name === route.name)]))
-)
+/* Accordion open state */
+const open = reactive(Object.fromEntries(groups.map((g) => [g.key, false])))
+
+function syncOpenFromRoute(name) {
+  groups.forEach((g) => {
+    open[g.key] = g.children.some((c) => c.to?.name === name)
+  })
+}
+
+/* Init open from current route */
+syncOpenFromRoute(route.name)
 
 /* Keep correct group open when route changes */
 watch(
   () => route.name,
   (name) => {
-    groups.forEach((g) => {
-      if (g.children.some((c) => c.to?.name === name)) open[g.key] = true
-    })
+    syncOpenFromRoute(name)
+    if (isMobile.value) closeMobile()
   }
 )
 
-/* Helpers */
-const initials = computed(() => (auth.user?.name || auth.user?.loginId || 'U').slice(0, 2).toUpperCase())
+/* Resize behavior */
+onMounted(() => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+})
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+})
 
-const userDisplayName = computed(() => auth.user?.name || auth.user?.loginId || ROLE_LABEL)
+/* Helpers */
+function safeStr(v) {
+  const s = String(v ?? '').trim()
+  return s || ''
+}
+const initials = computed(() => {
+  const base = safeStr(auth.user?.name) || safeStr(auth.user?.loginId) || 'U'
+  return base.slice(0, 2).toUpperCase()
+})
+
+const userDisplayName = computed(() => safeStr(auth.user?.name) || safeStr(auth.user?.loginId) || ROLE_LABEL)
 
 const roleDisplay = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const base = auth.user?.role ? [auth.user.role] : []
-  const roles = [...new Set([...raw, ...base].map((r) => String(r || '').trim()).filter(Boolean))]
-  // If empty, fallback to label (so we never show COO hard-coded everywhere)
+  const roles = [...new Set([...raw, ...base].map((r) => safeStr(r)).filter(Boolean))]
   return roles.length ? roles.join(', ') : `LEAVE_${ROLE_LABEL}`
 })
 
@@ -87,12 +133,12 @@ async function toggleAuth() {
     <!-- ✅ ONLY ONE toast renderer -->
     <ToastContainer />
 
-    <!-- Desktop sidebar -->
+    <!-- Desktop sidebar (md+) -->
     <aside
       class="hidden h-full flex-col border-r border-slate-300 bg-white text-sm
              shadow-[0_0_18px_rgba(15,23,42,0.10)]
              dark:border-slate-800 dark:bg-slate-950/95 md:flex"
-      :class="sidebarOpen ? 'w-64' : 'w-16'"
+      :class="desktopCollapsed ? 'w-16' : 'w-64'"
     >
       <!-- Top mini bar -->
       <div
@@ -102,17 +148,16 @@ async function toggleAuth() {
         <button
           type="button"
           class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-          @click="sidebarOpen = !sidebarOpen"
+          @click="toggleSidebar"
         >
           <i class="fa-solid fa-bars text-[13px]"></i>
         </button>
 
-        <!-- ✅ no repeated "COO" -->
-        <span v-if="sidebarOpen" class="ml-1 truncate text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+        <span v-if="!desktopCollapsed" class="ml-1 truncate text-[11px] font-semibold text-slate-600 dark:text-slate-400">
           {{ PORTAL_TITLE }}
         </span>
 
-        <span v-if="sidebarOpen" class="w-8"></span>
+        <span v-if="!desktopCollapsed" class="w-8"></span>
       </div>
 
       <!-- Nav groups -->
@@ -128,10 +173,10 @@ async function toggleAuth() {
             >
               <span class="flex items-center gap-2">
                 <i :class="[g.icon, 'text-[13px]']"></i>
-                <span v-if="sidebarOpen" class="truncate">{{ g.header }}</span>
+                <span v-if="!desktopCollapsed" class="truncate">{{ g.header }}</span>
               </span>
               <i
-                v-if="sidebarOpen"
+                v-if="!desktopCollapsed"
                 class="fa-solid text-[10px] text-slate-400"
                 :class="open[g.key] ? 'fa-chevron-up' : 'fa-chevron-down'"
               ></i>
@@ -151,7 +196,7 @@ async function toggleAuth() {
                 @click="handleNavClick(it)"
               >
                 <i :class="[it.icon, 'text-[12px]']"></i>
-                <span v-if="sidebarOpen" class="truncate">{{ it.label }}</span>
+                <span v-if="!desktopCollapsed" class="truncate">{{ it.label }}</span>
               </button>
             </div>
           </div>
@@ -160,20 +205,13 @@ async function toggleAuth() {
 
       <!-- User chip -->
       <div class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px] dark:border-slate-800">
-        <div
-          class="flex h-7 w-7 items-center justify-center rounded-full
-                 bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
-        >
+        <div class="flex h-7 w-7 items-center justify-center rounded-full bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white">
           {{ initials }}
         </div>
 
-        <div v-if="sidebarOpen" class="ml-2 min-w-0 flex-1">
-          <div class="truncate font-semibold">
-            {{ userDisplayName }}
-          </div>
-          <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
-            {{ roleDisplay }}
-          </div>
+        <div v-if="!desktopCollapsed" class="ml-2 min-w-0 flex-1">
+          <div class="truncate font-semibold">{{ userDisplayName }}</div>
+          <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">{{ roleDisplay }}</div>
         </div>
 
         <button
@@ -183,94 +221,90 @@ async function toggleAuth() {
           @click="toggleAuth"
         >
           <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[10px]"></i>
-          <span v-if="sidebarOpen">{{ auth.user ? 'Logout' : 'Go' }}</span>
+          <span v-if="!desktopCollapsed">{{ auth.user ? 'Logout' : 'Go' }}</span>
         </button>
       </div>
     </aside>
 
-    <!-- Mobile sidebar -->
+    <!-- Mobile overlay + sidebar (md-) -->
     <transition name="fade">
-      <aside
-        v-if="sidebarOpen"
-        class="fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-slate-300 bg-white
-               text-sm shadow-lg dark:border-slate-800 dark:bg-slate-950/95 md:hidden"
-      >
-        <div class="flex items-center justify-between border-b border-slate-300 px-2 py-2 dark:border-slate-800">
-          <span class="ml-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
-            {{ PORTAL_TITLE }}
-          </span>
-          <button
-            type="button"
-            class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
-            @click="sidebarOpen = false"
-          >
-            <i class="fa-solid fa-xmark text-[13px]"></i>
-          </button>
-        </div>
+      <div v-if="mobileOpen" class="fixed inset-0 z-30 md:hidden">
+        <div class="absolute inset-0 bg-slate-950/55 backdrop-blur-[1px]" @click="closeMobile" />
+        <aside
+          class="absolute inset-y-0 left-0 flex w-64 flex-col border-r border-slate-300 bg-white text-sm shadow-2xl
+                 dark:border-slate-800 dark:bg-slate-950/95"
+        >
+          <div class="flex items-center justify-between border-b border-slate-300 px-2 py-2 dark:border-slate-800">
+            <span class="ml-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
+              {{ PORTAL_TITLE }}
+            </span>
+            <button
+              type="button"
+              class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
+              @click="closeMobile"
+            >
+              <i class="fa-solid fa-xmark text-[13px]"></i>
+            </button>
+          </div>
 
-        <nav class="flex-1 overflow-y-auto">
-          <div class="py-1">
-            <div v-for="g in groups" :key="g.key + '-m'" class="px-1">
-              <button
-                type="button"
-                class="mt-1 flex w-full items-center justify-between rounded-md px-1.5 py-1.5
-                       text-[12px] font-semibold text-slate-700 transition
-                       hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="handleSectionClick(g.key)"
-              >
-                <span class="flex items-center gap-2">
-                  <i :class="[g.icon, 'text-[13px]']"></i>
-                  <span class="truncate">{{ g.header }}</span>
-                </span>
-                <i
-                  class="fa-solid text-[10px] text-slate-400"
-                  :class="open[g.key] ? 'fa-chevron-up' : 'fa-chevron-down'"
-                ></i>
-              </button>
-
-              <div v-show="open[g.key]" class="mt-0.5 space-y-0.5 pb-1">
+          <nav class="flex-1 overflow-y-auto">
+            <div class="py-1">
+              <div v-for="g in groups" :key="g.key + '-m'" class="px-1">
                 <button
-                  v-for="it in g.children"
-                  :key="it.label + '-m'"
                   type="button"
-                  class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px] transition border"
-                  :class="
-                    isActive(it)
-                      ? 'bg-[oklch(60%_0.118_184.704)] text-white border-[oklch(60%_0.118_184.704)]'
-                      : 'text-slate-700 border-slate-300 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800'
-                  "
-                  @click="handleNavClick(it); sidebarOpen = false"
+                  class="mt-1 flex w-full items-center justify-between rounded-md px-1.5 py-1.5
+                         text-[12px] font-semibold text-slate-700 transition
+                         hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                  @click="handleSectionClick(g.key)"
                 >
-                  <i :class="[it.icon, 'text-[12px]']"></i>
-                  <span class="truncate">{{ it.label }}</span>
+                  <span class="flex items-center gap-2">
+                    <i :class="[g.icon, 'text-[13px]']"></i>
+                    <span class="truncate">{{ g.header }}</span>
+                  </span>
+                  <i class="fa-solid text-[10px] text-slate-400" :class="open[g.key] ? 'fa-chevron-up' : 'fa-chevron-down'"></i>
                 </button>
+
+                <div v-show="open[g.key]" class="mt-0.5 space-y-0.5 pb-1">
+                  <button
+                    v-for="it in g.children"
+                    :key="it.label + '-m'"
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px] transition border"
+                    :class="
+                      isActive(it)
+                        ? 'bg-[oklch(60%_0.118_184.704)] text-white border-[oklch(60%_0.118_184.704)]'
+                        : 'text-slate-700 border-slate-300 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800'
+                    "
+                    @click="handleNavClick(it)"
+                  >
+                    <i :class="[it.icon, 'text-[12px]']"></i>
+                    <span class="truncate">{{ it.label }}</span>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </nav>
+          </nav>
 
-        <div class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px] dark:border-slate-800">
-          <div
-            class="flex h-7 w-7 items-center justify-center rounded-full
-                   bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
-          >
-            {{ initials }}
+          <div class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px] dark:border-slate-800">
+            <div class="flex h-7 w-7 items-center justify-center rounded-full bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white">
+              {{ initials }}
+            </div>
+            <div class="ml-2 min-w-0 flex-1">
+              <div class="truncate font-semibold">{{ userDisplayName }}</div>
+              <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">{{ roleDisplay }}</div>
+            </div>
+            <button
+              type="button"
+              class="ml-auto inline-flex h-7 items-center justify-center rounded-md px-2 text-[11px]
+                     text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+              @click="toggleAuth"
+            >
+              <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[10px]"></i>
+              <span>{{ auth.user ? 'Logout' : 'Go' }}</span>
+            </button>
           </div>
-          <div class="ml-2 min-w-0 flex-1">
-            <div class="truncate font-semibold">{{ userDisplayName }}</div>
-            <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">{{ roleDisplay }}</div>
-          </div>
-          <button
-            type="button"
-            class="ml-auto inline-flex h-7 items-center justify-center rounded-md px-2 text-[11px]
-                   text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-            @click="toggleAuth"
-          >
-            <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[10px]"></i>
-            <span>{{ auth.user ? 'Logout' : 'Go' }}</span>
-          </button>
-        </div>
-      </aside>
+        </aside>
+      </div>
     </transition>
 
     <!-- Main -->
@@ -284,7 +318,7 @@ async function toggleAuth() {
           <button
             type="button"
             class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 md:hidden"
-            @click="sidebarOpen = !sidebarOpen"
+            @click="toggleSidebar"
           >
             <i class="fa-solid fa-bars text-[13px]"></i>
           </button>
