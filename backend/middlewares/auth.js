@@ -11,7 +11,30 @@ function getUserRolesFromJwtPayload(payload) {
   return [...new Set([...rolesArr, ...roleOne].map(normalizeRole).filter(Boolean))]
 }
 
+// ✅ Public paths (NEVER require token / role)
+function isPublic(req) {
+  const url = String(req.originalUrl || '')
+
+  // health checks
+  if (url === '/healthz') return true
+  if (url === '/api/health') return true
+
+  // auth login should stay public
+  if (url.startsWith('/api/auth/login')) return true
+
+  // all public APIs
+  if (url.startsWith('/api/public/')) return true
+
+  // socket.io handshake endpoints should not be blocked by role middleware
+  if (url.startsWith('/socket.io/')) return true
+
+  return false
+}
+
 exports.requireAuth = (req, res, next) => {
+  // ✅ allow public endpoints
+  if (isPublic(req)) return next()
+
   console.log('[MW] requireAuth →', req.method, req.originalUrl)
 
   const hdr = req.headers.authorization || ''
@@ -36,6 +59,7 @@ exports.requireAuth = (req, res, next) => {
       console.log('[MW] requireAuth ✅ fallback verify OK')
     }
 
+    // compat: some old tokens may use id instead of loginId
     if (!payload.loginId && payload.id) payload.loginId = payload.id
 
     payload.roles = getUserRolesFromJwtPayload(payload)
@@ -55,6 +79,9 @@ exports.requireRole = (...roles) => {
   const allow = roles.map(normalizeRole).filter(Boolean)
 
   return (req, res, next) => {
+    // ✅ NEVER role-protect public endpoints
+    if (isPublic(req)) return next()
+
     console.log('[MW] requireRole(', allow.join(','), ') →', req.method, req.originalUrl)
 
     if (!req.user) {
@@ -69,7 +96,7 @@ exports.requireRole = (...roles) => {
     console.log('[MW] requireRole user=', req.user.loginId, 'has=', all)
 
     if (!all.some((r) => allow.includes(r))) {
-      console.log('[MW] requireRole ❌ FORBIDDEN (missing role). allow=', allow, 'has=', all)
+      console.log('[MW] requireRole ❌ FORBIDDEN. allow=', allow, 'has=', all)
       return res.status(403).json({ message: 'Forbidden' })
     }
 

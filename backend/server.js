@@ -160,11 +160,12 @@ app.use('/api/leave', require('./routes/leave/leaveUser.routes'))       // ✅ u
 app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
 
 // Reports + signatures
-app.use('/api', require('./routes/leave/leaveReport-admin.routes'))
-app.use('/api', require('./routes/files/signature.admin.routes'))
+app.use('/api/admin/leave', require('./routes/leave/leaveReport-admin.routes'))
+app.use('/api/admin/leave', require('./routes/files/signature.admin.routes'))
 
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
+
 app.use('/api/public', require('./routes/food/food-public.routes'))
 
 // ========================== Food ==========================

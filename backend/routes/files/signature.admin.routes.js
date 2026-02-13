@@ -2,8 +2,13 @@
 const express = require('express')
 const multer = require('multer')
 const ctrl = require('../../controllers/files/signature.admin.controller')
+const auth = require('../../middlewares/auth')
 
 const router = express.Router()
+
+// ✅ protect this router (admin only)
+router.use(auth.requireAuth)
+router.use(auth.requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'))
 
 function fileFilter(_req, file, cb) {
   const ok = ['image/png', 'image/jpeg', 'image/webp'].includes(file.mimetype)
@@ -37,27 +42,49 @@ function runUpload(req, res, next) {
   })
 }
 
-// meta (NO 404 spam)
-router.get('/admin/signatures/employees/:employeeId', ctrl.getEmployeeSignature)
-router.get('/admin/signatures/users/:loginId', ctrl.getUserSignature)
+/**
+ * Mounted at: /api/admin
+ * FINAL URLs:
+ *  - GET    /api/admin/signatures/employees/:employeeId
+ *  - GET    /api/admin/signatures/users/:loginId
+ *  - GET    /api/admin/signatures/:kind/:id/content
+ *  - POST   /api/admin/signatures/users/:loginId
+ *  - POST   /api/admin/signatures/employees/:employeeId
+ *  - DELETE /api/admin/signatures/:kind/:id
+ */
+
+// meta
+router.get('/signatures/employees/:employeeId', ctrl.getEmployeeSignature)
+router.get('/signatures/users/:loginId', ctrl.getUserSignature)
 
 // stream the image from MongoDB (GridFS)
-router.get('/admin/signatures/:kind/:id/content', validateKind, ctrl.streamSignature)
+router.get('/signatures/:kind/:id/content', validateKind, ctrl.streamSignature)
 
-// Vue endpoints (exact)
-router.post('/admin/signatures/users/:loginId', (req, _res, next) => {
-  req.params.kind = 'users'
-  req.params.id = req.params.loginId
-  next()
-}, runUpload, ctrl.uploadSignature)
+// upload (users)
+router.post(
+  '/signatures/users/:loginId',
+  (req, _res, next) => {
+    req.params.kind = 'users'
+    req.params.id = req.params.loginId
+    next()
+  },
+  runUpload,
+  ctrl.uploadSignature
+)
 
-router.post('/admin/signatures/employees/:employeeId', (req, _res, next) => {
-  req.params.kind = 'employees'
-  req.params.id = req.params.employeeId
-  next()
-}, runUpload, ctrl.uploadSignature)
+// upload (employees)
+router.post(
+  '/signatures/employees/:employeeId',
+  (req, _res, next) => {
+    req.params.kind = 'employees'
+    req.params.id = req.params.employeeId
+    next()
+  },
+  runUpload,
+  ctrl.uploadSignature
+)
 
-// optional delete
-router.delete('/admin/signatures/:kind/:id', validateKind, ctrl.deleteSignature)
+// delete
+router.delete('/signatures/:kind/:id', validateKind, ctrl.deleteSignature)
 
 module.exports = router

@@ -1147,9 +1147,11 @@ async function messengerUpdateStatus(req, res, next) {
   }
 }
 
-async function listMessengerTasks(req, res) {
+async function listMessengerTasks(req, res, next) {
   try {
-    const messengerId = req.query.messengerId || req.headers['x-login-id']
+    const messengerId =
+      String(req.query.messengerId || req.query.loginId || req.headers['x-login-id'] || req.user?.loginId || '').trim()
+
     if (!messengerId) return res.status(400).json({ message: 'messengerId missing' })
 
     const filter = {
@@ -1159,18 +1161,17 @@ async function listMessengerTasks(req, res) {
       ],
     }
 
-    if (req.query.date) filter.tripDate = req.query.date
-    if (req.query.status && req.query.status !== 'ALL') filter.status = req.query.status
+    if (req.query.date) filter.tripDate = String(req.query.date)
+    if (req.query.status && req.query.status !== 'ALL') filter.status = String(req.query.status).toUpperCase()
 
     const rows = await CarBooking.find(filter)
       .sort({ tripDate: -1, timeStart: 1 })
       .lean()
 
-    if (!rows.length) return res.status(404).json({ message: 'Not found' })
-    res.json(rows)
+    // ✅ IMPORTANT: empty list is NOT an error
+    return res.json(rows || [])
   } catch (err) {
-    console.error('listMessengerTasks error', err)
-    res.status(500).json({ message: err.message || 'Internal error' })
+    next(err)
   }
 }
 
