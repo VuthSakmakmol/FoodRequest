@@ -132,15 +132,19 @@ function mapToPdfCode(systemCode) {
   const c = up(systemCode)
   if (c === 'MC') return 'SL'
   if (c === 'MA') return 'ML'
+  // ✅ BL stays BL (explicit)
+  if (c === 'BL') return 'BL'
   return c
 }
 
+/** ✅ Add BL_day support */
 function dayColsForPdf(pdfCode, totalDays) {
   const d = num(totalDays)
   return {
     UL_day: pdfCode === 'UL' ? d : '',
     SL_day: pdfCode === 'SL' ? d : '',
     ML_day: pdfCode === 'ML' ? d : '',
+    BL_day: pdfCode === 'BL' ? d : '', // ✅ NEW
   }
 }
 
@@ -192,7 +196,6 @@ function listContractsMeta(profile) {
 
 function normMode(v) {
   if (typeof LeaveRequest.normalizeMode === 'function') return LeaveRequest.normalizeMode(v)
-  // fallback (should not happen if you used the updated LeaveRequest model)
   const m = up(v)
   if (m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'MANAGER_AND_GM') return m
   return 'MANAGER_AND_GM'
@@ -214,21 +217,18 @@ function modeHasCoo(mode) {
 function shouldShowManagerSig(mode, status) {
   if (!modeHasManager(mode)) return false
   const st = up(status)
-  // manager considered "approved" once it moves beyond PENDING_MANAGER
   return st === 'PENDING_GM' || st === 'PENDING_COO' || st === 'APPROVED'
 }
 
 function shouldShowGmSig(mode, status) {
   if (!modeHasGm(mode)) return false
   const st = up(status)
-  // gm considered "approved" once it moves beyond PENDING_GM (or final approved)
   return st === 'PENDING_COO' || st === 'APPROVED'
 }
 
 function shouldShowCooSig(mode, status) {
   if (!modeHasCoo(mode)) return false
   const st = up(status)
-  // COO shown only after final approved
   return st === 'APPROVED'
 }
 
@@ -264,7 +264,6 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       (await LeaveProfile.findOne({ employeeId: Number(employeeId) }).lean())
     if (!profile) return res.status(404).json({ message: 'Leave profile not found.' })
 
-    // ✅ Enrich meta (name/department/section/joinDate)
     const dir = await EmployeeDirectory.findOne(
       { employeeId: buildEmpIdIn(employeeId) },
       { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1, section: 1, joinDate: 1 }
@@ -275,7 +274,6 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
     const metaSection = safeText(dir?.section || profile?.section || 'Foreigner')
     const metaJoinDate = toYMD(dir?.joinDate || profile?.joinDate || profile?.meta?.joinDate)
 
-    // ✅ Your system signature for Checked By
     const checkedByLoginId = safeText(process.env.LEAVE_ADMIN_LOGIN_ID || 'leave_admin')
 
     const requested = pickContract(profile, { contractId, contractNo })
@@ -290,12 +288,10 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       .sort({ startDate: 1, createdAt: 1 })
       .lean()
 
-    // Filter to contract window + optional range + asOf
     docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, selectedContract.startDate, selectedContract.endDate))
     if (from && to) docs = docs.filter((r) => overlapsRange(r.startDate, r.endDate, from, to))
     if (asOf) docs = docs.filter((r) => toYMD(r.startDate) <= asOf)
 
-    // Only approved rows are used for remaining calculation
     const approved = docs.filter((r) => up(r.status) === 'APPROVED')
     const approvedIndex = new Map(approved.map((r, i) => [String(r._id), i]))
 
@@ -309,8 +305,6 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
       if (st === 'APPROVED') {
         const idx = approvedIndex.get(String(r._id))
         const hist = idx >= 0 ? approved.slice(0, idx + 1) : approved
-
-        // compute AL remaining as-of endDate of this row
         const snap = computeBalances(profile, hist, phnomPenhMidnightDate(toYMD(r.endDate || r.startDate)))
         const al = (snap?.balances || []).find((b) => up(b.leaveTypeCode) === 'AL')
         alRemain = num(al?.remaining)
@@ -318,7 +312,6 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
 
       const pdfCode = mapToPdfCode(sysCode)
 
-      // Approvers: prefer per-request (historically correct), fallback to profile
       const mgrId = safeText(r.managerLoginId || profile.managerLoginId || '')
       const gmId = safeText(r.gmLoginId || profile.gmLoginId || '')
       const cooId = safeText(r.cooLoginId || profile.cooLoginId || '')
@@ -330,14 +323,13 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
         from: toYMD(r.startDate),
         to: toYMD(r.endDate || r.startDate),
 
-        // ✅ show in correct column
         AL_day: sysCode === 'AL' ? num(r.totalDays) : '',
         SP_day: sysCode === 'SP' ? num(r.totalDays) : '',
 
         // ✅ show AL remaining for BOTH AL and SP (SP borrows AL)
         AL_remain: sysCode === 'AL' || sysCode === 'SP' ? alRemain : '',
 
-        // ✅ UL / SL / ML columns
+        // ✅ UL / SL / ML / BL columns
         ...dayColsForPdf(pdfCode, r.totalDays),
 
         // ✅ system for template + excel
@@ -345,7 +337,6 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
         status: r.status,
         approvalMode: mode,
 
-        // ✅ Signature IDs (frontend reads these)
         recordByEmployeeId: safeText(profile.employeeId),
         checkedByLoginId,
 
@@ -368,7 +359,6 @@ exports.getEmployeeLeaveRecord = async (req, res) => {
         contract: contractMeta(selectedContract),
         contracts: listContractsMeta(profile),
 
-        // if caller doesn't pass asOf, include "today" for display only (does NOT filter)
         asOf: asOf || null,
         generatedAt: nowYMD(),
       },

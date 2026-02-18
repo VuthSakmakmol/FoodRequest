@@ -149,9 +149,6 @@ app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'))
 // User profiles (self/team)
 app.use('/api/leave/user', require('./routes/leave/leaveProfile.user.routes'))
 
-// Replace days
-app.use('/api/leave/replace-days', require('./routes/leave/replaceDay.routes'))
-
 // Admin leave
 app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
 

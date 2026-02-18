@@ -232,6 +232,7 @@ async function exportRecordExcel() {
       UL_Day: r.UL_day ?? '',
       SL_Day: r.SL_day ?? '',
       ML_Day: r.ML_day ?? '',
+      BL_Day: r.BL_day ?? '',
 
       RecordBy: r.recordByEmployeeId || r.employeeId || r.recordByLoginId || r.recordBy || '',
       CheckedBy: LEAVE_ADMIN_LOGIN,
@@ -1202,6 +1203,7 @@ onBeforeUnmount(() => {
                           <span><b>SL</b>: Sick Leave</span>
                           <span><b>ML</b>: Maternity Leave</span>
                           <span><b>UL</b>: Unpaid Leave</span>
+                          <span><b>BL</b>: Business Leave</span>
                         </div>
                     </div>
                   </div>
@@ -1218,6 +1220,7 @@ onBeforeUnmount(() => {
                       <col style="width: 12mm;" /> <!-- SP Day -->
                       <col style="width: 12mm;" /> <!-- AL Remain -->
 
+                      <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
                       <col style="width: 8mm;" />
@@ -1239,6 +1242,7 @@ onBeforeUnmount(() => {
                         <th rowspan="2">UL<br />Day</th>
                         <th rowspan="2">SL<br />Day</th>
                         <th rowspan="2">ML<br />Day</th>
+                        <th rowspan="2">BL<br />Day</th>
                         <th rowspan="2">Record<br />By</th>
                         <th rowspan="2">Checked<br />by</th>
                         <th colspan="2">Approved by</th>
@@ -1271,6 +1275,7 @@ onBeforeUnmount(() => {
                         <td class="mono center">{{ r.UL_day ?? '' }}</td>
                         <td class="mono center">{{ r.SL_day ?? '' }}</td>
                         <td class="mono center">{{ r.ML_day ?? '' }}</td>
+                        <td class="mono center">{{ r.BL_day ?? '' }}</td>
 
                         <!-- Record By signature (employee) -->
                         <td class="small">
@@ -1329,7 +1334,7 @@ onBeforeUnmount(() => {
                         :key="'blank-' + n"
                         class="blank-row"
                       >
-                        <td v-for="c in 14" :key="c">&nbsp;</td>
+                        <td v-for="c in 15" :key="c">&nbsp;</td>
                       </tr>
 
                     </tbody>
