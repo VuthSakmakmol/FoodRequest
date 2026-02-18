@@ -163,6 +163,8 @@ app.use('/api/admin', require('./routes/files/signature.admin.routes'))
 
 app.use('/api/leave', require('./routes/leave/leave.public.routes'))
 
+// Swap Working Day
+app.use('/api/leave', require('./routes/leave/swapWorkingDay.routes'))
 
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))

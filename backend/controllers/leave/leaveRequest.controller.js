@@ -18,6 +18,11 @@
 //    PENDING_MANAGER, PENDING_GM, PENDING_COO, APPROVED, REJECTED, CANCELLED
 //
 // ✅ Realtime + Telegram (best-effort) + recalc profile after decision
+//
+// ✅ NEW: STRICT duplicate prevention per date+half
+//    - blocks only same date+half slot (AM/PM)
+//    - allows AM if only PM exists, and vice versa
+//    - full-day blocks both halves
 
 const createError = require('http-errors')
 
@@ -219,39 +224,38 @@ function initialStatusForMode(mode) {
 function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
   const m = normalizeMode(mode)
 
-  const steps = []
-  const push = (level, loginId) => {
-    const id = s(loginId)
-    steps.push({
-      level,
-      loginId: id || '-',
-      status: id ? 'PENDING' : 'SKIPPED',
-      actedAt: null,
-      note: '',
-    })
+  const need = (label, v) => {
+    const id = s(v)
+    if (!id) throw createError(400, `${label} approver is missing in profile`)
+    return id
   }
 
   if (m === 'MANAGER_AND_GM') {
-    push('MANAGER', managerLoginId)
-    push('GM', gmLoginId)
-  } else if (m === 'MANAGER_AND_COO') {
-    push('MANAGER', managerLoginId)
-    push('COO', cooLoginId)
-  } else if (m === 'GM_AND_COO') {
-    push('GM', gmLoginId)
-    push('COO', cooLoginId)
-  } else {
-    push('MANAGER', managerLoginId)
-    push('GM', gmLoginId)
+    return [
+      { level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' },
+      { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
+    ]
   }
 
-  const seen = new Set()
-  return steps.filter((x) => {
-    const key = up(x.level)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  if (m === 'MANAGER_AND_COO') {
+    return [
+      { level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' },
+      { level: 'COO', loginId: need('COO', cooLoginId), status: 'PENDING', actedAt: null, note: '' },
+    ]
+  }
+
+  if (m === 'GM_AND_COO') {
+    return [
+      { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
+      { level: 'COO', loginId: need('COO', cooLoginId), status: 'PENDING', actedAt: null, note: '' },
+    ]
+  }
+
+  // safest fallback
+  return [
+    { level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' },
+    { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
+  ]
 }
 
 function markApproval(approvals, level, status, note = '') {
@@ -280,6 +284,175 @@ function nextStatusAfterGmApprove(mode) {
 
 function nextStatusAfterCooApprove() {
   return 'APPROVED'
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ✅ NEW: STRICT no-duplicate date+half guard
+───────────────────────────────────────────────────────────── */
+
+function isValidYMD(v) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
+}
+
+function ymdFromAny(v) {
+  if (!v) return ''
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (isValidYMD(t)) return t
+    const d = new Date(t)
+    return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+  }
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? '' : v.toISOString().slice(0, 10)
+  const d = new Date(v)
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
+}
+
+function toUtcDateFromYmd(ymd) {
+  if (!isValidYMD(ymd)) return null
+  return new Date(`${ymd}T00:00:00.000Z`)
+}
+
+/** ✅ support old numeric employeeId data + new string employeeId */
+function buildEmpIdIn(employeeId) {
+  const sid = String(employeeId || '').trim()
+  const n = Number(sid)
+  const list = [sid]
+  if (Number.isFinite(n)) list.push(n)
+  return { $in: [...new Set(list)] }
+}
+
+function normHalf(v) {
+  const h = up(v)
+  if (!h) return ''
+  if (h === 'AM' || h === 'PM') return h
+  if (h === 'MORNING') return 'AM'
+  if (h === 'AFTERNOON') return 'PM'
+  // keep only AM/PM
+  return ''
+}
+
+function addSlot(map, dateYmd, half /* 'AM'|'PM' */) {
+  if (!dateYmd || !half) return
+  if (!map.has(dateYmd)) map.set(dateYmd, { AM: false, PM: false })
+  const obj = map.get(dateYmd)
+  obj[half] = true
+}
+
+function addFullDay(map, dateYmd) {
+  addSlot(map, dateYmd, 'AM')
+  addSlot(map, dateYmd, 'PM')
+}
+
+function* iterYmdInclusive(startYmd, endYmd) {
+  const sdt = toUtcDateFromYmd(startYmd)
+  const edt = toUtcDateFromYmd(endYmd)
+  if (!sdt || !edt) return
+  const oneDay = 24 * 60 * 60 * 1000
+  for (let t = sdt.getTime(); t <= edt.getTime(); t += oneDay) {
+    yield new Date(t).toISOString().slice(0, 10)
+  }
+}
+
+/**
+ * Convert ONE leave request into occupied date-half slots.
+ * Rules:
+ * - single day:
+ *   - half-day => only AM or PM
+ *   - full-day => AM+PM
+ * - multi-day:
+ *   - first day: startHalf=PM => PM only, else full
+ *   - last day : endHalf=AM  => AM only, else full
+ *   - middle days => full
+ *
+ * Supports legacy:
+ * - isHalfDay + dayPart (AM/PM)
+ */
+function requestToSlots(reqDoc) {
+  const slots = new Map()
+
+  const startYmd = ymdFromAny(reqDoc?.startDate)
+  const endYmd = ymdFromAny(reqDoc?.endDate || reqDoc?.startDate)
+  if (!startYmd || !endYmd) return slots
+
+  const startHalf = normHalf(reqDoc?.startHalf)
+  const endHalf = normHalf(reqDoc?.endHalf)
+
+  // legacy half-day on single day
+  const legacyHalf = !!reqDoc?.isHalfDay
+  const legacyPart = normHalf(reqDoc?.dayPart)
+
+  if (startYmd === endYmd) {
+    // single day
+    const half = startHalf || endHalf || (legacyHalf ? legacyPart : '')
+    if (half === 'AM' || half === 'PM') addSlot(slots, startYmd, half)
+    else addFullDay(slots, startYmd)
+    return slots
+  }
+
+  // multi-day
+  for (const d of iterYmdInclusive(startYmd, endYmd)) {
+    if (d === startYmd) {
+      if (startHalf === 'PM') addSlot(slots, d, 'PM')
+      else addFullDay(slots, d) // startHalf AM or null => full day
+      continue
+    }
+    if (d === endYmd) {
+      if (endHalf === 'AM') addSlot(slots, d, 'AM')
+      else addFullDay(slots, d) // endHalf PM or null => full day
+      continue
+    }
+    addFullDay(slots, d)
+  }
+
+  return slots
+}
+
+function hasSlotConflict(existingSlots, desiredSlots) {
+  for (const [date, dSlots] of desiredSlots.entries()) {
+    const eSlots = existingSlots.get(date)
+    if (!eSlots) continue
+    if ((dSlots.AM && eSlots.AM) || (dSlots.PM && eSlots.PM)) return true
+  }
+  return false
+}
+
+/**
+ * STRICT per employee:
+ * - compare occupied AM/PM slots across existing requests
+ * - ignore only REJECTED / CANCELLED
+ * - excludeId used for update
+ */
+async function assertNoDuplicateDateHalf({ employeeId, normalized, excludeId = null }) {
+  const empId = s(employeeId)
+  if (!empId) return
+
+  const desiredSlots = requestToSlots(normalized)
+  if (!desiredSlots.size) return
+
+  const query = {
+    employeeId: buildEmpIdIn(empId),
+    status: { $nin: ['REJECTED', 'CANCELLED'] },
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+  }
+
+  const existing = await LeaveRequest.find(query)
+    .select('startDate endDate startHalf endHalf isHalfDay dayPart status')
+    .lean()
+
+  const occupied = new Map()
+  for (const r of existing || []) {
+    const s2 = requestToSlots(r)
+    for (const [date, halves] of s2.entries()) {
+      if (!occupied.has(date)) occupied.set(date, { AM: false, PM: false })
+      const cur = occupied.get(date)
+      cur.AM = cur.AM || !!halves.AM
+      cur.PM = cur.PM || !!halves.PM
+    }
+  }
+
+  if (hasSlotConflict(occupied, desiredSlots)) {
+    throw createError(409, 'You already requested leave for this day/half. Please select another day or half.')
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -318,6 +491,9 @@ exports.createMyRequest = async (req, res, next) => {
     }
 
     const normalized = vr.normalized
+
+    // ✅ NEW: block duplicate same date+half (allow AM if only PM exists, etc.)
+    await assertNoDuplicateDateHalf({ employeeId, normalized })
 
     const doc = await LeaveRequest.create({
       employeeId,
@@ -419,8 +595,6 @@ exports.cancelMyRequest = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    MANAGER INBOX
    GET /api/leave/requests/manager/inbox?scope=ALL
-   - default (no scope): pending only
-   - scope=ALL: show all statuses for that manager (history view)
 ───────────────────────────────────────────────────────────── */
 exports.listManagerInbox = async (req, res, next) => {
   try {
@@ -451,8 +625,6 @@ exports.listManagerInbox = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    MANAGER DECISION
    POST /api/leave/requests/:id/manager-decision
-   body: { action:"APPROVE"|"REJECT", comment?:string }
-   ❌ Admin cannot decide on behalf of manager
 ───────────────────────────────────────────────────────────── */
 exports.managerDecision = async (req, res, next) => {
   try {
@@ -555,7 +727,6 @@ exports.listGmInbox = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    GM DECISION
    POST /api/leave/requests/:id/gm-decision
-   ❌ Admin cannot decide on behalf of GM
 ───────────────────────────────────────────────────────────── */
 exports.gmDecision = async (req, res, next) => {
   try {
@@ -656,7 +827,6 @@ exports.listCooInbox = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    COO DECISION
    POST /api/leave/requests/:id/coo-decision
-   ❌ Admin cannot decide on behalf of COO
 ───────────────────────────────────────────────────────────── */
 exports.cooDecision = async (req, res, next) => {
   try {
@@ -725,7 +895,6 @@ exports.cooDecision = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    UPDATE MY REQUEST (only before any approval happened)
    PATCH /api/leave/requests/:id
-   body: { leaveTypeCode, startDate, endDate, startHalf, endHalf, isHalfDay, dayPart, reason }
 ───────────────────────────────────────────────────────────── */
 exports.updateMyRequest = async (req, res, next) => {
   try {
@@ -773,6 +942,13 @@ exports.updateMyRequest = async (req, res, next) => {
     }
 
     const normalized = vr.normalized
+
+    // ✅ NEW: block duplicate same date+half, excluding this request itself
+    await assertNoDuplicateDateHalf({
+      employeeId: existing.employeeId,
+      normalized,
+      excludeId: existing._id,
+    })
 
     // ✅ update allowed fields
     existing.leaveTypeCode = normalized.leaveTypeCode

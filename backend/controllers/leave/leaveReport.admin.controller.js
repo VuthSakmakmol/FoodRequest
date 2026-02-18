@@ -12,7 +12,6 @@
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const LeaveRequest = require('../../models/leave/LeaveRequest')
-const ReplaceDayRequest = require('../../models/leave/ReplaceDayRequest')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const LeaveType = require('../../models/leave/LeaveType')
 
