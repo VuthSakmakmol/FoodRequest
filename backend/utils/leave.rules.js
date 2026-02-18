@@ -364,12 +364,14 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
   const usedMC = sumDays('MC', approvedInPeriod)
   const usedMA = sumDays('MA', approvedInPeriod)
   const usedUL = sumDays('UL', approvedInPeriod)
+  const usedBL = sumDays('BL', approvedInPeriod)
 
   const AL_ENT = computeALByServiceYears(profile?.joinDate, now)
   const SP_ENT = 7
   const MC_ENT = 90
   const MA_ENT = 90
   const UL_ENT = 0 // unlimited
+  const BL_ENT = 0
 
   const carryRaw = getActiveCarry(profile, {
     contractId: opts?.contractId ?? null,
@@ -440,6 +442,12 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
         used: ulCarryApplied.usedDisplay,
         remaining: 0, // ✅ UL is unlimited
       },
+      {
+        leaveTypeCode: 'BL',
+        yearlyEntitlement: 0,
+        used: usedBL,
+        remaining: 0
+      }
     ],
     meta: {
       asOfYMD,

@@ -86,6 +86,19 @@ const CORE_TYPES = [
     isSystem: true,
     order: 5,
   },
+  {
+    code: 'BL',
+    name: 'Business Leave',
+    description: 'Business leave for official work/travel limit',
+    requiresBalance: 'false',
+    yearlyEntitlement: 0,
+    accrualPerMonth: 0,
+    yearlyLimit: 0,
+    fixedDurationDays: 0,
+    allowNegative: false,
+    isSystem: true,
+    order: 6
+  }
 ]
 
 async function upsertCoreTypes() {

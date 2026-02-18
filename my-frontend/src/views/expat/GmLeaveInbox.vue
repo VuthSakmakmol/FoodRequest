@@ -3,7 +3,7 @@
   ✅ Edge-to-edge (no wasted edges)
   ✅ Responsive: mobile cards + desktop fixed table with aligned columns
   ✅ Filters: search + requested date range + expat id
-  ✅ Actions: Export CSV only (Excel compatible) + Export ALL (mobile)
+  ✅ Actions: Export XLSX only (ONE button)
   ✅ Approve + Reject buttons (GM action)
   ✅ Custom confirm modal (no SweetAlert)
   ✅ Attachments: READ-ONLY (GM can preview/download like ManagerLeaveInbox.vue)
@@ -18,6 +18,7 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
+import * as XLSX from 'xlsx' // ✅ ONLY ADD: Excel export
 
 defineOptions({ name: 'GmLeaveInbox' })
 
@@ -200,24 +201,13 @@ watch(
   }
 )
 
-/* ───────── Export to Excel (CSV download; works without extra libs) ───────── */
-function csvEscape(v) {
-  const s = String(v ?? '')
-  const needs = /[",\n\r]/.test(s)
-  const escaped = s.replace(/"/g, '""')
-  return needs ? `"${escaped}"` : escaped
-}
-
-function downloadTextFile(filename, text, mime = 'text/csv;charset=utf-8') {
-  const blob = new Blob([text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 3000)
+/* ───────── ✅ Export to REAL Excel (.xlsx) (ONE export only) ───────── */
+function safeSheetName(name, fallback = 'Inbox') {
+  let s = String(name || '').trim() || fallback
+  s = s.replace(/[\\\/\?\*\[\]\:]/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+  if (s.length > 31) s = s.slice(0, 31).trim()
+  return s || fallback
 }
 
 function buildExportRows(list) {
@@ -226,7 +216,7 @@ function buildExportRows(list) {
     EmployeeId: r.employeeId || '',
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
-    LeaveType: r.leaveTypeCode || '',
+    LeaveType: r.leaveTypeCode || '', // ✅ includes BL automatically
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
     TotalDays: Number(r.totalDays || 0),
@@ -237,30 +227,41 @@ function buildExportRows(list) {
   }))
 }
 
-function exportExcel(scope = 'FILTERED') {
+function exportExcel() {
   try {
-    const list = scope === 'ALL' ? rows.value : filteredRows.value
+    // ✅ ONE export: export ALL rows from backend (not filtered)
+    const list = rows.value
+
     if (!list.length) {
       showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
       return
     }
 
     const data = buildExportRows(list)
-    const headers = Object.keys(data[0])
+    const ws = XLSX.utils.json_to_sheet(data, { skipHeader: false })
 
-    const csv = [
-      headers.map(csvEscape).join(','),
-      ...data.map((row) => headers.map((h) => csvEscape(row[h])).join(',')),
-    ].join('\n')
+    ws['!cols'] = [
+      { wch: 18 }, // RequestedAt
+      { wch: 12 }, // EmployeeId
+      { wch: 24 }, // EmployeeName
+      { wch: 18 }, // Department
+      { wch: 10 }, // LeaveType
+      { wch: 12 }, // LeaveStart
+      { wch: 12 }, // LeaveEnd
+      { wch: 10 }, // TotalDays
+      { wch: 16 }, // Status
+      { wch: 18 }, // RejectBy
+      { wch: 50 }, // RejectReason
+      { wch: 60 }, // Reason
+    ]
 
-    const tag =
-      scope === 'ALL'
-        ? 'ALL'
-        : `${fromDate.value ? `_${fromDate.value}` : ''}${toDate.value ? `_${toDate.value}` : ''}` || 'FILTERED'
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, safeSheetName('GM Inbox', 'Inbox'))
 
-    downloadTextFile(`GmInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.csv`, csv)
+    const filename = `GmInbox_ALL_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
+    XLSX.writeFile(wb, filename)
 
-    showToast({ type: 'success', title: 'Exported', message: 'Downloaded CSV (Excel compatible).' })
+    showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx) — ALL leave types.' })
   } catch (e) {
     console.error('exportExcel error', e)
     showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })
@@ -555,9 +556,9 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"
-                  @click="exportExcel('FILTERED')"
-                  :disabled="loading || !filteredRows.length"
-                  title="Export filtered list to Excel"
+                  @click="exportExcel()"
+                  :disabled="loading || !rows.length"
+                  title="Export ALL rows to Excel (.xlsx)"
                 >
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
@@ -606,17 +607,12 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center justify-between">
-              <div class="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-sm ui-btn-indigo"
-                  @click="exportExcel('FILTERED')"
-                  :disabled="loading || !filteredRows.length"
-                >
-                  <i class="fa-solid fa-file-excel text-[11px]" />
-                  Export
-                </button>
-              </div>
+                <div class="flex items-center justify-between gap-2">
+                  <button type="button" class="ui-btn ui-btn-sm ui-btn-indigo" @click="exportExcel()" :disabled="loading || !rows.length">
+                    <i class="fa-solid fa-file-excel text-[11px]" />
+                    Export
+                  </button>
+                </div>
 
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading">
                   Clear
@@ -697,13 +693,7 @@ onBeforeUnmount(() => {
 
               <!-- ✅ Actions row: attachments left, approve/reject right -->
               <div class="mt-3 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-soft"
-                  @click="openAttachments(row)"
-                  :disabled="loading"
-                  title="View attachments"
-                >
+                <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading" title="View attachments">
                   <i class="fa-solid fa-paperclip text-[11px]" />
                   Attachments
                 </button>
@@ -820,11 +810,9 @@ onBeforeUnmount(() => {
                     <div v-if="canDecide(row)" class="flex items-center justify-center gap-2">
                       <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
                         <i class="fa-solid fa-circle-check text-[11px]" />
-                    
                       </button>
                       <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
                         <i class="fa-solid fa-circle-xmark text-[11px]" />
-
                       </button>
                     </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
@@ -835,7 +823,9 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Pagination -->
-          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div class="flex items-center gap-2">
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
@@ -874,10 +864,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="mt-3 space-y-2">
-            <div
-              v-if="decideAction === 'REJECT'"
-              class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
-            >
+            <div v-if="decideAction === 'REJECT'" class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
               <label class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Reject reason</label>
               <textarea
                 v-model="rejectNote"

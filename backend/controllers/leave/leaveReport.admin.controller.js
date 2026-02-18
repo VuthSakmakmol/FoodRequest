@@ -121,7 +121,7 @@ function buildTypeOrder(leaveTypesRows = []) {
   const codes = (leaveTypesRows || [])
     .map((t) => String(t?.code || '').toUpperCase().trim())
     .filter(Boolean)
-  const fallback = ['AL', 'SP', 'MC', 'MA', 'UL']
+  const fallback = ['AL', 'SP', 'MC', 'MA', 'UL', 'BL']
   return [...new Set([...fallback, ...codes])]
 }
 

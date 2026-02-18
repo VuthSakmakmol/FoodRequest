@@ -3,7 +3,7 @@
   ✅ Edge-to-edge (no wasted edges)
   ✅ Responsive: mobile cards + desktop fixed table (scroll inside table wrap, not page overflow)
   ✅ Filters: search + requested date range + expat id
-  ✅ Export CSV (Excel compatible): Filtered + Export ALL (mobile)
+  ✅ Export XLSX (ONE button, exports ALL rows)
   ✅ Approve/Reject with confirm modal (auto close on success)
   ✅ Attachments: READ-ONLY (preview/download like GM inbox)
   ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included via api instance)
@@ -16,6 +16,7 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
+import * as XLSX from 'xlsx' // ✅ ONLY ADD: Excel export
 
 defineOptions({ name: 'CooLeaveInbox' })
 
@@ -211,24 +212,13 @@ watch(
   }
 )
 
-/* ───────── Export CSV (Excel compatible) ───────── */
-function csvEscape(v) {
-  const s = String(v ?? '')
-  const needs = /[",\n\r]/.test(s)
-  const escaped = s.replace(/"/g, '""')
-  return needs ? `"${escaped}"` : escaped
-}
-
-function downloadTextFile(filename, text, mime = 'text/csv;charset=utf-8') {
-  const blob = new Blob([text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 3000)
+/* ───────── ✅ Export to REAL Excel (.xlsx) (ONE export only) ───────── */
+function safeSheetName(name, fallback = 'Inbox') {
+  let s = String(name || '').trim() || fallback
+  s = s.replace(/[\\\/\?\*\[\]\:]/g, ' ')
+  s = s.replace(/\s+/g, ' ').trim()
+  if (s.length > 31) s = s.slice(0, 31).trim()
+  return s || fallback
 }
 
 function buildExportRows(list) {
@@ -237,10 +227,9 @@ function buildExportRows(list) {
     EmployeeId: r.employeeId || '',
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
-    LeaveType: r.leaveTypeCode || '',
+    LeaveType: r.leaveTypeCode || '', // ✅ includes BL automatically
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
-    LeaveRange: formatRange(r),
     TotalDays: Number(r.totalDays || 0),
     Status: String(r.status || ''),
     RejectBy: String(r.status || '').toUpperCase() === 'REJECTED' ? rejectedByLabel(r) : '',
@@ -249,25 +238,41 @@ function buildExportRows(list) {
   }))
 }
 
-function exportExcel(scope = 'FILTERED') {
+function exportExcel() {
   try {
-    const list = scope === 'ALL' ? rows.value : filteredRows.value
+    // ✅ ONE export: export ALL rows from backend (not filtered)
+    const list = rows.value
     if (!list.length) {
       showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
       return
     }
 
     const data = buildExportRows(list)
-    const headers = Object.keys(data[0])
+    const ws = XLSX.utils.json_to_sheet(data, { skipHeader: false })
 
-    const csv = [
-      headers.map(csvEscape).join(','),
-      ...data.map((row) => headers.map((h) => csvEscape(row[h])).join(',')),
-    ].join('\n')
+    ws['!cols'] = [
+      { wch: 18 }, // RequestedAt
+      { wch: 12 }, // EmployeeId
+      { wch: 24 }, // EmployeeName
+      { wch: 18 }, // Department
+      { wch: 10 }, // LeaveType
+      { wch: 12 }, // LeaveStart
+      { wch: 12 }, // LeaveEnd
+      { wch: 18 }, // LeaveRange
+      { wch: 10 }, // TotalDays
+      { wch: 16 }, // Status
+      { wch: 18 }, // RejectBy
+      { wch: 50 }, // RejectReason
+      { wch: 60 }, // RequestReason
+    ]
 
-    const tag = scope === 'ALL' ? 'ALL' : 'FILTERED'
-    downloadTextFile(`CooInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.csv`, csv)
-    showToast({ type: 'success', title: 'Exported', message: 'Downloaded CSV (Excel compatible).' })
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, safeSheetName('COO Inbox', 'Inbox'))
+
+    const filename = `CooInbox_ALL_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
+    XLSX.writeFile(wb, filename)
+
+    showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx) — ALL leave types.' })
   } catch (e) {
     console.error('exportExcel error', e)
     showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })
@@ -280,8 +285,7 @@ const decideRow = ref(null)
 const decideAction = ref('') // 'APPROVE' | 'REJECT'
 const rejectNote = ref('')
 
-const canDecide = (row) =>
-  canCooDecide.value && String(row?.status || '').toUpperCase() === 'PENDING_COO'
+const canDecide = (row) => canCooDecide.value && String(row?.status || '').toUpperCase() === 'PENDING_COO'
 
 function openApprove(row) {
   if (!row?._id) return
@@ -317,7 +321,10 @@ async function confirmDecision() {
 
   try {
     deciding.value = true
-    await api.post(`/leave/requests/${decideRow.value._id}/coo-decision`, { action, ...(action === 'REJECT' ? { comment } : {}) })
+    await api.post(`/leave/requests/${decideRow.value._id}/coo-decision`, {
+      action,
+      ...(action === 'REJECT' ? { comment } : {}),
+    })
 
     showToast({
       type: 'success',
@@ -569,9 +576,9 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"
-                  @click="exportExcel('FILTERED')"
-                  :disabled="loading || !filteredRows.length"
-                  title="Export filtered list to CSV"
+                  @click="exportExcel()"
+                  :disabled="loading || !rows.length"
+                  title="Export ALL rows to Excel (.xlsx)"
                 >
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
@@ -620,17 +627,11 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center justify-between">
-                              <div class="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-sm ui-btn-indigo"
-                  @click="exportExcel('FILTERED')"
-                  :disabled="loading || !filteredRows.length"
-                >
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-indigo" @click="exportExcel()" :disabled="loading || !rows.length">
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
-              </div>
+
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading">
                   Clear
                 </button>
@@ -708,15 +709,8 @@ onBeforeUnmount(() => {
                 <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
               </div>
 
-              <!-- ✅ Actions row: attachments left, approve/reject right -->
               <div class="mt-3 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-soft"
-                  @click="openAttachments(row)"
-                  :disabled="loading"
-                  title="View attachments"
-                >
+                <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading">
                   <i class="fa-solid fa-paperclip text-[11px]" />
                   Attachments
                 </button>
@@ -733,7 +727,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- Desktop table (scroll within ui-table-wrap so it never overflows laptop screen) -->
+          <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table text-left min-w-[1280px]">
               <colgroup>
@@ -820,7 +814,6 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <!-- Files -->
                   <td class="ui-td align-top text-center">
                     <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading">
                       <i class="fa-solid fa-paperclip text-[11px]" />
@@ -828,7 +821,6 @@ onBeforeUnmount(() => {
                     </button>
                   </td>
 
-                  <!-- Actions -->
                   <td class="ui-td align-top text-center">
                     <div v-if="canDecide(row)" class="flex items-center justify-center gap-2">
                       <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
@@ -865,6 +857,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- ✅ Confirm modal + Attachments modal kept exactly as your original below -->
+    <!-- (No change needed; your original code continues here.) -->
+
     <!-- ✅ Confirm modal (Approve / Reject) -->
     <div v-if="!!decideAction" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal()" />
@@ -875,9 +870,7 @@ onBeforeUnmount(() => {
               <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
                 {{ decideAction === 'APPROVE' ? 'Approve request' : 'Reject request' }}
               </p>
-              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                This will update the request status immediately.
-              </p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">This will update the request status immediately.</p>
             </div>
             <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
               <i class="fa-solid fa-xmark" />
@@ -885,10 +878,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="mt-3 space-y-2">
-            <div
-              v-if="decideAction === 'REJECT'"
-              class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900"
-            >
+            <div v-if="decideAction === 'REJECT'" class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
               <label class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Reject reason</label>
               <textarea
                 v-model="rejectNote"
@@ -897,34 +887,18 @@ onBeforeUnmount(() => {
                        placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
                 placeholder="Example: Not enough coverage during that period..."
               />
-              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                Required. This reason will be visible in request history.
-              </p>
+              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Required. This reason will be visible in request history.</p>
             </div>
 
             <div class="flex items-center justify-end gap-2 pt-1">
-              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
-                Cancel
-              </button>
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">Cancel</button>
 
-              <button
-                v-if="decideAction === 'APPROVE'"
-                type="button"
-                class="ui-btn ui-btn-sm ui-btn-emerald"
-                @click="confirmDecision"
-                :disabled="deciding"
-              >
+              <button v-if="decideAction === 'APPROVE'" type="button" class="ui-btn ui-btn-sm ui-btn-emerald" @click="confirmDecision" :disabled="deciding">
                 <i class="fa-solid fa-circle-check text-[11px]" />
                 {{ deciding ? 'Approving...' : 'Approve' }}
               </button>
 
-              <button
-                v-else
-                type="button"
-                class="ui-btn ui-btn-sm ui-btn-rose"
-                @click="confirmDecision"
-                :disabled="deciding"
-              >
+              <button v-else type="button" class="ui-btn ui-btn-sm ui-btn-rose" @click="confirmDecision" :disabled="deciding">
                 <i class="fa-solid fa-circle-xmark text-[11px]" />
                 {{ deciding ? 'Rejecting...' : 'Reject' }}
               </button>
@@ -972,9 +946,7 @@ onBeforeUnmount(() => {
               {{ attError }}
             </div>
 
-            <div v-else-if="!attItems.length" class="py-8 text-center text-[11px] text-slate-500 dark:text-slate-400">
-              No attachments.
-            </div>
+            <div v-else-if="!attItems.length" class="py-8 text-center text-[11px] text-slate-500 dark:text-slate-400">No attachments.</div>
 
             <div v-else class="ui-frame">
               <div class="divide-y divide-slate-200/70 dark:divide-slate-700/70">
@@ -995,12 +967,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="flex items-center gap-2">
-                    <button
-                      v-if="canPreviewInline(it.contentType)"
-                      type="button"
-                      class="ui-btn ui-btn-xs ui-btn-soft"
-                      @click="openPreview(it)"
-                    >
+                    <button v-if="canPreviewInline(it.contentType)" type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openPreview(it)">
                       <i class="fa-solid fa-eye text-[11px]" />
                       Preview
                     </button>
@@ -1015,9 +982,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-3 flex justify-end">
-              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">
-                Close
-              </button>
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">Close</button>
             </div>
           </div>
         </div>

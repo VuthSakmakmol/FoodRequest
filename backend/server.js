@@ -161,7 +161,12 @@ app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes
 
 // Reports + signatures
 app.use('/api/admin/leave', require('./routes/leave/leaveReport-admin.routes'))
+
 app.use('/api/admin', require('./routes/files/signature.admin.routes'))
+
+app.use('/api/leave', require('./routes/leave/leave.public.routes'))
+
+
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
 

@@ -17,6 +17,7 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
+import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'ManagerLeaveInbox' })
 
@@ -224,21 +225,37 @@ function exportExcel(scope = 'FILTERED') {
       return
     }
 
+    // data rows (LeaveType includes BL automatically)
     const data = buildExportRows(list)
-    const headers = Object.keys(data[0])
 
-    const csv = [
-      headers.map(csvEscape).join(','),
-      ...data.map((row) => headers.map((h) => csvEscape(row[h])).join(',')),
-    ].join('\n')
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(data)
+
+    // nice widths (optional)
+    ws['!cols'] = [
+      { wch: 18 }, // RequestedAt
+      { wch: 12 }, // EmployeeId
+      { wch: 22 }, // EmployeeName
+      { wch: 20 }, // Department
+      { wch: 10 }, // LeaveType (AL/SP/BL/etc)
+      { wch: 12 }, // LeaveStart
+      { wch: 12 }, // LeaveEnd
+      { wch: 10 }, // TotalDays
+      { wch: 16 }, // Status
+      { wch: 45 }, // Reason
+    ]
+
+    XLSX.utils.book_append_sheet(wb, ws, 'ManagerInbox')
 
     const tag =
       scope === 'ALL'
         ? 'ALL'
         : `${fromDate.value ? `_${fromDate.value}` : ''}${toDate.value ? `_${toDate.value}` : ''}` || 'FILTERED'
 
-    downloadTextFile(`ManagerInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.csv`, csv)
-    showToast({ type: 'success', title: 'Exported', message: 'Downloaded CSV (Excel compatible).' })
+    const filename = `ManagerInbox_${tag}_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
+    XLSX.writeFile(wb, filename)
+
+    showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx).' })
   } catch (e) {
     console.error('exportExcel error', e)
     showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })

@@ -152,7 +152,7 @@ async function loadSchedule() {
   try {
     const params = { date: selectedDate.value }
     if (statusFilter.value !== 'ALL') params.status = statusFilter.value
-    const { data } = await api.get('/admin/car-bookings', { params })
+    const { data } = await api.get('/public/transport/schedule', { params })
     rows.value = (Array.isArray(data) ? data : []).map(x => ({
       ...x,
       stops: x.stops || [],

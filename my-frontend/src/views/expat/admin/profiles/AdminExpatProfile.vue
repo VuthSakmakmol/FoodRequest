@@ -95,7 +95,7 @@ function modeLabel(mode) {
 /* balances compact chips */
 function compactBalances(balances) {
   const arr = Array.isArray(balances) ? balances : []
-  const order = ['AL', 'SP', 'MC', 'MA', 'UL']
+  const order = ['AL', 'SP', 'MC', 'MA', 'UL', 'BL']
   const m = new Map(arr.map((x) => [String(x.leaveTypeCode || '').toUpperCase(), x]))
 
   const out = []
@@ -704,7 +704,7 @@ function buildBalanceMap(balances) {
   for (const b of arr) {
     const code = String(b?.leaveTypeCode || '').toUpperCase().trim()
     if (!code) continue
-    const ent = num(b.yearlyEntitlement)
+    const ent = num(b.entitlement ?? b.yearlyEntitlement)
     const used = num(b.used)
     const remain = Number.isFinite(b.remaining) ? num(b.remaining) : ent - used
     m.set(code, { ent, used, remain })
@@ -719,6 +719,7 @@ function buildRow(e, managerName = '') {
   const MC = get('MC')
   const MA = get('MA')
   const UL = get('UL')
+  const BL = get('BL')
 
   return {
     Manager: fmt(managerName),
@@ -742,6 +743,7 @@ function buildRow(e, managerName = '') {
     MC_Used: MC.used,
     MA_Used: MA.used,
     UL_Used: UL.used,
+    BL_Used: BL.used,
   }
 }
 function balanceObj(bm, code) {
@@ -775,6 +777,7 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
     { wch: 18 },
     { wch: 22 },
     { wch: 10 },
+    { wch: 10 }
   ]
   XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
 
@@ -827,6 +830,7 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
       const MC = balanceObj(bm, 'MC')
       const MA = balanceObj(bm, 'MA')
       const UL = balanceObj(bm, 'UL')
+      const BL = balanceObj(bm, "BL")
 
       return {
         GroupLabel: managerBadgeLabel(g),
@@ -857,6 +861,9 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
 
         UL_Used: UL.used,
         UL_Remain: UL.remain,
+
+        BL_Used: BL.used,
+        BL_Remain: BL.remain,
       }
     })
 
@@ -890,6 +897,7 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
       { wch: 8 }, { wch: 10 }, // MC
       { wch: 8 }, { wch: 10 }, // MA
       { wch: 8 }, { wch: 10 }, // UL
+      { wch: 8 }, { ech: 10 }, // BL
     ]
 
     XLSX.utils.book_append_sheet(wb, ws, sheetName)
