@@ -1,11 +1,16 @@
 // src/composables/useToast.js
 import { ref, readonly } from 'vue'
 
-const toasts = ref([]) // shared singleton
-
+const toasts = ref([])
 let idCounter = 1
 
-function showToast({ type = 'success', title = '', message = '', timeout = 3000 } = {}) {
+function showToast({
+  type = 'success',
+  title = '',
+  message = '',
+  timeout = 3000,
+  action = null, // { label: 'Undo', handler: () => {} }
+} = {}) {
   const id = idCounter++
 
   toasts.value.push({
@@ -13,6 +18,7 @@ function showToast({ type = 'success', title = '', message = '', timeout = 3000 
     type,
     title,
     message,
+    action,
   })
 
   if (timeout && timeout > 0) {
@@ -27,7 +33,6 @@ function removeToast(id) {
 }
 
 export function useToast() {
-  // every component using this composable shares the same toasts
   return {
     toasts: readonly(toasts),
     showToast,

@@ -5,81 +5,57 @@ import { useToast } from '@/composables/useToast'
 
 const { toasts, removeToast } = useToast()
 
-/**
- * ✅ Goal:
- * - Keep blur/glass look
- * - Avoid any “text behind showing through” by using HIGH opacity backgrounds
- * - No duplicate header/label (title + message)
- */
 const typeClasses = computed(() => ({
-  success:
-    'border-emerald-500/55 bg-white/98 text-slate-900 dark:bg-slate-950/97 dark:text-slate-50',
-  error:
-    'border-rose-500/55 bg-white/98 text-slate-900 dark:bg-slate-950/97 dark:text-slate-50',
-  info:
-    'border-sky-500/55 bg-sky-50/98 text-slate-900 dark:bg-slate-950/97 dark:text-slate-50',
-  warning:
-    'border-amber-500/55 bg-white/98 text-slate-900 dark:bg-slate-950/97 dark:text-slate-50',
+  success: 'bg-emerald-600 border-emerald-700 text-white',
+  error: 'bg-rose-600 border-rose-700 text-white',
+  warning: 'bg-amber-500 border-amber-600 text-black',
+  info: 'bg-sky-600 border-sky-700 text-white',
 }))
 
-const iconColor = computed(() => ({
-  success: 'text-emerald-600 dark:text-emerald-300',
-  error: 'text-rose-600 dark:text-rose-300',
-  warning: 'text-amber-600 dark:text-amber-300',
-  info: 'text-sky-600 dark:text-sky-300',
-}))
+const iconMap = {
+  success: 'fa-solid fa-circle-check',
+  error: 'fa-solid fa-circle-xmark',
+  warning: 'fa-solid fa-triangle-exclamation',
+  info: 'fa-solid fa-circle-info',
+}
 </script>
 
 <template>
-  <div
-    class="pointer-events-none fixed inset-x-0 top-14 z-[9999] flex flex-col items-end gap-2 px-2 sm:px-4"
-  >
-    <transition-group name="toast-fade" tag="div" class="flex w-full flex-col gap-2 sm:w-auto">
+  <div class="fixed top-4 right-4 z-[9999] flex flex-col gap-3 w-[95%] max-w-md">
+    <transition-group name="toast-slide">
       <div
         v-for="t in toasts"
         :key="t.id"
-        class="pointer-events-auto w-full sm:w-[360px] rounded-2xl border
-               shadow-[0_18px_42px_rgba(15,23,42,0.18)]
-               backdrop-blur-md backdrop-saturate-150
-               flex items-start gap-3 px-3.5 py-3"
+        class="rounded-xl border shadow-lg px-4 py-3 flex items-start gap-3"
         :class="typeClasses[t.type] || typeClasses.info"
       >
         <!-- Icon -->
-        <div class="mt-0.5">
-          <i
-            v-if="t.type === 'success'"
-            class="fa-solid fa-circle-check"
-            :class="iconColor.success"
-          />
-          <i
-            v-else-if="t.type === 'error'"
-            class="fa-solid fa-triangle-exclamation"
-            :class="iconColor.error"
-          />
-          <i
-            v-else-if="t.type === 'warning'"
-            class="fa-solid fa-circle-exclamation"
-            :class="iconColor.warning"
-          />
-          <i v-else class="fa-solid fa-circle-info" :class="iconColor.info" />
-        </div>
+        <i :class="[iconMap[t.type] || iconMap.info, 'mt-1 text-lg']"></i>
 
-        <!-- ✅ Text (NO DUPLICATE HEADER) -->
-        <div class="min-w-0 flex-1">
-          <p class="text-[12px] leading-snug text-slate-700 dark:text-slate-200">
+        <!-- Content -->
+        <div class="flex-1">
+          <p class="text-sm font-medium">
             {{ t.message || t.title }}
           </p>
+
+          <!-- Optional Action Button -->
+          <button
+            v-if="t.action"
+            type="button"
+            class="mt-2 text-xs font-semibold underline hover:opacity-80"
+            @click="t.action.handler(); removeToast(t.id)"
+          >
+            {{ t.action.label }}
+          </button>
         </div>
 
         <!-- Close -->
         <button
           type="button"
-          class="ml-1 mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full
-                 hover:bg-black/5 dark:hover:bg-white/10"
+          class="ml-2 opacity-80 hover:opacity-100"
           @click="removeToast(t.id)"
-          aria-label="Close toast"
         >
-          <i class="fa-solid fa-xmark text-[12px]" />
+          <i class="fa-solid fa-xmark"></i>
         </button>
       </div>
     </transition-group>
@@ -87,13 +63,16 @@ const iconColor = computed(() => ({
 </template>
 
 <style scoped>
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: all 0.18s ease-out;
+.toast-slide-enter-active,
+.toast-slide-leave-active {
+  transition: all 0.2s ease;
 }
-.toast-fade-enter-from,
-.toast-fade-leave-to {
+.toast-slide-enter-from {
   opacity: 0;
-  transform: translateY(-6px);
+  transform: translateX(20px);
+}
+.toast-slide-leave-to {
+  opacity: 0;
+  transform: translateX(20px);
 }
 </style>

@@ -66,9 +66,6 @@ const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminLeaveProfileEdit = () => import('@/views/expat/admin/profiles/AdminLeaveProfileEdit.vue')
 const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeaveReport.vue')
 
-// Replace Day (User)
-const UserReplaceDay = () => import('@/views/expat/user/UserReplaceDay.vue')
-const UserReplaceDayList = () => import('@/views/expat/user/UserReplaceDayList.vue')
 
 // COO views
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
@@ -277,9 +274,24 @@ const router = createRouter({
         { path: '', redirect: { name: 'leave-user-request' } },
         { path: 'request', name: 'leave-user-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-user-my-requests', component: ExpatMyRequests },
-        { path: 'replace-day', name: 'leave-user-replace-day', component: UserReplaceDay, meta: { title: 'Replace Day' } },
-        { path: 'replace-day/list', name: 'leave-user-replace-list', component: UserReplaceDayList, meta: { title: 'My Replace Day Requests' } },
-      ],
+        {
+          path: 'swap-day',
+          name: 'leave-user-swap-day',
+          component: () => import('@/views/expat/user/swap-day/UserMySwapDay.vue'),
+          meta: { title: 'My Swap Working Day' },
+        },
+        {
+          path: 'swap-day/new',
+          name: 'leave-user-swap-day-new',
+          component: () => import('@/views/expat/user/swap-day/UserSwapDay.vue'),
+          meta: { title: 'New Swap Working Day' },
+        },
+        {
+          path: 'swap-day/:id',
+          name: 'leave-user-swap-day-edit',
+          component: () => import('@/views/expat/user/swap-day/UserSwapDay.vue'),
+          meta: { title: 'Edit Swap Working Day' },
+        },]
     },
 
     /* ──────────────────────────────

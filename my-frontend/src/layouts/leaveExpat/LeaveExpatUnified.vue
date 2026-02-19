@@ -39,8 +39,7 @@ const groups = computed(() => {
       children: [
         { label: 'Request Leave',        icon: 'fa-regular fa-calendar-plus', to: { name: 'leave-user-request' } },
         { label: 'My Requests',          icon: 'fa-solid fa-list-ul',         to: { name: 'leave-user-my-requests' } },
-        // { label: 'Replace Day Request',  icon: 'fa-solid fa-calendar-plus',   to: { name: 'leave-user-replace-day' } },
-        // { label: 'Replace Day List',     icon: 'fa-solid fa-clipboard-list',  to: { name: 'leave-user-replace-list' } },
+        { label: 'Swap Working Day',     icon: 'fa-solid fa-arrows-rotate', to: { name: 'leave-user-swap-day' }, },
       ],
     })
   }
