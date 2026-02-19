@@ -306,6 +306,12 @@ const router = createRouter({
         { path: 'request', name: 'leave-manager-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-manager-my-requests', component: ExpatMyRequests },
         { path: 'inbox', name: 'leave-manager-inbox', component: ManagerLeaveInbox },
+        {
+          path: 'swap-day-inbox',
+          name: 'leave-manager-swap-day-inbox',
+          component: () => import('@/views/expat/manager/ManagerSwapDayInbox.vue'),
+          meta: { title: 'Manager Swap Day Inbox' },
+        },
       ],
     },
 

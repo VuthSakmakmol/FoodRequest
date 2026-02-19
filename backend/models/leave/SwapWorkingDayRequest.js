@@ -163,6 +163,7 @@ const SwapWorkingDayRequestSchema = new mongoose.Schema(
 
     cooComment: { type: String, default: '' },
     cooDecisionAt: { type: Date, default: null },
+    
 
     approvals: { type: [ApprovalStepSchema], default: [] },
 

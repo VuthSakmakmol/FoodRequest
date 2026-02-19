@@ -52,7 +52,7 @@ const groups = computed(() => {
       icon: 'fa-solid fa-clipboard-check',
       children: [
         { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',   to: { name: 'leave-manager-inbox' } },
-        // { label: 'Your Employee',      icon: 'fa-solid fa-id-badge',    to: { name: 'leave-manager-profile' } },
+        { label: 'Swap Day Inbox',  icon: 'fa-solid fa-arrows-rotate',   to: { name: 'leave-manager-swap-day-inbox' } },
       ],
     })
   }
