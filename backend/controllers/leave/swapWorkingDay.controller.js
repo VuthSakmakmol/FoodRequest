@@ -53,6 +53,10 @@ function isValidYMD(x) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s(x))
 }
 
+function ensureOwner(doc, loginId) {
+  if (s(doc.requesterLoginId) !== s(loginId)) throw createError(403, 'Not your request')
+}
+
 function assertYMD(x, label) {
   const v = s(x)
   if (!isValidYMD(v)) throw createError(400, `${label} must be YYYY-MM-DD`)
@@ -135,6 +139,15 @@ function canGmDecide(req) {
 }
 function canCooDecide(req) {
   return hasRole(req, 'LEAVE_COO')
+}
+
+// optional strict duration check
+function calcDaysInclusive(start, end) {
+  const a = new Date(`${start}T00:00:00.000Z`).getTime()
+  const b = new Date(`${end}T00:00:00.000Z`).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0
+  const diff = Math.floor((b - a) / 86400000)
+  return diff + 1
 }
 
 /* ───────────────── realtime (simple, safe) ───────────────── */
@@ -287,6 +300,13 @@ function countWorkingDays(startYmd, endYmd) {
     if (isWorkingDay(d)) c += 1
   }
   return c
+}
+
+function ensurePending(doc) {
+  const st = up(doc.status)
+  if (!st.startsWith('PENDING')) {
+    throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+  }
 }
 
 function assertRangeOrder(startYmd, endYmd, label) {
@@ -838,6 +858,72 @@ exports.getOne = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
     return res.json(payload)
+  } catch (e) {
+    next(e)
+  }
+}
+
+/**
+ * ✅ PUT /api/leave/swap-working-day/:id
+ * Body:
+ *  requestStartDate, requestEndDate, offStartDate, offEndDate, reason
+ */
+exports.updateMySwapRequest = async (req, res, next) => {
+  try {
+    const loginId = actorLoginId(req)
+    if (!loginId) throw createError(400, 'Missing user identity')
+
+    const { id } = req.params
+    const doc = await SwapWorkingDayRequest.findById(id)
+    if (!doc) throw createError(404, 'Swap request not found')
+
+    ensureOwner(doc, loginId)
+    ensurePending(doc)
+
+    const requestStartDate = assertYMD(req.body.requestStartDate, 'requestStartDate')
+    const requestEndDate = assertYMD(req.body.requestEndDate || req.body.requestStartDate, 'requestEndDate')
+    const offStartDate = assertYMD(req.body.offStartDate, 'offStartDate')
+    const offEndDate = assertYMD(req.body.offEndDate || req.body.offStartDate, 'offEndDate')
+
+    // optional: validate working days (use your rule)
+    if (!isWorkingDay(requestStartDate) || !isWorkingDay(requestEndDate)) {
+      throw createError(400, 'Request dates must be working days.')
+    }
+    if (!isWorkingDay(offStartDate) || !isWorkingDay(offEndDate)) {
+      throw createError(400, 'Compensatory dates must be working days.')
+    }
+
+    // ensure ranges
+    if (requestStartDate > requestEndDate) throw createError(400, 'Request date range invalid.')
+    if (offStartDate > offEndDate) throw createError(400, 'Compensatory date range invalid.')
+
+    const reqDays = calcDaysInclusive(requestStartDate, requestEndDate)
+    const offDays = calcDaysInclusive(offStartDate, offEndDate)
+    if (!reqDays || reqDays !== offDays) {
+      throw createError(400, 'Compensatory days must equal request days.')
+    }
+
+    doc.requestStartDate = requestStartDate
+    doc.requestEndDate = requestEndDate
+    doc.offStartDate = offStartDate
+    doc.offEndDate = offEndDate
+    doc.reason = s(req.body.reason || '')
+
+    await doc.save()
+
+    return res.json({
+      success: true,
+      _id: String(doc._id),
+      requestStartDate: doc.requestStartDate,
+      requestEndDate: doc.requestEndDate,
+      offStartDate: doc.offStartDate,
+      offEndDate: doc.offEndDate,
+      reason: doc.reason,
+      status: doc.status,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+      attachments: doc.attachments || [],
+    })
   } catch (e) {
     next(e)
   }

@@ -909,7 +909,7 @@ onBeforeUnmount(() => {
                 <div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
                   <div class="ui-frame p-2">
                     <div class="ui-label !mb-1">Leave Date</div>
-                    <div class="font-mono text-[11px]">{{ item.startDate }} → {{ item.endDate }}</div>
+                    <div class=" text-[11px]">{{ item.startDate }} → {{ item.endDate }}</div>
                   </div>
                   <div class="ui-frame p-2">
                     <div class="ui-label !mb-1">Days</div>
@@ -956,7 +956,7 @@ onBeforeUnmount(() => {
                       <span class="ui-badge ui-badge-info">{{ item.leaveTypeCode || '—' }}</span>
                     </td>
 
-                    <td class="ui-td whitespace-nowrap font-mono">
+                    <td class="ui-td whitespace-nowrap ">
                       {{ item.startDate }} → {{ item.endDate }}
                     </td>
 
@@ -1043,7 +1043,7 @@ onBeforeUnmount(() => {
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <span class="ui-badge ui-badge-info">{{ cancelItem?.leaveTypeCode }}</span>
                 <span class="mx-1 opacity-60">•</span>
-                <span class="font-mono">{{ cancelItem?.startDate }} → {{ cancelItem?.endDate }}</span>
+                <span class="">{{ cancelItem?.startDate }} → {{ cancelItem?.endDate }}</span>
               </div>
             </div>
           </div>
