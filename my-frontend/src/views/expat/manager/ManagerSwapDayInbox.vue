@@ -1,14 +1,19 @@
-<!-- src/views/expat/manager/ManagerSwapDayInbox.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
+import { useAuth } from '@/store/auth'
+
+// ✅ realtime (same pattern as UserMySwapDay)
+import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
+
 import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
 
 defineOptions({ name: 'ManagerSwapDayInbox' })
 
 const { showToast } = useToast()
+const auth = useAuth()
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -72,8 +77,11 @@ const STATUS_LABEL = {
   CANCELLED: 'Cancelled',
 }
 
+function s(v) {
+  return String(v ?? '').trim()
+}
 function up(v) {
-  return String(v ?? '').trim().toUpperCase()
+  return s(v).toUpperCase()
 }
 
 function fmtDateTime(v) {
@@ -86,8 +94,8 @@ function fmtYmd(v) {
   return dayjs(v).format('YYYY-MM-DD')
 }
 
-function statusBadgeUiClass(s) {
-  const st = up(s)
+function statusBadgeUiClass(x) {
+  const st = up(x)
   if (st === 'APPROVED') return 'ui-badge ui-badge-success'
   if (st === 'REJECTED') return 'ui-badge ui-badge-danger'
   if (st === 'CANCELLED') return 'ui-badge'
@@ -101,24 +109,22 @@ function canDecide(row) {
 
 /* brief reason helpers */
 function compactText(v) {
-  return String(v || '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return String(v || '').replace(/\s+/g, ' ').trim()
 }
 function briefReason(v, max = 70) {
-  const s = compactText(v)
-  if (!s) return '—'
-  if (s.length <= max) return s
-  return s.slice(0, max).trimEnd() + '…'
+  const t = compactText(v)
+  if (!t) return '—'
+  if (t.length <= max) return t
+  return t.slice(0, max).trimEnd() + '…'
 }
 
+/* rejected reason helpers */
 function getRejectedReason(row) {
   const r = row || {}
-  // 1) if you added new field in backend (recommended)
+
   const a = compactText(r.rejectedReason)
   if (a) return a
 
-  // 2) fallback to comments stored by each level
   const m = compactText(r.managerComment)
   if (m) return m
 
@@ -128,7 +134,6 @@ function getRejectedReason(row) {
   const c = compactText(r.cooComment)
   if (c) return c
 
-  // 3) fallback to approvals note (find the REJECTED step)
   const steps = Array.isArray(r.approvals) ? r.approvals : []
   const rejectedStep = steps.find((x) => up(x?.status) === 'REJECTED')
   const note = compactText(rejectedStep?.note)
@@ -165,6 +170,7 @@ const filteredRows = computed(() => {
         r.employeeId,
         r.employeeName,
         r.name,
+        r.department,
         r.reason,
         r.status,
         r.requestStartDate,
@@ -178,7 +184,6 @@ const filteredRows = computed(() => {
     })
   }
 
-  // newest first
   list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   return list
 })
@@ -201,8 +206,14 @@ const pagedRows = computed(() => {
 
 watch(
   () => [search.value, statusFilter.value, perPage.value],
-  () => {
-    page.value = 1
+  () => (page.value = 1)
+)
+
+watch(
+  () => pageCount.value,
+  (n) => {
+    if (page.value > n) page.value = n
+    if (page.value < 1) page.value = 1
   }
 )
 
@@ -217,15 +228,19 @@ function closeView() {
 }
 
 /* ───────────────── ATTACHMENTS ───────────────── */
+function normalizeEvidenceList(list) {
+  const arr = Array.isArray(list) ? list : []
+  return arr.map((x) => ({ ...x, attId: x?.attId || x?.fileId }))
+}
+
 async function openFiles(row) {
   filesRequest.value = row
   filesItems.value = []
-
   try {
     const res = await api.get(`/leave/swap-working-day/${row._id}/evidence`)
-    filesItems.value = Array.isArray(res.data) ? res.data : row.attachments || []
+    filesItems.value = normalizeEvidenceList(res.data)
   } catch (e) {
-    filesItems.value = row.attachments || []
+    filesItems.value = normalizeEvidenceList(row.attachments || [])
     showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments list' })
   } finally {
     filesOpen.value = true
@@ -237,7 +252,8 @@ async function refreshFilesAgain() {
   if (!req?._id) return
   try {
     const res = await api.get(`/leave/swap-working-day/${req._id}/evidence`)
-    filesItems.value = Array.isArray(res.data) ? res.data : []
+    filesItems.value = normalizeEvidenceList(res.data)
+
     const idx = rows.value.findIndex((r) => String(r._id) === String(req._id))
     if (idx >= 0) rows.value[idx].attachments = filesItems.value
   } catch (e) {
@@ -245,7 +261,7 @@ async function refreshFilesAgain() {
   }
 }
 
-/* ───────────────── DECISION (icon buttons + confirm modal) ───────────────── */
+/* ───────────────── DECISION ───────────────── */
 function openApprove(row) {
   if (!canDecide(row)) return
   confirmType.value = 'APPROVE'
@@ -253,7 +269,6 @@ function openApprove(row) {
   decisionNote.value = ''
   confirmOpen.value = true
 }
-
 function openReject(row) {
   if (!canDecide(row)) return
   confirmType.value = 'REJECT'
@@ -261,7 +276,6 @@ function openReject(row) {
   decisionNote.value = ''
   confirmOpen.value = true
 }
-
 function closeConfirm(force = false) {
   if (confirmBusy.value && !force) return
   confirmOpen.value = false
@@ -275,10 +289,9 @@ async function confirmDecision() {
   if (!row?._id) return
 
   const action = confirmType.value === 'APPROVE' ? 'APPROVE' : 'REJECT'
-  const comment = decisionNote.value?.trim?.() || ''
+  const note = decisionNote.value?.trim?.() || ''
 
-  // ✅ reject requires reason
-  if (action === 'REJECT' && !comment) {
+  if (action === 'REJECT' && !note) {
     showToast({ type: 'warning', message: 'Reject requires a reason.' })
     return
   }
@@ -288,26 +301,29 @@ async function confirmDecision() {
 
   try {
     await api.post(`/leave/swap-working-day/${row._id}/manager-decision`, {
-        action,
-        comment,
+      action,
+      note,
+      comment: note,
+      reason: note,
     })
 
     showToast({
-        type: 'success',
-        message: action === 'APPROVE' ? 'Approved and sent to next step.' : 'Rejected.',
+      type: 'success',
+      message: action === 'APPROVE' ? 'Approved and sent to next step.' : 'Rejected.',
     })
 
-    // ✅ close dialogs immediately even while busy
     closeConfirm(true)
     closeView()
 
+    // optional: you can skip fetch because realtime will update,
+    // but keep it as safety:
     await fetchInbox()
-    } catch (e) {
+  } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
-    } finally {
+  } finally {
     confirmBusy.value = false
     deciding.value = false
-    }
+  }
 }
 
 /* keep viewItem synced */
@@ -321,62 +337,69 @@ watch(
   { deep: true }
 )
 
-/* ───────────────── EXPORT EXCEL ───────────────── */
-function normalizeForExcel(r) {
-  return {
-    CreatedAt: r?.createdAt ? fmtDateTime(r.createdAt) : '',
-    EmployeeID: r?.employeeId || '',
-    EmployeeName: r?.employeeName || r?.name || '',
-    Department: r?.department || '',
-    WorkStart: r?.requestStartDate || '',
-    WorkEnd: r?.requestEndDate || '',
-    SwapStart: r?.offStartDate || '',
-    SwapEnd: r?.offEndDate || '',
-    Status: STATUS_LABEL[r?.status] || r?.status || '',
-    Reason: compactText(r?.reason || ''),
-    Attachments: Number(r?.attachments?.length || 0),
+/* ───────────────── REALTIME ─────────────────
+   Backend emits:
+   - swap:req:created
+   - swap:req:updated
+*/
+function upsertRow(doc) {
+  if (!doc?._id) return
+
+  const id = String(doc._id)
+  const idx = rows.value.findIndex((x) => String(x._id) === id)
+
+  if (idx >= 0) {
+    rows.value[idx] = { ...rows.value[idx], ...doc }
+  } else {
+    rows.value.unshift(doc)
+  }
+
+  // keep modals synced
+  if (viewItem.value?._id && String(viewItem.value._id) === id) {
+    viewItem.value = { ...viewItem.value, ...doc }
+  }
+  if (filesRequest.value?._id && String(filesRequest.value._id) === id) {
+    filesRequest.value = { ...filesRequest.value, ...doc }
   }
 }
 
-async function exportExcel() {
-  try {
-    if (exporting.value) return
-    exporting.value = true
+function onSwapCreated(doc) {
+  // ✅ If backend sends manager only relevant docs, just insert.
+  // If backend broadcasts to everyone, you can optionally ignore non-manager docs here.
+  upsertRow(doc)
+}
 
-    const data = filteredRows.value.map(normalizeForExcel)
-    if (!data.length) {
-      showToast({ type: 'warning', message: 'No data to export.' })
-      return
-    }
-
-    // lazy import to avoid bundle cost
-    const XLSX = await import('xlsx')
-
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'ManagerInbox')
-
-    const stamp = dayjs().format('YYYYMMDD_HHmm')
-    const fileName = `SwapDay_ManagerInbox_${stamp}.xlsx`
-
-    XLSX.writeFile(wb, fileName)
-    showToast({ type: 'success', message: 'Excel exported.' })
-  } catch (e) {
-    showToast({ type: 'error', message: e?.message || 'Export failed' })
-  } finally {
-    exporting.value = false
-  }
+function onSwapUpdated(doc) {
+  upsertRow(doc)
 }
 
 /* lifecycle */
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+
+  // ✅ join manager rooms (critical)
+  try {
+    subscribeRoleIfNeeded({ role: 'LEAVE_MANAGER' })
+
+    const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
+    const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
+
+    if (empId) await subscribeEmployeeIfNeeded(empId)
+    if (loginId) await subscribeUserIfNeeded(loginId)
+  } catch {}
+
   await fetchInbox()
+
+  socket.on('swap:req:created', onSwapCreated)
+  socket.on('swap:req:updated', onSwapUpdated)
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+
+  socket.off('swap:req:created', onSwapCreated)
+  socket.off('swap:req:updated', onSwapUpdated)
 })
 </script>
 
@@ -389,7 +412,7 @@ onBeforeUnmount(() => {
           <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="min-w-[240px]">
-              <div class="text-[15px] font-extrabold">Swap Working Day</div>
+              <div class="text-[15px] font-extrabold">Manager Inbox · Swap Working Day</div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -438,18 +461,7 @@ onBeforeUnmount(() => {
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
                 </button>
 
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-ghost"
-                  type="button"
-                  :disabled="loading"
-                  @click="
-                    () => {
-                      search = ''
-                      statusFilter = 'ALL'
-                    }
-                  "
-                  title="Clear filters"
-                >
+                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear filters">
                   <i class="fa-solid fa-broom text-[11px]" />
                 </button>
               </div>
@@ -504,17 +516,7 @@ onBeforeUnmount(() => {
                   Excel
                 </button>
 
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-ghost"
-                  type="button"
-                  :disabled="loading"
-                  @click="
-                    () => {
-                      search = ''
-                      statusFilter = 'ALL'
-                    }
-                  "
-                >
+                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters">
                   <i class="fa-solid fa-broom text-[11px]" />
                   Clear
                 </button>
@@ -662,12 +664,7 @@ onBeforeUnmount(() => {
                   </td>
                 </tr>
 
-                <tr
-                  v-for="row in pagedRows"
-                  :key="row._id"
-                  class="ui-tr-hover cursor-pointer"
-                  @click="openView(row)"
-                >
+                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
                   <td class="ui-td">
                     <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
                   </td>
@@ -815,6 +812,9 @@ onBeforeUnmount(() => {
                   {{ viewItem?.employeeName || viewItem?.name || '—' }}
                 </div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">ID: {{ viewItem?.employeeId || '—' }}</div>
+                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                  Dept: {{ viewItem.department }}
+                </div>
               </div>
 
               <div class="text-right md:text-left">
@@ -828,14 +828,14 @@ onBeforeUnmount(() => {
 
           <div class="grid gap-3 md:grid-cols-2">
             <div class="ui-card p-3">
-              <div class="ui-section-title">Request Working Date</div>
+              <div class="ui-section-title">Request Non-working Date(s)</div>
               <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
                 {{ fmtYmd(viewItem?.requestStartDate) }} → {{ fmtYmd(viewItem?.requestEndDate) }}
               </div>
             </div>
 
             <div class="ui-card p-3">
-              <div class="ui-section-title">Compensatory Day Off</div>
+              <div class="ui-section-title">Compensatory Working Day(s)</div>
               <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
                 {{ fmtYmd(viewItem?.offStartDate) }} → {{ fmtYmd(viewItem?.offEndDate) }}
               </div>
@@ -849,18 +849,17 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-                    <!-- ✅ Rejected Reason (show only when rejected) -->
-            <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
-                <div class="ui-section-title text-rose-600 dark:text-rose-400">Rejected Reason</div>
-                <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
-                    {{ getRejectedReason(viewItem) }}
-                </div>
+          <!-- ✅ Rejected Reason -->
+          <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
+            <div class="ui-section-title text-rose-600 dark:text-rose-400">Rejected Reason</div>
+            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+              {{ getRejectedReason(viewItem) }}
             </div>
+          </div>
 
           <div class="flex justify-end gap-2 pt-1">
             <button class="ui-btn ui-btn-ghost" type="button" @click="closeView">Close</button>
 
-            <!-- ✅ show only when pending -->
             <template v-if="canDecide(viewItem)">
               <button class="ui-btn ui-btn-rose" type="button" @click="openReject(viewItem)">Reject</button>
               <button class="ui-btn ui-btn-emerald" type="button" @click="openApprove(viewItem)">Approve</button>
@@ -892,10 +891,6 @@ onBeforeUnmount(() => {
             <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
               Employee:
               <span class="font-extrabold">{{ confirmTarget?.employeeName || confirmTarget?.name || '—' }}</span>
-               <!-- Work:
-              <span class="font-extrabold">
-                {{ fmtYmd(confirmTarget?.requestStartDate) }} → {{ fmtYmd(confirmTarget?.requestEndDate) }}
-              </span> -->
             </div>
           </div>
         </div>
@@ -910,7 +905,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="mt-4 flex justify-end gap-2">
-          <button type="button" class="ui-btn ui-btn-ghost" :disabled="confirmBusy" @click="closeConfirm">Close</button>
+          <button type="button" class="ui-btn ui-btn-ghost" :disabled="confirmBusy" @click="closeConfirm()">Close</button>
 
           <button
             type="button"

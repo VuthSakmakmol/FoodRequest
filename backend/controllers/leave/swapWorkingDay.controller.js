@@ -135,9 +135,26 @@ function emitSwap(req, payload, event = 'swap:req:updated') {
     const empId = s(payload?.employeeId)
     const requester = s(payload?.requesterLoginId)
 
+    const manager = s(payload?.managerLoginId)
+    const gm = s(payload?.gmLoginId)
+    const coo = s(payload?.cooLoginId)
+
+    // ✅ Admin viewers
     io.to('admins').emit(event, payload)
+
+    // ✅ Employee room
     if (empId) io.to(`employee:${empId}`).emit(event, payload)
+
+    // ✅ User room (requester loginId)
     if (requester) io.to(`user:${requester}`).emit(event, payload)
+
+    // ✅ Fallback: user room by employeeId (your Leave pattern does this)
+    if (empId) io.to(`user:${empId}`).emit(event, payload)
+
+    // ✅ Approver rooms (critical for inbox realtime)
+    if (manager) io.to(`user:${manager}`).emit(event, payload)
+    if (gm) io.to(`user:${gm}`).emit(event, payload)
+    if (coo) io.to(`user:${coo}`).emit(event, payload)
   } catch (e) {
     console.warn('⚠️ emitSwap failed:', e?.message)
   }

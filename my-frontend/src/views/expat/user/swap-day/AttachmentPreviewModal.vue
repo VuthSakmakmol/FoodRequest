@@ -9,16 +9,6 @@ defineOptions({ name: 'AttachmentPreviewModal' })
 
 const { showToast } = useToast()
 
-/**
- * Props:
- * - modelValue: open/close
- * - requestId: swap request id
- * - title/subtitle
- * - items: [{ attId, fileId, filename, contentType, uploadedAt, uploadedBy, size }]
- * - fetchContentPath: (requestId, attId) => string
- * - deletePath: (requestId, attId) => string
- * - canDelete: boolean
- */
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   requestId: { type: String, default: '' },
@@ -66,6 +56,7 @@ function revokeUrl(url) {
     if (url) URL.revokeObjectURL(url)
   } catch {}
 }
+
 function clearAllPreviews() {
   Object.values(previewUrlMap.value || {}).forEach(revokeUrl)
   previewUrlMap.value = {}
@@ -85,6 +76,31 @@ const selectedItem = computed(() =>
   (props.items || []).find((x) => s(x?.attId) === s(selectedAttId.value))
 )
 
+/** ✅ template-safe getters */
+const previewUrl = computed(() => previewUrlMap.value?.[selectedAttId.value] || '')
+const previewLoading = computed(() => !!previewLoadingMap.value?.[selectedAttId.value])
+const previewError = computed(() => previewErrorMap.value?.[selectedAttId.value] || '')
+
+/* ─────────────────────────────
+   Robust error extraction (blob/json/text)
+───────────────────────────── */
+async function readBlobMessage(blob) {
+  try {
+    if (!blob) return ''
+    // blob might be JSON or plain text
+    const text = await blob.text()
+    if (!text) return ''
+    try {
+      const j = JSON.parse(text)
+      return j?.message || j?.error || ''
+    } catch {
+      return text.slice(0, 300)
+    }
+  } catch {
+    return ''
+  }
+}
+
 async function ensurePreview(attId) {
   const id = s(attId)
   const item = (props.items || []).find((x) => s(x?.attId) === id)
@@ -98,22 +114,38 @@ async function ensurePreview(attId) {
   previewErrorMap.value = { ...previewErrorMap.value, [id]: '' }
 
   try {
-    // ✅ IMPORTANT: backend expects :attId + /content
     const path = props.fetchContentPath(props.requestId, item.attId)
+
     const res = await api.get(path, { responseType: 'blob' })
 
-    const blob = new Blob([res.data], {
-      type: res.headers?.['content-type'] || item.contentType || 'application/octet-stream',
-    })
+    const contentType =
+      res.headers?.['content-type'] ||
+      res.headers?.['Content-Type'] ||
+      item.contentType ||
+      'application/octet-stream'
+
+    const blob = new Blob([res.data], { type: contentType })
 
     const url = URL.createObjectURL(blob)
+
+    // safety: if replacing existing url for same id, revoke old
+    if (previewUrlMap.value?.[id]) revokeUrl(previewUrlMap.value[id])
+
     previewUrlMap.value = { ...previewUrlMap.value, [id]: url }
     return url
   } catch (e) {
-    previewErrorMap.value = {
-      ...previewErrorMap.value,
-      [id]: e?.response?.data?.message || 'Preview failed.',
+    let msg =
+      e?.response?.data?.message ||
+      e?.response?.data?.error ||
+      e?.message ||
+      ''
+
+    // axios with responseType blob => error payload often Blob
+    if (!msg && e?.response?.data instanceof Blob) {
+      msg = await readBlobMessage(e.response.data)
     }
+
+    previewErrorMap.value = { ...previewErrorMap.value, [id]: msg || 'Preview failed.' }
     return ''
   } finally {
     previewLoadingMap.value = { ...previewLoadingMap.value, [id]: false }
@@ -161,7 +193,7 @@ async function confirmDelete() {
 
   deleting.value = true
   try {
-    const path = props.deletePath(props.requestId, attId) // ✅ delete by attId
+    const path = props.deletePath(props.requestId, attId)
     await api.delete(path)
 
     // cleanup cache
@@ -170,12 +202,23 @@ async function confirmDelete() {
     delete next[attId]
     previewUrlMap.value = next
 
+    const nextL = { ...(previewLoadingMap.value || {}) }
+    delete nextL[attId]
+    previewLoadingMap.value = nextL
+
+    const nextE = { ...(previewErrorMap.value || {}) }
+    delete nextE[attId]
+    previewErrorMap.value = nextE
+
+    // if deleted selected, clear selection (watcher will reselect)
+    if (s(selectedAttId.value) === attId) selectedAttId.value = ''
+
     showToast({ type: 'success', message: 'Attachment deleted.' })
     emit('deleted', { attId })
     emit('refresh')
     closeDelete()
   } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Delete failed.' })
+    showToast({ type: 'error', message: e?.response?.data?.message || e?.message || 'Delete failed.' })
   } finally {
     deleting.value = false
   }
@@ -195,7 +238,6 @@ watch(
       return
     }
 
-    // open -> select first
     const first = (props.items || [])[0]
     selectedAttId.value = first?.attId ? s(first.attId) : ''
     if (selectedAttId.value) await ensurePreview(selectedAttId.value)
@@ -301,30 +343,30 @@ onBeforeUnmount(() => clearAllPreviews())
 
           <template v-else>
             <div
-              v-if="previewLoadingMap[selectedAttId]"
+              v-if="previewLoading"
               class="h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400"
             >
               Loading preview…
             </div>
 
             <div
-              v-else-if="previewErrorMap[selectedAttId]"
+              v-else-if="previewError"
               class="h-[520px] grid place-items-center text-[12px] text-rose-500"
             >
-              {{ previewErrorMap[selectedAttId] }}
+              {{ previewError }}
             </div>
 
             <template v-else>
               <div class="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/40 overflow-hidden">
                 <iframe
-                  v-if="isPdf(selectedItem) && previewUrlMap[selectedAttId]"
-                  :src="previewUrlMap[selectedAttId]"
+                  v-if="isPdf(selectedItem) && previewUrl"
+                  :src="previewUrl"
                   class="w-full h-[520px]"
                   style="border:0;"
                 />
                 <img
-                  v-else-if="isImage(selectedItem) && previewUrlMap[selectedAttId]"
-                  :src="previewUrlMap[selectedAttId]"
+                  v-else-if="isImage(selectedItem) && previewUrl"
+                  :src="previewUrl"
                   class="w-full h-[520px] object-contain bg-white dark:bg-slate-950/40"
                 />
                 <div v-else class="h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
@@ -333,7 +375,7 @@ onBeforeUnmount(() => clearAllPreviews())
               </div>
 
               <div class="mt-2">
-                <button class="ui-btn ui-btn-soft w-full" type="button" :disabled="!previewUrlMap[selectedAttId]" @click="openFullscreen">
+                <button class="ui-btn ui-btn-soft w-full" type="button" :disabled="!previewUrl" @click="openFullscreen">
                   <i class="fa-solid fa-expand text-[11px]" />
                   Fullscreen preview
                 </button>
@@ -363,14 +405,14 @@ onBeforeUnmount(() => clearAllPreviews())
         </div>
 
         <iframe
-          v-if="isPdf(selectedItem) && previewUrlMap[selectedAttId]"
-          :src="previewUrlMap[selectedAttId]"
+          v-if="isPdf(selectedItem) && previewUrl"
+          :src="previewUrl"
           class="w-full h-[calc(100%-52px)]"
           style="border:0;"
         />
         <img
-          v-else-if="isImage(selectedItem) && previewUrlMap[selectedAttId]"
-          :src="previewUrlMap[selectedAttId]"
+          v-else-if="isImage(selectedItem) && previewUrl"
+          :src="previewUrl"
           class="w-full h-[calc(100%-52px)] object-contain bg-white dark:bg-slate-950"
         />
         <div v-else class="h-[calc(100%-52px)] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">

@@ -2,17 +2,22 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
-import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useRouter } from 'vue-router'
+import { useAuth } from '@/store/auth'
+
+import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
 import AttachmentPreviewModal from './AttachmentPreviewModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+
+import { swapWorkingDayApi } from '@/utils/swapWorkingDay.api'
 
 defineOptions({ name: 'UserMySwapDay' })
 
 const { showToast } = useToast()
 const router = useRouter()
+const auth = useAuth()
 
 /* ───────────────── STATE ───────────────── */
 const loading = ref(false)
@@ -85,8 +90,6 @@ function compactText(v) {
  * ✅ Business rule (UI):
  * requester cannot edit/cancel when there is ANY approved step (any level)
  * - Also allow only while status is pending.
- *
- * Works with your approvals[] schema (MANAGER/GM/COO with status PENDING/APPROVED/REJECTED)
  */
 function hasAnyApprovedStep(item) {
   const steps = Array.isArray(item?.approvals) ? item.approvals : []
@@ -100,13 +103,17 @@ function canEditOrCancel(item) {
   return true
 }
 
+/* ───────────────── FETCH ───────────────── */
 async function fetchData() {
   try {
     loading.value = true
-    const res = await api.get('/leave/swap-working-day/my')
-    rows.value = Array.isArray(res.data) ? res.data : []
+    const data = await swapWorkingDayApi.myList()
+    rows.value = Array.isArray(data) ? data : []
   } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load swap requests' })
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Failed to load swap requests',
+    })
   } finally {
     loading.value = false
   }
@@ -135,7 +142,6 @@ watch(
 
 /* ───────────────── CANCEL (with confirm) ───────────────── */
 function askCancel(item) {
-  // ✅ guard (even if button hidden)
   if (!canEditOrCancel(item)) {
     showToast({ type: 'warning', message: 'This request cannot be cancelled after any approval.' })
     return
@@ -149,7 +155,7 @@ async function confirmCancel() {
   if (!item?._id) return
   cancelBusy.value = true
   try {
-    await api.post(`/leave/swap-working-day/${item._id}/cancel`)
+    await swapWorkingDayApi.cancel(item._id)
     showToast({ type: 'success', message: 'Swap request cancelled.' })
     cancelOpen.value = false
     cancelTarget.value = null
@@ -166,8 +172,8 @@ async function openFiles(item) {
   filesRequest.value = item
   filesItems.value = []
   try {
-    const res = await api.get(`/leave/swap-working-day/${item._id}/evidence`)
-    filesItems.value = Array.isArray(res.data) ? res.data : item.attachments || []
+    const data = await swapWorkingDayApi.listEvidence(item._id)
+    filesItems.value = Array.isArray(data) ? data : item.attachments || []
   } catch (e) {
     filesItems.value = item.attachments || []
     showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments list' })
@@ -180,7 +186,7 @@ async function refreshFilesAgain() {
   const req = filesRequest.value
   if (!req?._id) return
   try {
-    const res = await api.get(`/leave/swap-working-day/${req._id}/evidence`)
+    const res = await swapWorkingDayApi.listEvidence(req._id)
     filesItems.value = Array.isArray(res.data) ? res.data : []
     const idx = rows.value.findIndex((r) => String(r._id) === String(req._id))
     if (idx >= 0) rows.value[idx].attachments = filesItems.value
@@ -189,6 +195,7 @@ async function refreshFilesAgain() {
   }
 }
 
+/* ───────────────── FILTERED LIST ───────────────── */
 const filteredRows = computed(() => {
   let result = [...rows.value]
 
@@ -206,19 +213,64 @@ const filteredRows = computed(() => {
     })
   }
 
-  // newest first
   result.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   return result
 })
 
+/* ───────────────── REALTIME ─────────────────
+   Backend emits:
+   - swap:req:created
+   - swap:req:updated
+*/
+function upsertRow(doc) {
+  if (!doc?._id) return
+
+  const idx = rows.value.findIndex((x) => String(x._id) === String(doc._id))
+  if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
+  else rows.value.unshift(doc)
+
+  // keep modals synced
+  if (filesRequest.value?._id && String(filesRequest.value._id) === String(doc._id)) {
+    filesRequest.value = { ...filesRequest.value, ...doc }
+  }
+  if (viewItem.value?._id && String(viewItem.value._id) === String(doc._id)) {
+    viewItem.value = { ...viewItem.value, ...doc }
+  }
+}
+
+function onSwapCreated(doc) {
+  upsertRow(doc)
+}
+function onSwapUpdated(doc) {
+  upsertRow(doc)
+}
+
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+
+  // join correct rooms
+  try {
+    subscribeRoleIfNeeded({ role: 'LEAVE_USER' })
+
+    const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
+    const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
+
+    if (empId) await subscribeEmployeeIfNeeded(empId)
+    if (loginId) await subscribeUserIfNeeded(loginId)
+  } catch {}
+
   await fetchData()
+
+  socket.on('swap:req:created', onSwapCreated)
+  socket.on('swap:req:updated', onSwapUpdated)
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+
+  socket.off('swap:req:created', onSwapCreated)
+  socket.off('swap:req:updated', onSwapUpdated)
 })
 </script>
 
@@ -284,11 +336,13 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                    Work: <span class="font-extrabold">{{ fmtYmd(item.requestStartDate) }} → {{ fmtYmd(item.requestEndDate) }}</span>
+                    Work:
+                    <span class="font-extrabold">{{ fmtYmd(item.requestStartDate) }} → {{ fmtYmd(item.requestEndDate) }}</span>
                   </div>
 
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                    Swap: <span class="font-extrabold">{{ fmtYmd(item.offStartDate) }} → {{ fmtYmd(item.offEndDate) }}</span>
+                    Swap:
+                    <span class="font-extrabold">{{ fmtYmd(item.offStartDate) }} → {{ fmtYmd(item.offEndDate) }}</span>
                   </div>
                 </div>
 
@@ -298,7 +352,7 @@ onBeforeUnmount(() => {
                   </span>
 
                   <div class="flex items-center justify-end gap-2">
-                    <!-- ✅ Detail icon -->
+                    <!-- Detail -->
                     <button class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn" type="button" title="Detail" @click="openDetail(item)">
                       <i class="fa-solid fa-eye text-[12px]" />
                     </button>
@@ -323,7 +377,6 @@ onBeforeUnmount(() => {
                 <div class="mt-0.5">{{ item.reason ? compactText(item.reason) : '—' }}</div>
               </div>
 
-              <!-- ✅ Actions: hide if any approved step OR not pending -->
               <div class="mt-3 flex justify-end gap-2">
                 <template v-if="canEditOrCancel(item)">
                   <button class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click="askCancel(item)">Cancel</button>
@@ -362,15 +415,11 @@ onBeforeUnmount(() => {
                     {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                   </td>
 
-                  <td class="ui-td">
-                    {{ item.requestStartDate }} → {{ item.requestEndDate }}
-                  </td>
+                  <td class="ui-td">{{ item.requestStartDate }} → {{ item.requestEndDate }}</td>
 
-                  <td class="ui-td">
-                    {{ item.offStartDate }} → {{ item.offEndDate }}
-                  </td>
+                  <td class="ui-td">{{ item.offStartDate }} → {{ item.offEndDate }}</td>
 
-                  <!-- ✅ File column (click to preview) -->
+                  <!-- File column -->
                   <td class="ui-td text-center">
                     <button
                       v-if="item.attachments?.length"
@@ -395,10 +444,9 @@ onBeforeUnmount(() => {
                     {{ item.reason ? compactText(item.reason) : '—' }}
                   </td>
 
-                  <!-- ✅ Actions -->
+                  <!-- Actions -->
                   <td class="ui-td text-center">
                     <div class="flex justify-center gap-2">
-                      <!-- ✅ Detail icon ALWAYS -->
                       <button
                         class="ui-btn ui-btn-soft ui-btn-xs ui-icon-btn"
                         type="button"
@@ -409,7 +457,6 @@ onBeforeUnmount(() => {
                         <i class="fa-solid fa-eye text-[11px]" />
                       </button>
 
-                      <!-- ✅ Edit/Cancel ONLY if pending AND no approved step -->
                       <template v-if="canEditOrCancel(item)">
                         <button class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click="askCancel(item)">Cancel</button>
 
@@ -439,9 +486,7 @@ onBeforeUnmount(() => {
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Swap Request Detail</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-            Created: {{ fmtDateTime(viewItem?.createdAt) }}
-          </div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">Created: {{ fmtDateTime(viewItem?.createdAt) }}</div>
         </div>
 
         <div class="flex items-center gap-2">
@@ -514,9 +559,7 @@ onBeforeUnmount(() => {
               :key="idx"
               class="ui-frame p-2 flex items-center justify-between text-[11px]"
             >
-              <div class="font-extrabold text-slate-700 dark:text-slate-200">
-                {{ s.level }} · {{ s.loginId }}
-              </div>
+              <div class="font-extrabold text-slate-700 dark:text-slate-200">{{ s.level }} · {{ s.loginId }}</div>
               <div class="flex items-center gap-2">
                 <span
                   class="ui-badge"
@@ -524,22 +567,17 @@ onBeforeUnmount(() => {
                 >
                   {{ s.status }}
                 </span>
-                <span class="text-slate-500 dark:text-slate-400">
-                  {{ s.actedAt ? fmtDateTime(s.actedAt) : '—' }}
-                </span>
+                <span class="text-slate-500 dark:text-slate-400">{{ s.actedAt ? fmtDateTime(s.actedAt) : '—' }}</span>
               </div>
             </div>
 
-            <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500">
-              —
-            </div>
+            <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500">—</div>
           </div>
         </div>
 
         <div class="flex justify-end gap-2 pt-1">
           <button class="ui-btn ui-btn-ghost" type="button" @click="closeDetail">Close</button>
 
-          <!-- ✅ Actions ONLY if pending + no approved step -->
           <template v-if="canEditOrCancel(viewItem)">
             <button class="ui-btn ui-btn-rose" type="button" @click="askCancel(viewItem)">Cancel</button>
             <button

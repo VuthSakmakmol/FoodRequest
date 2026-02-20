@@ -1,9 +1,13 @@
+<!-- src/views/expat/user/swap-day/UserSwapDay.vue -->
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useRouter, useRoute } from 'vue-router'
+import { useAuth } from '@/store/auth'
+
+import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
 import AttachmentPreviewModal from './AttachmentPreviewModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -13,6 +17,7 @@ defineOptions({ name: 'UserSwapDay' })
 const { showToast } = useToast()
 const router = useRouter()
 const route = useRoute()
+const auth = useAuth()
 
 /* ───────────────── mode ───────────────── */
 const id = computed(() => String(route.params?.id || '').trim())
@@ -31,7 +36,7 @@ const form = ref({
 })
 
 /** existing attachments from backend (must contain attId) */
-const existingAttachments = ref([]) // [{ attId,fileId,filename,contentType,uploadedAt,size }]
+const existingAttachments = ref([]) // [{ attId,fileId,filename,contentType,uploadedAt,size,uploadedBy,note }]
 
 /** new selected files (queue) */
 const queuedFiles = ref([]) // File[]
@@ -104,7 +109,15 @@ const canSubmit = computed(() => {
 function isAllowed(file) {
   const t = String(file.type || '').toLowerCase()
   const name = String(file.name || '').toLowerCase()
-  return t.includes('pdf') || t.startsWith('image/') || name.endsWith('.pdf') || name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.webp')
+  return (
+    t.includes('pdf') ||
+    t.startsWith('image/') ||
+    name.endsWith('.pdf') ||
+    name.endsWith('.png') ||
+    name.endsWith('.jpg') ||
+    name.endsWith('.jpeg') ||
+    name.endsWith('.webp')
+  )
 }
 
 function pickFile(e) {
@@ -168,11 +181,10 @@ async function uploadQueuedFiles(requestId) {
   if (!queuedFiles.value.length) return
 
   const fd = new FormData()
-  for (const f of queuedFiles.value) fd.append('files', f)
+  for (const f of queuedFiles.value) fd.append('files', f) // ✅ field name: "files"
 
-  await api.post(`/leave/swap-working-day/${requestId}/evidence`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  })
+  // ✅ IMPORTANT: do NOT set multipart header manually (axios/browser boundary)
+  await api.post(`/leave/swap-working-day/${requestId}/evidence`, fd)
 
   queuedFiles.value = []
   await fetchAttachments(requestId)
@@ -212,9 +224,11 @@ async function doSubmitNew() {
     confirmSubmitOpen.value = false
     router.push({ name: 'leave-user-swap-day' })
   } catch (e) {
-    // rollback on failure
+    // optional rollback if you really want
     if (createdId) {
-      try { await api.post(`/leave/swap-working-day/${createdId}/cancel`) } catch (_) {}
+      try {
+        await api.post(`/leave/swap-working-day/${createdId}/cancel`)
+      } catch (_) {}
     }
     showToast({ type: 'error', message: e?.response?.data?.message || 'Submit failed.' })
   } finally {
@@ -238,7 +252,7 @@ async function doSaveEdit() {
 
     await api.put(`/leave/swap-working-day/${id.value}`, payload)
 
-    // ✅ ensure attachments can be uploaded in edit too
+    // ✅ upload in edit too (only if still allowed; backend will enforce lock)
     if (queuedFiles.value.length) {
       await uploadQueuedFiles(id.value)
     }
@@ -264,6 +278,53 @@ function confirmLeave() {
   confirmLeaveOpen.value = false
   router.back()
 }
+
+/* ───────────────── REALTIME (optional but recommended) ─────────────────
+   If someone approves while user is on edit page:
+   - update status
+   - lock UI
+*/
+let offUpdated = null
+let offCreated = null
+
+function applyRealtime(doc) {
+  if (!isEdit.value) return
+  if (!doc?._id) return
+  if (String(doc._id) !== String(id.value)) return
+
+  const newStatus = doc.status || ''
+  if (newStatus && newStatus !== status.value) {
+    status.value = newStatus
+    if (!String(newStatus).toUpperCase().includes('PENDING')) {
+      showToast({ type: 'warning', message: `This request is now ${newStatus}. Editing is locked.` })
+    }
+  }
+
+  // keep approvals/attachments count in sync (attachments list is loaded via evidence endpoint)
+  // but if doc includes attachments metadata, you can optionally refresh:
+  // fetchAttachments(id.value)
+}
+
+onMounted(() => {
+  // subscribe rooms
+  try {
+    subscribeRoleIfNeeded({ role: 'LEAVE_USER' })
+    const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
+    const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
+    if (empId) subscribeEmployeeIfNeeded(empId)
+    if (loginId) subscribeUserIfNeeded(loginId)
+  } catch {}
+
+  offUpdated = onSocket('swap:req:updated', applyRealtime)
+  offCreated = onSocket('swap:req:created', applyRealtime)
+})
+
+onBeforeUnmount(() => {
+  try {
+    if (typeof offUpdated === 'function') offUpdated()
+    if (typeof offCreated === 'function') offCreated()
+  } catch {}
+})
 </script>
 
 <template>
@@ -376,12 +437,12 @@ function confirmLeave() {
                   <button
                     class="ui-btn ui-btn-soft ui-btn-sm"
                     type="button"
-                    :disabled="!isEdit && !existingAttachments.length && !queuedFiles.length"
+                    :disabled="!isEdit || (!existingAttachments.length && !queuedFiles.length)"
                     @click="openFilesModal"
                     title="Preview / manage attachments"
                   >
                     <i class="fa-solid fa-paperclip text-[11px]" />
-                    Preview ({{ (existingAttachments?.length || 0) }} )
+                    Preview ({{ (existingAttachments?.length || 0) }})
                   </button>
                 </div>
 
@@ -411,6 +472,7 @@ function confirmLeave() {
                     class="ui-btn ui-btn-soft"
                     type="button"
                     @click="openFilesModal"
+                    :disabled="!existingAttachments.length"
                   >
                     <i class="fa-solid fa-eye text-[11px]" />
                     View Existing
@@ -482,7 +544,7 @@ function confirmLeave() {
     </div>
   </div>
 
-  <!-- ✅ Attachment Preview Modal (works for edit + after refresh) -->
+  <!-- ✅ Attachment Preview Modal -->
   <AttachmentPreviewModal
     v-model="filesOpen"
     :request-id="isEdit ? id : ''"
