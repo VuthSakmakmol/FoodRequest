@@ -49,10 +49,19 @@ function ensureOwner(req, doc) {
   if (s(doc.requesterLoginId) !== me) throw createError(403, 'Not your request')
 }
 
+/* ✅ NEW: lock attachment changes once ANY approval approved */
+function hasAnyApproved(approvals) {
+  const arr = Array.isArray(approvals) ? approvals : []
+  return arr.some((a) => up(a?.status) === 'APPROVED')
+}
+
 function ensurePendingForEdit(doc) {
   const st = up(doc.status)
   if (!st.startsWith('PENDING')) {
     throw createError(400, `Attachments can only be modified while request is pending. Current status: ${doc.status}`)
+  }
+  if (hasAnyApproved(doc?.approvals)) {
+    throw createError(400, 'This request already has an approval. Attachments can no longer be changed.')
   }
 }
 
@@ -116,11 +125,9 @@ exports.uploadEvidence = async (req, res, next) => {
       const size = Number(f.size || 0) || 0
       const buffer = f.buffer
 
-      // allow only pdf/images
       const ok = mimetype.includes('pdf') || mimetype.startsWith('image/')
       if (!ok) throw createError(400, `File "${originalname}" is not allowed (PDF/images only).`)
 
-      // safety limit (multer already does)
       if (size > 5 * 1024 * 1024) throw createError(400, `File "${originalname}" exceeds 5MB limit.`)
 
       const uploaded = await uploadBuffer({

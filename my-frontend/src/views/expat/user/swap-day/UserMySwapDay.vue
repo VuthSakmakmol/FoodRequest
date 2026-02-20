@@ -1,5 +1,6 @@
+<!-- src/views/expat/user/swap-day/UserMySwapDay.vue -->
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
@@ -20,6 +21,13 @@ const rows = ref([])
 const search = ref('')
 const statusFilter = ref('ALL')
 
+/* responsive */
+const isMobile = ref(false)
+function updateIsMobile() {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
+
 /* attachments modal state */
 const filesOpen = ref(false)
 const filesRequest = ref(null)
@@ -29,6 +37,10 @@ const filesItems = ref([])
 const cancelOpen = ref(false)
 const cancelBusy = ref(false)
 const cancelTarget = ref(null)
+
+/* detail modal */
+const viewOpen = ref(false)
+const viewItem = ref(null)
 
 const STATUS_LABEL = {
   ALL: 'All',
@@ -40,8 +52,12 @@ const STATUS_LABEL = {
   CANCELLED: 'Cancelled',
 }
 
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+
 function statusBadgeUiClass(s) {
-  const st = String(s || '').toUpperCase()
+  const st = up(s)
   if (st === 'APPROVED') return 'ui-badge ui-badge-success'
   if (st === 'REJECTED') return 'ui-badge ui-badge-danger'
   if (st === 'CANCELLED') return 'ui-badge'
@@ -59,6 +75,31 @@ function fmtYmd(v) {
   return dayjs(v).format('YYYY-MM-DD')
 }
 
+function compactText(v) {
+  return String(v || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * ✅ Business rule (UI):
+ * requester cannot edit/cancel when there is ANY approved step (any level)
+ * - Also allow only while status is pending.
+ *
+ * Works with your approvals[] schema (MANAGER/GM/COO with status PENDING/APPROVED/REJECTED)
+ */
+function hasAnyApprovedStep(item) {
+  const steps = Array.isArray(item?.approvals) ? item.approvals : []
+  return steps.some((s) => up(s?.status) === 'APPROVED')
+}
+
+function canEditOrCancel(item) {
+  const st = up(item?.status)
+  if (!st.startsWith('PENDING')) return false
+  if (hasAnyApprovedStep(item)) return false
+  return true
+}
+
 async function fetchData() {
   try {
     loading.value = true
@@ -71,8 +112,34 @@ async function fetchData() {
   }
 }
 
+/* ───────────────── DETAIL ───────────────── */
+function openDetail(item) {
+  viewItem.value = item
+  viewOpen.value = true
+}
+function closeDetail() {
+  viewOpen.value = false
+  viewItem.value = null
+}
+
+/* keep detail modal synced with latest data */
+watch(
+  () => rows.value,
+  (list) => {
+    if (!viewOpen.value || !viewItem.value?._id) return
+    const found = (list || []).find((x) => String(x._id) === String(viewItem.value._id))
+    if (found) viewItem.value = found
+  },
+  { deep: true }
+)
+
 /* ───────────────── CANCEL (with confirm) ───────────────── */
 function askCancel(item) {
+  // ✅ guard (even if button hidden)
+  if (!canEditOrCancel(item)) {
+    showToast({ type: 'warning', message: 'This request cannot be cancelled after any approval.' })
+    return
+  }
   cancelTarget.value = item
   cancelOpen.value = true
 }
@@ -100,7 +167,7 @@ async function openFiles(item) {
   filesItems.value = []
   try {
     const res = await api.get(`/leave/swap-working-day/${item._id}/evidence`)
-    filesItems.value = Array.isArray(res.data) ? res.data : (item.attachments || [])
+    filesItems.value = Array.isArray(res.data) ? res.data : item.attachments || []
   } catch (e) {
     filesItems.value = item.attachments || []
     showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments list' })
@@ -124,18 +191,35 @@ async function refreshFilesAgain() {
 
 const filteredRows = computed(() => {
   let result = [...rows.value]
-  if (statusFilter.value !== 'ALL') result = result.filter((r) => r.status === statusFilter.value)
+
+  if (statusFilter.value !== 'ALL') {
+    result = result.filter((r) => up(r.status) === up(statusFilter.value))
+  }
 
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
-    result = result.filter(
-      (r) => (r.reason || '').toLowerCase().includes(q) || (r.status || '').toLowerCase().includes(q)
-    )
+    result = result.filter((r) => {
+      const hay = [r.reason, r.status, r.requestStartDate, r.requestEndDate, r.offStartDate, r.offEndDate]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ')
+      return hay.includes(q)
+    })
   }
+
+  // newest first
+  result.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   return result
 })
 
-onMounted(fetchData)
+onMounted(async () => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  await fetchData()
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+})
 </script>
 
 <template>
@@ -156,7 +240,7 @@ onMounted(fetchData)
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Reason or status..."
+                    placeholder="Reason, date, status..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -174,7 +258,7 @@ onMounted(fetchData)
                 </select>
               </div>
 
-              <button class="ui-btn ui-btn-primary" @click="router.push({ name: 'leave-user-swap-day-new' })">
+              <button class="ui-btn ui-btn-primary" type="button" @click="router.push({ name: 'leave-user-swap-day-new' })">
                 <i class="fa-solid fa-plus text-[11px]" />
                 New Request
               </button>
@@ -189,6 +273,75 @@ onMounted(fetchData)
             No swap requests found.
           </div>
 
+          <!-- ✅ MOBILE CARDS -->
+          <div v-else-if="isMobile" class="space-y-2">
+            <article v-for="item in filteredRows" :key="item._id" class="ui-card p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 space-y-1">
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    Created:
+                    <span class="font-extrabold text-slate-900 dark:text-slate-50">{{ fmtDateTime(item.createdAt) }}</span>
+                  </div>
+
+                  <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                    Work: <span class="font-extrabold">{{ fmtYmd(item.requestStartDate) }} → {{ fmtYmd(item.requestEndDate) }}</span>
+                  </div>
+
+                  <div class="text-[11px] text-slate-600 dark:text-slate-300">
+                    Swap: <span class="font-extrabold">{{ fmtYmd(item.offStartDate) }} → {{ fmtYmd(item.offEndDate) }}</span>
+                  </div>
+                </div>
+
+                <div class="shrink-0 text-right space-y-2">
+                  <span :class="statusBadgeUiClass(item.status)">
+                    {{ STATUS_LABEL[item.status] || item.status }}
+                  </span>
+
+                  <div class="flex items-center justify-end gap-2">
+                    <!-- ✅ Detail icon -->
+                    <button class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn" type="button" title="Detail" @click="openDetail(item)">
+                      <i class="fa-solid fa-eye text-[12px]" />
+                    </button>
+
+                    <!-- Files -->
+                    <button
+                      v-if="item.attachments?.length"
+                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                      type="button"
+                      title="Attachments"
+                      @click="openFiles(item)"
+                    >
+                      <i class="fa-solid fa-paperclip text-[12px]" />
+                      <span class="ml-1">{{ item.attachments.length }}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-2 ui-frame p-2 text-[11px] text-slate-600 dark:text-slate-300">
+                <div class="font-extrabold text-slate-700 dark:text-slate-200">Reason</div>
+                <div class="mt-0.5">{{ item.reason ? compactText(item.reason) : '—' }}</div>
+              </div>
+
+              <!-- ✅ Actions: hide if any approved step OR not pending -->
+              <div class="mt-3 flex justify-end gap-2">
+                <template v-if="canEditOrCancel(item)">
+                  <button class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click="askCancel(item)">Cancel</button>
+                  <button
+                    class="ui-btn ui-btn-primary ui-btn-xs"
+                    type="button"
+                    @click="router.push({ name: 'leave-user-swap-day-edit', params: { id: item._id } })"
+                  >
+                    Edit
+                  </button>
+                </template>
+
+                <span v-else class="text-[11px] text-slate-400">—</span>
+              </div>
+            </article>
+          </div>
+
+          <!-- ✅ DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table">
               <thead>
@@ -196,10 +349,10 @@ onMounted(fetchData)
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
-                  <th class="ui-th">File</th>
+                  <th class="ui-th text-center">File</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
-                  <th class="ui-th">Actions</th>
+                  <th class="ui-th text-center">Actions</th>
                 </tr>
               </thead>
 
@@ -217,17 +370,19 @@ onMounted(fetchData)
                     {{ item.offStartDate }} → {{ item.offEndDate }}
                   </td>
 
-                  <!-- ✅ ONLY FILE COLUMN (click to preview) -->
-                  <td class="ui-td">
+                  <!-- ✅ File column (click to preview) -->
+                  <td class="ui-td text-center">
                     <button
                       v-if="item.attachments?.length"
                       class="ui-btn ui-btn-soft ui-btn-xs"
+                      type="button"
                       @click="openFiles(item)"
                       title="Preview attachments"
                     >
-                      {{ item.attachments.length }} file(s)
+                      <i class="fa-solid fa-paperclip text-[11px]" />
+                      <span class="ml-1">{{ item.attachments.length }}</span>
                     </button>
-                    <span v-else>—</span>
+                    <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
                   <td class="ui-td">
@@ -236,28 +391,36 @@ onMounted(fetchData)
                     </span>
                   </td>
 
-                  <td class="ui-td truncate">
-                    {{ item.reason || '—' }}
+                  <td class="ui-td truncate" :title="compactText(item.reason)">
+                    {{ item.reason ? compactText(item.reason) : '—' }}
                   </td>
 
-                  <!-- ✅ Actions: remove Files button -->
-                  <td class="ui-td">
+                  <!-- ✅ Actions -->
+                  <td class="ui-td text-center">
                     <div class="flex justify-center gap-2">
+                      <!-- ✅ Detail icon ALWAYS -->
                       <button
-                        v-if="String(item.status || '').includes('PENDING')"
-                        class="ui-btn ui-btn-rose ui-btn-xs"
-                        @click="askCancel(item)"
+                        class="ui-btn ui-btn-soft ui-btn-xs ui-icon-btn"
+                        type="button"
+                        title="Detail"
+                        aria-label="Detail"
+                        @click="openDetail(item)"
                       >
-                        Cancel
+                        <i class="fa-solid fa-eye text-[11px]" />
                       </button>
 
-                      <button
-                        v-if="String(item.status || '').includes('PENDING')"
-                        class="ui-btn ui-btn-primary ui-btn-xs"
-                        @click="router.push({ name:'leave-user-swap-day-edit', params:{ id:item._id } })"
-                      >
-                        Edit
-                      </button>
+                      <!-- ✅ Edit/Cancel ONLY if pending AND no approved step -->
+                      <template v-if="canEditOrCancel(item)">
+                        <button class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click="askCancel(item)">Cancel</button>
+
+                        <button
+                          class="ui-btn ui-btn-primary ui-btn-xs"
+                          type="button"
+                          @click="router.push({ name: 'leave-user-swap-day-edit', params: { id: item._id } })"
+                        >
+                          Edit
+                        </button>
+                      </template>
                     </div>
                   </td>
                 </tr>
@@ -265,6 +428,128 @@ onMounted(fetchData)
             </table>
           </div>
 
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ DETAIL MODAL -->
+  <div v-if="viewOpen" class="ui-modal-backdrop">
+    <div class="ui-modal p-0 overflow-hidden">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+        <div class="min-w-0">
+          <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Swap Request Detail</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Created: {{ fmtDateTime(viewItem?.createdAt) }}
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            v-if="viewItem?.attachments?.length"
+            class="ui-btn ui-btn-soft ui-btn-xs"
+            type="button"
+            @click="openFiles(viewItem)"
+            title="Attachments"
+          >
+            <i class="fa-solid fa-paperclip text-[11px]" />
+            Attachments
+          </button>
+
+          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeDetail">
+            <i class="fa-solid fa-xmark text-[11px]" />
+            Close
+          </button>
+        </div>
+      </div>
+
+      <div class="p-4 space-y-3">
+        <div class="ui-frame p-3">
+          <div class="grid gap-3 md:grid-cols-2">
+            <div>
+              <div class="ui-label">Status</div>
+              <span :class="statusBadgeUiClass(viewItem?.status)">
+                {{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}
+              </span>
+            </div>
+
+            <div class="text-right md:text-left">
+              <div class="ui-label">Editable?</div>
+              <div class="text-[12px] font-extrabold">
+                <span v-if="canEditOrCancel(viewItem)" class="text-emerald-600 dark:text-emerald-400">Yes</span>
+                <span v-else class="text-slate-500 dark:text-slate-400">No</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid gap-3 md:grid-cols-2">
+          <div class="ui-card p-3">
+            <div class="ui-section-title">Request Working Date</div>
+            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
+              {{ fmtYmd(viewItem?.requestStartDate) }} → {{ fmtYmd(viewItem?.requestEndDate) }}
+            </div>
+          </div>
+
+          <div class="ui-card p-3">
+            <div class="ui-section-title">Compensatory Day Off</div>
+            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
+              {{ fmtYmd(viewItem?.offStartDate) }} → {{ fmtYmd(viewItem?.offEndDate) }}
+            </div>
+          </div>
+        </div>
+
+        <div class="ui-card p-3">
+          <div class="ui-section-title">Reason</div>
+          <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+            {{ viewItem?.reason || '—' }}
+          </div>
+        </div>
+
+        <div class="ui-card p-3">
+          <div class="ui-section-title">Approvals</div>
+          <div class="mt-2 grid gap-2">
+            <div
+              v-for="(s, idx) in (Array.isArray(viewItem?.approvals) ? viewItem.approvals : [])"
+              :key="idx"
+              class="ui-frame p-2 flex items-center justify-between text-[11px]"
+            >
+              <div class="font-extrabold text-slate-700 dark:text-slate-200">
+                {{ s.level }} · {{ s.loginId }}
+              </div>
+              <div class="flex items-center gap-2">
+                <span
+                  class="ui-badge"
+                  :class="up(s.status)==='APPROVED' ? 'ui-badge-success' : (up(s.status)==='REJECTED' ? 'ui-badge-danger' : 'ui-badge-warning')"
+                >
+                  {{ s.status }}
+                </span>
+                <span class="text-slate-500 dark:text-slate-400">
+                  {{ s.actedAt ? fmtDateTime(s.actedAt) : '—' }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500">
+              —
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-1">
+          <button class="ui-btn ui-btn-ghost" type="button" @click="closeDetail">Close</button>
+
+          <!-- ✅ Actions ONLY if pending + no approved step -->
+          <template v-if="canEditOrCancel(viewItem)">
+            <button class="ui-btn ui-btn-rose" type="button" @click="askCancel(viewItem)">Cancel</button>
+            <button
+              class="ui-btn ui-btn-primary"
+              type="button"
+              @click="router.push({ name: 'leave-user-swap-day-edit', params: { id: viewItem._id } })"
+            >
+              Edit
+            </button>
+          </template>
         </div>
       </div>
     </div>
@@ -279,7 +564,7 @@ onMounted(fetchData)
     :items="filesItems"
     :fetch-content-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}/content`"
     :delete-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}`"
-    :can-delete="String(filesRequest?.status || '').includes('PENDING')"
+    :can-delete="canEditOrCancel(filesRequest)"
     @refresh="refreshFilesAgain()"
   />
 
@@ -295,3 +580,10 @@ onMounted(fetchData)
     @confirm="confirmCancel"
   />
 </template>
+
+<style scoped>
+.ui-icon-btn {
+  padding-left: 0.55rem !important;
+  padding-right: 0.55rem !important;
+}
+</style>

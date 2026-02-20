@@ -44,12 +44,20 @@ function closeMobile() {
 }
 
 /* ───────── Nav groups ───────── */
+/* ───────── Nav groups ───────── */
 const groups = [
   {
     key: 'approvals',
     header: 'Approvals',
     icon: 'fa-solid fa-clipboard-check',
-    children: [{ label: `${ROLE_LABEL} Inbox`, icon: 'fa-solid fa-circle-check', to: { name: 'leave-coo-inbox' } }],
+    children: [
+      { label: `${ROLE_LABEL} Inbox`, icon: 'fa-solid fa-circle-check', to: { name: 'leave-coo-inbox' } },
+      {
+        label: 'Swap Day Inbox',
+        icon: 'fa-solid fa-calendar-days',
+        to: { name: 'leave-coo-swap-day-inbox' },
+      },
+    ],
   },
 ]
 

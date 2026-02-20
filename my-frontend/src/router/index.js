@@ -327,6 +327,12 @@ const router = createRouter({
         { path: 'request', name: 'leave-gm-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-gm-my-requests', component: ExpatMyRequests },
         { path: 'inbox', name: 'leave-gm-inbox', component: GmLeaveInbox },
+        {
+          path: 'swap-day-inbox',
+          name: 'leave-gm-swap-day-inbox',
+          component: () => import('@/views/expat/gm/GmSwapDayInbox.vue'),
+          meta: { title: 'GM Swap Day Inbox' },
+        },
       ],
     },
 
@@ -340,6 +346,12 @@ const router = createRouter({
       children: [
         { path: '', redirect: { name: 'leave-coo-inbox' } },
         { path: 'inbox', name: 'leave-coo-inbox', component: CooLeaveInbox },
+        {
+          path: 'swap-day-inbox',
+          name: 'leave-coo-swap-day-inbox',
+          component: () => import('@/views/expat/coo/CooSwapDayInbox.vue'),
+          meta: { title: 'COO Swap Day Inbox' },
+        },
       ],
     },
 

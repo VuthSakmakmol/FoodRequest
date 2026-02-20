@@ -109,12 +109,16 @@ function canCooDecide(req) {
   return hasRole(req, 'LEAVE_COO')
 }
 
-function calcDaysInclusive(start, end) {
-  const a = new Date(`${start}T00:00:00.000Z`).getTime()
-  const b = new Date(`${end}T00:00:00.000Z`).getTime()
-  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0
-  const diff = Math.floor((b - a) / 86400000)
-  return diff + 1
+/* ✅ NEW: lock edit/cancel once ANY approval is approved */
+function hasAnyApproved(approvals) {
+  const arr = Array.isArray(approvals) ? approvals : []
+  return arr.some((a) => up(a?.status) === 'APPROVED')
+}
+
+function ensureRequesterCanEditOrCancel(doc) {
+  if (hasAnyApproved(doc?.approvals)) {
+    throw createError(400, 'This request already has an approval. You cannot edit or cancel it.')
+  }
 }
 
 /* ───────────────── realtime ───────────────── */
@@ -330,13 +334,8 @@ async function assertNoSwapOverlap({ employeeId, reqStart, reqEnd, offStart, off
 
 function parseDecisionBody(req) {
   const body = req.body || {}
-
-  // accept action / decision
   const actionRaw = body.action || body.decision
-
-  // ✅ accept many keys but store in ONE variable: note
   const note = s(body.note || body.comment || body.reason || '')
-
   const act = up(actionRaw)
 
   let action = ''
@@ -345,7 +344,6 @@ function parseDecisionBody(req) {
   else throw createError(400, 'Invalid action')
 
   if (action === 'REJECT' && !note) throw createError(400, 'Reject requires a reason.')
-
   return { action, note }
 }
 
@@ -380,6 +378,7 @@ exports.createMySwapRequest = async (req, res, next) => {
       throw createError(400, 'request dates and off dates cannot overlap.')
     }
 
+    // ✅ rules
     assertAllNonWorking(requestStartDate, requestEndDate, 'request dates')
     assertAllWorking(offStartDate, offEndDate, 'off dates')
 
@@ -452,7 +451,7 @@ exports.listMySwapRequests = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   CANCEL MY
+   CANCEL MY  ✅ LOCK if any APPROVED in approvals
 ───────────────────────────────────────────────────────────── */
 exports.cancelMySwapRequest = async (req, res, next) => {
   try {
@@ -463,7 +462,11 @@ exports.cancelMySwapRequest = async (req, res, next) => {
     const existing = await SwapWorkingDayRequest.findById(id)
     if (!existing) throw createError(404, 'Request not found')
 
-    if (!isAdminViewer(req) && s(existing.requesterLoginId) !== loginId) throw createError(403, 'Not your request')
+    // ✅ requester only
+    ensureOwner(existing, loginId)
+
+    // ✅ cannot cancel once any approval approved
+    ensureRequesterCanEditOrCancel(existing)
 
     if (['APPROVED', 'REJECTED', 'CANCELLED'].includes(up(existing.status))) {
       throw createError(400, `Request is ${existing.status}. Cannot cancel.`)
@@ -536,10 +539,8 @@ exports.managerDecision = async (req, res, next) => {
       action === 'APPROVE'
         ? {
             status: newStatus,
-            managerComment: s(note || ''), // optional approve note
+            managerComment: s(note || ''),
             managerDecisionAt: now,
-
-            // clear reject fields
             rejectedReason: '',
             rejectedAt: null,
             rejectedBy: '',
@@ -547,12 +548,8 @@ exports.managerDecision = async (req, res, next) => {
           }
         : {
             status: 'REJECTED',
-
-            // ✅ DO NOT store reject in managerComment
             managerComment: '',
             managerDecisionAt: now,
-
-            // ✅ store reject reason here
             rejectedReason: s(note),
             rejectedAt: now,
             rejectedBy: me,
@@ -644,7 +641,6 @@ exports.gmDecision = async (req, res, next) => {
             status: newStatus,
             gmComment: s(note || ''),
             gmDecisionAt: now,
-
             rejectedReason: '',
             rejectedAt: null,
             rejectedBy: '',
@@ -654,7 +650,6 @@ exports.gmDecision = async (req, res, next) => {
             status: 'REJECTED',
             gmComment: '',
             gmDecisionAt: now,
-
             rejectedReason: s(note),
             rejectedAt: now,
             rejectedBy: me,
@@ -689,7 +684,6 @@ exports.gmDecision = async (req, res, next) => {
     next(e)
   }
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    COO INBOX
@@ -747,7 +741,6 @@ exports.cooDecision = async (req, res, next) => {
             status: newStatus,
             cooComment: s(note || ''),
             cooDecisionAt: now,
-
             rejectedReason: '',
             rejectedAt: null,
             rejectedBy: '',
@@ -757,7 +750,6 @@ exports.cooDecision = async (req, res, next) => {
             status: 'REJECTED',
             cooComment: '',
             cooDecisionAt: now,
-
             rejectedReason: s(note),
             rejectedAt: now,
             rejectedBy: me,
@@ -852,12 +844,14 @@ exports.getOne = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   UPDATE (LEAVE_USER)
+   UPDATE (LEAVE_USER) ✅ LOCK if any APPROVED in approvals
 ───────────────────────────────────────────────────────────── */
 exports.updateMySwapRequest = async (req, res, next) => {
   try {
     const loginId = actorLoginId(req)
+    const employeeId = actorEmployeeId(req)
     if (!loginId) throw createError(400, 'Missing user identity')
+    if (!employeeId) throw createError(400, 'Missing employeeId in token')
 
     const { id } = req.params
     const doc = await SwapWorkingDayRequest.findById(id)
@@ -866,42 +860,58 @@ exports.updateMySwapRequest = async (req, res, next) => {
     ensureOwner(doc, loginId)
     ensurePending(doc)
 
-    const requestStartDate = assertYMD(req.body.requestStartDate, 'requestStartDate')
-    const requestEndDate = assertYMD(req.body.requestEndDate || req.body.requestStartDate, 'requestEndDate')
-    const offStartDate = assertYMD(req.body.offStartDate, 'offStartDate')
-    const offEndDate = assertYMD(req.body.offEndDate || req.body.offStartDate, 'offEndDate')
+    // ✅ HARD LOCK: once any approval approved, no edit
+    ensureRequesterCanEditOrCancel(doc)
 
-    if (!isWorkingDay(requestStartDate) || !isWorkingDay(requestEndDate)) throw createError(400, 'Request dates must be working days.')
-    if (!isWorkingDay(offStartDate) || !isWorkingDay(offEndDate)) throw createError(400, 'Compensatory dates must be working days.')
+    const requestStartDate = assertYMD(req.body?.requestStartDate, 'requestStartDate')
+    const requestEndDate = assertYMD(req.body?.requestEndDate, 'requestEndDate')
+    const offStartDate = assertYMD(req.body?.offStartDate, 'offStartDate')
+    const offEndDate = assertYMD(req.body?.offEndDate, 'offEndDate')
 
-    if (requestStartDate > requestEndDate) throw createError(400, 'Request date range invalid.')
-    if (offStartDate > offEndDate) throw createError(400, 'Compensatory date range invalid.')
+    assertRangeOrder(requestStartDate, requestEndDate, 'request')
+    assertRangeOrder(offStartDate, offEndDate, 'off')
 
-    const reqDays = calcDaysInclusive(requestStartDate, requestEndDate)
-    const offDays = calcDaysInclusive(offStartDate, offEndDate)
-    if (!reqDays || reqDays !== offDays) throw createError(400, 'Compensatory days must equal request days.')
+    if (dateRangesOverlap(requestStartDate, requestEndDate, offStartDate, offEndDate)) {
+      throw createError(400, 'request dates and off dates cannot overlap.')
+    }
+
+    // ✅ must match create rules
+    assertAllNonWorking(requestStartDate, requestEndDate, 'request dates')
+    assertAllWorking(offStartDate, offEndDate, 'off dates')
+
+    const requestTotalDays = countCalendarDays(requestStartDate, requestEndDate)
+    const offTotalDays = countWorkingDays(offStartDate, offEndDate)
+
+    if (!requestTotalDays || requestTotalDays <= 0) throw createError(400, 'Invalid request date range')
+    if (!offTotalDays || offTotalDays <= 0) throw createError(400, 'Invalid off date range')
+
+    if (requestTotalDays !== offTotalDays) {
+      throw createError(400, `Total days must match. requestDays=${requestTotalDays}, offDays=${offTotalDays}`)
+    }
+
+    await assertNoSwapOverlap({
+      employeeId,
+      reqStart: requestStartDate,
+      reqEnd: requestEndDate,
+      offStart: offStartDate,
+      offEnd: offEndDate,
+      excludeId: id,
+    })
 
     doc.requestStartDate = requestStartDate
     doc.requestEndDate = requestEndDate
     doc.offStartDate = offStartDate
     doc.offEndDate = offEndDate
-    doc.reason = s(req.body.reason || '')
+    doc.requestTotalDays = requestTotalDays
+    doc.offTotalDays = offTotalDays
+    doc.reason = s(req.body?.reason || '')
 
     await doc.save()
 
-    return res.json({
-      success: true,
-      _id: String(doc._id),
-      requestStartDate: doc.requestStartDate,
-      requestEndDate: doc.requestEndDate,
-      offStartDate: doc.offStartDate,
-      offEndDate: doc.offEndDate,
-      reason: doc.reason,
-      status: doc.status,
-      createdAt: doc.createdAt,
-      updatedAt: doc.updatedAt,
-      attachments: doc.attachments || [],
-    })
+    const payload = await attachEmployeeInfoToOne(doc)
+    emitSwap(req, payload, 'swap:req:updated')
+
+    return res.json(payload)
   } catch (e) {
     next(e)
   }

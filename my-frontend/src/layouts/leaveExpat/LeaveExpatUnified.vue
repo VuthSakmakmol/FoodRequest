@@ -78,7 +78,11 @@ const groups = computed(() => {
       icon: 'fa-solid fa-user-check',
       children: [
         { label: 'COO Inbox', icon: 'fa-solid fa-inbox',     to: { name: 'leave-coo-inbox' } },
-        // { label: 'Profile',   icon: 'fa-solid fa-id-badge',  to: { name: 'leave-coo-profile' } },
+        {
+          label: 'Swap Day Inbox',
+          icon: 'fa-solid fa-calendar-days',
+          to: { name: 'leave-coo-swap-day-inbox' },
+        },
       ].filter(x => x.to?.name),
     })
   }
