@@ -1,3 +1,4 @@
+<!-- src/views/coo/ManagerSwapDayInbox.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
