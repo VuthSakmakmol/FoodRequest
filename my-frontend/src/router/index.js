@@ -423,6 +423,13 @@ const router = createRouter({
             title: 'Leave Report Summary',
           },
         },
+
+        {
+          path: 'swap-day/report',
+          name: 'leave-admin-swap-day-report',
+          component: () => import('@/views/expat/admin/swap-day/SwapDayReport.vue'),
+          meta: { title: 'SwapDay Report' },
+        }
       ],
     },
 

@@ -53,6 +53,7 @@ const groups = [
       { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',   to: { name: 'leave-admin-swap-day-manager-inbox' } },
       { label: 'GM Inbox',      icon: 'fa-solid fa-user-star',  to: { name: 'leave-admin-swap-day-gm-inbox' } },
       { label: 'COO Inbox',     icon: 'fa-solid fa-user-shield',to: { name: 'leave-admin-swap-day-coo-inbox' } },
+      { label: 'SwapDay Report', icon: 'fa-solid fa-file-export', to: { name: 'leave-admin-swap-day-report' } },
     ],
   },
   {
