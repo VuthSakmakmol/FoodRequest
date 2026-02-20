@@ -356,21 +356,53 @@ const router = createRouter({
     },
 
     /* ──────────────────────────────
-     * Leave / Expat – Admin
-     * ────────────────────────────── */
+    * Leave / Expat – Admin
+    * ────────────────────────────── */
     {
       path: '/leave/admin',
       component: AdminLeaveExpat,
       meta: { requiresRole: ['LEAVE_ADMIN', 'ADMIN'] },
       children: [
         { path: '', redirect: { name: 'leave-admin-types' } },
+
         { path: 'types', name: 'leave-admin-types', component: AdminLeaveTypes },
         { path: 'profiles', name: 'leave-admin-profiles', component: AdminExpatProfiles },
+
+        // ✅ Leave Approval (Admin stays in Admin layout)
         { path: 'manager-inbox', name: 'leave-admin-manager-inbox', component: ManagerLeaveInbox },
-        { path: 'gm-inbox', name: 'leave-admin-gm-inbox', component: GmLeaveInbox },
+        { path: 'gm-inbox',      name: 'leave-admin-gm-inbox',      component: GmLeaveInbox },
+
+        // ✅ ADD THIS: COO leave inbox inside ADMIN layout (so it won't go to COOLeaveExpat)
+        {
+          path: 'coo-inbox',
+          name: 'leave-admin-coo-inbox',
+          component: CooLeaveInbox,
+          meta: { title: 'COO Inbox (Admin View)' },
+        },
+
         { path: 'request', name: 'leave-admin-request', component: ExpatRequestLeave },
         { path: 'my-requests', name: 'leave-admin-my-requests', component: ExpatMyRequests },
         { path: 'add-signature', name: 'leave-add-signature', component: AdminAddSignature },
+
+        // ✅ SwapDay Approval (Admin stays in Admin layout)
+        {
+          path: 'swap-day/manager-inbox',
+          name: 'leave-admin-swap-day-manager-inbox',
+          component: () => import('@/views/expat/manager/ManagerSwapDayInbox.vue'),
+          meta: { title: 'Manager Swap Day Inbox (Admin View)' },
+        },
+        {
+          path: 'swap-day/gm-inbox',
+          name: 'leave-admin-swap-day-gm-inbox',
+          component: () => import('@/views/expat/gm/GmSwapDayInbox.vue'),
+          meta: { title: 'GM Swap Day Inbox (Admin View)' },
+        },
+        {
+          path: 'swap-day/coo-inbox',
+          name: 'leave-admin-swap-day-coo-inbox',
+          component: () => import('@/views/expat/coo/CooSwapDayInbox.vue'),
+          meta: { title: 'COO Swap Day Inbox (Admin View)' },
+        },
 
         {
           path: 'profiles/:employeeId/edit',

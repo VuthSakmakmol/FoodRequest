@@ -29,15 +29,30 @@ function closeMobileDrawer() {
   mobileDrawerOpen.value = false
 }
 
-/* Nav groups (Expat Leave Admin) */
+/* ✅ Nav groups (Expat Leave Admin)
+   - Rename "Approvals" -> "Leave Approval"
+   - Add "SwapDay Approval" with 3 inbox routes
+   - IMPORTANT: use EXISTING route names from router/index.js
+*/
 const groups = [
   {
-    key: 'approvals',
-    header: 'Approvals',
+    key: 'leave-approval',
+    header: 'Leave Approval',
     icon: 'fa-solid fa-clipboard-check',
     children: [
-      { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',  to: { name: 'leave-admin-manager-inbox' } },
-      { label: 'GM Inbox',      icon: 'fa-solid fa-user-star', to: { name: 'leave-admin-gm-inbox' } },
+      { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',   to: { name: 'leave-admin-manager-inbox' } },
+      { label: 'GM Inbox',      icon: 'fa-solid fa-user-star',  to: { name: 'leave-admin-gm-inbox' } },
+      { label: 'COO Inbox',     icon: 'fa-solid fa-user-shield',to: { name: 'leave-admin-coo-inbox' } },
+    ],
+  },
+  {
+    key: 'swapday-approval',
+    header: 'SwapDay Approval',
+    icon: 'fa-solid fa-right-left',
+    children: [
+      { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',   to: { name: 'leave-admin-swap-day-manager-inbox' } },
+      { label: 'GM Inbox',      icon: 'fa-solid fa-user-star',  to: { name: 'leave-admin-swap-day-gm-inbox' } },
+      { label: 'COO Inbox',     icon: 'fa-solid fa-user-shield',to: { name: 'leave-admin-swap-day-coo-inbox' } },
     ],
   },
   {
@@ -48,7 +63,7 @@ const groups = [
       { label: 'Leave Types',    icon: 'fa-solid fa-gear',         to: { name: 'leave-admin-types' } },
       { label: 'Expat Profiles', icon: 'fa-solid fa-user-group',   to: { name: 'leave-admin-profiles' } },
       { label: 'Report Summary', icon: 'fa-solid fa-chart-column', to: { name: 'leave-admin-report' } },
-      { label: 'Add Signature',  icon: 'fa-solid fa-add', to: { name: 'leave-add-signature'}},
+      { label: 'Add Signature',  icon: 'fa-solid fa-add',          to: { name: 'leave-add-signature' } },
     ],
   },
 ]
@@ -106,9 +121,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- ✅ Font Kantumruy Pro is applied globally by tailwind.css: html,body { font-family: var(--ui-font); } -->
   <div class="ui-page flex h-screen w-screen overflow-hidden">
-    <!-- ✅ Global glass toast (ONLY ONE renderer) -->
     <ToastContainer />
 
     <!-- Desktop sidebar -->
@@ -120,10 +133,7 @@ onBeforeUnmount(() => {
       style="border-color: rgb(var(--ui-border));"
     >
       <!-- Sidebar top -->
-      <div
-        class="flex items-center justify-between border-b px-2 py-2"
-        style="border-color: rgb(var(--ui-border));"
-      >
+      <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
         <button
           type="button"
           class="inline-flex h-8 w-8 items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -187,10 +197,7 @@ onBeforeUnmount(() => {
       </nav>
 
       <!-- User chip -->
-      <div
-        class="flex items-center gap-2 border-t px-2 py-2 text-[11px]"
-        style="border-color: rgb(var(--ui-border));"
-      >
+      <div class="flex items-center gap-2 border-t px-2 py-2 text-[11px]" style="border-color: rgb(var(--ui-border));">
         <div class="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
           {{ initials }}
         </div>
@@ -226,13 +233,10 @@ onBeforeUnmount(() => {
                  dark:bg-slate-950/95"
           style="border-right: 1px solid rgb(var(--ui-border));"
         >
-          <div
-            class="flex items-center justify-between border-b px-2 py-2"
-            style="border-color: rgb(var(--ui-border));"
-          >
+          <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
             <div class="min-w-0">
               <div class="truncate text-[11px] font-extrabold uppercase tracking-wide text-slate-700 dark:text-slate-200">
-              Expat Leave
+                Expat Leave
               </div>
               <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
                 Admin Portal
@@ -283,10 +287,7 @@ onBeforeUnmount(() => {
             </div>
           </nav>
 
-          <div
-            class="flex items-center gap-2 border-t px-2 py-2"
-            style="border-color: rgb(var(--ui-border));"
-          >
+          <div class="flex items-center gap-2 border-t px-2 py-2" style="border-color: rgb(var(--ui-border));">
             <div class="flex h-8 w-8 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
               {{ initials }}
             </div>
@@ -341,12 +342,9 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="flex items-center gap-2">
-          <!-- future right-side actions -->
-        </div>
+        <div class="flex items-center gap-2"></div>
       </header>
 
-      <!-- ✅ Full-width content -->
       <main class="flex-1 min-h-0 overflow-auto">
         <div class="w-full px-2 sm:px-4 lg:px-6 2xl:px-10 py-3">
           <router-view />

@@ -6,8 +6,8 @@
 //    - MANAGER_AND_COO
 //    - GM_AND_COO
 //
-// ✅ Removes old "MANAGER_GM / GM_COO" reporting labels.
-// ✅ Filters + counts now use the 3 semantic modes.
+// ✅ REMOVED ReplaceDayRequest usage (no Replace Day feature)
+// ✅ Keeps response shape compatible by returning replaceDays STUB (empty stats)
 // ✅ Keeps everything else (balances, pending strict remaining, stats) the same.
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
@@ -80,6 +80,10 @@ function nowYMD(tz = DEFAULT_TZ) {
   return `${parts.year}-${parts.month}-${parts.day}`
 }
 
+/**
+ * Phnom Penh midnight Date for a YMD (prevents timezone drift).
+ * PP 00:00 == UTC previous day 17:00.
+ */
 function phnomPenhMidnightDate(ymd) {
   const s = String(ymd || '').trim()
   if (!isValidYMD(s)) return new Date()
@@ -125,11 +129,7 @@ function buildTypeOrder(leaveTypesRows = []) {
 }
 
 function findBalanceRow(snapshot, code) {
-  return (
-    (snapshot?.balances || []).find(
-      (b) => up(b.leaveTypeCode) === up(code)
-    ) || null
-  )
+  return (snapshot?.balances || []).find((b) => up(b.leaveTypeCode) === up(code)) || null
 }
 
 /**
@@ -169,6 +169,7 @@ function computeStrictRemaining(snapshot, pendingUsage) {
     MC: rem('MC') - num(pendingUsage.pendingMC),
     MA: rem('MA') - num(pendingUsage.pendingMA),
     UL: rem('UL'),
+    BL: rem('BL'),
   }
 
   for (const k of Object.keys(strict)) strict[k] = Number(strict[k] || 0)
@@ -186,8 +187,11 @@ async function loadDirectoryMap(employeeIds = []) {
   const ids = [...new Set(employeeIds.map((x) => String(x || '').trim()).filter(Boolean))]
   if (!ids.length) return new Map()
 
+  // ✅ support string+number match
+  const q = buildEmployeeIdInQuery(ids)
+
   const rows = await EmployeeDirectory.find(
-    { employeeId: { $in: ids } },
+    { employeeId: q },
     { employeeId: 1, name: 1, fullName: 1, department: 1, departmentName: 1 }
   ).lean()
 
@@ -208,17 +212,15 @@ function normalizeApprovalMode(v) {
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
 
   // legacy profile enums you had earlier:
-  // - GM_ONLY  => manager+gm
-  // - GM_AND_COO => gm+coo (sometimes stored)
   if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
   if (raw === 'GM_COO') return 'GM_AND_COO'
   if (raw === 'GM_OR_COO') return 'GM_AND_COO'
   if (raw === 'COO_AND_GM') return 'GM_AND_COO'
   if (raw === 'GM_THEN_COO') return 'GM_AND_COO'
 
-  // some old UIs used MANAGER_GM / GM_COO
+  // old UIs used MANAGER_GM / GM+COO
   if (raw === 'MANAGER_GM' || raw === 'MANAGER+GM') return 'MANAGER_AND_GM'
-  if (raw === 'GM_COO' || raw === 'GM+COO') return 'GM_AND_COO'
+  if (raw === 'GM+COO') return 'GM_AND_COO'
 
   return 'MANAGER_AND_GM'
 }
@@ -299,7 +301,9 @@ exports.getLeaveReportSummary = async (req, res) => {
 
     let filteredProfiles = (profiles || []).map((p) => {
       const empId = safeText(p.employeeId)
-      const dir = dirMap.get(empId) || {}
+
+      // ✅ directory could have stored numeric or string
+      const dir = dirMap.get(empId) || dirMap.get(String(Number(empId))) || {}
 
       const managerId = safeText(p.managerLoginId)
       const gmId = safeText(p.gmLoginId)
@@ -322,15 +326,14 @@ exports.getLeaveReportSummary = async (req, res) => {
     }
 
     if (departmentQ) {
-      filteredProfiles = filteredProfiles.filter((p) =>
-        String(p.department || '').toLowerCase().includes(departmentQ)
-      )
+      filteredProfiles = filteredProfiles.filter((p) => String(p.department || '').toLowerCase().includes(departmentQ))
     }
 
     if (q) {
       filteredProfiles = filteredProfiles.filter((p) => {
-        const hay =
-          `${p.employeeId} ${p.name} ${p.department} ${p.managerLoginId} ${p.gmLoginId} ${p.cooLoginId} ${p.approvalMode}`.toLowerCase()
+        const hay = `${p.employeeId} ${p.name} ${p.department} ${p.managerLoginId} ${p.gmLoginId} ${p.cooLoginId} ${
+          p.approvalMode
+        }`.toLowerCase()
         return hay.includes(q)
       })
     }
@@ -361,13 +364,8 @@ exports.getLeaveReportSummary = async (req, res) => {
       reqSummaryDocs = reqSummaryDocs.filter((d) => overlapsRange(d.startDate, d.endDate, dateFrom, dateTo))
     }
 
-    let replaceDocs = await ReplaceDayRequest.find({ employeeId: empIdQuery }).sort({ createdAt: -1 }).lean()
-    if (dateFrom && dateTo) {
-      replaceDocs = replaceDocs.filter((d) => {
-        const rd = toYMD(d.requestDate || d.createdAt)
-        return rd ? rd >= dateFrom && rd <= dateTo : false
-      })
-    }
+    // ✅ NO ReplaceDayRequest anymore
+    const replaceDocs = [] // kept for response shape compatibility (empty)
 
     // group by employee
     const approvedByEmp = new Map()
@@ -487,22 +485,6 @@ exports.getLeaveReportSummary = async (req, res) => {
       reqByMonth[mk].days += num(r.totalDays)
     }
 
-    // replace day stats
-    const repCountsByStatus = {}
-    const repByMonth = {}
-    let repEvidenceFiles = 0
-
-    for (const r of replaceDocs || []) {
-      const st = String(r.status || '—')
-      repCountsByStatus[st] = (repCountsByStatus[st] || 0) + 1
-
-      repEvidenceFiles += Array.isArray(r.evidences) ? r.evidences.length : 0
-
-      const mk = monthKey(r.requestDate || r.createdAt)
-      if (!repByMonth[mk]) repByMonth[mk] = { count: 0 }
-      repByMonth[mk].count += 1
-    }
-
     const recentLeaveRequests = (reqSummaryDocs || []).slice(0, limit).map((r) => ({
       _id: String(r._id || ''),
       employeeId: safeText(r.employeeId),
@@ -518,26 +500,22 @@ exports.getLeaveReportSummary = async (req, res) => {
       cooLoginId: safeText(r.cooLoginId),
     }))
 
-    const recentReplaceDays = (replaceDocs || []).slice(0, limit).map((r) => ({
-      _id: String(r._id || ''),
-      employeeId: safeText(r.employeeId),
-      requestDate: toYMD(r.requestDate),
-      compensatoryDate: toYMD(r.compensatoryDate),
-      status: String(r.status || ''),
-      createdAt: r.createdAt || null,
-      evidenceCount: Array.isArray(r.evidences) ? r.evidences.length : 0,
-      managerLoginId: safeText(r.managerLoginId),
-      gmLoginId: safeText(r.gmLoginId),
-      cooLoginId: safeText(r.cooLoginId),
-    }))
+    // ✅ Replace Day STUB (keeps response shape compatible)
+    const repCountsByStatus = {}
+    const repByMonth = {}
+    const repEvidenceFiles = 0
+    const recentReplaceDays = []
 
     const counts = {
       profiles: employeeRows.length,
       active: employeeRows.filter((x) => x.isActive).length,
       inactive: employeeRows.filter((x) => !x.isActive).length,
       leaveRequests: (reqSummaryDocs || []).length,
-      replaceDays: (replaceDocs || []).length,
-      replaceEvidenceFiles: repEvidenceFiles,
+
+      // ✅ keep fields but always 0
+      replaceDays: 0,
+      replaceEvidenceFiles: 0,
+
       countsByApprovalMode,
     }
 
@@ -565,6 +543,8 @@ exports.getLeaveReportSummary = async (req, res) => {
         byMonth: reqByMonth,
         recent: recentLeaveRequests,
       },
+
+      // ✅ keep key but empty (so frontend won’t break)
       replaceDays: {
         countsByStatus: repCountsByStatus,
         byMonth: repByMonth,
