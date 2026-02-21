@@ -31,6 +31,7 @@ const groups = [
         icon: 'fa-solid fa-calendar-days',
         to: { name: 'leave-gm-swap-day-inbox' },
       },
+      { label: 'Forget Scan Inbox', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-gm-forget-scan-inbox' } },
     ],
   },
 ]

@@ -67,6 +67,16 @@ const groups = [
       { label: 'Add Signature',  icon: 'fa-solid fa-add',          to: { name: 'leave-add-signature' } },
     ],
   },
+  {
+    key: 'forgetscan-approval',
+    header: 'Forget Scan',
+    icon: 'fa-solid fa-fingerprint',
+    children: [
+      { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',    to: { name: 'leave-admin-forget-scan-manager-inbox' } },
+      { label: 'GM Inbox',      icon: 'fa-solid fa-user-star',   to: { name: 'leave-admin-forget-scan-gm-inbox' } },
+      { label: 'COO Inbox',     icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-forget-scan-coo-inbox' } },
+    ],
+  },
 ]
 
 /* Open/close state (accordion) */

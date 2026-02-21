@@ -1,3 +1,4 @@
+<!-- src/components/ui/ComfiremDialog.vue -->
 <script setup>
 import { computed } from 'vue'
 

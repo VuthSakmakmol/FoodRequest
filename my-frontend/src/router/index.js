@@ -291,7 +291,14 @@ const router = createRouter({
           name: 'leave-user-swap-day-edit',
           component: () => import('@/views/expat/user/swap-day/UserSwapDay.vue'),
           meta: { title: 'Edit Swap Working Day' },
-        },]
+        },
+        {
+          path: 'forget-scan',
+          name: 'leave-user-forget-scan',
+          component: () => import('@/views/expat/user/forgetScan/UserForgetScan.vue'),
+          meta: { title: 'Expat Forget Scan' },
+        },
+      ]
     },
 
     /* ──────────────────────────────
@@ -312,6 +319,12 @@ const router = createRouter({
           component: () => import('@/views/expat/manager/ManagerSwapDayInbox.vue'),
           meta: { title: 'Manager Swap Day Inbox' },
         },
+        {
+          path: 'forget-scan-inbox',
+          name: 'leave-manager-forget-scan-inbox',
+          component: () => import('@/views/expat/manager/forgetScan/ManagerForgetScanInbox.vue'),
+          meta: { title: 'Manager Forget Scan Inbox' }
+        }
       ],
     },
 
@@ -333,6 +346,12 @@ const router = createRouter({
           component: () => import('@/views/expat/gm/GmSwapDayInbox.vue'),
           meta: { title: 'GM Swap Day Inbox' },
         },
+        {
+          path: 'forget-scan-inbox',
+          name: 'leave-gm-forget-scan-inbox',
+          component: () => import('@/views/expat/gm/forgetScan/GmForgetScanInbox.vue'),
+          meta: { title: 'GM Forget Scan Inbox' },
+        },
       ],
     },
 
@@ -352,6 +371,12 @@ const router = createRouter({
           component: () => import('@/views/expat/coo/CooSwapDayInbox.vue'),
           meta: { title: 'COO Swap Day Inbox' },
         },
+        {
+          path : 'forget-scan-inbox',
+          name: 'leave-coo-forget-scan-inbox',
+          component: () => import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue'),
+          meta: { title: 'COO Forget Scan Inbox' } 
+        }
       ],
     },
 
@@ -429,7 +454,27 @@ const router = createRouter({
           name: 'leave-admin-swap-day-report',
           component: () => import('@/views/expat/admin/swap-day/SwapDayReport.vue'),
           meta: { title: 'SwapDay Report' },
-        }
+        },
+
+        // Forget scan
+        {
+          path: 'forget-scan/manager-inbox',
+          name: 'leave-admin-forget-scan-manager-inbox',
+          component: () => import('@/views/expat/manager/forgetScan/ManagerForgetScanInbox.vue'),
+          meta: { title: 'Manager Forget Scan Inbox (Admin View)' },
+        },
+        {
+          path: 'forget-scan/gm-inbox',
+          name: 'leave-admin-forget-scan-gm-inbox',
+          component: () => import('@/views/expat/gm/forgetScan/GmForgetScanInbox.vue'),
+          meta: { title: 'GM Forget Scan Inbox (Admin View)' },
+        },
+        {
+          path: 'forget-scan/coo-inbox',
+          name: 'leave-admin-forget-scan-coo-inbox',
+          component: () => import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue'),
+          meta: { title: 'COO Forget Scan Inbox (Admin View)' },
+        },
       ],
     },
 

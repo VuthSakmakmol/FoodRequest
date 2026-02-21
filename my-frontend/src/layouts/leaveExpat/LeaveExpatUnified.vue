@@ -39,7 +39,8 @@ const groups = computed(() => {
       children: [
         { label: 'Request Leave',        icon: 'fa-regular fa-calendar-plus', to: { name: 'leave-user-request' } },
         { label: 'My Requests',          icon: 'fa-solid fa-list-ul',         to: { name: 'leave-user-my-requests' } },
-        { label: 'Swap Working Day',     icon: 'fa-solid fa-arrows-rotate', to: { name: 'leave-user-swap-day' }, },
+        { label: 'Swap Working Day',     icon: 'fa-solid fa-arrows-rotate',   to: { name: 'leave-user-swap-day' }, },
+        { label: 'Forget Scan',          icon: 'fa-solid fa-fingerprint',     to: { name: 'leave-user-forget-scan' } },
       ],
     })
   }
@@ -53,6 +54,7 @@ const groups = computed(() => {
       children: [
         { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie',   to: { name: 'leave-manager-inbox' } },
         { label: 'Swap Day Inbox',  icon: 'fa-solid fa-arrows-rotate',   to: { name: 'leave-manager-swap-day-inbox' } },
+        { label: 'forget Scan inbox', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-manager-forget-scan-inbox'}}
       ],
     })
   }
@@ -78,11 +80,8 @@ const groups = computed(() => {
       icon: 'fa-solid fa-user-check',
       children: [
         { label: 'COO Inbox', icon: 'fa-solid fa-inbox',     to: { name: 'leave-coo-inbox' } },
-        {
-          label: 'Swap Day Inbox',
-          icon: 'fa-solid fa-calendar-days',
-          to: { name: 'leave-coo-swap-day-inbox' },
-        },
+        { label: 'Swap Day Inbox', icon: 'fa-solid fa-calendar-days',   to: { name: 'leave-coo-swap-day-inbox' }, },
+        { label: 'Forget Scan Inbox', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-coo-forget-scan-inbox' } },
       ].filter(x => x.to?.name),
     })
   }
