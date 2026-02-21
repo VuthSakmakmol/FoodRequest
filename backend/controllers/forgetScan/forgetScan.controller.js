@@ -357,14 +357,26 @@ exports.listManagerInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewManagerInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '') // 'ALL' or ''
     const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] }
 
-    const base = isAdminViewer(req)
-      ? { approvalMode: modeFilter }
-      : { approvalMode: modeFilter, managerLoginId: me }
+    // Admin viewer: keep scope logic
+    if (isAdminViewer(req)) {
+      const scope = up(req.query?.scope || '')
+      const query =
+        scope === 'ALL'
+          ? { approvalMode: modeFilter }
+          : { approvalMode: modeFilter, status: 'PENDING_MANAGER' }
 
-    const query = scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_MANAGER' }
+      const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
+      return res.json(await attachEmployeeInfo(rows || []))
+    }
+
+    // ✅ Manager: can see pending manager + later (history)
+    const query = {
+      approvalMode: modeFilter,
+      managerLoginId: me,
+      status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+    }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -445,14 +457,35 @@ exports.listGmInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] }
 
-    const base = isAdminViewer(req)
-      ? { approvalMode: modeFilter }
-      : { approvalMode: modeFilter, gmLoginId: me }
+    if (isAdminViewer(req)) {
+      const scope = up(req.query?.scope || '')
+      const query =
+        scope === 'ALL'
+          ? { approvalMode: modeFilter }
+          : { approvalMode: modeFilter, status: 'PENDING_GM' }
 
-    const query = scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_GM' }
+      const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
+      return res.json(await attachEmployeeInfo(rows || []))
+    }
+
+    // ✅ GM: queue + history
+    // - MANAGER_AND_GM: can see only PENDING_GM + final states (no PENDING_MANAGER)
+    // - GM_AND_COO: can see PENDING_GM + PENDING_COO + final states
+    const query = {
+      gmLoginId: me,
+      $or: [
+        {
+          approvalMode: 'MANAGER_AND_GM',
+          status: { $in: ['PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+        },
+        {
+          approvalMode: 'GM_AND_COO',
+          status: { $in: ['PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+        },
+      ],
+    }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -533,14 +566,25 @@ exports.listCooInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] }
 
-    const base = isAdminViewer(req)
-      ? { approvalMode: modeFilter }
-      : { approvalMode: modeFilter, cooLoginId: me }
+    if (isAdminViewer(req)) {
+      const scope = up(req.query?.scope || '')
+      const query =
+        scope === 'ALL'
+          ? { approvalMode: modeFilter }
+          : { approvalMode: modeFilter, status: 'PENDING_COO' }
 
-    const query = scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_COO' }
+      const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
+      return res.json(await attachEmployeeInfo(rows || []))
+    }
+
+    // ✅ COO: queue + history (only from COO step onward)
+    const query = {
+      approvalMode: modeFilter,
+      cooLoginId: me,
+      status: { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+    }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))

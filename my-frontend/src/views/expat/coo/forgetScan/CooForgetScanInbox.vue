@@ -40,7 +40,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('PENDING_COO') // ✅ default filter
+const statusFilter = ref('ALL') // ✅ default filter
 
 /* pagination */
 const page = ref(1)

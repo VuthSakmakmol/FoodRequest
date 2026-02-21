@@ -139,19 +139,32 @@ function emitSwap(req, payload, event = 'swap:req:updated') {
     const gm = s(payload?.gmLoginId)
     const coo = s(payload?.cooLoginId)
 
-    // ✅ Admin viewers
+    const st = up(payload?.status)
+
+    // ✅ always notify admins + requester/employee
     io.to('admins').emit(event, payload)
-
-    // ✅ Employee room
     if (empId) io.to(`employee:${empId}`).emit(event, payload)
-
-    // ✅ User room (requester loginId)
     if (requester) io.to(`user:${requester}`).emit(event, payload)
+    if (empId) io.to(`user:${empId}`).emit(event, payload) // optional fallback
 
-    // ✅ Fallback: user room by employeeId (your Leave pattern does this)
-    if (empId) io.to(`user:${empId}`).emit(event, payload)
+    // ✅ QUEUE routing: notify ONLY the current approver room
+    if (st === 'PENDING_MANAGER' && manager) {
+      io.to(`user:${manager}`).emit(event, payload)
+      return
+    }
+    if (st === 'PENDING_GM' && gm) {
+      io.to(`user:${gm}`).emit(event, payload)
+      return
+    }
+    if (st === 'PENDING_COO' && coo) {
+      io.to(`user:${coo}`).emit(event, payload)
+      return
+    }
 
-    // ✅ Approver rooms (critical for inbox realtime)
+    // ✅ final states: (optional)
+    // You can notify ALL approvers if you want them to know result,
+    // but it won't affect inbox because inbox is queue-filtered.
+    // If you want strict privacy, remove this block.
     if (manager) io.to(`user:${manager}`).emit(event, payload)
     if (gm) io.to(`user:${gm}`).emit(event, payload)
     if (coo) io.to(`user:${coo}`).emit(event, payload)
@@ -505,17 +518,32 @@ exports.cancelMySwapRequest = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    MANAGER INBOX
 ───────────────────────────────────────────────────────────── */
+// listManagerInbox: force queue for non-admin
 exports.listManagerInbox = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewManagerInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] }
 
-    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, managerLoginId: me }
-    const query = scope === 'ALL' ? base : { ...base, status: 'PENDING_MANAGER' }
+    if (isAdminViewer(req)) {
+      const scope = up(req.query?.scope || '')
+      const query =
+        scope === 'ALL'
+          ? { approvalMode: modeFilter }
+          : { approvalMode: modeFilter, status: 'PENDING_MANAGER' }
+
+      const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
+      return res.json(await attachEmployeeInfo(rows || []))
+    }
+
+    // ✅ Manager: pending manager + later statuses (history)
+    const query = {
+      approvalMode: modeFilter,
+      managerLoginId: me,
+      status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+    }
 
     const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -611,11 +639,30 @@ exports.listGmInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] }
 
-    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, gmLoginId: me }
-    const query = scope === 'ALL' ? base : { ...base, status: 'PENDING_GM' }
+    if (isAdminViewer(req)) {
+      const scope = up(req.query?.scope || '')
+      const query =
+        scope === 'ALL'
+          ? { approvalMode: modeFilter }
+          : { approvalMode: modeFilter, status: 'PENDING_GM' }
+
+      const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
+      return res.json(await attachEmployeeInfo(rows || []))
+    }
+
+    // ✅ GM: queue + history
+    const query = {
+      gmLoginId: me,
+      $or: [
+        // MANAGER_AND_GM: GM sees only from GM step onward
+        { approvalMode: 'MANAGER_AND_GM', status: { $in: ['PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED'] } },
+
+        // GM_AND_COO: GM sees PENDING_GM + PENDING_COO + final
+        { approvalMode: 'GM_AND_COO', status: { $in: ['PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] } },
+      ],
+    }
 
     const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -623,7 +670,6 @@ exports.listGmInbox = async (req, res, next) => {
     next(e)
   }
 }
-
 /* ─────────────────────────────────────────────────────────────
    GM DECISION
 ───────────────────────────────────────────────────────────── */
@@ -711,11 +757,25 @@ exports.listCooInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] }
 
-    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, cooLoginId: me }
-    const query = scope === 'ALL' ? base : { ...base, status: 'PENDING_COO' }
+    if (isAdminViewer(req)) {
+      const scope = up(req.query?.scope || '')
+      const query =
+        scope === 'ALL'
+          ? { approvalMode: modeFilter }
+          : { approvalMode: modeFilter, status: 'PENDING_COO' }
+
+      const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
+      return res.json(await attachEmployeeInfo(rows || []))
+    }
+
+    // ✅ COO: only from COO step onward
+    const query = {
+      approvalMode: modeFilter,
+      cooLoginId: me,
+      status: { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+    }
 
     const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))

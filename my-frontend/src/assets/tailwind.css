@@ -5,7 +5,7 @@
 */
 
 /* ✅ Optional Google fonts (keep only if you actually use them) */
-@import url("https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap");
+/* @import url("https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap"); */
 
 @tailwind base;
 @tailwind components;
@@ -84,12 +84,12 @@ Base Tokens (Light/Dark)
     --ui-font: "Arial Nova", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
       "Noto Sans";
 
-    /* Radii */
-    --ui-r-xs: 10px;
-    --ui-r-sm: 12px;
-    --ui-r-md: 16px;
-    --ui-r-lg: 20px;
-    --ui-r-xl: 24px;
+    /* ✅ Radii (SMALLER, compact look) */
+    --ui-r-xs: 8px;
+    --ui-r-sm: 10px;
+    --ui-r-md: 12px;
+    --ui-r-lg: 14px;
+    --ui-r-xl: 16px;
 
     /* Core surfaces */
     --ui-bg: 248 250 252; /* slate-50 */
@@ -227,16 +227,17 @@ Base Tokens (Light/Dark)
     opacity: 1;
     cursor: pointer;
   }
-    /* ✅ Make native <select> dropdown options readable (Light) */
+
+  /* ✅ Make native <select> dropdown options readable (Light) */
   select option {
-    background: rgb(var(--ui-card));   /* white-ish */
-    color: rgb(var(--ui-fg));          /* dark text */
+    background: rgb(var(--ui-card)); /* white-ish */
+    color: rgb(var(--ui-fg)); /* dark text */
   }
 
   /* ✅ Dark mode dropdown options */
   .dark select option {
     background: rgb(var(--ui-card-2)); /* dark surface */
-    color: rgb(var(--ui-fg));          /* light text */
+    color: rgb(var(--ui-fg)); /* light text */
   }
 }
 
@@ -260,8 +261,9 @@ Base Tokens (Light/Dark)
     @apply w-full max-w-none px-0;
   }
 
+  /* ✅ smaller top radius (rounded-t-2xl -> rounded-t-xl) */
   .ui-hero-gradient {
-    @apply rounded-t-2xl border-x-0 border-t-0 border border-slate-200 dark:border-slate-800
+    @apply rounded-t-xl border-x-0 border-t-0 border border-slate-200 dark:border-slate-800
            bg-gradient-to-r from-emerald-600 via-teal-500 to-sky-500
            px-4 py-3 text-white;
   }
@@ -594,7 +596,8 @@ Base Tokens (Light/Dark)
 
   /* Skeleton + Divider */
   .ui-skeleton {
-    @apply animate-pulse rounded-xl;
+    @apply animate-pulse;
+    border-radius: var(--ui-r-xl);
     background: rgb(var(--ui-border) / 0.22);
   }
   .ui-divider {
@@ -634,7 +637,7 @@ Base Tokens (Light/Dark)
     @apply grid place-items-center shrink-0 border;
     width: 38px;
     height: 38px;
-    border-radius: 16px;
+    border-radius: 14px; /* slightly smaller than before */
     border-color: rgb(var(--ui-border) / 0.75);
     background: rgb(var(--ui-border) / 0.22);
     color: rgb(var(--ui-fg) / 0.92);
