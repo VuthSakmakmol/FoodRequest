@@ -7,7 +7,9 @@
   ✅ No SweetAlert2 / no window alert
   ✅ Uses /leave/forget-scan/gm/inbox?scope=ALL
      and /leave/forget-scan/:id/gm-decision
-  ✅ Optional realtime hooks: forgetscan:req:created / forgetscan:req:updated
+  ✅ Realtime:
+     - forgetscan:req:created
+     - forgetscan:req:updated
 -->
 
 <script setup>
@@ -40,7 +42,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL') // ✅ default filter
+const statusFilter = ref('ALL')
 
 /* pagination */
 const page = ref(1)
@@ -316,6 +318,7 @@ async function confirmDecision() {
     closeConfirm(true)
     closeView()
 
+    // realtime updates, keep fetch as safety:
     await fetchInbox()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
@@ -370,10 +373,11 @@ async function exportExcel() {
   }
 }
 
-/* ───────────────── REALTIME (optional) ───────────────── */
+/* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
   const id = String(doc._id)
+
   const idx = rows.value.findIndex((x) => String(x._id) === id)
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
@@ -395,7 +399,7 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // join GM rooms
+  // ✅ join GM rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_GM' })
 
@@ -408,18 +412,15 @@ onMounted(async () => {
 
   await fetchInbox()
 
-  try {
-    socket.on('forgetscan:req:created', onReqCreated)
-    socket.on('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+  socket.on('forgetscan:req:created', onReqCreated)
+  socket.on('forgetscan:req:updated', onReqUpdated)
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  try {
-    socket.off('forgetscan:req:created', onReqCreated)
-    socket.off('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+
+  socket.off('forgetscan:req:created', onReqCreated)
+  socket.off('forgetscan:req:updated', onReqUpdated)
 })
 </script>
 

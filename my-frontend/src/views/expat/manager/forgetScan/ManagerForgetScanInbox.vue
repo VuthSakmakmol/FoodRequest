@@ -1,10 +1,11 @@
 <!-- src/views/expat/manager/forgetScan/ManagerForgetScanInbox.vue
   ✅ SAME STYLE as ManagerSwapDayInbox (ui-* tokens, hero bar, filters, pagination, view modal, decision modal)
-  ✅ Default filter = PENDING_MANAGER (so after approve it disappears unless user selects ALL)
-  ✅ Scope ALWAYS fetches scope=ALL (like your swap-day inbox), but filter controls what is shown
-  ✅ Export Excel (xlsx) like your project pattern
-  ✅ No SweetAlert2 / no window alert
-  ✅ Fix Vue warning: use (label, k) not (label, key)
+  ✅ Default filter = PENDING_MANAGER
+  ✅ Always fetch scope=ALL (like swap-day), filter controls what shown
+  ✅ Export Excel (xlsx)
+  ✅ Realtime ready (SwapDay baseline):
+      - forgetscan:req:created
+      - forgetscan:req:updated
 -->
 
 <script setup>
@@ -37,7 +38,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL') // ✅ default filter (pending manager)
+const statusFilter = ref('ALL')
 
 /* pagination */
 const page = ref(1)
@@ -48,7 +49,7 @@ const perPageOptions = [20, 50, 100, 'All']
 const viewOpen = ref(false)
 const viewItem = ref(null)
 
-/* decision modal (custom, same as your swap-day) */
+/* decision modal */
 const confirmOpen = ref(false)
 const confirmBusy = ref(false)
 const confirmType = ref('') // 'APPROVE' | 'REJECT'
@@ -96,7 +97,6 @@ function fmtDateTime(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD HH:mm')
 }
-
 function fmtYmd(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD')
@@ -133,7 +133,7 @@ function briefReason(v, max = 70) {
   return t.slice(0, max).trimEnd() + '…'
 }
 
-/* rejected reason helpers (same idea as swap-day) */
+/* rejected reason helpers */
 function getRejectedReason(row) {
   const r = row || {}
 
@@ -157,17 +157,17 @@ function getRejectedReason(row) {
   return '—'
 }
 
-/* ───────────────── FETCH ─────────────────
-   Like your swap-day manager inbox:
-   Always fetch scope=ALL, then filter locally by statusFilter
-*/
+/* ───────────────── FETCH ───────────────── */
 async function fetchInbox() {
   try {
     loading.value = true
     const res = await api.get('/leave/forget-scan/manager/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load manager forget scan inbox' })
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Failed to load manager forget scan inbox',
+    })
   } finally {
     loading.value = false
   }
@@ -316,7 +316,7 @@ async function confirmDecision() {
     closeConfirm(true)
     closeView()
 
-    // Re-fetch as safety (even if realtime not implemented yet)
+    // ✅ realtime will update, but keep as safety
     await fetchInbox()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
@@ -349,7 +349,6 @@ function buildExcelRows(list) {
 async function exportExcel() {
   try {
     exporting.value = true
-
     const data = buildExcelRows(filteredRows.value)
     if (!data.length) {
       showToast({ type: 'warning', message: 'No data to export.' })
@@ -371,14 +370,11 @@ async function exportExcel() {
   }
 }
 
-/* ───────────────── REALTIME (optional) ─────────────────
-   If backend emits later:
-   - forgetscan:req:created
-   - forgetscan:req:updated
-*/
+/* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
   const id = String(doc._id)
+
   const idx = rows.value.findIndex((x) => String(x._id) === id)
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
@@ -400,7 +396,7 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // join manager rooms (same pattern)
+  // ✅ join manager rooms (critical)
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_MANAGER' })
 
@@ -413,18 +409,15 @@ onMounted(async () => {
 
   await fetchInbox()
 
-  try {
-    socket.on('forgetscan:req:created', onReqCreated)
-    socket.on('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+  socket.on('forgetscan:req:created', onReqCreated)
+  socket.on('forgetscan:req:updated', onReqUpdated)
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  try {
-    socket.off('forgetscan:req:created', onReqCreated)
-    socket.off('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+
+  socket.off('forgetscan:req:created', onReqCreated)
+  socket.off('forgetscan:req:updated', onReqUpdated)
 })
 </script>
 
@@ -464,7 +457,6 @@ onBeforeUnmount(() => {
                   v-model="statusFilter"
                   class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
                 >
-                  <!-- ✅ FIX warning: use (label, k) -->
                   <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
                     {{ label }}
                   </option>
@@ -870,7 +862,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- CONFIRM DECISION MODAL (same as swap-day) -->
+    <!-- CONFIRM DECISION MODAL -->
     <div v-if="confirmOpen" class="ui-modal-backdrop">
       <div class="ui-modal p-4">
         <div class="flex items-start gap-3">

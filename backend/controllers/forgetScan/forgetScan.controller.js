@@ -28,6 +28,23 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
 /* ───────────────── helpers ───────────────── */
 
+const { broadcastForgetScanRequest } = require('../../utils/forgetScan.realtime')
+
+function getIo(req) {
+  return req.io || req.app?.get('io') || null
+}
+
+function emitForget(req, doc, event = 'forgetscan:req:updated') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastForgetScanRequest(io, doc, event)
+  } catch (e) {
+    console.warn('⚠️ forgetscan realtime emit failed:', e?.message)
+  }
+}
+
+
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -269,6 +286,7 @@ exports.createMyForgetScan = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+    emitForget(req, payload, 'forgetscan:req:created')
     return res.status(201).json(payload)
   } catch (e) {
     next(e)
@@ -322,6 +340,7 @@ exports.cancelMyForgetScan = async (req, res, next) => {
     await existing.save()
 
     const payload = await attachEmployeeInfoToOne(existing)
+    emitForget(req, payload, 'forgetscan:req:updated')
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -409,6 +428,7 @@ exports.managerDecision = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+    emitForget(req, payload, 'forgetscan:req:updated')
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -496,6 +516,7 @@ exports.gmDecision = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+    emitForget(req, payload, 'forgetscan:req:updated')
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -583,6 +604,7 @@ exports.cooDecision = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+    emitForget(req, payload, 'forgetscan:req:updated')
     return res.json(payload)
   } catch (e) {
     next(e)

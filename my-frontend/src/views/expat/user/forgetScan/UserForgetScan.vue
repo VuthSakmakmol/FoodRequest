@@ -1,18 +1,16 @@
 <!-- src/views/expat/user/forgetScan/UserForgetScan.vue
-  ✅ Follows your ui-* design system (ui-page/ui-container/ui-card/ui-hero-gradient/ui-table/ui-badge/ui-btn)
-  ✅ Uses your toast composable: useToast().showToast(...)
-  ✅ Simple form: forgotDate + forgotType + reason
-  ✅ List my requests with search + status filter
-  ✅ Cancel rule (same as SwapDay): cannot cancel if ANY approval step is APPROVED
-  ✅ Uses ConfirmDialog (no SweetAlert2, no window.alert)
-  ✅ Optional realtime hook placeholders (you can add backend events later)
+  ✅ Full realtime ready (SwapDay baseline)
+  ✅ ui-* design system
+  ✅ create + list + filter + detail modal + cancel confirm
+  ✅ Realtime events:
+      - forgetscan:req:created
+      - forgetscan:req:updated
 -->
 
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import { useToast } from '@/composables/useToast'
-import { useRouter } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -22,7 +20,6 @@ import api from '@/utils/api'
 defineOptions({ name: 'UserForgetScan' })
 
 const { showToast } = useToast()
-const router = useRouter()
 const auth = useAuth()
 
 /* ───────────────── STATE ───────────────── */
@@ -179,15 +176,10 @@ async function submitCreate() {
     const res = await api.post('/leave/forget-scan', payload)
     showToast({ type: 'success', message: 'Forget scan request submitted.' })
 
-    // optimistic update
+    // ✅ Optimistic insert (realtime will also push, but this feels instant)
     const doc = res.data
-    if (doc?._id) {
-      const idx = rows.value.findIndex((x) => String(x._id) === String(doc._id))
-      if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
-      else rows.value.unshift(doc)
-    } else {
-      await fetchData()
-    }
+    if (doc?._id) upsertRow(doc)
+    else await fetchData()
 
     createOpen.value = false
   } catch (e) {
@@ -244,6 +236,8 @@ async function confirmCancel() {
     showToast({ type: 'success', message: 'Request cancelled.' })
     cancelOpen.value = false
     cancelTarget.value = null
+
+    // realtime should update, but keep as safety:
     await fetchData()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Cancel failed.' })
@@ -274,21 +268,25 @@ const filteredRows = computed(() => {
   return result
 })
 
-/* ───────────────── REALTIME (optional) ─────────────────
-   If you later emit:
+/* ───────────────── REALTIME ─────────────────
+   Backend emits:
      - forgetscan:req:created
      - forgetscan:req:updated
 */
 function upsertRow(doc) {
   if (!doc?._id) return
-  const idx = rows.value.findIndex((x) => String(x._id) === String(doc._id))
+  const id = String(doc._id)
+
+  const idx = rows.value.findIndex((x) => String(x._id) === id)
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  if (viewItem.value?._id && String(viewItem.value._id) === String(doc._id)) {
+  // keep detail modal synced
+  if (viewItem.value?._id && String(viewItem.value._id) === id) {
     viewItem.value = { ...viewItem.value, ...doc }
   }
 }
+
 function onReqCreated(doc) {
   upsertRow(doc)
 }
@@ -300,7 +298,7 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // subscribe rooms (safe)
+  // ✅ subscribe rooms (critical)
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_USER' })
 
@@ -313,19 +311,15 @@ onMounted(async () => {
 
   await fetchData()
 
-  // optional realtime handlers (won't break if backend doesn't emit)
-  try {
-    socket.on('forgetscan:req:created', onReqCreated)
-    socket.on('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+  // ✅ realtime handlers
+  socket.on('forgetscan:req:created', onReqCreated)
+  socket.on('forgetscan:req:updated', onReqUpdated)
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  try {
-    socket.off('forgetscan:req:created', onReqCreated)
-    socket.off('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+  socket.off('forgetscan:req:created', onReqCreated)
+  socket.off('forgetscan:req:updated', onReqUpdated)
 })
 </script>
 

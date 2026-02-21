@@ -7,7 +7,7 @@
   ✅ No SweetAlert2 / no window alert
   ✅ Uses /leave/forget-scan/coo/inbox?scope=ALL
      and /leave/forget-scan/:id/coo-decision
-  ✅ Optional realtime hooks: forgetscan:req:created / forgetscan:req:updated
+  ✅ Realtime hooks: forgetscan:req:created / forgetscan:req:updated
 -->
 
 <script setup>
@@ -40,7 +40,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL') // ✅ default filter (pending COO)
+const statusFilter = ref('PENDING_COO') // ✅ default filter
 
 /* pagination */
 const page = ref(1)
@@ -318,6 +318,7 @@ async function confirmDecision() {
     closeConfirm(true)
     closeView()
 
+    // realtime will also update; keep fetch as safety
     await fetchInbox()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
@@ -372,10 +373,11 @@ async function exportExcel() {
   }
 }
 
-/* ───────────────── REALTIME (optional) ───────────────── */
+/* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
   const id = String(doc._id)
+
   const idx = rows.value.findIndex((x) => String(x._id) === id)
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
@@ -397,7 +399,7 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // join COO rooms
+  // ✅ join COO rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_COO' })
 
@@ -410,18 +412,15 @@ onMounted(async () => {
 
   await fetchInbox()
 
-  try {
-    socket.on('forgetscan:req:created', onReqCreated)
-    socket.on('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+  socket.on('forgetscan:req:created', onReqCreated)
+  socket.on('forgetscan:req:updated', onReqUpdated)
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  try {
-    socket.off('forgetscan:req:created', onReqCreated)
-    socket.off('forgetscan:req:updated', onReqUpdated)
-  } catch {}
+
+  socket.off('forgetscan:req:created', onReqCreated)
+  socket.off('forgetscan:req:updated', onReqUpdated)
 })
 </script>
 
@@ -551,7 +550,7 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
             <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
               No items found.
@@ -627,7 +626,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table table-fixed w-full min-w-[1050px]">
               <colgroup>
