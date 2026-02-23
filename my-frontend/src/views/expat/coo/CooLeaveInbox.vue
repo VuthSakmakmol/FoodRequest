@@ -736,10 +736,10 @@ onBeforeUnmount(() => {
                 <col class="w-[58px]" />
                 <col class="w-[160px]" />
                 <col class="w-[80px]" />
-                <col />
                 <col class="w-[130px]" />
                 <col class="w-[120px]" />
                 <col class="w-[120px]" />
+                <col class="w-[200px]" />
               </colgroup>
 
               <thead>
@@ -749,10 +749,10 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Type</th>
                   <th class="ui-th text-left">Leave Date</th>
                   <th class="ui-th text-right">Days</th>
-                  <th class="ui-th text-left">Reason</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-center">Actions</th>
+                  <th class="ui-th text-left">Reason</th>
                 </tr>
               </thead>
 
@@ -792,19 +792,7 @@ onBeforeUnmount(() => {
                     {{ Number(row.totalDays || 0).toLocaleString() }}
                   </td>
 
-                  <td class="ui-td text-left align-top">
-                    <p class="reason-cell">{{ row.reason || '—' }}</p>
-
-                    <div
-                      v-if="String(row.status || '').toUpperCase() === 'REJECTED' && getRejectReason(row)"
-                      class="mt-2 inline-flex max-w-[640px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
-                    >
-                      <span class="font-extrabold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
-                      <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
-                    </div>
-                  </td>
-
+                  
                   <td class="ui-td align-top">
                     <span
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
@@ -832,6 +820,19 @@ onBeforeUnmount(() => {
                     </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
+                  <td class="ui-td text-left align-top">
+                    <p class="reason-cell">{{ row.reason || '—' }}</p>
+
+                    <div
+                      v-if="String(row.status || '').toUpperCase() === 'REJECTED' && getRejectReason(row)"
+                      class="mt-2 inline-flex max-w-[640px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                    >
+                      <span class="font-extrabold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
+                      <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
+                    </div>
+                  </td>
+
                 </tr>
               </tbody>
             </table>

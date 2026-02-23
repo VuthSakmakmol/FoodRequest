@@ -68,8 +68,8 @@ const COL_WIDTH = {
   forgotDate: '140px',
   forgotType: '140px',
   status: '150px',
-  reason: 'auto',
   actions: '92px',
+  reason: 'auto',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -635,8 +635,8 @@ onBeforeUnmount(() => {
                 <col :style="{ width: COL_WIDTH.forgotDate }" />
                 <col :style="{ width: COL_WIDTH.forgotType }" />
                 <col :style="{ width: COL_WIDTH.status }" />
-                <col :style="{ width: COL_WIDTH.reason }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
+                <col :style="{ width: COL_WIDTH.reason }" />
               </colgroup>
 
               <thead>
@@ -646,8 +646,8 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Forgot Date</th>
                   <th class="ui-th">Type</th>
                   <th class="ui-th">Status</th>
-                  <th class="ui-th">Reason</th>
                   <th class="ui-th text-center">Action</th>
+                  <th class="ui-th">Reason</th>
                 </tr>
               </thead>
 
@@ -688,12 +688,6 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <td class="ui-td">
-                    <p class="reason-cell" :title="compactText(row.reason)">
-                      {{ row.reason ? compactText(row.reason) : '—' }}
-                    </p>
-                  </td>
-
                   <td class="ui-td text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">
                       <template v-if="canDecide(row)">
@@ -722,6 +716,12 @@ onBeforeUnmount(() => {
 
                       <span v-else class="text-[11px] text-slate-400">—</span>
                     </div>
+                  </td>
+
+                  <td class="ui-td">
+                    <p class="reason-cell" :title="compactText(row.reason)">
+                      {{ row.reason ? compactText(row.reason) : '—' }}
+                    </p>
                   </td>
                 </tr>
               </tbody>

@@ -475,6 +475,12 @@ const router = createRouter({
           component: () => import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue'),
           meta: { title: 'COO Forget Scan Inbox (Admin View)' },
         },
+        {
+          path: 'forgetscan/report',
+          name: 'admin-forget-scan-report',
+          component: () => import('@/views/expat/admin/forgetScan/AdminForgetScanReport.vue'),
+          meta: { title: 'Forget scan Report for Admin'}
+        }
       ],
     },
 

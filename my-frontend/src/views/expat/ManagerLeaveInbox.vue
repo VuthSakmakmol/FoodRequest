@@ -761,10 +761,10 @@ onBeforeUnmount(() => {
                 <col class="w-[92px]" />
                 <col class="w-[160px]" />
                 <col class="w-[80px]" />
-                <col />
                 <col class="w-[170px]" />
                 <col class="w-[96px]" />
                 <col class="w-[92px]" />
+                <col class="w-[200px]"/>
               </colgroup>
 
               <thead>
@@ -774,10 +774,10 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Type</th>
                   <th class="ui-th text-left">Leave Date</th>
                   <th class="ui-th text-right">Days</th>
-                  <th class="ui-th text-left">Reason</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Files</th>
-                  <th class="ui-th text-center">Act</th>
+                  <th class="ui-th text-center">Action</th>
+                  <th class="ui-th text-left">Reason</th>
                 </tr>
               </thead>
 
@@ -812,10 +812,6 @@ onBeforeUnmount(() => {
                   <td class="ui-td text-left whitespace-nowrap align-top">{{ formatRange(row) }}</td>
 
                   <td class="ui-td text-right align-top tabular-nums">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
-
-                  <td class="ui-td text-left align-top">
-                    <p class="reason-cell">{{ row.reason || '—' }}</p>
-                  </td>
 
                   <td class="ui-td align-top">
                     <span
@@ -869,7 +865,11 @@ onBeforeUnmount(() => {
                       </button>
                     </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
+                    </td>
+
+                    <td class="ui-td text-left align-top">
+                      <p class="reason-cell">{{ row.reason || '—' }}</p>
+                    </td>
                 </tr>
               </tbody>
             </table>

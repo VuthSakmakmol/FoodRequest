@@ -1,12 +1,12 @@
 <!-- src/views/expat/admin/swap-day/SwapDayReport.vue
   ✅ Leave Admin / Admin can view ALL Swap Working Day requests
-  ✅ Filters: search, status, approval mode, date range (request/off), employeeId
-  ✅ Responsive: mobile cards + desktop table (column width config)
+  ✅ Header filters style MATCHES AdminForgetScanReport (6-in-1 row)
+  ✅ Responsive: mobile cards + desktop table
   ✅ Export Excel (xlsx)
-  ✅ Details modal + Attachments preview (same style using AttachmentPreviewModal)
-  ✅ Realtime updates (swap:req:created / swap:req:updated) using your standard socket pattern
+  ✅ Details modal + Attachments preview (AttachmentPreviewModal)
+  ✅ Realtime updates (swap:req:created / swap:req:updated)
+  ✅ Reason always shown (fallback fields)
 -->
-
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
@@ -16,10 +16,7 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
-// ✅ realtime (same pattern)
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
-
-// ✅ reuse your existing preview modal (swap-day)
 import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
 
 defineOptions({ name: 'SwapDayReport' })
@@ -40,10 +37,10 @@ const rows = ref([])
 
 const search = ref('')
 const statusFilter = ref('ALL')
-const approvalMode = ref('ALL') // MANAGER_AND_GM | MANAGER_AND_COO | GM_AND_COO
+const approvalMode = ref('ALL')
 const employeeIdFilter = ref('')
 
-const dateMode = ref('REQUEST') // REQUEST | OFF
+const dateMode = ref('REQUEST')
 const dateFrom = ref('')
 const dateTo = ref('')
 
@@ -73,7 +70,7 @@ const COL_WIDTH = {
   swapDate: '200px',
   file: '110px',
   status: '140px',
-  reason: 'auto',
+  reason: '220px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -139,41 +136,41 @@ function normalizeEvidenceList(list) {
   return arr.map((x) => ({ ...x, attId: x?.attId || x?.fileId }))
 }
 
-/* ───────────────── API ─────────────────
-  Expected backend endpoint:
-    GET /leave/swap-working-day/admin?scope=ALL&status=...&approvalMode=...&q=...&employeeId=...&from=...&to=...&dateMode=REQUEST|OFF
-  If your backend uses different param names, just adjust buildQuery() below.
-*/
+/* ✅ Reason fallback (IMPORTANT) */
+function reasonText(row) {
+  const r = row || {}
+  const candidates = [
+    r.reason,
+    r.requestReason,
+    r.note,
+    r.remark,
+    r.comments,
+    r.description,
+  ]
+  const pick = candidates.map(compactText).find((x) => !!x)
+  return pick || '—'
+}
+
+/* ───────────────── API ───────────────── */
 function buildQuery() {
   const q = {}
 
-  // search
   if (s(search.value)) q.q = s(search.value)
-
-  // status
   if (statusFilter.value !== 'ALL') q.status = up(statusFilter.value)
-
-  // approval mode
   if (approvalMode.value !== 'ALL') q.approvalMode = up(approvalMode.value)
-
-  // employeeId
   if (s(employeeIdFilter.value)) q.employeeId = s(employeeIdFilter.value)
 
-  // date
   const df = s(dateFrom.value)
   const dt = s(dateTo.value)
   if ((df && !dt) || (!df && dt)) {
-    // do not block UI hard; show toast & ignore
     showToast({ type: 'warning', message: 'Please provide both date from and date to.' })
   } else if (df && dt) {
     q.from = df
     q.to = dt
-    q.dateMode = up(dateMode.value) // REQUEST | OFF
+    q.dateMode = up(dateMode.value)
   }
 
-  // keep admin scope explicit (if backend uses it)
   q.scope = 'ALL'
-
   return q
 }
 
@@ -190,31 +187,18 @@ async function fetchRows() {
   }
 }
 
-/* ───────────────── FILTER (local safety) ─────────────────
-  We still filter locally to:
-   - be robust if backend ignores some params
-   - keep page behavior consistent
-*/
+/* ───────────────── FILTER (local safety) ───────────────── */
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
-  // status
-  if (statusFilter.value !== 'ALL') {
-    list = list.filter((r) => up(r.status) === up(statusFilter.value))
-  }
+  if (statusFilter.value !== 'ALL') list = list.filter((r) => up(r.status) === up(statusFilter.value))
+  if (approvalMode.value !== 'ALL') list = list.filter((r) => up(r.approvalMode) === up(approvalMode.value))
 
-  // approvalMode
-  if (approvalMode.value !== 'ALL') {
-    list = list.filter((r) => up(r.approvalMode) === up(approvalMode.value))
-  }
-
-  // employeeId
   if (s(employeeIdFilter.value)) {
     const eid = s(employeeIdFilter.value)
     list = list.filter((r) => String(r.employeeId || '').includes(eid))
   }
 
-  // search
   const q = search.value.trim().toLowerCase()
   if (q) {
     list = list.filter((r) => {
@@ -223,7 +207,7 @@ const filteredRows = computed(() => {
         r.employeeName,
         r.name,
         r.department,
-        r.reason,
+        reasonText(r), // ✅ include reason in search even if field differs
         r.status,
         r.approvalMode,
         r.requestStartDate,
@@ -240,13 +224,11 @@ const filteredRows = computed(() => {
     })
   }
 
-  // date range local filter
   const df = s(dateFrom.value)
   const dt = s(dateTo.value)
   if (df && dt) {
     const pickStart = (r) => (up(dateMode.value) === 'OFF' ? s(r.offStartDate) : s(r.requestStartDate))
     const pickEnd = (r) => (up(dateMode.value) === 'OFF' ? s(r.offEndDate) : s(r.requestEndDate))
-
     list = list.filter((r) => {
       const a = pickStart(r)
       const b = pickEnd(r) || a
@@ -255,7 +237,6 @@ const filteredRows = computed(() => {
     })
   }
 
-  // newest first
   list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   return list
 })
@@ -358,28 +339,21 @@ function excelRows(list) {
     OffFrom: fmtYmd(r.offStartDate),
     OffTo: fmtYmd(r.offEndDate),
     Files: safeFileCount(r),
-    Reason: compactText(r.reason),
-    ManagerLoginId: s(r.managerLoginId),
-    GmLoginId: s(r.gmLoginId),
-    CooLoginId: s(r.cooLoginId),
+    Reason: reasonText(r), //  always export reason
+    // ManagerLoginId: s(r.managerLoginId),
+    // GmLoginId: s(r.gmLoginId),
+    // CooLoginId: s(r.cooLoginId),
   }))
 }
 
 async function exportExcel() {
   try {
     exporting.value = true
-
-    // ✅ Export what user currently sees (filteredRows)
     const data = excelRows(filteredRows.value)
-
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'SwapDayReport')
-
-    const stamp = dayjs().format('YYYYMMDD_HHmm')
-    const fileName = `SwapDayReport_${stamp}.xlsx`
-
-    XLSX.writeFile(wb, fileName)
+    XLSX.writeFile(wb, `SwapDayReport_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`)
     showToast({ type: 'success', message: 'Excel exported.' })
   } catch (e) {
     showToast({ type: 'error', message: e?.message || 'Export failed' })
@@ -388,11 +362,7 @@ async function exportExcel() {
   }
 }
 
-/* ───────────────── REALTIME ─────────────────
-   Backend emits:
-    - swap:req:created
-    - swap:req:updated
-*/
+/* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
   const id = String(doc._id)
@@ -401,13 +371,8 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  // keep modals synced
-  if (viewItem.value?._id && String(viewItem.value._id) === id) {
-    viewItem.value = { ...viewItem.value, ...doc }
-  }
-  if (filesRequest.value?._id && String(filesRequest.value._id) === id) {
-    filesRequest.value = { ...filesRequest.value, ...doc }
-  }
+  if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
+  if (filesRequest.value?._id && String(filesRequest.value._id) === id) filesRequest.value = { ...filesRequest.value, ...doc }
 }
 
 function onSwapCreated(doc) {
@@ -422,13 +387,10 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ join admin rooms (critical)
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_ADMIN' })
-
     const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
     const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
-
     if (empId) await subscribeEmployeeIfNeeded(empId)
     if (loginId) await subscribeUserIfNeeded(loginId)
   } catch {}
@@ -452,236 +414,104 @@ onBeforeUnmount(() => {
       <div class="ui-card rounded-none border-x-0 border-t-0 overflow-hidden">
         <!-- HERO -->
         <div class="ui-hero-gradient">
-          <!-- Desktop header -->
-          <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-            <div class="min-w-[260px]">
+          <!-- Row 1: title + actions -->
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
               <div class="text-[15px] font-extrabold">SwapDay Report · Admin</div>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
+              <div class="mt-1 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[260px] max-w-xs">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
-                  <input
-                    v-model="search"
-                    type="text"
-                    placeholder="Employee / ID / reason / status..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
-                  />
-                </div>
-              </div>
+            <div class="flex items-center gap-2">
+              <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows" title="Refresh">
+                <i class="fa-solid fa-rotate-right text-[11px]" />
+              </button>
 
-              <div class="min-w-[170px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
-                    {{ label }}
-                  </option>
-                </select>
-              </div>
+              <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel" title="Export Excel">
+                <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
+                <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
+              </button>
 
-              <div class="min-w-[190px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Approval Mode</label>
-                <select
-                  v-model="approvalMode"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, key) in APPROVAL_MODE_LABEL" :key="key" :value="key">
-                    {{ label }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="min-w-[160px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Employee ID</label>
-                <input
-                  v-model="employeeIdFilter"
-                  type="text"
-                  placeholder="e.g. 51910020"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none placeholder:text-white/70"
-                />
-              </div>
-
-              <div class="flex items-center gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows" title="Refresh">
-                  <i class="fa-solid fa-rotate-right text-[11px]" />
-                </button>
-
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-soft"
-                  type="button"
-                  :disabled="loading || exporting"
-                  @click="exportExcel"
-                  title="Export to Excel"
-                >
-                  <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
-                  <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
-                </button>
-
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear filters">
-                  <i class="fa-solid fa-broom text-[11px]" />
-                </button>
-              </div>
+              <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear">
+                <i class="fa-solid fa-broom text-[11px]" />
+              </button>
             </div>
           </div>
 
-          <!-- Date row (Desktop) -->
-          <div v-if="!isMobile" class="mt-3 flex flex-wrap items-end gap-3">
-            <div class="min-w-[180px]">
-              <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date Mode</label>
+          <!-- Row 2: 6 filters in one row (desktop) -->
+          <div class="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-12">
+            <div class="lg:col-span-3 min-w-0">
+              <div class="flex items-center rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-[11px]
+                          focus-within:border-white/40 focus-within:bg-white/15">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
+                <input
+                  v-model="search"
+                  type="text"
+                  placeholder="Search employee / id / reason..."
+                  class="w-full min-w-0 bg-transparent text-white placeholder:text-white/70 outline-none focus:ring-0"
+                />
+              </div>
+            </div>
+
+            <div class="lg:col-span-2">
+              <select v-model="statusFilter" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="Status">
+                <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
+              </select>
+            </div>
+
+            <div class="lg:col-span-2">
               <select
-                v-model="dateMode"
+                v-model="approvalMode"
                 class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
+                title="Approval mode"
               >
+                <option v-for="(label, key) in APPROVAL_MODE_LABEL" :key="key" :value="key">{{ label }}</option>
+              </select>
+            </div>
+
+            <div class="lg:col-span-2">
+              <input
+                v-model="employeeIdFilter"
+                type="text"
+                placeholder="Employee ID"
+                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none placeholder:text-white/70"
+              />
+            </div>
+
+            <div class="lg:col-span-2">
+              <input v-model="dateFrom" type="date" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="From" />
+            </div>
+
+            <div class="lg:col-span-2">
+              <input v-model="dateTo" type="date" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="To" />
+            </div>
+
+            <div class="lg:col-span-3">
+              <select v-model="dateMode" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="Date mode">
                 <option value="REQUEST">Request Date</option>
                 <option value="OFF">Compensatory (Off) Date</option>
               </select>
             </div>
 
-            <div class="min-w-[190px]">
-              <label class="mb-1 block text-[11px] font-extrabold text-white/90">From</label>
-              <input
-                v-model="dateFrom"
-                type="date"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-              />
-            </div>
-
-            <div class="min-w-[190px]">
-              <label class="mb-1 block text-[11px] font-extrabold text-white/90">To</label>
-              <input
-                v-model="dateTo"
-                type="date"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-              />
-            </div>
-
-            <div class="flex items-center gap-2">
-              <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows">
-                <i class="fa-solid fa-magnifying-glass text-[11px]" />
-                Apply
-              </button>
+            <div class="lg:col-span-1">
+              <select v-model="perPage" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="Per page">
+                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
+              </select>
             </div>
           </div>
 
-          <!-- Mobile header -->
-          <div v-else class="space-y-3">
-            <div>
-              <div class="text-[15px] font-extrabold">SwapDay Report · Admin</div>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
-                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
-              </div>
-            </div>
+          <!-- Row 3: DateMode + PerPage -->
+          <div class="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-12">
+            
 
-            <div class="space-y-2">
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
-                  <input
-                    v-model="search"
-                    type="text"
-                    placeholder="Employee / ID / reason / status..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
-                  />
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                  <select
-                    v-model="statusFilter"
-                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                  >
-                    <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
-                      {{ label }}
-                    </option>
-                  </select>
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Mode</label>
-                  <select
-                    v-model="approvalMode"
-                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                  >
-                    <option v-for="(label, key) in APPROVAL_MODE_LABEL" :key="key" :value="key">
-                      {{ label }}
-                    </option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Employee ID</label>
-                  <input
-                    v-model="employeeIdFilter"
-                    type="text"
-                    placeholder="51910020"
-                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none placeholder:text-white/70"
-                  />
-                </div>
-
-                <div>
-                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date Mode</label>
-                  <select
-                    v-model="dateMode"
-                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                  >
-                    <option value="REQUEST">Request</option>
-                    <option value="OFF">Off</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
-                <div>
-                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">From</label>
-                  <input
-                    v-model="dateFrom"
-                    type="date"
-                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                  />
-                </div>
-                <div>
-                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">To</label>
-                  <input
-                    v-model="dateTo"
-                    type="date"
-                    class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                  />
-                </div>
-              </div>
-
-              <div class="flex items-center justify-end gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows">
-                  <i class="fa-solid fa-rotate-right text-[11px]" />
-                  Refresh
-                </button>
-
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel">
-                  <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
-                  <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
-                  Excel
-                </button>
-
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters">
-                  <i class="fa-solid fa-broom text-[11px]" />
-                  Clear
-                </button>
-              </div>
-            </div>
+            <!-- <div class="lg:col-span-6 flex items-center justify-between gap-2">
+              <button class="ui-btn ui-btn-xs ui-btn-soft" type="button" :disabled="loading" @click="fetchRows" title="Apply">
+                <i class="fa-solid fa-filter text-[11px] mr-2" />
+                Apply
+              </button>
+            </div> -->
           </div>
         </div>
 
@@ -689,11 +519,9 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
-              No items found.
-            </div>
+            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">No items found.</div>
 
             <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
               <div class="flex items-start justify-between gap-3">
@@ -713,32 +541,24 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="shrink-0 text-right space-y-1">
-                  <span :class="statusBadgeUiClass(row.status)">
-                    {{ STATUS_LABEL[row.status] || row.status }}
-                  </span>
+                  <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
                 </div>
               </div>
 
               <div class="mt-2 grid gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <div class="ui-frame p-2">
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Work (Request) Date</div>
-                  <div class="mt-0.5">
-                    {{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}
-                  </div>
+                  <div class="mt-0.5">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div>
                 </div>
 
                 <div class="ui-frame p-2">
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Swap (Off) Date</div>
-                  <div class="mt-0.5">
-                    {{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}
-                  </div>
+                  <div class="mt-0.5">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div>
                 </div>
 
                 <div class="ui-frame p-2">
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Reason</div>
-                  <div class="mt-0.5">
-                    {{ briefText(row.reason, 140) }}
-                  </div>
+                  <div class="mt-0.5">{{ briefText(reasonText(row), 140) }}</div>
                 </div>
               </div>
 
@@ -762,7 +582,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table table-fixed w-full min-w-[1200px]">
               <colgroup>
@@ -795,9 +615,7 @@ onBeforeUnmount(() => {
                 </tr>
 
                 <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
-                  <td class="ui-td">
-                    <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
-                  </td>
+                  <td class="ui-td"><div class="truncate">{{ fmtDateTime(row.createdAt) }}</div></td>
 
                   <td class="ui-td">
                     <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
@@ -808,17 +626,11 @@ onBeforeUnmount(() => {
                     </div>
                   </td>
 
-                  <td class="ui-td">
-                    <div class="truncate">{{ modeLabel(row.approvalMode) }}</div>
-                  </td>
+                  <td class="ui-td"><div class="truncate">{{ modeLabel(row.approvalMode) }}</div></td>
 
-                  <td class="ui-td">
-                    <div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div>
-                  </td>
+                  <td class="ui-td"><div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div></td>
 
-                  <td class="ui-td">
-                    <div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div>
-                  </td>
+                  <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
 
                   <td class="ui-td text-center" @click.stop>
                     <button
@@ -837,15 +649,11 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <span :class="statusBadgeUiClass(row.status)">
-                      {{ STATUS_LABEL[row.status] || row.status }}
-                    </span>
+                    <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
                   </td>
 
                   <td class="ui-td">
-                    <p class="reason-cell" :title="compactText(row.reason)">
-                      {{ row.reason ? compactText(row.reason) : '—' }}
-                    </p>
+                    <p class="reason-cell" :title="reasonText(row)">{{ reasonText(row) }}</p>
                   </td>
                 </tr>
               </tbody>
@@ -858,9 +666,7 @@ onBeforeUnmount(() => {
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
               </select>
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                Page {{ page }} / {{ pageCount }}
-              </span>
+              <span class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }} / {{ pageCount }}</span>
             </div>
 
             <div class="flex items-center justify-end gap-1">
@@ -886,12 +692,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <button
-              v-if="viewItem?.attachments?.length"
-              class="ui-btn ui-btn-soft ui-btn-xs"
-              type="button"
-              @click="openFiles(viewItem)"
-            >
+            <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
               <i class="fa-solid fa-paperclip text-[11px]" />
               Attachments
             </button>
@@ -912,21 +713,15 @@ onBeforeUnmount(() => {
                   {{ viewItem?.employeeName || viewItem?.name || '—' }}
                 </div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">ID: {{ viewItem?.employeeId || '—' }}</div>
-                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                  Dept: {{ viewItem.department }}
-                </div>
+                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">Dept: {{ viewItem.department }}</div>
               </div>
 
               <div class="text-right md:text-left">
                 <div class="ui-label">Status</div>
-                <span :class="statusBadgeUiClass(viewItem?.status)">
-                  {{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}
-                </span>
+                <span :class="statusBadgeUiClass(viewItem?.status)">{{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}</span>
 
                 <div class="mt-2 ui-label">Approval Mode</div>
-                <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                  {{ modeLabel(viewItem?.approvalMode) }}
-                </div>
+                <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">{{ modeLabel(viewItem?.approvalMode) }}</div>
               </div>
             </div>
           </div>
@@ -950,25 +745,7 @@ onBeforeUnmount(() => {
           <div class="ui-card p-3">
             <div class="ui-section-title">Reason</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
-              {{ viewItem?.reason || '—' }}
-            </div>
-          </div>
-
-          <div class="ui-card p-3">
-            <div class="ui-section-title">Approvers</div>
-            <div class="mt-1 grid gap-2 text-[12px] text-slate-700 dark:text-slate-200 md:grid-cols-3">
-              <div class="ui-frame p-2">
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">Manager</div>
-                <div class="font-extrabold">{{ viewItem?.managerLoginId || '—' }}</div>
-              </div>
-              <div class="ui-frame p-2">
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">GM</div>
-                <div class="font-extrabold">{{ viewItem?.gmLoginId || '—' }}</div>
-              </div>
-              <div class="ui-frame p-2">
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">COO</div>
-                <div class="font-extrabold">{{ viewItem?.cooLoginId || '—' }}</div>
-              </div>
+              {{ reasonText(viewItem) }}
             </div>
           </div>
 

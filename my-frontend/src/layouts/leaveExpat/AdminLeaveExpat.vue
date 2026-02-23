@@ -38,7 +38,7 @@ const groups = [
     icon: 'fa-solid fa-clipboard-check',
     children: [
       { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-manager-inbox' } },
-      { label: 'GM Inbox', icon: 'fa-solid fa-user-star', to: { name: 'leave-admin-gm-inbox' } },
+      { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-gm-inbox' } },
       { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-coo-inbox' } },
       { label: 'Leave Types', icon: 'fa-solid fa-gear', to: { name: 'leave-admin-types' } },
       { label: 'Expat Profiles', icon: 'fa-solid fa-user-group', to: { name: 'leave-admin-profiles' } },
@@ -52,7 +52,7 @@ const groups = [
     icon: 'fa-solid fa-right-left',
     children: [
       { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-swap-day-manager-inbox' } },
-      { label: 'GM Inbox', icon: 'fa-solid fa-user-star', to: { name: 'leave-admin-swap-day-gm-inbox' } },
+      { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-swap-day-gm-inbox' } },
       { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-swap-day-coo-inbox' } },
       { label: 'SwapDay Report', icon: 'fa-solid fa-file-export', to: { name: 'leave-admin-swap-day-report' } },
     ],
@@ -63,8 +63,9 @@ const groups = [
     icon: 'fa-solid fa-fingerprint',
     children: [
       { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-forget-scan-manager-inbox' } },
-      { label: 'GM Inbox', icon: 'fa-solid fa-user-star', to: { name: 'leave-admin-forget-scan-gm-inbox' } },
+      { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-forget-scan-gm-inbox' } },
       { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-forget-scan-coo-inbox' } },
+      { label: 'Forget Scan Report', icon: 'fa-solid fa-file-export', to: { name: 'admin-forget-scan-report'}},
     ],
   },
 ]
