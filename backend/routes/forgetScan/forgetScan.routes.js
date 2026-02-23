@@ -48,6 +48,13 @@ router.post(
   ctrl.cancelMyForgetScan
 )
 
+// edit my request (owner only; controller enforces)
+router.patch(
+  '/forget-scan/:id',
+  requireRole('LEAVE_USER', 'LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
+  ctrl.updateMyForgetScan
+)
+
 /* ───────────────── Inboxes + decisions ───────────────── */
 
 // manager inbox (manager + admin viewer)

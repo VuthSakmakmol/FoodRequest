@@ -1,5 +1,10 @@
 <!-- src/views/expat/MyRequests.vue
   ✅ Responsive: mobile cards + desktop table
+  ✅ Files column SAME style as UserMySwapDay:
+     - show paperclip icon + 1/2/3… when attachments exist
+     - show — when none
+     - centered column (desktop)
+     - mobile shows file button only when exist
   ✅ Click Files => instantly preview inside modal (PDF iframe or image)
   ✅ Fullscreen preview overlay
   ✅ No "Clear previews", no per-file eye icon
@@ -341,11 +346,23 @@ const editForm = ref({
   singleHalf: 'AM', // required
 
   // multi-day edges (optional but at least 1 edge required)
-  startHalfPart: 'AM', // default suggestion
-  endHalfPart: 'PM',   // default suggestion
+  startHalfPart: 'AM',
+  endHalfPart: 'PM',
 })
 
-/* ───────── Edit modal: requested day calculation + same hint as RequestLeave ───────── */
+/* ───────── Holidays (for working-day calculation) ───────── */
+const holidaySet = ref(new Set())
+
+async function fetchHolidays() {
+  try {
+    const res = await api.get('/leave/holidays')
+    const items = Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : []
+    holidaySet.value = new Set(items.map((x) => String(x || '').trim()).filter(Boolean))
+  } catch {
+    holidaySet.value = new Set()
+  }
+}
+
 function isWorkingDay(ymd) {
   if (!ymd) return false
   const d = dayjs(ymd)
@@ -354,7 +371,6 @@ function isWorkingDay(ymd) {
   if (holidaySet.value?.has(String(ymd).trim())) return false
   return true
 }
-
 
 function countWorkingDaysInclusive(startYmd, endYmd) {
   if (!startYmd || !endYmd) return 0
@@ -381,21 +397,13 @@ const baseWorkingDaysEdit = computed(() => {
   return countWorkingDaysInclusive(s, e)
 })
 
-
-const holidaySet = ref(new Set())
-
-async function fetchHolidays() {
-  try {
-    const res = await api.get('/leave/holidays')
-    const items = Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : []
-    holidaySet.value = new Set(items.map((x) => String(x || '').trim()).filter(Boolean))
-  } catch {
-    holidaySet.value = new Set()
-  }
-}
-
 const useHalfEdit = computed(() => {
   return !!(editForm.value.singleHalf || editForm.value.startHalfPart || editForm.value.endHalfPart)
+})
+
+const isMultiDayEdit = computed(() => {
+  if (!editForm.value.startDate || !editForm.value.endDate) return false
+  return editForm.value.endDate > editForm.value.startDate
 })
 
 const requestedDaysEdit = computed(() => {
@@ -431,17 +439,13 @@ const editBreakdownText = computed(() => {
 
   const parts = []
 
-  // single-day
   if (!isMultiDayEdit.value && useHalfEdit.value && editForm.value.singleHalf) {
     parts.push(`half of Start Date (${String(editForm.value.singleHalf).toUpperCase()})`)
   }
 
-  // multi-day edges
   if (isMultiDayEdit.value && useHalfEdit.value) {
-    if (editForm.value.startHalfPart)
-      parts.push(`half of Start Date (${String(editForm.value.startHalfPart).toUpperCase()})`)
-    if (editForm.value.endHalfPart)
-      parts.push(`half of End Date (${String(editForm.value.endHalfPart).toUpperCase()})`)
+    if (editForm.value.startHalfPart) parts.push(`half of Start Date (${String(editForm.value.startHalfPart).toUpperCase()})`)
+    if (editForm.value.endHalfPart) parts.push(`half of End Date (${String(editForm.value.endHalfPart).toUpperCase()})`)
   }
 
   if (!parts.length) return `You request ${totalStr} days`
@@ -517,11 +521,6 @@ async function previewExistingEditFile(file) {
   await selectFile(file.attId)
 }
 
-const isMultiDayEdit = computed(() => {
-  if (!editForm.value.startDate || !editForm.value.endDate) return false
-  return editForm.value.endDate > editForm.value.startDate
-})
-
 function openEdit(item) {
   if (!item?._id) return
   if (!canEdit(item)) {
@@ -541,7 +540,6 @@ function openEdit(item) {
   const startHalf = item?.startHalf ? String(item.startHalf).toUpperCase() : ''
   const endHalf = item?.endHalf ? String(item.endHalf).toUpperCase() : ''
 
-  // defaults to help users (can toggle off by clicking same button)
   const defaultSingle = 'AM'
   const defaultStart = 'AM'
   const defaultEnd = 'PM'
@@ -554,10 +552,7 @@ function openEdit(item) {
     endDate: end,
     reason: String(item.reason || ''),
 
-    // single day -> must be AM/PM
     singleHalf: !isMulti ? (startHalf || defaultSingle) : defaultSingle,
-
-    // multi day -> at least one edge required (we suggest both)
     startHalfPart: isMulti ? (startHalf || defaultStart) : defaultStart,
     endHalfPart: isMulti ? (endHalf || defaultEnd) : defaultEnd,
   }
@@ -583,10 +578,8 @@ watch(
     if (editForm.value.endDate < editForm.value.startDate) editForm.value.endDate = editForm.value.startDate
 
     if (!isMultiDayEdit.value) {
-      // single day -> require singleHalf
       if (!editForm.value.singleHalf) editForm.value.singleHalf = 'AM'
     } else {
-      // multi day -> suggest edges if both empty
       if (!editForm.value.startHalfPart && !editForm.value.endHalfPart) {
         editForm.value.startHalfPart = 'AM'
         editForm.value.endHalfPart = 'PM'
@@ -595,7 +588,6 @@ watch(
   }
 )
 
-/* hint text to reduce confusion */
 const halfHintText = computed(() => {
   const s = editForm.value.startDate
   const e = editForm.value.endDate
@@ -623,10 +615,7 @@ const canSaveEdit = computed(() => {
   if (!editForm.value.endDate) return false
   if (editForm.value.endDate < editForm.value.startDate) return false
 
-  // single day must have AM/PM
   if (!isMultiDayEdit.value) return !!editForm.value.singleHalf
-
-  // multi-day must have at least one edge
   return !!(editForm.value.startHalfPart || editForm.value.endHalfPart)
 })
 
@@ -647,7 +636,6 @@ async function saveEdit() {
       reason: editForm.value.reason || '',
     }
 
-    // ✅ always send half fields (no checkbox)
     if (!isMultiDayEdit.value) {
       const part = String(editForm.value.singleHalf || 'AM').toUpperCase()
       payload.isHalfDay = true
@@ -720,7 +708,9 @@ const pageCount = computed(() => {
   return Math.ceil(processedRequests.value.length / per) || 1
 })
 
-watch([search, statusFilter, perPage], () => { page.value = 1 })
+watch([search, statusFilter, perPage], () => {
+  page.value = 1
+})
 
 /* ───────── API ───────── */
 async function fetchMyRequests(silent = false) {
@@ -728,7 +718,13 @@ async function fetchMyRequests(silent = false) {
     loadingMyRequests.value = true
     loadError.value = ''
     const res = await api.get('/leave/requests/my')
-    myRequests.value = Array.isArray(res.data) ? res.data : []
+    const list = Array.isArray(res.data) ? res.data : []
+
+    // ✅ ensure attachments array exists so Files column can show count safely
+    myRequests.value = list.map((r) => ({
+      ...r,
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+    }))
   } catch (e) {
     loadError.value = e?.response?.data?.message || 'Unable to load your leave requests.'
     if (!silent) showToast({ type: 'error', title: 'Failed to load', message: loadError.value })
@@ -749,7 +745,9 @@ function isMyDoc(payload = {}) {
 let refreshTimer = null
 function triggerRealtimeRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(() => { fetchMyRequests(true) }, 150)
+  refreshTimer = setTimeout(() => {
+    fetchMyRequests(true)
+  }, 150)
 }
 
 const offHandlers = []
@@ -770,7 +768,9 @@ function setupRealtime() {
 }
 
 /* cleanup previews on unmount */
-onBeforeUnmount(() => { clearAllPreviews() })
+onBeforeUnmount(() => {
+  clearAllPreviews()
+})
 
 /* ───────── lifecycle ───────── */
 onMounted(async () => {
@@ -785,7 +785,11 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (refreshTimer) clearTimeout(refreshTimer)
-  offHandlers.forEach((off) => { try { off && off() } catch {} })
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
 })
 </script>
 
@@ -862,10 +866,7 @@ onBeforeUnmount(() => {
           <div v-else>
             <!-- ✅ Mobile cards -->
             <div v-if="isMobile" class="space-y-2">
-              <div
-                v-if="!pagedRequests.length"
-                class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400"
-              >
+              <div v-if="!pagedRequests.length" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
                 You have not submitted any leave requests yet.
               </div>
 
@@ -882,23 +883,23 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="flex items-center gap-2">
-                    <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="openFiles(item)">
+                    <!-- ✅ Files (SwapDay style): only when exist -->
+                    <button
+                      v-if="item.attachments?.length"
+                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                      type="button"
+                      title="Attachments"
+                      @click="openFiles(item)"
+                    >
                       <i class="fa-solid fa-paperclip text-[11px]" />
-                      Files
+                      <span class="ml-1">{{ item.attachments.length }}</span>
                     </button>
 
                     <button v-if="canEdit(item)" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openEdit(item)">
-                      <i class="fa-solid fa-pen-to-square text-[11px]" />
                       Edit
                     </button>
 
-                    <button
-                      v-if="canCancel(item)"
-                      type="button"
-                      class="ui-btn ui-btn-rose ui-btn-xs"
-                      @click="openCancel(item)"
-                    >
-                      <i class="fa-solid fa-xmark text-[11px]" />
+                    <button v-if="canCancel(item)" type="button" class="ui-btn ui-btn-rose ui-btn-xs" @click="openCancel(item)">
                       Cancel
                     </button>
                   </div>
@@ -909,7 +910,7 @@ onBeforeUnmount(() => {
                 <div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
                   <div class="ui-frame p-2">
                     <div class="ui-label !mb-1">Leave Date</div>
-                    <div class=" text-[11px]">{{ item.startDate }} → {{ item.endDate }}</div>
+                    <div class="text-[11px]">{{ item.startDate }} → {{ item.endDate }}</div>
                   </div>
                   <div class="ui-frame p-2">
                     <div class="ui-label !mb-1">Days</div>
@@ -935,8 +936,8 @@ onBeforeUnmount(() => {
                     <th class="ui-th">Days</th>
                     <th class="ui-th">Status</th>
                     <th class="ui-th">Reason</th>
+                    <th class="ui-th text-center">File</th>
                     <th class="ui-th">Actions</th>
-                    <th class="ui-th">Files</th>
                   </tr>
                 </thead>
 
@@ -956,7 +957,7 @@ onBeforeUnmount(() => {
                       <span class="ui-badge ui-badge-info">{{ item.leaveTypeCode || '—' }}</span>
                     </td>
 
-                    <td class="ui-td whitespace-nowrap ">
+                    <td class="ui-td whitespace-nowrap">
                       {{ item.startDate }} → {{ item.endDate }}
                     </td>
 
@@ -972,27 +973,33 @@ onBeforeUnmount(() => {
                       <span class="block w-full truncate text-left">{{ item.reason || '—' }}</span>
                     </td>
 
+                    <!-- ✅ File column (SwapDay style) -->
+                    <td class="ui-td text-center">
+                      <button
+                        v-if="item.attachments?.length"
+                        class="ui-btn ui-btn-soft ui-btn-xs"
+                        type="button"
+                        @click="openFiles(item)"
+                        title="Preview attachments"
+                      >
+                        <i class="fa-solid fa-paperclip text-[11px]" />
+                        <span class="ml-1">{{ item.attachments.length }}</span>
+                      </button>
+                      <span v-else class="text-[11px] text-slate-400">—</span>
+                    </td>
+
                     <td class="ui-td">
                       <div class="flex items-center gap-2">
                         <button v-if="canEdit(item)" type="button" class="ui-btn ui-btn-soft ui-btn-xs" @click="openEdit(item)">
-                          <i class="fa-solid fa-pen-to-square text-[11px]" />
                           Edit
                         </button>
 
                         <button v-if="canCancel(item)" type="button" class="ui-btn ui-btn-rose ui-btn-xs" @click="openCancel(item)">
-                          <i class="fa-solid fa-xmark text-[11px]" />
                           Cancel
                         </button>
 
                         <span v-if="!canEdit(item) && !canCancel(item)" class="text-[11px] text-slate-400 dark:text-slate-500">—</span>
                       </div>
-                    </td>
-
-                    <td class="ui-td">
-                      <button type="button" class="ui-btn ui-btn-ghost ui-btn-xs" @click="openFiles(item)">
-                        <i class="fa-solid fa-paperclip text-[11px]" />
-                        View
-                      </button>
                     </td>
                   </tr>
                 </tbody>
@@ -1231,7 +1238,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Edit modal -->
+      <!-- Edit modal (unchanged UI) -->
       <div v-if="editOpen" class="ui-modal-backdrop">
         <div class="ui-modal ui-modal-lg p-4">
           <div class="flex items-start justify-between gap-3">
@@ -1268,23 +1275,23 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Half hint -->
-              <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700
-                          dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200">
+              <div
+                class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700
+                       dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200"
+              >
                 <div class="font-extrabold text-[11px]">Calculation</div>
                 <div class="mt-0.5">{{ editBreakdownText }}</div>
               </div>
 
-              <!-- Half selector (always visible) -->
               <div class="mt-3">
                 <div class="flex items-start justify-between gap-2">
                   <div>
                     <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Half-day (AM / PM)</div>
+                    <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{{ halfHintText }}</div>
                   </div>
                 </div>
 
                 <div class="mt-2 space-y-2">
-                  <!-- single-day -->
                   <div v-if="!isMultiDayEdit" class="flex justify-end gap-2">
                     <button type="button" class="sq-chip" :class="editForm.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf='AM'">
                       AM
@@ -1294,7 +1301,6 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
 
-                  <!-- multi-day edges -->
                   <div v-else class="grid gap-2 sm:grid-cols-2">
                     <div class="ui-frame p-2">
                       <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Start day</div>
@@ -1306,9 +1312,7 @@ onBeforeUnmount(() => {
                           PM
                         </button>
                       </div>
-                      <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                        Click again to clear.
-                      </div>
+                      <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Click again to clear.</div>
                     </div>
 
                     <div class="ui-frame p-2">
@@ -1321,9 +1325,7 @@ onBeforeUnmount(() => {
                           PM
                         </button>
                       </div>
-                      <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                        Click again to clear.
-                      </div>
+                      <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Click again to clear.</div>
                     </div>
                   </div>
 
@@ -1339,9 +1341,6 @@ onBeforeUnmount(() => {
               <textarea v-model="editForm.reason" class="ui-textarea" rows="2" placeholder="Optional…" />
             </div>
 
-            
-
-            <!-- Add evidence (Upload Files) -->
             <div class="ui-card p-3">
               <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Add evidence (optional)</div>
 
@@ -1386,7 +1385,6 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- Existing attachments list -->
             <div class="ui-card p-3">
               <div class="flex items-center justify-between gap-2">
                 <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Existing attachments</div>
@@ -1440,6 +1438,12 @@ onBeforeUnmount(() => {
 }
 .sq-chip-on {
   @apply border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200;
+}
+
+/* icon btn padding same as your standard */
+.ui-icon-btn {
+  padding-left: 0.55rem !important;
+  padding-right: 0.55rem !important;
 }
 
 /* optional size variants for modal if your global css doesn't include */

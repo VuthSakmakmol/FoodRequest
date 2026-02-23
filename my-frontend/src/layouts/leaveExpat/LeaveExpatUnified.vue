@@ -62,7 +62,7 @@ const groups = computed(() => {
       icon: 'fa-solid fa-plane-departure',
       children: [
         { label: 'Request Leave', icon: 'fa-regular fa-calendar-plus', to: { name: 'leave-user-request' } },
-        { label: 'My Requests', icon: 'fa-solid fa-list-ul', to: { name: 'leave-user-my-requests' } },
+        { label: 'My Leave Requests', icon: 'fa-solid fa-list-ul', to: { name: 'leave-user-my-requests' } },
         { label: 'Swap Working Day', icon: 'fa-solid fa-arrows-rotate', to: { name: 'leave-user-swap-day' } },
         { label: 'Forget Scan', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-user-forget-scan' } },
       ],
@@ -76,7 +76,7 @@ const groups = computed(() => {
       header: 'Approvals',
       icon: 'fa-solid fa-clipboard-check',
       children: [
-        { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-manager-inbox' } },
+        { label: 'Leave Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-manager-inbox' } },
         { label: 'Swap Day Inbox', icon: 'fa-solid fa-arrows-rotate', to: { name: 'leave-manager-swap-day-inbox' } },
         { label: 'Forget Scan Inbox', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-manager-forget-scan-inbox' } },
       ],
@@ -200,7 +200,7 @@ const roleLabel = computed(() => {
     <aside
       class="hidden h-full flex-col border-r dark:border-slate-800 bg-white/80 dark:bg-slate-950/75 backdrop-blur
              shadow-[0_0_18px_rgba(15,23,42,0.06)] md:flex"
-      :class="sidebarExpanded ? 'w-72' : 'w-16'"
+      :class="sidebarExpanded ? 'w-64' : 'w-16'"
       style="border-color: rgb(var(--ui-border));"
     >
       <!-- Top brand -->
@@ -218,7 +218,6 @@ const roleLabel = computed(() => {
           <div class="truncate text-[11px] font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">
             Expat Leave
           </div>
-          <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">Unified Portal</div>
         </div>
 
         <div v-if="sidebarExpanded" class="w-9" />
@@ -327,7 +326,6 @@ const roleLabel = computed(() => {
           <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
             <div class="min-w-0">
               <div class="truncate text-[11px] font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">Expat Leave</div>
-              <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">Unified Portal</div>
             </div>
 
             <button type="button" class="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800" @click="closeMobileDrawer">

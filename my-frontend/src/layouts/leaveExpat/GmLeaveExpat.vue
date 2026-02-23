@@ -44,7 +44,7 @@ const groups = [
     header: 'Approvals',
     icon: 'fa-solid fa-clipboard-check',
     children: [
-      { label: 'GM Inbox', icon: 'fa-solid fa-star', to: { name: 'leave-gm-inbox' } },
+      { label: 'Leave Inbox', icon: 'fa-solid fa-star', to: { name: 'leave-gm-inbox' } },
       { label: 'Swap Day Inbox', icon: 'fa-solid fa-calendar-days', to: { name: 'leave-gm-swap-day-inbox' } },
       { label: 'Forget Scan Inbox', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-gm-forget-scan-inbox' } },
     ],
@@ -112,7 +112,7 @@ onBeforeUnmount(() => {
     <aside
       class="hidden h-full flex-col border-r dark:border-slate-800 bg-white/80 dark:bg-slate-950/75 backdrop-blur
              shadow-[0_0_18px_rgba(15,23,42,0.06)] md:flex"
-      :class="sidebarExpanded ? 'w-72' : 'w-16'"
+      :class="sidebarExpanded ? 'w-64' : 'w-16'"
       style="border-color: rgb(var(--ui-border));"
     >
       <!-- Top brand -->

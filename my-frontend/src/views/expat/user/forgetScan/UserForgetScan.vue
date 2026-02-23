@@ -2,9 +2,14 @@
   ✅ Full realtime ready (SwapDay baseline)
   ✅ ui-* design system
   ✅ create + list + filter + detail modal + cancel confirm
+  ✅ Edit button (NO file attachment)
+  ✅ Edit allowed only when:
+      - status is pending
+      - and NO approval step has acted/approved/rejected
   ✅ Realtime events:
       - forgetscan:req:created
       - forgetscan:req:updated
+  ✅ FIX: Edit dialog closes immediately after successful Save
 -->
 
 <script setup>
@@ -40,6 +45,17 @@ function updateIsMobile() {
 const createOpen = ref(false)
 const createBusy = ref(false)
 const form = ref({
+  forgotDate: '',
+  forgotType: 'FORGET_IN',
+  reason: '',
+})
+
+/* edit modal (NO attachments) */
+const editOpen = ref(false)
+const editBusy = ref(false)
+const editError = ref('')
+const editItem = ref(null)
+const editForm = ref({
   forgotDate: '',
   forgotType: 'FORGET_IN',
   reason: '',
@@ -121,6 +137,20 @@ function canCancel(item) {
   return true
 }
 
+/**
+ * ✅ Edit allowed only if NO one acted yet
+ * - must be pending
+ * - approvals: no approved, no rejected, no actedAt
+ */
+function canEdit(item) {
+  if (!isPending(item)) return false
+  const approvals = Array.isArray(item?.approvals) ? item.approvals : []
+  const anyApproved = approvals.some((a) => up(a?.status) === 'APPROVED')
+  const anyRejected = approvals.some((a) => up(a?.status) === 'REJECTED')
+  const anyActed = approvals.some((a) => !!a?.actedAt)
+  return !(anyApproved || anyRejected || anyActed)
+}
+
 /* ───────────────── FETCH ───────────────── */
 async function fetchData() {
   try {
@@ -147,10 +177,10 @@ function closeCreate() {
   createOpen.value = false
 }
 
-function validateForm() {
-  const d = String(form.value.forgotDate || '').trim()
-  const t = up(form.value.forgotType)
-  const r = compactText(form.value.reason)
+function validatePayload(v) {
+  const d = String(v?.forgotDate || '').trim()
+  const t = up(v?.forgotType)
+  const r = compactText(v?.reason)
 
   if (!d) return 'Forgot date is required.'
   if (!['FORGET_IN', 'FORGET_OUT'].includes(t)) return 'Forgot type must be FORGET_IN or FORGET_OUT.'
@@ -159,7 +189,7 @@ function validateForm() {
 }
 
 async function submitCreate() {
-  const err = validateForm()
+  const err = validatePayload(form.value)
   if (err) {
     showToast({ type: 'warning', message: err })
     return
@@ -176,7 +206,6 @@ async function submitCreate() {
     const res = await api.post('/leave/forget-scan', payload)
     showToast({ type: 'success', message: 'Forget scan request submitted.' })
 
-    // ✅ Optimistic insert (realtime will also push, but this feels instant)
     const doc = res.data
     if (doc?._id) upsertRow(doc)
     else await fetchData()
@@ -189,6 +218,73 @@ async function submitCreate() {
     })
   } finally {
     createBusy.value = false
+  }
+}
+
+/* ───────────────── EDIT (NO attachments) ───────────────── */
+function openEdit(item) {
+  if (!item?._id) return
+  if (!canEdit(item)) {
+    showToast({ type: 'info', message: 'This request cannot be edited after any approval action.' })
+    return
+  }
+  editItem.value = item
+  editError.value = ''
+  editForm.value = {
+    forgotDate: String(item.forgotDate || '').trim(),
+    forgotType: up(item.forgotType || 'FORGET_IN'),
+    reason: String(item.reason || ''),
+  }
+  editOpen.value = true
+}
+
+function closeEdit(force = false) {
+  if (editBusy.value && !force) return
+  editOpen.value = false
+  editError.value = ''
+  editItem.value = null
+}
+
+async function submitEdit() {
+  if (!editItem.value?._id) return
+
+  const err = validatePayload(editForm.value)
+  if (err) {
+    editError.value = err
+    showToast({ type: 'warning', message: err })
+    return
+  }
+
+  // guard again
+  if (!canEdit(editItem.value)) {
+    showToast({ type: 'warning', message: 'This request cannot be edited after any approval action.' })
+    closeEdit()
+    return
+  }
+
+  editBusy.value = true
+  editError.value = ''
+  try {
+    const payload = {
+      forgotDate: String(editForm.value.forgotDate || '').trim(),
+      forgotType: up(editForm.value.forgotType),
+      reason: compactText(editForm.value.reason),
+    }
+
+    const res = await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
+
+    const doc = res?.data
+    if (doc?._id) upsertRow(doc)
+    else await fetchData()
+
+    showToast({ type: 'success', message: 'Request updated.' })
+    closeEdit(true)
+  } catch (e) {
+    const msg = e?.response?.data?.message || 'Update failed.'
+    editError.value = msg
+    showToast({ type: 'error', message: msg })
+  } finally {
+    editBusy.value = false
   }
 }
 
@@ -236,8 +332,6 @@ async function confirmCancel() {
     showToast({ type: 'success', message: 'Request cancelled.' })
     cancelOpen.value = false
     cancelTarget.value = null
-
-    // realtime should update, but keep as safety:
     await fetchData()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Cancel failed.' })
@@ -268,11 +362,7 @@ const filteredRows = computed(() => {
   return result
 })
 
-/* ───────────────── REALTIME ─────────────────
-   Backend emits:
-     - forgetscan:req:created
-     - forgetscan:req:updated
-*/
+/* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
   const id = String(doc._id)
@@ -284,6 +374,18 @@ function upsertRow(doc) {
   // keep detail modal synced
   if (viewItem.value?._id && String(viewItem.value._id) === id) {
     viewItem.value = { ...viewItem.value, ...doc }
+  }
+
+  // keep edit form synced while open (optional)
+  if (editItem.value?._id && String(editItem.value._id) === id) {
+    editItem.value = { ...editItem.value, ...doc }
+    if (editOpen.value) {
+      editForm.value = {
+        forgotDate: String(editItem.value.forgotDate || '').trim(),
+        forgotType: up(editItem.value.forgotType || 'FORGET_IN'),
+        reason: String(editItem.value.reason || ''),
+      }
+    }
   }
 }
 
@@ -298,20 +400,19 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ subscribe rooms (critical)
+  // ✅ subscribe rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_USER' })
 
     const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
-    const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
+    const lid = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
 
     if (empId) await subscribeEmployeeIfNeeded(empId)
-    if (loginId) await subscribeUserIfNeeded(loginId)
+    if (lid) await subscribeUserIfNeeded(lid)
   } catch {}
 
   await fetchData()
 
-  // ✅ realtime handlers
   socket.on('forgetscan:req:created', onReqCreated)
   socket.on('forgetscan:req:updated', onReqUpdated)
 })
@@ -409,6 +510,16 @@ onBeforeUnmount(() => {
                     <button class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn" type="button" title="Detail" @click="openDetail(item)">
                       <i class="fa-solid fa-eye text-[12px]" />
                     </button>
+
+                    <button
+                      v-if="canEdit(item)"
+                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                      type="button"
+                      title="Edit"
+                      @click="openEdit(item)"
+                    >
+                      <i class="fa-solid fa-pen-to-square text-[12px]" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -422,7 +533,10 @@ onBeforeUnmount(() => {
                 <button v-if="canCancel(item)" class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click="askCancel(item)">
                   Cancel
                 </button>
-                <span v-else class="text-[11px] text-slate-400">—</span>
+                <button v-if="canEdit(item)" class="ui-btn ui-btn-primary ui-btn-xs" type="button" @click="openEdit(item)">
+                  Edit
+                </button>
+                <span v-else-if="!canCancel(item)" class="text-[11px] text-slate-400">—</span>
               </div>
             </article>
           </div>
@@ -469,9 +583,21 @@ onBeforeUnmount(() => {
                         <i class="fa-solid fa-eye text-[11px]" />
                       </button>
 
+                      <button
+                        v-if="canEdit(item)"
+                        class="ui-btn ui-btn-soft ui-btn-xs ui-icon-btn"
+                        type="button"
+                        title="Edit"
+                        @click="openEdit(item)"
+                      >
+                        Edit
+                      </button>
+
                       <button v-if="canCancel(item)" class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click="askCancel(item)">
                         Cancel
                       </button>
+
+                      <span v-if="!canEdit(item) && !canCancel(item)" class="text-[11px] text-slate-400">—</span>
                     </div>
                   </td>
                 </tr>
@@ -539,6 +665,67 @@ onBeforeUnmount(() => {
           <button class="ui-btn ui-btn-primary" type="button" :disabled="createBusy" @click="submitCreate">
             <i v-if="createBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
             Submit
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ EDIT MODAL (NO attachments) -->
+  <div v-if="editOpen" class="ui-modal-backdrop">
+    <div class="ui-modal p-0 overflow-hidden max-w-xl">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+        <div class="min-w-0">
+          <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit Forget Scan</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">Allowed only before any approval action.</div>
+        </div>
+        <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" :disabled="editBusy" @click="closeEdit">
+          <i class="fa-solid fa-xmark text-[11px]" />
+          Close
+        </button>
+      </div>
+
+      <div class="p-4 space-y-3">
+        <div class="ui-card p-3 space-y-3">
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="ui-field">
+              <label class="ui-label">Forgot Date</label>
+              <input type="date" v-model="editForm.forgotDate" class="ui-date" :disabled="editBusy" />
+            </div>
+
+            <div class="ui-field">
+              <label class="ui-label">Forgot Type</label>
+              <select v-model="editForm.forgotType" class="ui-select" :disabled="editBusy">
+                <option value="FORGET_IN">Forget IN</option>
+                <option value="FORGET_OUT">Forget OUT</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="ui-field">
+            <label class="ui-label">Reason</label>
+            <textarea
+              v-model="editForm.reason"
+              rows="4"
+              class="ui-textarea"
+              placeholder="Explain briefly..."
+              :disabled="editBusy"
+            />
+          </div>
+
+          <div v-if="editError" class="text-[11px] font-extrabold text-rose-600 dark:text-rose-400">
+            {{ editError }}
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <button class="ui-btn ui-btn-ghost" type="button" :disabled="editBusy" @click="closeEdit">
+            Cancel
+          </button>
+
+          <button class="ui-btn ui-btn-primary" type="button" :disabled="editBusy" @click="submitEdit">
+            <i v-if="editBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
+            Save changes
           </button>
         </div>
       </div>
@@ -625,6 +812,11 @@ onBeforeUnmount(() => {
 
         <div class="flex justify-end gap-2 pt-1">
           <button class="ui-btn ui-btn-ghost" type="button" @click="closeDetail">Close</button>
+
+          <button v-if="canEdit(viewItem)" class="ui-btn ui-btn-primary" type="button" @click="openEdit(viewItem)">
+            Edit
+          </button>
+
           <button v-if="canCancel(viewItem)" class="ui-btn ui-btn-rose" type="button" @click="askCancel(viewItem)">
             Cancel
           </button>

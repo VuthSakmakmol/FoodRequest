@@ -128,7 +128,7 @@ onBeforeUnmount(() => {
     <aside
       class="hidden h-full flex-col border-r dark:border-slate-800 bg-white/80 dark:bg-slate-950/75 backdrop-blur
              shadow-[0_0_18px_rgba(15,23,42,0.06)] md:flex"
-      :class="sidebarExpanded ? 'w-72' : 'w-16'"
+      :class="sidebarExpanded ? 'w-64' : 'w-16'"
       style="border-color: rgb(var(--ui-border));"
     >
       <!-- Top brand -->
