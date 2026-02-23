@@ -36,8 +36,10 @@ const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/le
 // Optional Telegram notify service (best-effort)
 let notify = null
 try {
-  notify = require('../../services/leave/leave.telegram.notify')
+  notify = require('../../services/telegram/leave')
+  console.log('✅ leave telegram notify loaded:', Object.keys(notify || {}))
 } catch (e) {
+  console.warn('⚠️ leave telegram notify NOT loaded:', e?.message)
   notify = null
 }
 
@@ -525,7 +527,9 @@ exports.createMyRequest = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:created')
 
-    await safeNotify(notify?.notifyLeaveRequestCreated, doc)
+    await safeNotify(notify?.notifyAdminsOnCreate, payload)
+    await safeNotify(notify?.notifyCreatedToEmployee, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     return res.status(201).json(payload)
   } catch (e) {
@@ -582,7 +586,8 @@ exports.cancelMyRequest = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(existing)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyLeaveRequestCancelled, existing)
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyCancelledToEmployee, payload)
 
     await recalcAndEmitProfile(req, existing.employeeId)
 
@@ -679,8 +684,9 @@ exports.managerDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyManagerDecisionToEmployee, doc)
-    await safeNotify(notify?.notifyLeaveAdminManagerDecision, doc)
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver if pending
 
     if (act === 'APPROVE') {
       if (newStatus === 'PENDING_GM') await safeNotify(notify?.notifyManagerApprovedToGm, doc)
@@ -780,8 +786,9 @@ exports.gmDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyGmDecisionToEmployee, doc)
-    await safeNotify(notify?.notifyLeaveAdminGmDecision, doc)
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver if pending
 
     if (act === 'APPROVE' && newStatus === 'PENDING_COO') {
       await safeNotify(notify?.notifyGmApprovedToCoo, doc)
@@ -880,9 +887,8 @@ exports.cooDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyCooDecisionToEmployee, doc)
-    await safeNotify(notify?.notifyLeaveAdminCooDecision, doc)
-    await safeNotify(notify?.notifyCooDecisionToGm, doc)
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyCooDecisionToEmployee, payload)
 
     await recalcAndEmitProfile(req, doc.employeeId)
 

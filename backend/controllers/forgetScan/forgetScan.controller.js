@@ -28,6 +28,25 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
 /* ───────────────── helpers ───────────────── */
 
+/* Notify (Telegram) */
+let notify = null
+try {
+  notify = require('../../services/telegram/forgetScan')
+  console.log('✅ forgetscan telegram notify loaded')
+} catch (e) {
+  console.warn('⚠️ forgetscan telegram notify NOT loaded:', e?.message)
+  notify = null
+}
+
+async function safeNotify(fn, ...args) {
+  try {
+    if (typeof fn !== 'function') return
+    return await fn(...args)
+  } catch (e) {
+    console.warn('⚠️ forgetscan telegram notify failed:', e?.response?.data || e?.message)
+  }
+}
+
 const { broadcastForgetScanRequest } = require('../../utils/forgetScan.realtime')
 
 function getIo(req) {
@@ -287,6 +306,9 @@ exports.createMyForgetScan = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
     emitForget(req, payload, 'forgetscan:req:created')
+    await safeNotify(notify?.notifyAdminsOnCreate, payload)
+    await safeNotify(notify?.notifyForgetCreatedToEmployee, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
     return res.status(201).json(payload)
   } catch (e) {
     next(e)
@@ -341,6 +363,8 @@ exports.cancelMyForgetScan = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(existing)
     emitForget(req, payload, 'forgetscan:req:updated')
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyCancelledToEmployee, payload)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -409,6 +433,7 @@ exports.updateMyForgetScan = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(existing)
     emitForget(req, payload, 'forgetscan:req:updated')
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -509,6 +534,9 @@ exports.managerDecision = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
     emitForget(req, payload, 'forgetscan:req:updated')
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -618,6 +646,9 @@ exports.gmDecision = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
     emitForget(req, payload, 'forgetscan:req:updated')
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -717,6 +748,8 @@ exports.cooDecision = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
     emitForget(req, payload, 'forgetscan:req:updated')
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyCooDecisionToEmployee, payload)
     return res.json(payload)
   } catch (e) {
     next(e)

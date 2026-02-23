@@ -1,9 +1,10 @@
-// backend/services/telegram/swap/swap.telegram.service.js
 /* eslint-disable no-console */
+// backend/services/telegram/forgetScan/forgetScan.telegram.service.js
+
 const { sendDM } = require('../core/telegram.http')
 
-async function sendSwapDM(chatId, text, opts = {}) {
+async function sendForgetScanDM(chatId, text, opts = {}) {
   return sendDM(chatId, text, opts)
 }
 
-module.exports = { sendSwapDM }
+module.exports = { sendForgetScanDM }
