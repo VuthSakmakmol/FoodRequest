@@ -105,7 +105,7 @@ async function upsertUser({ loginId, name, password, role, telegramChatId }) {
   return user
 }
 
-async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId }) {
+async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId, cooLoginId }) {
   const empId = String(employeeId || '').trim()
   if (!empId) return
 
@@ -131,22 +131,24 @@ async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId }) {
       employeeLoginId: empId,
       managerLoginId,
       gmLoginId,
+      cooLoginId, // ✅ add
       isActive: true,
       name: empDir.name || '',
       department: empDir.department || '',
       balances: [],
       contracts: [],
-      joinDate: '',      // set later via admin UI
-      contractDate: '',  // set later via admin UI
+      joinDate: '',
+      contractDate: '',
       alCarry: 0,
     })
-    console.log(`🆕 Created LeaveProfile: employeeId=${empId} → manager=${managerLoginId}, gm=${gmLoginId}`)
+    console.log(`🆕 Created LeaveProfile: employeeId=${empId} → manager=${managerLoginId}, gm=${gmLoginId}, coo=${cooLoginId}`)
     return
   }
 
   let changed = false
   if (String(prof.managerLoginId || '') !== managerLoginId) { prof.managerLoginId = managerLoginId; changed = true }
   if (String(prof.gmLoginId || '') !== gmLoginId) { prof.gmLoginId = gmLoginId; changed = true }
+  if (String(prof.cooLoginId || '') !== String(cooLoginId || '')) { prof.cooLoginId = cooLoginId; changed = true } // ✅ add
   if (prof.isActive === false) { prof.isActive = true; changed = true }
 
   if (changed) {
