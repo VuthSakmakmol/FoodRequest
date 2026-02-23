@@ -712,7 +712,7 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left min-w-[1320px]">
+            <table class="ui-table text-left min-w-[1120px]">
               <colgroup>
                 <col class="w-[120px]" />
                 <col class="w-[260px]" />

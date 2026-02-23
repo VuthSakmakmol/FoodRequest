@@ -103,7 +103,10 @@ async function fetchInbox() {
   try {
     loading.value = true
     const res = await api.get('/leave/requests/manager/inbox?scope=ALL')
-    rows.value = Array.isArray(res.data) ? res.data : []
+    rows.value = (Array.isArray(res.data) ? res.data : []).map(r => ({
+      ...r,
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+    }))
   } catch (e) {
     console.error('fetchInbox error', e)
     showToast({
@@ -181,6 +184,19 @@ watch(
     page.value = 1
   }
 )
+
+/* Helper */
+const roles = computed(() => {
+  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  const one = auth.user?.role ? [auth.user.role] : []
+  return [...new Set([...raw, ...one].map(r => String(r || '').trim().toUpperCase()))]
+})
+
+const isAdminViewer = computed(() =>
+  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
+)
+
+const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
 
 /* ───────── Export CSV ───────── */
 function csvEscape(v) {
@@ -268,8 +284,12 @@ const decideId = ref('')
 const decideAction = ref('') // 'APPROVE' | 'REJECT'
 const rejectNote = ref('')
 
-const canDecide = (row) => String(row?.status || '').toUpperCase() === 'PENDING_MANAGER'
+const canDecide = (row) =>
+  isRealManager.value &&
+  !isAdminViewer.value &&
+  String(row?.status || '').toUpperCase() === 'PENDING_MANAGER'
 
+  
 function openApprove(row) {
   if (!row?._id) return
   decideId.value = row._id
@@ -689,9 +709,19 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-3 flex items-center justify-between gap-2">
-                <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading" title="View attachments">
-                  <i class="fa-solid fa-paperclip text-[11px]" />
-                </button>
+              <!-- ✅ Files (SwapDay/MyRequests style): only show if exist -->
+              <button
+                v-if="row.attachments?.length"
+                type="button"
+                class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                @click="openAttachments(row)"
+                :disabled="loading"
+                title="View attachments"
+                aria-label="View attachments"
+              >
+                <i class="fa-solid fa-paperclip text-[11px]" />
+                <span class="ml-1">{{ row.attachments.length }}</span>
+              </button>
 
                 <!-- ✅ ICON ONLY actions on mobile too -->
                 <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
@@ -796,18 +826,21 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <!-- Files (icon only) -->
+                  <!-- ✅ File column (SwapDay/MyRequests style) -->
                   <td class="ui-td align-top text-center">
                     <button
+                      v-if="row.attachments?.length"
                       type="button"
-                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                      class="ui-btn ui-btn-soft ui-btn-xs"
                       @click="openAttachments(row)"
                       :disabled="loading"
-                      title="View attachments"
-                      aria-label="View attachments"
+                      title="Preview attachments"
                     >
-                      <i class="fa-solid fa-paperclip text-[12px]" />
+                      <i class="fa-solid fa-paperclip text-[11px]" />
+                      <span class="ml-1">{{ row.attachments.length }}</span>
                     </button>
+
+                    <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
                   <!-- ✅ Actions (ICON ONLY) -->

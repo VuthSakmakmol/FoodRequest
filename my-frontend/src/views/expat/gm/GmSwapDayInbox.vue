@@ -55,6 +55,19 @@ const decisionNote = ref('')
 /* export */
 const exporting = ref(false)
 
+/* Helper */
+const roles = computed(() => {
+  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  const one = auth.user?.role ? [auth.user.role] : []
+  return [...new Set([...raw, ...one].map(r => String(r || '').trim().toUpperCase()))]
+})
+
+const isAdminViewer = computed(() =>
+  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
+)
+
+const isRealGm = computed(() => roles.value.includes('LEAVE_GM'))
+
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
   created: '140px',
@@ -108,8 +121,15 @@ function statusBadgeUiClass(x) {
  * ✅ GM can decide ONLY when the request is pending for GM.
  */
 function canDecide(row) {
+  // ✅ Admin viewers must NOT approve/reject
+  if (isAdminViewer.value) return false
+
+  // ✅ Only real GM can decide
+  if (!isRealGm.value) return false
+
   return up(row?.status) === 'PENDING_GM'
 }
+
 
 /* brief reason helpers */
 function compactText(v) {

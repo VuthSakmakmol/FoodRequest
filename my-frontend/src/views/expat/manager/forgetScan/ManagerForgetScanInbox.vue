@@ -59,6 +59,19 @@ const decisionNote = ref('')
 /* export */
 const exporting = ref(false)
 
+/* Helper */
+const roles = computed(() => {
+  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  const one = auth.user?.role ? [auth.user.role] : []
+  return [...new Set([...raw, ...one].map(r => String(r || '').trim().toUpperCase()))]
+})
+
+const isAdminViewer = computed(() =>
+  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
+)
+
+const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
+
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
   created: '140px',
@@ -119,6 +132,12 @@ function typeBadgeUiClass(x) {
 
 /** Manager can decide only when still pending at manager */
 function canDecide(row) {
+  // ✅ Admin viewers must NOT approve/reject
+  if (isAdminViewer.value) return false
+
+  // ✅ Only real manager can decide
+  if (!isRealManager.value) return false
+
   return up(row?.status) === 'PENDING_MANAGER'
 }
 
