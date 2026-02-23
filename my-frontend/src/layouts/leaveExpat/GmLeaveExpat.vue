@@ -1,74 +1,85 @@
-
-<!-- src/layouts/LeaveExpat/GMLeaveExpat.vue -->
+<!-- src/layouts/LeaveExpat/GMLeaveExpat.vue
+  ✅ Converted to SAME professional sidebar system as AdminLeaveExpat.vue
+  ✅ Desktop: collapsible (w-72 ↔ w-16)
+  ✅ Mobile: overlay drawer (separate state)
+  ✅ Group active focus color + child active style
+  ✅ Route-sync keeps correct group opened
+  ✅ ONE ToastContainer
+-->
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
+import ToastContainer from '@/components/AppToast.vue'
 
-import ToastContainer from '@/components/AppToast.vue' // ✅ use the glass toast UI
+defineOptions({ name: 'GMLeaveExpat' })
 
 const router = useRouter()
-const route  = useRoute()
-const auth   = useAuth()
+const route = useRoute()
+const auth = useAuth()
 
-/* ───────── Sidebar state ───────── */
-const sidebarOpen = ref(true)
+/* ───────── Responsive ───────── */
+const isMobile = ref(false)
+function updateIsMobile() {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.innerWidth < 768
+}
 
-/* Nav groups (GM Expat Leave) */
+/* ───────── Sidebar states ───────── */
+const sidebarExpanded = ref(true)   // desktop: w-72 vs w-16
+const mobileDrawerOpen = ref(false) // mobile overlay drawer
+
+function toggleSidebar() {
+  if (isMobile.value) mobileDrawerOpen.value = !mobileDrawerOpen.value
+  else sidebarExpanded.value = !sidebarExpanded.value
+}
+function closeMobileDrawer() {
+  mobileDrawerOpen.value = false
+}
+
+/* ✅ Nav groups (GM Expat Leave) */
 const groups = [
   {
     key: 'approvals',
     header: 'Approvals',
     icon: 'fa-solid fa-clipboard-check',
     children: [
-      {
-        label: 'GM Inbox',
-        icon: 'fa-solid fa-star',
-        to: { name: 'leave-gm-inbox' },
-      },
-      {
-        label: 'Swap Day Inbox',
-        icon: 'fa-solid fa-calendar-days',
-        to: { name: 'leave-gm-swap-day-inbox' },
-      },
+      { label: 'GM Inbox', icon: 'fa-solid fa-star', to: { name: 'leave-gm-inbox' } },
+      { label: 'Swap Day Inbox', icon: 'fa-solid fa-calendar-days', to: { name: 'leave-gm-swap-day-inbox' } },
       { label: 'Forget Scan Inbox', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-gm-forget-scan-inbox' } },
     ],
   },
 ]
 
-/* Open/close state (accordion) */
+/* Accordion open state */
 const open = reactive(
-  Object.fromEntries(
-    groups.map(g => [g.key, g.children.some(c => c.to?.name === route.name)])
-  )
+  Object.fromEntries(groups.map((g) => [g.key, g.children.some((c) => c.to?.name === route.name)]))
 )
 
-/* Keep correct group open when route changes */
+/* route sync */
 watch(
   () => route.name,
   (name) => {
-    groups.forEach(g => {
-      if (g.children.some(c => c.to?.name === name)) {
-        open[g.key] = true
-      }
+    groups.forEach((g) => {
+      if (g.children.some((c) => c.to?.name === name)) open[g.key] = true
     })
+    if (isMobile.value) closeMobileDrawer()
   }
 )
 
-/* Helpers */
-const initials = computed(() =>
-  (auth.user?.name || auth.user?.loginId || 'U').slice(0, 2).toUpperCase()
-)
-
+const initials = computed(() => (auth.user?.name || auth.user?.loginId || 'U').slice(0, 2).toUpperCase())
 const appTitle = computed(() => route.meta?.title || 'Expat Leave GM Portal')
 
 function isActive(it) {
   return route.name === it?.to?.name
 }
+function isGroupActive(g) {
+  return g?.children?.some((c) => c?.to?.name === route.name)
+}
 
 function handleSectionClick(key) {
-  const wasOpen = open[key]
-  Object.keys(open).forEach(k => { open[k] = false })
+  const wasOpen = !!open[key]
+  Object.keys(open).forEach((k) => (open[k] = false))
   open[key] = !wasOpen
 }
 
@@ -76,271 +87,286 @@ function handleNavClick(it) {
   if (it?.to) router.push(it.to)
 }
 
-/* Logout -> Greeting */
 function toggleAuth() {
   if (auth.user) auth.logout()
   router.push({ name: 'greeting' })
 }
+
+onMounted(() => {
+  updateIsMobile()
+  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (isMobile.value) mobileDrawerOpen.value = false
+})
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+})
 </script>
 
 <template>
-  <div
-    class="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-900
-           dark:bg-slate-950 dark:text-slate-50"
-  >
+  <div class="ui-page flex h-screen w-screen overflow-hidden">
     <!-- ✅ ONLY one toast UI (glass) -->
     <ToastContainer />
 
     <!-- Desktop sidebar -->
     <aside
-      class="hidden h-full flex-col border-r border-slate-300 bg-white text-sm
-             shadow-[0_0_18px_rgba(15,23,42,0.10)]
-             dark:border-slate-800 dark:bg-slate-950/95
-             md:flex"
-      :class="sidebarOpen ? 'w-64' : 'w-16'"
+      class="hidden h-full flex-col border-r dark:border-slate-800 bg-white/80 dark:bg-slate-950/75 backdrop-blur
+             shadow-[0_0_18px_rgba(15,23,42,0.06)] md:flex"
+      :class="sidebarExpanded ? 'w-72' : 'w-16'"
+      style="border-color: rgb(var(--ui-border));"
     >
-      <!-- Top mini bar -->
-      <div
-        class="flex items-center justify-between border-b border-slate-300 px-2 py-2
-               text-[13px] font-semibold tracking-wide uppercase
-               dark:border-slate-800"
-      >
+      <!-- Top brand -->
+      <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
         <button
           type="button"
-          class="inline-flex h-8 w-8 items-center justify-center rounded-md
-                 hover:bg-slate-100 dark:hover:bg-slate-800"
-          @click="sidebarOpen = !sidebarOpen"
+          class="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+          @click="sidebarExpanded = !sidebarExpanded"
+          title="Toggle sidebar"
         >
-          <i class="fa-solid fa-bars text-[13px]"></i>
+          <i class="fa-solid fa-bars text-[13px]" />
         </button>
 
-        <span
-          v-if="sidebarOpen"
-          class="ml-1 truncate text-[11px] font-semibold text-slate-600 dark:text-slate-400"
-        >
-          Expat GM
-        </span>
+        <div v-if="sidebarExpanded" class="min-w-0">
+          <div class="truncate text-[11px] font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">
+            Expat Leave
+          </div>
+          <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">GM Portal</div>
+        </div>
 
-        <span v-if="sidebarOpen" class="w-8"></span>
+        <div v-if="sidebarExpanded" class="w-9" />
       </div>
 
-      <!-- Nav groups -->
-      <nav class="flex-1 overflow-y-auto">
-        <div class="py-1">
-          <div
-            v-for="g in groups"
-            :key="g.key"
-            class="px-1"
+      <!-- Nav -->
+      <nav class="flex-1 overflow-y-auto ui-scrollbar px-2 py-2">
+        <div v-for="g in groups" :key="g.key" class="mb-2">
+          <!-- Group header -->
+          <button
+            type="button"
+            class="group relative w-full rounded-xl px-2.5 py-2 transition border text-left"
+            :class="
+              isGroupActive(g)
+                ? 'border-sky-500/40 bg-sky-50/80 dark:bg-sky-500/10'
+                : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            "
+            @click="handleSectionClick(g.key)"
           >
-            <!-- Section header -->
-            <button
-              type="button"
-              class="mt-1 flex w-full items-center justify-between rounded-md px-1.5 py-1.5
-                     text-[12px] font-semibold text-slate-700 transition
-                     hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="handleSectionClick(g.key)"
-            >
-              <span class="flex items-center gap-2">
-                <i :class="[g.icon, 'text-[13px]']"></i>
-                <span v-if="sidebarOpen" class="truncate">{{ g.header }}</span>
-              </span>
-              <i
-                v-if="sidebarOpen"
-                class="fa-solid text-[10px] text-slate-400"
-                :class="open[g.key] ? 'fa-chevron-up' : 'fa-chevron-down'"
-              ></i>
-            </button>
+            <span class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full" :class="isGroupActive(g) ? 'bg-sky-500' : 'bg-transparent'" />
 
-            <!-- Children -->
-            <div
-              v-show="open[g.key]"
-              class="mt-0.5 space-y-0.5 pb-1"
-            >
-              <button
-                v-for="it in g.children"
-                :key="it.label"
-                type="button"
-                class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px]
-                       transition border"
-                :class="isActive(it)
-                  ? 'bg-[oklch(60%_0.118_184.704)] text-white border-[oklch(60%_0.118_184.704)]'
-                  : 'text-slate-700 border-slate-300 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800'"
-                @click="handleNavClick(it)"
-              >
-                <i :class="[it.icon, 'text-[12px]']"></i>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2 min-w-0">
                 <span
-                  v-if="sidebarOpen"
-                  class="truncate"
+                  class="grid h-8 w-8 place-items-center rounded-xl border"
+                  :class="
+                    isGroupActive(g)
+                      ? 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300'
+                      : 'border-slate-200/70 bg-white/60 text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200'
+                  "
                 >
-                  {{ it.label }}
+                  <i :class="[g.icon, 'text-[13px]']" />
                 </span>
-              </button>
+
+                <div v-if="sidebarExpanded" class="min-w-0">
+                  <div class="truncate text-[12px] font-extrabold" :class="isGroupActive(g) ? 'text-sky-700 dark:text-sky-200' : 'text-slate-800 dark:text-slate-100'">
+                    {{ g.header }}
+                  </div>
+                  <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                    {{ g.children.length }} items
+                  </div>
+                </div>
+              </div>
+
+              <i
+                v-if="sidebarExpanded"
+                class="fa-solid fa-chevron-down text-[11px] transition"
+                :class="[open[g.key] ? 'rotate-180' : '', isGroupActive(g) ? 'text-sky-500' : 'text-slate-400']"
+              />
             </div>
+          </button>
+
+          <!-- Children -->
+          <div v-show="open[g.key]" class="mt-1 pl-10 space-y-1">
+            <button
+              v-for="it in g.children"
+              :key="it.label"
+              type="button"
+              class="relative flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12px] transition border text-left"
+              :class="
+                isActive(it)
+                  ? 'border-sky-500/40 bg-sky-600 text-white shadow-[0_10px_22px_rgba(2,132,199,0.22)]'
+                  : 'border-slate-200/70 bg-white/60 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-200 dark:hover:bg-slate-800/60'
+              "
+              @click="handleNavClick(it)"
+            >
+              <span class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full" :class="isActive(it) ? 'bg-white/90' : 'bg-transparent'" />
+              <i :class="[it.icon, 'text-[12px]', isActive(it) ? 'opacity-95' : 'opacity-80']" />
+              <span v-if="sidebarExpanded" class="truncate font-semibold">{{ it.label }}</span>
+            </button>
           </div>
         </div>
       </nav>
 
-      <!-- User chip -->
-      <div
-        class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px]
-               dark:border-slate-800"
-      >
-        <div
-          class="flex h-7 w-7 items-center justify-center rounded-full
-                 bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
-        >
-          {{ initials }}
-        </div>
-        <div
-          v-if="sidebarOpen"
-          class="ml-2 min-w-0 flex-1"
-        >
-          <div class="truncate font-semibold">
-            {{ auth.user?.name || auth.user?.loginId || 'GM' }}
-          </div>
-          <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
-            {{ auth.user?.role || 'LEAVE_GM' }}
-          </div>
-        </div>
-        <button
-          type="button"
-          class="ml-auto inline-flex h-7 items-center justify-center rounded-md px-2 text-[11px]
-                 text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-          @click="toggleAuth"
-        >
-          <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[10px]"></i>
-          <span v-if="sidebarOpen">
-            {{ auth.user ? 'Logout' : 'Go' }}
-          </span>
-        </button>
-      </div>
-    </aside>
-
-    <!-- Mobile sidebar (overlay) -->
-    <transition name="fade">
-      <aside
-        v-if="sidebarOpen"
-        class="fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-slate-300 bg-white
-               text-sm shadow-lg dark:border-slate-800 dark:bg-slate-950/95 md:hidden"
-      >
-        <div
-          class="flex items-center justify-between border-b border-slate-300 px-2 py-2
-                 dark:border-slate-800"
-        >
-          <span class="ml-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-400">
-            Expat GM
-          </span>
-          <button
-            type="button"
-            class="inline-flex h-8 w-8 items-center justify-center rounded-md
-                   hover:bg-slate-100 dark:hover:bg-slate-800"
-            @click="sidebarOpen = false"
-          >
-            <i class="fa-solid fa-xmark text-[13px]"></i>
-          </button>
-        </div>
-
-        <nav class="flex-1 overflow-y-auto">
-          <div class="py-1">
-            <div
-              v-for="g in groups"
-              :key="g.key + '-m'"
-              class="px-1"
-            >
-              <button
-                type="button"
-                class="mt-1 flex w-full items-center justify-between rounded-md px-1.5 py-1.5
-                       text-[12px] font-semibold text-slate-700 transition
-                       hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="handleSectionClick(g.key)"
-              >
-                <span class="flex items-center gap-2">
-                  <i :class="[g.icon, 'text-[13px]']"></i>
-                  <span class="truncate">{{ g.header }}</span>
-                </span>
-                <i
-                  class="fa-solid text-[10px] text-slate-400"
-                  :class="open[g.key] ? 'fa-chevron-up' : 'fa-chevron-down'"
-                ></i>
-              </button>
-
-              <div
-                v-show="open[g.key]"
-                class="mt-0.5 space-y-0.5 pb-1"
-              >
-                <button
-                  v-for="it in g.children"
-                  :key="it.label + '-m'"
-                  type="button"
-                  class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px]
-                         transition border"
-                  :class="isActive(it)
-                    ? 'bg-[oklch(60%_0.118_184.704)] text-white border-[oklch(60%_0.118_184.704)]'
-                    : 'text-slate-700 border-slate-300 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800'"
-                  @click="
-                    handleNavClick(it);
-                    sidebarOpen = false;
-                  "
-                >
-                  <i :class="[it.icon, 'text-[12px]']"></i>
-                  <span class="truncate">{{ it.label }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </nav>
-
-        <div
-          class="flex items-center border-t border-slate-300 px-2 py-2 text-[11px]
-                 dark:border-slate-800"
-        >
-          <div
-            class="flex h-7 w-7 items-center justify-center rounded-full
-                   bg-[oklch(60%_0.118_184.704)] text-[11px] font-bold text-white"
-          >
+      <!-- User -->
+      <div class="border-t px-2 py-2" style="border-color: rgb(var(--ui-border));">
+        <div class="flex items-center gap-2">
+          <div class="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
             {{ initials }}
           </div>
-          <div class="ml-2 min-w-0 flex-1">
-            <div class="truncate font-semibold">
+
+          <div v-if="sidebarExpanded" class="min-w-0 flex-1">
+            <div class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
               {{ auth.user?.name || auth.user?.loginId || 'GM' }}
             </div>
             <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
               {{ auth.user?.role || 'LEAVE_GM' }}
             </div>
           </div>
+
           <button
             type="button"
-            class="ml-auto inline-flex h-7 items-center justify-center rounded-md px-2 text-[11px]
+            class="ml-auto inline-flex h-9 items-center justify-center rounded-xl px-3 text-[11px] font-extrabold
                    text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
             @click="toggleAuth"
           >
-            <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[10px]"></i>
-            <span>{{ auth.user ? 'Logout' : 'Go' }}</span>
+            <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[11px]" />
+            <span v-if="sidebarExpanded">{{ auth.user ? 'Logout' : 'Go' }}</span>
           </button>
         </div>
-      </aside>
+      </div>
+    </aside>
+
+    <!-- Mobile drawer -->
+    <transition name="fade">
+      <div v-if="mobileDrawerOpen" class="fixed inset-0 z-30 md:hidden">
+        <div class="absolute inset-0 bg-black/30" @click="closeMobileDrawer" />
+
+        <aside class="absolute inset-y-0 left-0 flex w-60 max-w-[70vw] flex-col bg-white dark:bg-slate-950/95 shadow-2xl"
+          style="border-right: 1px solid rgb(var(--ui-border));"
+        >
+          <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
+            <div class="min-w-0">
+              <div class="truncate text-[11px] font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">
+                Expat Leave
+              </div>
+              <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">GM Portal</div>
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800"
+              @click="closeMobileDrawer"
+            >
+              <i class="fa-solid fa-xmark text-[14px]" />
+            </button>
+          </div>
+
+          <nav class="flex-1 overflow-y-auto ui-scrollbar px-2 py-2">
+            <div v-for="g in groups" :key="g.key + '-m'" class="mb-2">
+              <button
+                type="button"
+                class="relative w-full rounded-xl px-2.5 py-2 transition border text-left"
+                :class="
+                  isGroupActive(g)
+                    ? 'border-sky-500/40 bg-sky-50/80 dark:bg-sky-500/10'
+                    : 'border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60'
+                "
+                @click="handleSectionClick(g.key)"
+              >
+                <span class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full" :class="isGroupActive(g) ? 'bg-sky-500' : 'bg-transparent'" />
+
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span
+                      class="grid h-8 w-8 place-items-center rounded-xl border"
+                      :class="
+                        isGroupActive(g)
+                          ? 'border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300'
+                          : 'border-slate-200/70 bg-white/60 text-slate-600 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200'
+                      "
+                    >
+                      <i :class="[g.icon, 'text-[13px]']" />
+                    </span>
+
+                    <div class="min-w-0">
+                      <div class="truncate text-[12px] font-extrabold" :class="isGroupActive(g) ? 'text-sky-700 dark:text-sky-200' : 'text-slate-800 dark:text-slate-100'">
+                        {{ g.header }}
+                      </div>
+                      <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">{{ g.children.length }} items</div>
+                    </div>
+                  </div>
+
+                  <i class="fa-solid fa-chevron-down text-[11px] transition" :class="[open[g.key] ? 'rotate-180' : '', isGroupActive(g) ? 'text-sky-500' : 'text-slate-400']" />
+                </div>
+              </button>
+
+              <div v-show="open[g.key]" class="mt-1 pl-10 space-y-1">
+                <button
+                  v-for="it in g.children"
+                  :key="it.label + '-m'"
+                  type="button"
+                  class="relative flex w-full items-center gap-2 rounded-xl px-3 py-2 text-[12px] transition border text-left"
+                  :class="
+                    isActive(it)
+                      ? 'border-sky-500/40 bg-sky-600 text-white shadow-[0_10px_22px_rgba(2,132,199,0.22)]'
+                      : 'border-slate-200/70 bg-white/60 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-950/30 dark:text-slate-200 dark:hover:bg-slate-800/60'
+                  "
+                  @click="handleNavClick(it)"
+                >
+                  <span class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full" :class="isActive(it) ? 'bg-white/90' : 'bg-transparent'" />
+                  <i :class="[it.icon, 'text-[12px]', isActive(it) ? 'opacity-95' : 'opacity-80']" />
+                  <span class="truncate font-semibold">{{ it.label }}</span>
+                </button>
+              </div>
+            </div>
+          </nav>
+
+          <div class="border-t px-2 py-2" style="border-color: rgb(var(--ui-border));">
+            <div class="flex items-center gap-2">
+              <div class="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
+                {{ initials }}
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <div class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                  {{ auth.user?.name || auth.user?.loginId || 'GM' }}
+                </div>
+                <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                  {{ auth.user?.role || 'LEAVE_GM' }}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                class="inline-flex h-9 items-center justify-center rounded-xl px-3 text-[11px] font-extrabold
+                       text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                @click="toggleAuth"
+              >
+                <i class="fa-solid fa-arrow-right-from-bracket mr-1 text-[11px]" />
+                <span>{{ auth.user ? 'Logout' : 'Go' }}</span>
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
     </transition>
 
     <!-- Main column -->
-    <div class="flex flex-1 flex-col">
-      <!-- Top bar -->
+    <div class="flex flex-1 flex-col min-w-0">
       <header
-        class="flex items-center justify-between border-b border-slate-300 bg-white/90
-               px-2 py-1.5 text-[13px] shadow-sm
-               dark:border-slate-800 dark:bg-slate-950/95"
+        class="flex items-center justify-between border-b bg-white/70 backdrop-blur px-2 sm:px-4 py-2 shadow-sm
+               dark:bg-slate-950/60"
+        style="border-color: rgb(var(--ui-border));"
       >
-        <div class="flex h-9 items-center gap-2 min-w-0">
+        <div class="flex items-center gap-2 min-w-0">
           <button
             type="button"
-            class="inline-flex h-8 w-8 items-center justify-center rounded-md
-                   hover:bg-slate-100 dark:hover:bg-slate-800 md:hidden"
-            @click="sidebarOpen = !sidebarOpen"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 md:hidden"
+            @click="toggleSidebar"
           >
-            <i class="fa-solid fa-bars text-[13px]"></i>
+            <i class="fa-solid fa-bars text-[13px]" />
           </button>
 
-          <div class="flex flex-col leading-tight min-w-0">
-            <div class="truncate text-[11px] font-semibold text-slate-900 dark:text-slate-50">
+          <div class="min-w-0">
+            <div class="truncate text-[12px] font-extrabold text-slate-800 dark:text-slate-100">
               {{ appTitle }}
             </div>
             <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
@@ -348,15 +374,14 @@ function toggleAuth() {
             </div>
           </div>
         </div>
+
+        <div class="flex items-center gap-2"></div>
       </header>
 
-      <!-- Content -->
-      <main
-        class="flex-1 overflow-auto bg-slate-50
-               px-1 py-1 text-sm
-               dark:bg-slate-950"
-      >
-        <router-view />
+      <main class="flex-1 min-h-0 overflow-auto">
+        <div class="w-full px-2 sm:px-4 lg:px-6 2xl:px-10 py-3">
+          <router-view />
+        </div>
       </main>
     </div>
   </div>
