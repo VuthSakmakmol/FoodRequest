@@ -7,7 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
-import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
+import { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
 
 import AttachmentPreviewModal from './AttachmentPreviewModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -52,7 +52,6 @@ const isDirty = computed(() => JSON.stringify(form.value) !== initialSnapshot.va
 /* ───────────────── dialogs ───────────────── */
 const confirmLeaveOpen = ref(false)
 const confirmSaveOpen = ref(false)
-const confirmSubmitOpen = ref(false)
 const confirmBusy = ref(false)
 
 /* ───────────────── attachments modal ───────────────── */
@@ -60,9 +59,10 @@ const filesOpen = ref(false)
 const filesItems = computed(() => existingAttachments.value || [])
 
 async function fetchAttachments(requestId) {
-  if (!requestId) return
+  const rid = String(requestId || '').trim()
+  if (!rid) return
   try {
-    const res = await api.get(`/leave/swap-working-day/${requestId}/evidence`)
+    const res = await api.get(`/leave/swap-working-day/${rid}/evidence`)
     existingAttachments.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     existingAttachments.value = []
@@ -74,17 +74,61 @@ function openFilesModal() {
   filesOpen.value = true
 }
 
-/* ───────────────── date helpers ───────────────── */
+/* ───────────────── date helpers ─────────────────
+   ✅ When "From" changes, auto set "To" = "From" (both sections)
+   ✅ If "To" becomes earlier than "From", clamp it back.
+*/
+const requestEndManuallyEdited = ref(false)
+const compEndManuallyEdited = ref(false)
+
+function onRequestEndInput() {
+  requestEndManuallyEdited.value = true
+}
+function onCompEndInput() {
+  compEndManuallyEdited.value = true
+}
+
 watch(
   () => form.value.requestStart,
   (v) => {
-    if (v && !form.value.requestEnd) form.value.requestEnd = v
+    if (!v) return
+    form.value.requestEnd = v
+    requestEndManuallyEdited.value = false
   }
 )
+
 watch(
   () => form.value.compStart,
   (v) => {
-    if (v && !form.value.compEnd) form.value.compEnd = v
+    if (!v) return
+    form.value.compEnd = v
+    compEndManuallyEdited.value = false
+  }
+)
+
+watch(
+  () => form.value.requestEnd,
+  (v) => {
+    if (!v || !form.value.requestStart) return
+    const s = dayjs(form.value.requestStart)
+    const e = dayjs(v)
+    if (s.isValid() && e.isValid() && e.isBefore(s, 'day')) {
+      form.value.requestEnd = form.value.requestStart
+      requestEndManuallyEdited.value = false
+    }
+  }
+)
+
+watch(
+  () => form.value.compEnd,
+  (v) => {
+    if (!v || !form.value.compStart) return
+    const s = dayjs(form.value.compStart)
+    const e = dayjs(v)
+    if (s.isValid() && e.isValid() && e.isBefore(s, 'day')) {
+      form.value.compEnd = form.value.compStart
+      compEndManuallyEdited.value = false
+    }
   }
 )
 
@@ -177,27 +221,37 @@ onMounted(loadForEdit)
 
 /* ───────────────── upload queued files ───────────────── */
 async function uploadQueuedFiles(requestId) {
-  if (!requestId) return
+  const rid = String(requestId || '').trim()
+  if (!rid) return
   if (!queuedFiles.value.length) return
 
   const fd = new FormData()
   for (const f of queuedFiles.value) fd.append('files', f) // ✅ field name: "files"
 
-  // ✅ IMPORTANT: do NOT set multipart header manually (axios/browser boundary)
-  await api.post(`/leave/swap-working-day/${requestId}/evidence`, fd)
+  // ✅ IMPORTANT: do NOT set multipart header manually
+  await api.post(`/leave/swap-working-day/${rid}/evidence`, fd)
 
   queuedFiles.value = []
-  await fetchAttachments(requestId)
+  await fetchAttachments(rid)
 }
 
 /* ───────────────── submit/save ───────────────── */
 function askPrimary() {
+  if (saving.value) return
+
   if (!canSubmit.value) {
     showToast({ type: 'error', message: 'Duration mismatch or missing fields.' })
     return
   }
-  if (isEdit.value) confirmSaveOpen.value = true
-  else confirmSubmitOpen.value = true
+
+  // ✅ NEW: submit immediately (no confirm)
+  if (!isEdit.value) {
+    doSubmitNew()
+    return
+  }
+
+  // ✅ EDIT: confirm save
+  confirmSaveOpen.value = true
 }
 
 async function doSubmitNew() {
@@ -216,20 +270,24 @@ async function doSubmitNew() {
     const res = await api.post('/leave/swap-working-day', payload)
     createdId = res.data?._id
 
-    if (createdId) {
-      await uploadQueuedFiles(createdId)
+    // ✅ Upload evidence if any (do NOT auto-cancel if upload fails)
+    if (createdId && queuedFiles.value.length) {
+      try {
+        await uploadQueuedFiles(createdId)
+      } catch (e2) {
+        // Request exists — show warning and go edit so user can retry upload
+        showToast({
+          type: 'warning',
+          message: e2?.response?.data?.message || 'Request created, but evidence upload failed. You can upload again in Edit.',
+        })
+        router.push({ name: 'leave-user-swap-day-edit', params: { id: createdId } })
+        return
+      }
     }
 
     showToast({ type: 'success', message: 'Swap working day submitted.' })
-    confirmSubmitOpen.value = false
     router.push({ name: 'leave-user-swap-day' })
   } catch (e) {
-    // optional rollback if you really want
-    if (createdId) {
-      try {
-        await api.post(`/leave/swap-working-day/${createdId}/cancel`)
-      } catch (_) {}
-    }
     showToast({ type: 'error', message: e?.response?.data?.message || 'Submit failed.' })
   } finally {
     saving.value = false
@@ -279,7 +337,7 @@ function confirmLeave() {
   router.back()
 }
 
-/* ───────────────── REALTIME (optional but recommended) ─────────────────
+/* ───────────────── REALTIME (optional) ─────────────────
    If someone approves while user is on edit page:
    - update status
    - lock UI
@@ -299,14 +357,9 @@ function applyRealtime(doc) {
       showToast({ type: 'warning', message: `This request is now ${newStatus}. Editing is locked.` })
     }
   }
-
-  // keep approvals/attachments count in sync (attachments list is loaded via evidence endpoint)
-  // but if doc includes attachments metadata, you can optionally refresh:
-  // fetchAttachments(id.value)
 }
 
 onMounted(() => {
-  // subscribe rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_USER' })
     const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
@@ -348,6 +401,7 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-arrow-left text-[11px]" />
                 Back
               </button>
+
               <button
                 class="ui-hero-btn ui-hero-btn-primary"
                 type="button"
@@ -381,9 +435,16 @@ onBeforeUnmount(() => {
                     <label class="ui-label">From</label>
                     <input type="date" v-model="form.requestStart" class="ui-date" :disabled="isEdit && !isPending" />
                   </div>
+
                   <div class="ui-field">
                     <label class="ui-label">To</label>
-                    <input type="date" v-model="form.requestEnd" class="ui-date" :disabled="isEdit && !isPending" />
+                    <input
+                      type="date"
+                      v-model="form.requestEnd"
+                      class="ui-date"
+                      :disabled="isEdit && !isPending"
+                      @input="onRequestEndInput"
+                    />
                   </div>
                 </div>
               </div>
@@ -403,9 +464,16 @@ onBeforeUnmount(() => {
                     <label class="ui-label">From</label>
                     <input type="date" v-model="form.compStart" class="ui-date" :disabled="isEdit && !isPending" />
                   </div>
+
                   <div class="ui-field">
                     <label class="ui-label">To</label>
-                    <input type="date" v-model="form.compEnd" class="ui-date" :disabled="isEdit && !isPending" />
+                    <input
+                      type="date"
+                      v-model="form.compEnd"
+                      class="ui-date"
+                      :disabled="isEdit && !isPending"
+                      @input="onCompEndInput"
+                    />
                   </div>
                 </div>
 
@@ -442,7 +510,7 @@ onBeforeUnmount(() => {
                     title="Preview / manage attachments"
                   >
                     <i class="fa-solid fa-paperclip text-[11px]" />
-                    Preview ({{ (existingAttachments?.length || 0) }})
+                    Preview ({{ existingAttachments?.length || 0 }})
                   </button>
                 </div>
 
@@ -516,6 +584,7 @@ onBeforeUnmount(() => {
                     Click “Preview” to view/delete (pending only).
                   </div>
                 </div>
+
                 <div v-else class="text-[11px] text-slate-500 dark:text-slate-400">
                   No existing attachments.
                 </div>
@@ -524,9 +593,7 @@ onBeforeUnmount(() => {
 
             <!-- footer buttons -->
             <div class="flex justify-end gap-2">
-              <button class="ui-btn ui-btn-ghost" type="button" @click="askLeave">
-                Cancel
-              </button>
+              <button class="ui-btn ui-btn-ghost" type="button" @click="askLeave">Cancel</button>
 
               <button
                 class="ui-btn ui-btn-primary"
@@ -566,18 +633,6 @@ onBeforeUnmount(() => {
     cancel-text="Stay"
     tone="warning"
     @confirm="confirmLeave"
-  />
-
-  <!-- Confirm submit (new) -->
-  <ConfirmDialog
-    v-model="confirmSubmitOpen"
-    :busy="confirmBusy"
-    title="Submit request?"
-    message="Are you sure you want to submit this swap working day request?"
-    confirm-text="Yes, submit"
-    cancel-text="No"
-    tone="primary"
-    @confirm="doSubmitNew"
   />
 
   <!-- Confirm save (edit) -->
