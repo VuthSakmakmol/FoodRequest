@@ -6,8 +6,11 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
-// ✅ realtime (same pattern as UserMySwapDay)
+// ✅ realtime
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
+
+// ✅ Excel export
+import * as XLSX from 'xlsx'
 
 import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
 
@@ -45,12 +48,18 @@ const filesOpen = ref(false)
 const filesRequest = ref(null)
 const filesItems = ref([])
 
-/* decision confirm modal */
+/* single decision confirm modal */
 const confirmOpen = ref(false)
 const confirmBusy = ref(false)
 const confirmType = ref('') // 'APPROVE' | 'REJECT'
 const confirmTarget = ref(null)
 const decisionNote = ref('')
+
+/* bulk decision modal */
+const bulkConfirmOpen = ref(false)
+const bulkConfirmBusy = ref(false)
+const bulkConfirmType = ref('') // 'APPROVE' | 'REJECT'
+const bulkDecisionNote = ref('')
 
 /* export */
 const exporting = ref(false)
@@ -59,17 +68,15 @@ const exporting = ref(false)
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const one = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...one].map(r => String(r || '').trim().toUpperCase()))]
+  return [...new Set([...raw, ...one].map((r) => String(r || '').trim().toUpperCase()))]
 })
 
-const isAdminViewer = computed(() =>
-  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
-)
-
+const isAdminViewer = computed(() => roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN'))
 const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
 
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
+  select: '56px',
   created: '140px',
   employee: '240px',
   workDate: '200px',
@@ -102,7 +109,6 @@ function fmtDateTime(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD HH:mm')
 }
-
 function fmtYmd(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD')
@@ -118,12 +124,8 @@ function statusBadgeUiClass(x) {
 }
 
 function canDecide(row) {
-  // ✅ Admin viewers must NOT approve/reject
   if (isAdminViewer.value) return false
-
-  // ✅ Only real manager can decide
   if (!isRealManager.value) return false
-
   return up(row?.status) === 'PENDING_MANAGER'
 }
 
@@ -141,24 +143,18 @@ function briefReason(v, max = 70) {
 /* rejected reason helpers */
 function getRejectedReason(row) {
   const r = row || {}
-
   const a = compactText(r.rejectedReason)
   if (a) return a
-
   const m = compactText(r.managerComment)
   if (m) return m
-
   const g = compactText(r.gmComment)
   if (g) return g
-
   const c = compactText(r.cooComment)
   if (c) return c
-
   const steps = Array.isArray(r.approvals) ? r.approvals : []
   const rejectedStep = steps.find((x) => up(x?.status) === 'REJECTED')
   const note = compactText(rejectedStep?.note)
   if (note) return note
-
   return '—'
 }
 
@@ -179,9 +175,7 @@ async function fetchInbox() {
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
-  if (statusFilter.value !== 'ALL') {
-    list = list.filter((r) => up(r.status) === up(statusFilter.value))
-  }
+  if (statusFilter.value !== 'ALL') list = list.filter((r) => up(r.status) === up(statusFilter.value))
 
   const q = search.value.trim().toLowerCase()
   if (q) {
@@ -223,11 +217,6 @@ const pagedRows = computed(() => {
   const start = (page.value - 1) * per
   return filteredRows.value.slice(start, start + per)
 })
-
-watch(
-  () => [search.value, statusFilter.value, perPage.value],
-  () => (page.value = 1)
-)
 
 watch(
   () => pageCount.value,
@@ -281,7 +270,7 @@ async function refreshFilesAgain() {
   }
 }
 
-/* ───────────────── DECISION ───────────────── */
+/* ───────────────── SINGLE DECISION ───────────────── */
 function openApprove(row) {
   if (!canDecide(row)) return
   confirmType.value = 'APPROVE'
@@ -334,9 +323,6 @@ async function confirmDecision() {
 
     closeConfirm(true)
     closeView()
-
-    // optional: you can skip fetch because realtime will update,
-    // but keep it as safety:
     await fetchInbox()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
@@ -357,40 +343,189 @@ watch(
   { deep: true }
 )
 
-/* ───────────────── REALTIME ─────────────────
-   Backend emits:
-   - swap:req:created
-   - swap:req:updated
-*/
+/* ───────────────── BULK SELECT ───────────────── */
+const selectedIds = ref(new Set())
+const selectedCount = computed(() => selectedIds.value.size)
+
+function isSelected(row) {
+  return selectedIds.value.has(String(row?._id))
+}
+function toggleRow(row) {
+  const id = String(row?._id || '')
+  if (!id) return
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+const selectableRows = computed(() => filteredRows.value.filter((r) => canDecide(r)))
+
+const isAllSelected = computed(() => {
+  const list = selectableRows.value
+  if (!list.length) return false
+  return list.every((r) => selectedIds.value.has(String(r._id)))
+})
+const isIndeterminate = computed(() => {
+  const list = selectableRows.value
+  if (!list.length) return false
+  const picked = list.filter((r) => selectedIds.value.has(String(r._id))).length
+  return picked > 0 && picked < list.length
+})
+
+function toggleSelectAll() {
+  const list = selectableRows.value
+  const next = new Set(selectedIds.value)
+
+  if (isAllSelected.value) list.forEach((r) => next.delete(String(r._id)))
+  else list.forEach((r) => next.add(String(r._id)))
+
+  selectedIds.value = next
+}
+
+/* clear selection when filters/pagination inputs change */
+watch(
+  () => [search.value, statusFilter.value, perPage.value],
+  () => {
+    page.value = 1
+    clearSelection()
+  }
+)
+
+/* ───────────────── BULK DECISION ───────────────── */
+function openBulkApprove() {
+  if (!selectedCount.value) return
+  bulkConfirmType.value = 'APPROVE'
+  bulkDecisionNote.value = ''
+  bulkConfirmOpen.value = true
+}
+function openBulkReject() {
+  if (!selectedCount.value) return
+  bulkConfirmType.value = 'REJECT'
+  bulkDecisionNote.value = ''
+  bulkConfirmOpen.value = true
+}
+function closeBulkConfirm(force = false) {
+  if (bulkConfirmBusy.value && !force) return
+  bulkConfirmOpen.value = false
+  bulkConfirmType.value = ''
+  bulkDecisionNote.value = ''
+}
+
+async function confirmBulkDecision() {
+  if (!selectedCount.value) return
+
+  const action = bulkConfirmType.value === 'APPROVE' ? 'APPROVE' : 'REJECT'
+  const note = bulkDecisionNote.value?.trim?.() || ''
+  if (action === 'REJECT' && !note) {
+    showToast({ type: 'warning', message: 'Reject requires a reason.' })
+    return
+  }
+
+  bulkConfirmBusy.value = true
+  deciding.value = true
+
+  const ids = Array.from(selectedIds.value)
+
+  try {
+    await api.post('/leave/swap-working-day/manager/bulk-decision', {
+      ids,
+      action,
+      note,
+      comment: note,
+      reason: note,
+    })
+
+    showToast({
+      type: 'success',
+      message: action === 'APPROVE' ? `Approved ${ids.length} request(s).` : `Rejected ${ids.length} request(s).`,
+    })
+
+    closeBulkConfirm(true)
+    clearSelection()
+    await fetchInbox()
+  } catch (e) {
+    showToast({ type: 'error', message: e?.response?.data?.message || 'Bulk decision failed' })
+  } finally {
+    bulkConfirmBusy.value = false
+    deciding.value = false
+  }
+}
+
+/* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
 
   const id = String(doc._id)
   const idx = rows.value.findIndex((x) => String(x._id) === id)
 
-  if (idx >= 0) {
-    rows.value[idx] = { ...rows.value[idx], ...doc }
-  } else {
-    rows.value.unshift(doc)
-  }
+  if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
+  else rows.value.unshift(doc)
 
-  // keep modals synced
-  if (viewItem.value?._id && String(viewItem.value._id) === id) {
-    viewItem.value = { ...viewItem.value, ...doc }
-  }
-  if (filesRequest.value?._id && String(filesRequest.value._id) === id) {
-    filesRequest.value = { ...filesRequest.value, ...doc }
+  if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
+  if (filesRequest.value?._id && String(filesRequest.value._id) === id) filesRequest.value = { ...filesRequest.value, ...doc }
+
+  // if item moved out of pending, remove from selection automatically
+  const updated = up(doc?.status)
+  if (updated !== 'PENDING_MANAGER') {
+    const next = new Set(selectedIds.value)
+    next.delete(id)
+    selectedIds.value = next
   }
 }
 
 function onSwapCreated(doc) {
-  // ✅ If backend sends manager only relevant docs, just insert.
-  // If backend broadcasts to everyone, you can optionally ignore non-manager docs here.
+  upsertRow(doc)
+}
+function onSwapUpdated(doc) {
   upsertRow(doc)
 }
 
-function onSwapUpdated(doc) {
-  upsertRow(doc)
+/* ───────────────── EXPORT / CLEAR FILTERS ───────────────── */
+function clearFilters() {
+  search.value = ''
+  statusFilter.value = 'ALL'
+  perPage.value = 20
+  page.value = 1
+  clearSelection()
+}
+
+async function exportExcel() {
+  try {
+    exporting.value = true
+
+    const list = filteredRows.value.map((r) => ({
+      CreatedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+      EmployeeID: r.employeeId || '',
+      EmployeeName: r.employeeName || r.name || '',
+      Department: r.department || '',
+      WorkDateFrom: r.requestStartDate || '',
+      WorkDateTo: r.requestEndDate || '',
+      SwapDateFrom: r.offStartDate || '',
+      SwapDateTo: r.offEndDate || '',
+      RequestDays: r.requestTotalDays ?? '',
+      OffDays: r.offTotalDays ?? '',
+      Status: r.status || '',
+      Reason: r.reason || '',
+      Attachments: Array.isArray(r.attachments) ? r.attachments.length : 0,
+    }))
+
+    const ws = XLSX.utils.json_to_sheet(list)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'ManagerInbox')
+
+    const filename = `swap_manager_inbox_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
+    XLSX.writeFile(wb, filename)
+
+    showToast({ type: 'success', message: 'Exported Excel.' })
+  } catch (e) {
+    showToast({ type: 'error', message: e?.message || 'Export failed' })
+  } finally {
+    exporting.value = false
+  }
 }
 
 /* lifecycle */
@@ -398,7 +533,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ join manager rooms (critical)
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_MANAGER' })
 
@@ -417,7 +551,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-
   socket.off('swap:req:created', onSwapCreated)
   socket.off('swap:req:updated', onSwapUpdated)
 })
@@ -436,6 +569,7 @@ onBeforeUnmount(() => {
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-warning">Selected: {{ selectedCount }}</span>
               </div>
             </div>
 
@@ -466,6 +600,53 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center gap-2">
+                <!-- Bulk controls -->
+                <template v-if="isRealManager && !isAdminViewer">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-soft"
+                    type="button"
+                    :disabled="loading || deciding || !selectableRows.length"
+                    @click="toggleSelectAll"
+                    :title="isAllSelected ? 'Unselect all pending' : 'Select all pending'"
+                  >
+                    <i class="fa-solid fa-check-double text-[11px]" />
+                    <span class="ml-1">{{ selectedCount }}</span>
+                  </button>
+
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-emerald"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkApprove"
+                    title="Approve selected"
+                  >
+                    <i class="fa-solid fa-circle-check text-[11px]" />
+                    Approve ({{ selectedCount }})
+                  </button>
+
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-rose"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkReject"
+                    title="Reject selected"
+                  >
+                    <i class="fa-solid fa-circle-xmark text-[11px]" />
+                    Reject ({{ selectedCount }})
+                  </button>
+
+                  <button
+                    v-if="selectedCount"
+                    class="ui-btn ui-btn-sm ui-btn-ghost"
+                    type="button"
+                    :disabled="loading || deciding"
+                    @click="clearSelection"
+                    title="Clear selection"
+                  >
+                    <i class="fa-solid fa-xmark text-[11px]" />
+                  </button>
+                </template>
+
                 <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox" title="Refresh">
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                 </button>
@@ -495,6 +676,7 @@ onBeforeUnmount(() => {
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-warning">Selected: {{ selectedCount }}</span>
               </div>
             </div>
 
@@ -524,7 +706,22 @@ onBeforeUnmount(() => {
                 </select>
               </div>
 
-              <div class="flex items-center justify-end gap-2">
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <template v-if="isRealManager && !isAdminViewer">
+                  <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || deciding || !selectableRows.length" @click="toggleSelectAll">
+                    <i class="fa-solid fa-check-double text-[11px]" />
+                    Select ({{ selectedCount }})
+                  </button>
+
+                  <button class="ui-btn ui-btn-sm ui-btn-emerald" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkApprove">
+                    Approve ({{ selectedCount }})
+                  </button>
+
+                  <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
+                    Reject ({{ selectedCount }})
+                  </button>
+                </template>
+
                 <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox">
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                   Refresh
@@ -572,10 +769,21 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="shrink-0 text-right space-y-1">
+                <div class="shrink-0 text-right space-y-1 flex items-start gap-2">
                   <span :class="statusBadgeUiClass(row.status)">
                     {{ STATUS_LABEL[row.status] || row.status }}
                   </span>
+
+                  <!-- checkbox (only pending + manager) -->
+                  <input
+                    v-if="canDecide(row)"
+                    type="checkbox"
+                    class="mt-1"
+                    :checked="isSelected(row)"
+                    @click.stop
+                    @change="toggleRow(row)"
+                    aria-label="Select row"
+                  />
                 </div>
               </div>
 
@@ -618,32 +826,17 @@ onBeforeUnmount(() => {
                 </button>
                 <span v-else class="text-[11px] text-slate-400">No files</span>
 
-                <!-- ✅ Actions: show ONLY when pending -->
+                <!-- Actions -->
                 <div class="flex items-center gap-2">
                   <template v-if="canDecide(row)">
-                    <button
-                      type="button"
-                      class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
-                      :disabled="loading || deciding"
-                      @click="openApprove(row)"
-                      title="Approve"
-                      aria-label="Approve"
-                    >
+                    <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
                       <i class="fa-solid fa-circle-check text-[12px]" />
                     </button>
 
-                    <button
-                      type="button"
-                      class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
-                      :disabled="loading || deciding"
-                      @click="openReject(row)"
-                      title="Reject"
-                      aria-label="Reject"
-                    >
+                    <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
                       <i class="fa-solid fa-circle-xmark text-[12px]" />
                     </button>
                   </template>
-
                   <span v-else class="text-[11px] text-slate-400">—</span>
                 </div>
               </div>
@@ -652,8 +845,9 @@ onBeforeUnmount(() => {
 
           <!-- ✅ DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1100px]">
+            <table class="ui-table table-fixed w-full min-w-[1150px]">
               <colgroup>
+                <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
@@ -666,6 +860,16 @@ onBeforeUnmount(() => {
 
               <thead>
                 <tr>
+                  <th class="ui-th text-center">
+                    <input
+                      v-if="isRealManager && !isAdminViewer"
+                      type="checkbox"
+                      :checked="isAllSelected"
+                      :indeterminate.prop="isIndeterminate"
+                      @change="toggleSelectAll"
+                      aria-label="Select all pending"
+                    />
+                  </th>
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Work Date</th>
@@ -679,12 +883,16 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
-                    No items found.
-                  </td>
+                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
                 </tr>
 
                 <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
+                  <!-- Select -->
+                  <td class="ui-td text-center" @click.stop>
+                    <input v-if="canDecide(row)" type="checkbox" :checked="isSelected(row)" @change="toggleRow(row)" aria-label="Select row" />
+                    <span v-else class="text-[11px] text-slate-400">—</span>
+                  </td>
+
                   <td class="ui-td">
                     <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
                   </td>
@@ -693,9 +901,7 @@ onBeforeUnmount(() => {
                     <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
                       {{ row.employeeName || row.name || row.employeeId || '—' }}
                     </div>
-                    <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                      ID: {{ row.employeeId || '—' }}
-                    </div>
+                    <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">ID: {{ row.employeeId || '—' }}</div>
                   </td>
 
                   <td class="ui-td">
@@ -724,46 +930,26 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <span :class="statusBadgeUiClass(row.status)">
-                      {{ STATUS_LABEL[row.status] || row.status }}
-                    </span>
+                    <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
                   </td>
 
-                  <!-- ✅ Actions: show ONLY when pending -->
+                  <!-- Actions -->
                   <td class="ui-td text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">
                       <template v-if="canDecide(row)">
-                        <button
-                          type="button"
-                          class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
-                          :disabled="loading || deciding"
-                          @click="openApprove(row)"
-                          title="Approve"
-                          aria-label="Approve"
-                        >
+                        <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
                           <i class="fa-solid fa-circle-check text-[12px]" />
                         </button>
-
-                        <button
-                          type="button"
-                          class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
-                          :disabled="loading || deciding"
-                          @click="openReject(row)"
-                          title="Reject"
-                          aria-label="Reject"
-                        >
+                        <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
                           <i class="fa-solid fa-circle-xmark text-[12px]" />
                         </button>
                       </template>
-
                       <span v-else class="text-[11px] text-slate-400">—</span>
                     </div>
                   </td>
-                  
+
                   <td class="ui-td">
-                    <p class="reason-cell" :title="compactText(row.reason)">
-                      {{ row.reason ? compactText(row.reason) : '—' }}
-                    </p>
+                    <p class="reason-cell" :title="compactText(row.reason)">{{ row.reason ? compactText(row.reason) : '—' }}</p>
                   </td>
                 </tr>
               </tbody>
@@ -771,16 +957,12 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Pagination -->
-          <div
-            class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
-          >
+          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-2">
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
               </select>
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                Page {{ page }} / {{ pageCount }}
-              </span>
+              <span class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }} / {{ pageCount }}</span>
             </div>
 
             <div class="flex items-center justify-end gap-1">
@@ -806,12 +988,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <button
-              v-if="viewItem?.attachments?.length"
-              class="ui-btn ui-btn-soft ui-btn-xs"
-              type="button"
-              @click="openFiles(viewItem)"
-            >
+            <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
               <i class="fa-solid fa-paperclip text-[11px]" />
               Attachments
             </button>
@@ -832,9 +1009,7 @@ onBeforeUnmount(() => {
                   {{ viewItem?.employeeName || viewItem?.name || '—' }}
                 </div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400">ID: {{ viewItem?.employeeId || '—' }}</div>
-                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                  Dept: {{ viewItem.department }}
-                </div>
+                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">Dept: {{ viewItem.department }}</div>
               </div>
 
               <div class="text-right md:text-left">
@@ -869,7 +1044,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- ✅ Rejected Reason -->
           <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
             <div class="ui-section-title text-rose-600 dark:text-rose-400">Rejected Reason</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
@@ -889,7 +1063,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- CONFIRM DECISION MODAL -->
+    <!-- SINGLE CONFIRM DECISION MODAL -->
     <div v-if="confirmOpen" class="ui-modal-backdrop">
       <div class="ui-modal p-4">
         <div class="flex items-start gap-3">
@@ -909,8 +1083,7 @@ onBeforeUnmount(() => {
               {{ confirmType === 'APPROVE' ? 'Approve this request?' : 'Reject this request?' }}
             </div>
             <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-              Employee:
-              <span class="font-extrabold">{{ confirmTarget?.employeeName || confirmTarget?.name || '—' }}</span>
+              Employee: <span class="font-extrabold">{{ confirmTarget?.employeeName || confirmTarget?.name || '—' }}</span>
             </div>
           </div>
         </div>
@@ -936,6 +1109,57 @@ onBeforeUnmount(() => {
           >
             <i v-if="confirmBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
             {{ confirmType === 'APPROVE' ? 'Approve' : 'Reject' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BULK CONFIRM MODAL -->
+    <div v-if="bulkConfirmOpen" class="ui-modal-backdrop">
+      <div class="ui-modal p-4">
+        <div class="flex items-start gap-3">
+          <div
+            class="grid h-10 w-10 place-items-center rounded-2xl border"
+            :style="
+              bulkConfirmType === 'APPROVE'
+                ? 'border-color: rgb(var(--ui-success) / 0.25); background: rgb(var(--ui-success) / 0.10); color: rgb(var(--ui-success));'
+                : 'border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.10); color: rgb(var(--ui-danger));'
+            "
+          >
+            <i :class="bulkConfirmType === 'APPROVE' ? 'fa-solid fa-check' : 'fa-solid fa-xmark'" />
+          </div>
+
+          <div class="flex-1">
+            <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">
+              {{ bulkConfirmType === 'APPROVE' ? 'Approve selected requests?' : 'Reject selected requests?' }}
+            </div>
+            <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+              Selected: <span class="font-extrabold">{{ selectedCount }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 ui-field">
+          <textarea
+            v-model="bulkDecisionNote"
+            rows="3"
+            class="ui-textarea"
+            :placeholder="bulkConfirmType === 'REJECT' ? 'Please type the reason for rejection...' : 'Add a short note (optional)...'"
+          />
+        </div>
+
+        <div class="mt-4 flex justify-end gap-2">
+          <button type="button" class="ui-btn ui-btn-ghost" :disabled="bulkConfirmBusy" @click="closeBulkConfirm()">Close</button>
+
+          <button
+            type="button"
+            class="ui-btn"
+            :class="bulkConfirmType === 'APPROVE' ? 'ui-btn-emerald' : 'ui-btn-rose'"
+            :disabled="bulkConfirmBusy"
+            @click="confirmBulkDecision"
+          >
+            <i v-if="bulkConfirmBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
+            {{ bulkConfirmType === 'APPROVE' ? `Approve (${selectedCount})` : `Reject (${selectedCount})` }}
           </button>
         </div>
       </div>

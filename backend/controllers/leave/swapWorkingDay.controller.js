@@ -971,3 +971,289 @@ exports.updateMySwapRequest = async (req, res, next) => {
     next(e)
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   MANAGER BULK DECISION
+   POST /leave/swap-working-day/manager/bulk-decision
+   body: { ids: string[], action: "APPROVE"|"REJECT", note?: string }
+───────────────────────────────────────────────────────────── */
+exports.managerBulkDecision = async (req, res, next) => {
+  try {
+    const me = actorLoginId(req)
+    if (!me) throw createError(400, 'Missing user identity')
+    if (!canManagerDecide(req)) throw createError(403, 'Forbidden')
+
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => s(x)).filter(Boolean) : []
+    if (!ids.length) throw createError(400, 'ids is required')
+
+    const { action, note } = parseDecisionBody(req) // uses action/note from body
+    const now = new Date()
+
+    // Load docs (for validation + mode-specific next status)
+    const docs = await SwapWorkingDayRequest.find({
+      _id: { $in: ids },
+      status: 'PENDING_MANAGER',
+      managerLoginId: me,
+      approvalMode: { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] },
+    })
+
+    if (!docs.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
+
+    // Validate each doc is still valid (defensive)
+    const toUpdate = []
+    const skipped = []
+    for (const d of docs) {
+      const mode = normalizeMode(d.approvalMode)
+      if (!['MANAGER_AND_GM', 'MANAGER_AND_COO'].includes(mode)) {
+        skipped.push(String(d._id))
+        continue
+      }
+      if (s(d.managerLoginId) !== me || s(d.status) !== 'PENDING_MANAGER') {
+        skipped.push(String(d._id))
+        continue
+      }
+      toUpdate.push(d)
+    }
+
+    if (!toUpdate.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
+
+    // Build bulk ops
+    const ops = toUpdate.map((d) => {
+      const mode = normalizeMode(d.approvalMode)
+      const newStatus = action === 'APPROVE' ? nextStatusAfterManagerApprove(mode) : 'REJECTED'
+
+      const setPayload =
+        action === 'APPROVE'
+          ? {
+              status: newStatus,
+              managerComment: s(note || ''),
+              managerDecisionAt: now,
+              rejectedReason: '',
+              rejectedAt: null,
+              rejectedBy: '',
+              rejectedLevel: '',
+            }
+          : {
+              status: 'REJECTED',
+              managerComment: '',
+              managerDecisionAt: now,
+              rejectedReason: s(note),
+              rejectedAt: now,
+              rejectedBy: me,
+              rejectedLevel: 'MANAGER',
+            }
+
+      return {
+        updateOne: {
+          filter: { _id: d._id, status: 'PENDING_MANAGER', managerLoginId: me },
+          update: {
+            $set: {
+              ...setPayload,
+              approvals: markApproval(d.approvals, 'MANAGER', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+            },
+          },
+        },
+      }
+    })
+
+    await SwapWorkingDayRequest.bulkWrite(ops, { ordered: false })
+
+    // Fetch updated docs to return + emit realtime/telegram per doc
+    const updatedDocs = await SwapWorkingDayRequest.find({ _id: { $in: toUpdate.map((x) => x._id) } }).lean()
+    const enriched = await attachEmployeeInfo(updatedDocs)
+
+    // Realtime + Telegram best-effort
+    for (const p of enriched) {
+      emitSwap(req, p, 'swap:req:updated')
+      await safeNotify(notify?.notifyAdminsOnUpdate, p)
+      await safeNotify(notify?.notifyManagerDecisionToEmployee, p)
+      if (action === 'APPROVE') {
+        await safeNotify(notify?.notifyCurrentApprover, p) // DM next approver
+      }
+    }
+
+    return res.json({
+      ok: true,
+      total: ids.length,
+      processed: enriched.length,
+      updated: enriched,
+      skipped: ids.filter((x) => !enriched.some((u) => String(u._id) === String(x))),
+    })
+  } catch (e) {
+    next(e)
+  }
+}
+
+exports.gmBulkDecision = async (req, res, next) => {
+  try {
+    const me = actorLoginId(req)
+    if (!me) throw createError(400, 'Missing user identity')
+    if (!canGmDecide(req)) throw createError(403, 'Forbidden')
+
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => s(x)).filter(Boolean) : []
+    if (!ids.length) throw createError(400, 'ids is required')
+
+    const { action, note } = parseDecisionBody(req)
+    const now = new Date()
+
+    // only GM-valid modes
+    const docs = await SwapWorkingDayRequest.find({
+      _id: { $in: ids },
+      status: 'PENDING_GM',
+      gmLoginId: me,
+      approvalMode: { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] },
+    })
+
+    if (!docs.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
+
+    const ops = docs.map((d) => {
+      const mode = normalizeMode(d.approvalMode)
+      const newStatus = action === 'APPROVE' ? nextStatusAfterGmApprove(mode) : 'REJECTED'
+
+      const setPayload =
+        action === 'APPROVE'
+          ? {
+              status: newStatus,
+              gmComment: s(note || ''),
+              gmDecisionAt: now,
+              rejectedReason: '',
+              rejectedAt: null,
+              rejectedBy: '',
+              rejectedLevel: '',
+            }
+          : {
+              status: 'REJECTED',
+              gmComment: '',
+              gmDecisionAt: now,
+              rejectedReason: s(note),
+              rejectedAt: now,
+              rejectedBy: me,
+              rejectedLevel: 'GM',
+            }
+
+      return {
+        updateOne: {
+          filter: { _id: d._id, status: 'PENDING_GM', gmLoginId: me },
+          update: {
+            $set: {
+              ...setPayload,
+              approvals: markApproval(d.approvals, 'GM', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+            },
+          },
+        },
+      }
+    })
+
+    await SwapWorkingDayRequest.bulkWrite(ops, { ordered: false })
+
+    const updatedDocs = await SwapWorkingDayRequest.find({ _id: { $in: docs.map((x) => x._id) } }).lean()
+    const enriched = await attachEmployeeInfo(updatedDocs)
+
+    for (const p of enriched) {
+      emitSwap(req, p, 'swap:req:updated')
+      await safeNotify(notify?.notifyAdminsOnUpdate, p)
+      await safeNotify(notify?.notifyGmDecisionToEmployee, p)
+      if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p) // DM next approver (COO in GM_AND_COO)
+    }
+
+    return res.json({
+      ok: true,
+      total: ids.length,
+      processed: enriched.length,
+      updated: enriched,
+      skipped: ids.filter((x) => !enriched.some((u) => String(u._id) === String(x))),
+    })
+  } catch (e) {
+    next(e)
+  }
+}
+
+
+exports.cooBulkDecision = async (req, res, next) => {
+  try {
+    const me = actorLoginId(req)
+    if (!me) throw createError(400, 'Missing user identity')
+    if (!canCooDecide(req)) throw createError(403, 'Forbidden')
+
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => s(x)).filter(Boolean) : []
+    if (!ids.length) throw createError(400, 'ids is required')
+
+    const { action, note } = parseDecisionBody(req)
+    const now = new Date()
+
+    const docs = await SwapWorkingDayRequest.find({
+      _id: { $in: ids },
+      status: 'PENDING_COO',
+      cooLoginId: me,
+      approvalMode: { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] },
+    })
+
+    if (!docs.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
+
+    const ops = docs.map((d) => {
+      const newStatus = action === 'APPROVE' ? nextStatusAfterCooApprove(d.approvalMode) : 'REJECTED'
+
+      const setPayload =
+        action === 'APPROVE'
+          ? {
+              status: newStatus,
+              cooComment: s(note || ''),
+              cooDecisionAt: now,
+              rejectedReason: '',
+              rejectedAt: null,
+              rejectedBy: '',
+              rejectedLevel: '',
+            }
+          : {
+              status: 'REJECTED',
+              cooComment: '',
+              cooDecisionAt: now,
+              rejectedReason: s(note),
+              rejectedAt: now,
+              rejectedBy: me,
+              rejectedLevel: 'COO',
+            }
+
+      return {
+        updateOne: {
+          filter: { _id: d._id, status: 'PENDING_COO', cooLoginId: me },
+          update: {
+            $set: {
+              ...setPayload,
+              approvals: markApproval(d.approvals, 'COO', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+            },
+          },
+        },
+      }
+    })
+
+    await SwapWorkingDayRequest.bulkWrite(ops, { ordered: false })
+
+    const updatedDocs = await SwapWorkingDayRequest.find({ _id: { $in: docs.map((x) => x._id) } }).lean()
+    const enriched = await attachEmployeeInfo(updatedDocs)
+
+    for (const p of enriched) {
+      emitSwap(req, p, 'swap:req:updated')
+      await safeNotify(notify?.notifyAdminsOnUpdate, p)
+      await safeNotify(notify?.notifyCooDecisionToEmployee, p)
+    }
+
+    return res.json({
+      ok: true,
+      total: ids.length,
+      processed: enriched.length,
+      updated: enriched,
+      skipped: ids.filter((x) => !enriched.some((u) => String(u._id) === String(x))),
+    })
+  } catch (e) {
+    next(e)
+  }
+}

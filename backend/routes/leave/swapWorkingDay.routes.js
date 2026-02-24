@@ -58,4 +58,32 @@ router.get(
   swapCtrl.getOne
 )
 
+
+/* ─────────────────────────────────────────────
+   MANAGER
+───────────────────────────────────────────── */
+router.post(
+  '/swap-working-day/manager/bulk-decision',
+  requireRole('LEAVE_MANAGER'),
+  swapCtrl.managerBulkDecision
+)
+
+/* ─────────────────────────────────────────────
+   GM
+───────────────────────────────────────────── */
+router.post(
+  '/swap-working-day/gm/bulk-decision',
+  requireRole('LEAVE_GM'),
+  swapCtrl.gmBulkDecision
+)
+
+/* ─────────────────────────────────────────────
+   COO
+───────────────────────────────────────────── */
+router.post(
+  '/swap-working-day/coo/bulk-decision',
+  requireRole('LEAVE_COO'),
+  swapCtrl.cooBulkDecision
+)
+
 module.exports = router
