@@ -128,7 +128,10 @@ async function fetchInbox(silent = false) {
   try {
     loading.value = true
     const res = await api.get('/leave/requests/coo/inbox?scope=ALL')
-    rows.value = Array.isArray(res.data) ? res.data : []
+    rows.value = (Array.isArray(res.data) ? res.data : []).map((r) => ({
+      ...r,
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+    }))
   } catch (e) {
     console.error('fetchInbox COO error', e)
     if (!silent) {
@@ -710,10 +713,20 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-3 flex items-center justify-between gap-2">
-                <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading">
+                <button
+                  v-if="row.attachments?.length"
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                  @click="openAttachments(row)"
+                  :disabled="loading"
+                  title="Attachments"
+                  aria-label="Attachments"
+                >
                   <i class="fa-solid fa-paperclip text-[11px]" />
-                  Attachments
+                  <span class="ml-1">{{ row.attachments.length }}</span>
                 </button>
+
+                <span v-else class="text-[11px] text-slate-400">—</span>
 
                 <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
                   <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
@@ -803,10 +816,19 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td align-top text-center">
-                    <button type="button" class="ui-btn ui-btn-xs ui-btn-soft" @click="openAttachments(row)" :disabled="loading">
+                    <button
+                      v-if="row.attachments?.length"
+                      type="button"
+                      class="ui-btn ui-btn-soft ui-btn-xs"
+                      @click="openAttachments(row)"
+                      :disabled="loading"
+                      title="Preview attachments"
+                    >
                       <i class="fa-solid fa-paperclip text-[11px]" />
-                      View
+                      <span class="ml-1">{{ row.attachments.length }}</span>
                     </button>
+
+                    <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
                   <td class="ui-td align-top text-center">
@@ -1038,5 +1060,10 @@ onBeforeUnmount(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.35;
+}
+
+.ui-icon-btn {
+  padding-left: 0.55rem !important;
+  padding-right: 0.55rem !important;
 }
 </style>

@@ -431,10 +431,7 @@ onBeforeUnmount(() => {
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div>
               <div class="text-sm font-extrabold">My Forget Scan</div>
-              <div class="text-[11px] text-white/85">Submit a request when you forgot to scan in/out.</div>
-            </div>
 
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_auto] md:items-end">
               <div>

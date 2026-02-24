@@ -6,6 +6,20 @@ const crypto = require('crypto')
 
 const LeaveRequest = require('../../models/leave/LeaveRequest')
 const { uploadBuffer, deleteFile, toObjectId, getBucket } = require('../../utils/gridfs')
+const { broadcastLeaveRequest } = require('../../utils/leave.realtime')
+
+function getIo(req) {
+  return req.io || req.app?.get('io') || null
+}
+function emitReq(req, docOrPlain, event = 'leave:req:updated') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastLeaveRequest(io, docOrPlain, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitReq(${event}) failed:`, e?.message)
+  }
+}
 
 const BUCKET = 'leave_evidence'
 
@@ -176,6 +190,9 @@ exports.uploadMany = async (req, res, next) => {
 
     if (doc.attachments.length > 20) throw createError(400, 'Attachment limit reached (max 20 per request)')
     await doc.save()
+    // realtime: update attachment count everywhere (MyRequests, Manager/GM/COO inbox)
+    const latest = await LeaveRequest.findById(id).lean()
+    if (latest) emitReq(req, latest, 'leave:req:updated')
 
     const items = added.map((a) => {
       const ts = a?.uploadedAt ? new Date(a.uploadedAt).getTime() : Date.now()
@@ -252,6 +269,9 @@ exports.remove = async (req, res, next) => {
     const fileId = arr[idx]?.fileId
     doc.attachments.splice(idx, 1)
     await doc.save()
+    // realtime: update attachment count everywhere
+    const latest = await LeaveRequest.findById(id).lean()
+    if (latest) emitReq(req, latest, 'leave:req:updated')
 
     try {
       await deleteFile(fileId, BUCKET)

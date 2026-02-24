@@ -764,7 +764,7 @@ onBeforeUnmount(() => {
                 <col class="w-[170px]" />
                 <col class="w-[96px]" />
                 <col class="w-[92px]" />
-                <col class="w-[200px]"/>
+                <col class="w-[200px]" />
               </colgroup>
 
               <thead>

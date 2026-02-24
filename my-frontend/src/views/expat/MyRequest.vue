@@ -8,7 +8,7 @@
   ✅ Click Files => instantly preview inside modal (PDF iframe or image)
   ✅ Fullscreen preview overlay
   ✅ No "Clear previews", no per-file eye icon
-  ✅ Delete attachment confirm modal
+  ✅ Delete attachment confirm modal (locked after approval started)
   ✅ Edit request (only before any approval happened)
 
   ✅ EDIT MODAL UPDATED:
@@ -20,6 +20,12 @@
      - Hint text shows what user is selecting (1 day, half day, multi-day edges)
      - Evidence uses "Upload Files" button (no "No file chosen")
      - Existing attached files list shown in edit modal; click to preview (re-uses Files modal)
+
+  ✅ Dialog/Modal improvements:
+     - ESC closes top-most modal
+     - backdrop click closes (files/fullscreen)
+     - body scroll lock when any modal open
+     - responsive heights + scroll areas (no overflow on mobile)
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -86,7 +92,7 @@ function canCancel(item) {
 }
 
 /**
- * ✅ Edit allowed only if NO one approved yet
+ * ✅ Edit allowed only if NO one approved/acted yet
  */
 function canEdit(item) {
   const st = String(item?.status || '').toUpperCase()
@@ -289,6 +295,11 @@ const delOpen = ref(false)
 const delTarget = ref({ requestId: '', attId: '', filename: '' })
 const deleting = ref(false)
 
+const canDeleteFiles = computed(() => {
+  // delete only if edit allowed (no approval started)
+  return canEdit(filesRequest.value)
+})
+
 function askDeleteAttachment(requestId, attId, filename) {
   delTarget.value = { requestId, attId, filename }
   delOpen.value = true
@@ -300,6 +311,12 @@ function closeDeleteAttachment() {
 async function confirmDeleteAttachment() {
   const { requestId, attId } = delTarget.value || {}
   if (!requestId || !attId) return
+
+  if (!canDeleteFiles.value) {
+    showToast({ type: 'info', title: 'Locked', message: 'Attachments are locked after approval started.' })
+    closeDeleteAttachment()
+    return
+  }
 
   deleting.value = true
   try {
@@ -343,11 +360,11 @@ const editForm = ref({
   reason: '',
 
   // single-day
-  singleHalf: 'AM', // required
+  singleHalf: 'AM', // required (AM/PM)
 
   // multi-day edges (optional but at least 1 edge required)
-  startHalfPart: 'AM',
-  endHalfPart: 'PM',
+  startHalfPart: '', // AM/PM or ''
+  endHalfPart: '', // AM/PM or ''
 })
 
 /* ───────── Holidays (for working-day calculation) ───────── */
@@ -390,20 +407,16 @@ function countWorkingDaysInclusive(startYmd, endYmd) {
   return count
 }
 
+const isMultiDayEdit = computed(() => {
+  if (!editForm.value.startDate || !editForm.value.endDate) return false
+  return editForm.value.endDate > editForm.value.startDate
+})
+
 const baseWorkingDaysEdit = computed(() => {
   const s = editForm.value.startDate
   const e = editForm.value.endDate
   if (!s || !e) return 0
   return countWorkingDaysInclusive(s, e)
-})
-
-const useHalfEdit = computed(() => {
-  return !!(editForm.value.singleHalf || editForm.value.startHalfPart || editForm.value.endHalfPart)
-})
-
-const isMultiDayEdit = computed(() => {
-  if (!editForm.value.startDate || !editForm.value.endDate) return false
-  return editForm.value.endDate > editForm.value.startDate
 })
 
 const requestedDaysEdit = computed(() => {
@@ -413,14 +426,12 @@ const requestedDaysEdit = computed(() => {
 
   const work = baseWorkingDaysEdit.value
   if (!work) return 0
-  if (!useHalfEdit.value) return work
 
-  // single-day half
-  if (!isMultiDayEdit.value) {
-    return editForm.value.singleHalf ? 0.5 : work
-  }
+  // single-day always half-day by design (AM/PM required)
+  if (!isMultiDayEdit.value) return 0.5
 
   // multi-day edges
+  // total = working days - 0.5 for each edge chosen
   let total = work
   if (editForm.value.startHalfPart) total -= 0.5
   if (editForm.value.endHalfPart) total -= 0.5
@@ -437,21 +448,34 @@ const editBreakdownText = computed(() => {
   if (!total) return '—'
   const totalStr = Number.isInteger(total) ? String(total) : String(total)
 
+  if (!isMultiDayEdit.value) return `You request ${totalStr} day (half day: ${String(editForm.value.singleHalf || 'AM').toUpperCase()})`
+
   const parts = []
-
-  if (!isMultiDayEdit.value && useHalfEdit.value && editForm.value.singleHalf) {
-    parts.push(`half of Start Date (${String(editForm.value.singleHalf).toUpperCase()})`)
-  }
-
-  if (isMultiDayEdit.value && useHalfEdit.value) {
-    if (editForm.value.startHalfPart) parts.push(`half of Start Date (${String(editForm.value.startHalfPart).toUpperCase()})`)
-    if (editForm.value.endHalfPart) parts.push(`half of End Date (${String(editForm.value.endHalfPart).toUpperCase()})`)
-  }
-
+  if (editForm.value.startHalfPart) parts.push(`Start (${String(editForm.value.startHalfPart).toUpperCase()})`)
+  if (editForm.value.endHalfPart) parts.push(`End (${String(editForm.value.endHalfPart).toUpperCase()})`)
   if (!parts.length) return `You request ${totalStr} days`
-  return `You request ${totalStr} days (${parts.join(' + ')})`
+  return `You request ${totalStr} days (half edges: ${parts.join(' + ')})`
 })
 
+const halfHintText = computed(() => {
+  const s = editForm.value.startDate
+  const e = editForm.value.endDate
+  if (!s || !e) return 'Select dates, then choose AM/PM.'
+
+  if (!isMultiDayEdit.value) {
+    const part = editForm.value.singleHalf || 'AM'
+    return `You are requesting 0.5 day on ${s} (${part}).`
+  }
+
+  const a = editForm.value.startHalfPart
+  const b = editForm.value.endHalfPart
+  if (a && b) return `Multi-day: start ${s} (${a}) → end ${e} (${b}).`
+  if (a) return `Multi-day: start ${s} (${a}) → end ${e} (FULL DAY).`
+  if (b) return `Multi-day: start ${s} (FULL DAY) → end ${e} (${b}).`
+  return 'Choose AM/PM for Start and/or End day (at least one).'
+})
+
+/* new evidence */
 const newEvidence = ref([]) // {id,file}
 const editEvidenceInputEl = ref(null)
 
@@ -508,7 +532,7 @@ async function fetchExistingEditFiles(requestId) {
         size: Number(x?.size || 0),
       }))
       .filter((x) => x.attId)
-  } catch (e) {
+  } catch {
     existingEditFiles.value = []
   } finally {
     existingEditLoading.value = false
@@ -540,10 +564,6 @@ function openEdit(item) {
   const startHalf = item?.startHalf ? String(item.startHalf).toUpperCase() : ''
   const endHalf = item?.endHalf ? String(item.endHalf).toUpperCase() : ''
 
-  const defaultSingle = 'AM'
-  const defaultStart = 'AM'
-  const defaultEnd = 'PM'
-
   const isMulti = end > start
 
   editForm.value = {
@@ -552,9 +572,10 @@ function openEdit(item) {
     endDate: end,
     reason: String(item.reason || ''),
 
-    singleHalf: !isMulti ? (startHalf || defaultSingle) : defaultSingle,
-    startHalfPart: isMulti ? (startHalf || defaultStart) : defaultStart,
-    endHalfPart: isMulti ? (endHalf || defaultEnd) : defaultEnd,
+    singleHalf: !isMulti ? (startHalf || 'AM') : 'AM',
+    // multi-day: default both empty, user must choose at least one
+    startHalfPart: isMulti ? (startHalf || '') : '',
+    endHalfPart: isMulti ? (endHalf || '') : '',
   }
 
   fetchExistingEditFiles(item._id)
@@ -569,7 +590,7 @@ function closeEdit() {
   if (editEvidenceInputEl.value) editEvidenceInputEl.value.value = ''
 }
 
-/* keep dates valid, and re-apply sensible defaults when switching single/multi */
+/* keep dates valid */
 watch(
   () => [editForm.value.startDate, editForm.value.endDate],
   () => {
@@ -577,35 +598,18 @@ watch(
     if (!editForm.value.endDate) editForm.value.endDate = editForm.value.startDate
     if (editForm.value.endDate < editForm.value.startDate) editForm.value.endDate = editForm.value.startDate
 
+    // when switching from multi -> single, keep singleHalf valid
     if (!isMultiDayEdit.value) {
       if (!editForm.value.singleHalf) editForm.value.singleHalf = 'AM'
+      // clear multi edges
+      editForm.value.startHalfPart = ''
+      editForm.value.endHalfPart = ''
     } else {
-      if (!editForm.value.startHalfPart && !editForm.value.endHalfPart) {
-        editForm.value.startHalfPart = 'AM'
-        editForm.value.endHalfPart = 'PM'
-      }
+      // multi-day: singleHalf irrelevant but keep stable
+      if (!editForm.value.singleHalf) editForm.value.singleHalf = 'AM'
     }
   }
 )
-
-const halfHintText = computed(() => {
-  const s = editForm.value.startDate
-  const e = editForm.value.endDate
-
-  if (!s || !e) return 'Select dates, then choose AM/PM.'
-  if (!isMultiDayEdit.value) {
-    const part = editForm.value.singleHalf || 'AM'
-    return `You are requesting 0.5 day on ${s} (${part}).`
-  }
-
-  const a = editForm.value.startHalfPart
-  const b = editForm.value.endHalfPart
-
-  if (a && b) return `You are requesting multi-day leave: start ${s} (${a}) → end ${e} (${b}).`
-  if (a) return `You are requesting multi-day leave: start ${s} (${a}) → end ${e} (FULL DAY).`
-  if (b) return `You are requesting multi-day leave: start ${s} (FULL DAY) → end ${e} (${b}).`
-  return 'Choose AM/PM for Start and/or End day (at least one).'
-})
 
 const canSaveEdit = computed(() => {
   if (savingEdit.value) return false
@@ -615,7 +619,10 @@ const canSaveEdit = computed(() => {
   if (!editForm.value.endDate) return false
   if (editForm.value.endDate < editForm.value.startDate) return false
 
+  // single-day: AM/PM required
   if (!isMultiDayEdit.value) return !!editForm.value.singleHalf
+
+  // multi-day: at least one edge required
   return !!(editForm.value.startHalfPart || editForm.value.endHalfPart)
 })
 
@@ -767,15 +774,34 @@ function setupRealtime() {
   )
 }
 
-/* cleanup previews on unmount */
-onBeforeUnmount(() => {
-  clearAllPreviews()
+/* ───────── modal UX: body scroll lock + ESC ───────── */
+function lockBodyScroll(on) {
+  if (typeof document === 'undefined') return
+  const b = document.body
+  if (on) b.classList.add('overflow-hidden')
+  else b.classList.remove('overflow-hidden')
+}
+
+watch([cancelOpen, filesOpen, delOpen, editOpen, fullOpen], ([c, f, d, e, full]) => {
+  lockBodyScroll(!!(c || f || d || e || full))
 })
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (fullOpen.value) return closeFullscreen()
+  if (delOpen.value) return closeDeleteAttachment()
+  if (filesOpen.value) return closeFiles()
+  if (editOpen.value) return closeEdit()
+  if (cancelOpen.value) return closeCancel()
+}
 
 /* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
   await fetchHolidays()
   await fetchLeaveTypes()
   await fetchMyRequests(true)
@@ -783,7 +809,12 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  clearAllPreviews()
+  lockBodyScroll(false)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
   if (refreshTimer) clearTimeout(refreshTimer)
   offHandlers.forEach((off) => {
     try {
@@ -1066,13 +1097,16 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Files Preview Modal -->
-      <div v-if="filesOpen" class="ui-modal-backdrop">
+      <div v-if="filesOpen" class="ui-modal-backdrop" @click.self="closeFiles">
         <div class="ui-modal ui-modal-xl p-0 overflow-hidden">
           <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
             <div class="min-w-0">
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Attachments</div>
               <div class="text-[11px] text-slate-500 dark:text-slate-400">
                 {{ filesRequest?.leaveTypeCode }} • {{ filesRequest?.startDate }} → {{ filesRequest?.endDate }}
+              </div>
+              <div v-if="filesRequest && !canEdit(filesRequest)" class="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                Attachments are locked because approval has started.
               </div>
             </div>
 
@@ -1088,9 +1122,9 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="grid md:grid-cols-[320px_1fr] gap-0">
+          <div class="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-0">
             <!-- left list -->
-            <div class="border-r border-slate-200 dark:border-slate-800 p-3">
+            <div class="md:border-r border-slate-200 dark:border-slate-800 p-3 max-h-[40vh] md:max-h-[calc(100vh-140px)] overflow-auto">
               <div v-if="filesLoading" class="text-[11px] text-slate-500 dark:text-slate-400">Loading…</div>
               <div v-else-if="filesError" class="text-[11px] font-semibold text-rose-600 dark:text-rose-300">{{ filesError }}</div>
               <div v-else-if="!filesItems.length" class="text-[11px] text-slate-500 dark:text-slate-400">No files attached.</div>
@@ -1117,8 +1151,9 @@ onBeforeUnmount(() => {
                     <button
                       class="ui-btn ui-btn-ghost ui-btn-xs"
                       type="button"
-                      title="Delete"
-                      @click.stop="askDeleteAttachment(filesRequest?._id, f.attId, f.filename)"
+                      :disabled="!canDeleteFiles"
+                      :title="canDeleteFiles ? 'Delete' : 'Locked after approval'"
+                      @click.stop="canDeleteFiles && askDeleteAttachment(filesRequest?._id, f.attId, f.filename)"
                     >
                       <i class="fa-solid fa-trash text-[11px]" />
                     </button>
@@ -1129,16 +1164,19 @@ onBeforeUnmount(() => {
 
             <!-- right preview -->
             <div class="p-3">
-              <div v-if="!selectedAttId" class="h-[420px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
+              <div v-if="!selectedAttId" class="h-[45vh] md:h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
                 Select a file
               </div>
 
               <template v-else>
-                <div v-if="previewLoadingMap[selectedAttId]" class="h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
+                <div
+                  v-if="previewLoadingMap[selectedAttId]"
+                  class="h-[55vh] md:h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400"
+                >
                   Loading preview…
                 </div>
 
-                <div v-else-if="previewErrorMap[selectedAttId]" class="h-[520px] grid place-items-center text-[12px] text-rose-500">
+                <div v-else-if="previewErrorMap[selectedAttId]" class="h-[55vh] md:h-[520px] grid place-items-center text-[12px] text-rose-500">
                   {{ previewErrorMap[selectedAttId] }}
                 </div>
 
@@ -1147,15 +1185,15 @@ onBeforeUnmount(() => {
                     <iframe
                       v-if="isPdfType(filesItems.find(x => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
                       :src="previewUrlMap[selectedAttId]"
-                      class="w-full h-[520px]"
+                      class="w-full h-[55vh] md:h-[520px]"
                       style="border: 0;"
                     />
                     <img
                       v-else-if="isImageType(filesItems.find(x => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
                       :src="previewUrlMap[selectedAttId]"
-                      class="w-full h-[520px] object-contain bg-white dark:bg-slate-950/40"
+                      class="w-full h-[55vh] md:h-[520px] object-contain bg-white dark:bg-slate-950/40"
                     />
-                    <div v-else class="h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
+                    <div v-else class="h-[55vh] md:h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
                       Preview not available
                     </div>
                   </div>
@@ -1174,7 +1212,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Fullscreen overlay -->
-      <div v-if="fullOpen" class="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm">
+      <div v-if="fullOpen" class="fixed inset-0 z-[90] bg-black/70 backdrop-blur-sm" @click.self="closeFullscreen">
         <div class="absolute inset-0 p-3">
           <div class="h-full w-full rounded-2xl bg-white dark:bg-slate-950 overflow-hidden border border-white/10">
             <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
@@ -1225,12 +1263,15 @@ onBeforeUnmount(() => {
                 Are you sure you want to delete:
                 <span class="font-extrabold">{{ delTarget.filename }}</span>
               </div>
+              <div v-if="!canDeleteFiles" class="mt-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                Locked after approval started.
+              </div>
             </div>
           </div>
 
           <div class="mt-4 flex justify-end gap-2">
             <button type="button" class="ui-btn ui-btn-ghost" :disabled="deleting" @click="closeDeleteAttachment">Close</button>
-            <button type="button" class="ui-btn ui-btn-rose" :disabled="deleting" @click="confirmDeleteAttachment">
+            <button type="button" class="ui-btn ui-btn-rose" :disabled="deleting || !canDeleteFiles" @click="confirmDeleteAttachment">
               <i v-if="deleting" class="fa-solid fa-spinner animate-spin text-[11px]" />
               Delete
             </button>
@@ -1238,9 +1279,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Edit modal (unchanged UI) -->
+      <!-- Edit modal -->
       <div v-if="editOpen" class="ui-modal-backdrop">
-        <div class="ui-modal ui-modal-lg p-4">
+        <div class="ui-modal ui-modal-lg p-4 overflow-auto">
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit request</div>
@@ -1292,6 +1333,7 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="mt-2 space-y-2">
+                  <!-- single day -->
                   <div v-if="!isMultiDayEdit" class="flex justify-end gap-2">
                     <button type="button" class="sq-chip" :class="editForm.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf='AM'">
                       AM
@@ -1301,14 +1343,25 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
 
+                  <!-- multi day edges -->
                   <div v-else class="grid gap-2 sm:grid-cols-2">
                     <div class="ui-frame p-2">
                       <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Start day</div>
                       <div class="mt-2 flex justify-end gap-2">
-                        <button type="button" class="sq-chip" :class="editForm.startHalfPart === 'AM' ? 'sq-chip-on' : ''" @click="editForm.startHalfPart = (editForm.startHalfPart === 'AM' ? '' : 'AM')">
+                        <button
+                          type="button"
+                          class="sq-chip"
+                          :class="editForm.startHalfPart === 'AM' ? 'sq-chip-on' : ''"
+                          @click="editForm.startHalfPart = (editForm.startHalfPart === 'AM' ? '' : 'AM')"
+                        >
                           AM
                         </button>
-                        <button type="button" class="sq-chip" :class="editForm.startHalfPart === 'PM' ? 'sq-chip-on' : ''" @click="editForm.startHalfPart = (editForm.startHalfPart === 'PM' ? '' : 'PM')">
+                        <button
+                          type="button"
+                          class="sq-chip"
+                          :class="editForm.startHalfPart === 'PM' ? 'sq-chip-on' : ''"
+                          @click="editForm.startHalfPart = (editForm.startHalfPart === 'PM' ? '' : 'PM')"
+                        >
                           PM
                         </button>
                       </div>
@@ -1318,10 +1371,20 @@ onBeforeUnmount(() => {
                     <div class="ui-frame p-2">
                       <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">End day</div>
                       <div class="mt-2 flex justify-end gap-2">
-                        <button type="button" class="sq-chip" :class="editForm.endHalfPart === 'AM' ? 'sq-chip-on' : ''" @click="editForm.endHalfPart = (editForm.endHalfPart === 'AM' ? '' : 'AM')">
+                        <button
+                          type="button"
+                          class="sq-chip"
+                          :class="editForm.endHalfPart === 'AM' ? 'sq-chip-on' : ''"
+                          @click="editForm.endHalfPart = (editForm.endHalfPart === 'AM' ? '' : 'AM')"
+                        >
                           AM
                         </button>
-                        <button type="button" class="sq-chip" :class="editForm.endHalfPart === 'PM' ? 'sq-chip-on' : ''" @click="editForm.endHalfPart = (editForm.endHalfPart === 'PM' ? '' : 'PM')">
+                        <button
+                          type="button"
+                          class="sq-chip"
+                          :class="editForm.endHalfPart === 'PM' ? 'sq-chip-on' : ''"
+                          @click="editForm.endHalfPart = (editForm.endHalfPart === 'PM' ? '' : 'PM')"
+                        >
                           PM
                         </button>
                       </div>
@@ -1446,13 +1509,13 @@ onBeforeUnmount(() => {
   padding-right: 0.55rem !important;
 }
 
-/* optional size variants for modal if your global css doesn't include */
+/* modal width helpers (safe on mobile) */
 .ui-modal-xl {
-  width: min(1100px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  width: min(1100px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
 }
 .ui-modal-lg {
-  width: min(860px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  width: min(860px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
 }
 </style>

@@ -45,6 +45,23 @@ try {
 
 /* ───────────────── helpers ───────────────── */
 
+function allowedStatusesForInboxLevel(level) {
+  const lvl = up(level)
+  if (lvl === 'MANAGER') {
+    // manager can see everything under manager flows (including pending_manager)
+    return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+  }
+  if (lvl === 'GM') {
+    // GM should NOT see PENDING_MANAGER
+    return ['PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+  }
+  if (lvl === 'COO') {
+    // COO should NOT see PENDING_MANAGER or PENDING_GM
+    return ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+  }
+  return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+}
+
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -718,10 +735,12 @@ exports.listGmInbox = async (req, res, next) => {
       ? { approvalMode: modeFilter }
       : { approvalMode: modeFilter, gmLoginId: me }
 
-    const query =
-      scope === 'ALL'
-        ? { ...base }
-        : { ...base, status: 'PENDING_GM' }
+    // ✅ IMPORTANT: non-admin "scope=ALL" still must respect flow
+    const query = isAdminViewer(req)
+      ? (scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_GM' })
+      : (scope === 'ALL'
+          ? { ...base, status: { $in: allowedStatusesForInboxLevel('GM') } }
+          : { ...base, status: 'PENDING_GM' })
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -819,10 +838,12 @@ exports.listCooInbox = async (req, res, next) => {
       ? { approvalMode: modeFilter }
       : { approvalMode: modeFilter, cooLoginId: me }
 
-    const query =
-      scope === 'ALL'
-        ? { ...base }
-        : { ...base, status: 'PENDING_COO' }
+    // ✅ IMPORTANT: non-admin "scope=ALL" still must respect flow
+    const query = isAdminViewer(req)
+      ? (scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_COO' })
+      : (scope === 'ALL'
+          ? { ...base, status: { $in: allowedStatusesForInboxLevel('COO') } }
+          : { ...base, status: 'PENDING_COO' })
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))

@@ -51,7 +51,7 @@ function actionLinkLine(url, label) {
 function employeeSubmitted(doc) {
   return [
     '✅ <b>Leave request submitted</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
     `📌 Status: <b>${esc(String(doc?.status || 'SUBMITTED'))}</b>`,
   ]
@@ -62,7 +62,7 @@ function employeeSubmitted(doc) {
 function managerNew(doc, employeeName) {
   return [
     '🗓️ <b>New Leave request</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     '📌 Status: Waiting for Manager approval',
@@ -76,7 +76,7 @@ function managerNew(doc, employeeName) {
 function gmNew(doc, employeeName) {
   return [
     '🗓️ <b>New Leave request (GM)</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     '📌 Status: Waiting for GM approval',
@@ -91,7 +91,7 @@ function gmNew(doc, employeeName) {
 function cooNew(doc, employeeName) {
   return [
     '🗓️ <b>New Leave request (COO)</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     '📌 Status: Waiting for COO approval',
@@ -115,7 +115,7 @@ function employeeDecision(doc, roleLabel) {
 
   return [
     `${emoji} <b>Leave request ${esc(status || 'UPDATED')} by ${esc(roleLabel)}</b>`,
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
     extra,
   ]
@@ -126,7 +126,7 @@ function employeeDecision(doc, roleLabel) {
 function adminCreated(doc, employeeName) {
   return [
     '📣 <b>Leave request created</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     `📌 Status: <b>${esc(String(doc?.status || '-'))}</b>`,
@@ -140,7 +140,7 @@ function adminCreated(doc, employeeName) {
 function adminUpdated(doc, employeeName) {
   return [
     '📣 <b>Leave request updated</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     `📌 Status: <b>${esc(String(doc?.status || '-'))}</b>`,
