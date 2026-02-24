@@ -281,11 +281,19 @@ async function fetchDefaultApprovers() {
     // pick first if exists (or keep seeded fallback)
     if (gmList.length) {
       const a = gmList[0]
-      defaultGm.value = { loginId: String(a.loginId || '').trim() || defaultGm.value.loginId, name: String(a.label || a.name || '').trim() || defaultGm.value.name, role: 'LEAVE_GM' }
+      defaultGm.value = {
+        loginId: String(a.loginId || '').trim() || defaultGm.value.loginId,
+        name: String(a.label || a.name || '').trim() || defaultGm.value.name,
+        role: 'LEAVE_GM',
+      }
     }
     if (cooList.length) {
       const a = cooList[0]
-      defaultCoo.value = { loginId: String(a.loginId || '').trim() || defaultCoo.value.loginId, name: String(a.label || a.name || '').trim() || defaultCoo.value.name, role: 'LEAVE_COO' }
+      defaultCoo.value = {
+        loginId: String(a.loginId || '').trim() || defaultCoo.value.loginId,
+        name: String(a.label || a.name || '').trim() || defaultCoo.value.name,
+        role: 'LEAVE_COO',
+      }
     }
   } catch (e) {
     console.warn('fetchDefaultApprovers failed; using seed fallbacks', e)
@@ -333,7 +341,6 @@ function managerBadgeLabel(g) {
   // Badge label: MANAGER or GM
   return hasValue(g?.manager?.name) ? 'MANAGER' : 'GM'
 }
-
 
 /* strong password rule (OPTIONAL input) */
 function validateStrongPassword(pwd) {
@@ -429,7 +436,6 @@ function clearSelected(model) {
 function exportCurrentViewExcel() {
   exportExcelFromGroups(pagedManagers.value, { scope: 'CurrentView' })
 }
-
 
 async function runSearchSimple(model) {
   const qv = String(model.query || '').split('—')[0].trim() || String(model.query || '').trim()
@@ -696,7 +702,9 @@ async function submitCreate() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Export (Grouped by manager)
+   Export (ONLY 2 SHEETS)
+   1) AllEmployees (Ent -> Quota)
+   2) Authorize (was Summary)
 ───────────────────────────────────────────────────────────── */
 function buildBalanceMap(balances) {
   const arr = Array.isArray(balances) ? balances : []
@@ -711,6 +719,7 @@ function buildBalanceMap(balances) {
   }
   return m
 }
+
 function buildRow(e, managerName = '') {
   const bm = buildBalanceMap(e.balances)
   const get = (code) => bm.get(code) || { used: 0, ent: 0, remain: 0 }
@@ -729,26 +738,24 @@ function buildRow(e, managerName = '') {
     JoinDate: fmt(e.joinDate),
     ContractDate: fmt(e.contractDate),
     ContractEnd: fmt(e.contractEndDate),
-    Mode: modeLabel(e.approvalMode),
+    // Mode: modeLabel(e.approvalMode),
     Status: e.isActive ? 'Active' : 'Inactive',
 
+    // ✅ Ent -> Quota
     AL_Used: AL.used,
-    AL_Ent: AL.ent,
+    AL_Quota: AL.ent,
     AL_Remain: AL.remain,
 
     SP_Used: SP.used,
-    SP_Ent: SP.ent,
+    SP_Quota: SP.ent,
     SP_Remain: SP.remain,
 
+    // keep the rest as-is
     MC_Used: MC.used,
     MA_Used: MA.used,
     UL_Used: UL.used,
     BL_Used: BL.used,
   }
-}
-function balanceObj(bm, code) {
-  const b = bm.get(code) || { ent: 0, used: 0, remain: 0 }
-  return { ent: num(b.ent), used: num(b.used), remain: num(b.remain) }
 }
 
 function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
@@ -760,41 +767,35 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
 
   const wb = XLSX.utils.book_new()
 
-  // ✅ Sheet 1: Summary
-  const summaryRows = base.map((g) => ({
+  // ✅ Sheet 1: Authorize (was Summary)
+  const authorizeRows = base.map((g) => ({
     GroupLabel: managerBadgeLabel(g),
-    ManagerName: managerDisplayName(g),
-    ManagerEmployeeId: fmt(g.manager?.employeeId),
-    ManagerLoginId: fmt(g.manager?.loginId || g.manager?.managerLoginId),
-    ManagerDepartment: fmt(g.manager?.department),
+    AuthorizeName: managerDisplayName(g),
+    AuthorizeEmployeeId: fmt(g.manager?.employeeId),
+    AuthorizeLoginId: fmt(g.manager?.loginId || g.manager?.managerLoginId),
+    AuthorizeDepartment: fmt(g.manager?.department),
     Employees: (g.employees || []).length,
   }))
-  const wsSummary = XLSX.utils.json_to_sheet(summaryRows)
-  wsSummary['!cols'] = [
-    { wch: 10 },
-    { wch: 26 },
-    { wch: 16 },
-    { wch: 18 },
-    { wch: 22 },
-    { wch: 10 },
-    { wch: 10 }
+  const wsAuthorize = XLSX.utils.json_to_sheet(authorizeRows)
+  wsAuthorize['!cols'] = [
+    { wch: 12 }, // GroupLabel
+    { wch: 28 }, // AuthorizeName
+    { wch: 18 }, // AuthorizeEmployeeId
+    { wch: 20 }, // AuthorizeLoginId
+    { wch: 24 }, // AuthorizeDepartment
+    { wch: 10 }, // Employees
   ]
-  XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary')
+  XLSX.utils.book_append_sheet(wb, wsAuthorize, 'Authorize')
 
-  // ✅ Sheet 2: All employees in ONE sheet (wrapped / unified)
+  // ✅ Sheet 2: AllEmployees (ONE sheet only) + Ent -> Quota
   const allEmployeesRows = []
   for (const g of base) {
     const managerName = managerDisplayName(g)
     const list = Array.isArray(g.employees) ? g.employees : []
-    for (const e of list) {
-      // uses your helper so output stays consistent
-      allEmployeesRows.push(buildRow(e, managerName))
-    }
+    for (const e of list) allEmployeesRows.push(buildRow(e, managerName))
   }
 
   const wsAll = XLSX.utils.json_to_sheet(allEmployeesRows)
-
-  // optional: nice column widths for the unified sheet
   wsAll['!cols'] = [
     { wch: 22 }, // Manager
     { wch: 12 }, // EmployeeID
@@ -803,105 +804,17 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
     { wch: 12 }, // JoinDate
     { wch: 12 }, // ContractDate
     { wch: 12 }, // ContractEnd
-    { wch: 12 }, // Mode
+    // { wch: 12 }, // Mode
     { wch: 10 }, // Status
 
-    { wch: 10 }, { wch: 10 }, { wch: 10 }, // AL Used/Ent/Remain
-    { wch: 10 }, { wch: 10 }, { wch: 10 }, // SP Used/Ent/Remain
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, // AL Used/Quota/Remain
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, // SP Used/Quota/Remain
     { wch: 10 }, // MC_Used
     { wch: 10 }, // MA_Used
     { wch: 10 }, // UL_Used
+    { wch: 10 }, // BL_Used
   ]
-
   XLSX.utils.book_append_sheet(wb, wsAll, 'AllEmployees')
-
-  // ✅ Existing: One sheet per manager/GM group
-  const usedNames = new Map()
-
-  for (const g of base) {
-    const managerName = managerDisplayName(g) // ✅ GM fallback
-    const list = Array.isArray(g.employees) ? g.employees : []
-
-    const rows = list.map((e) => {
-      const bm = buildBalanceMap(e.balances)
-
-      const AL = balanceObj(bm, 'AL')
-      const SP = balanceObj(bm, 'SP')
-      const MC = balanceObj(bm, 'MC')
-      const MA = balanceObj(bm, 'MA')
-      const UL = balanceObj(bm, 'UL')
-      const BL = balanceObj(bm, "BL")
-
-      return {
-        GroupLabel: managerBadgeLabel(g),
-        GroupManagerName: fmt(managerName),
-
-        EmployeeID: fmt(e.employeeId),
-        Name: fmt(e.name),
-        Department: fmt(e.department),
-
-        JoinDate: fmt(e.joinDate),
-        ContractDate: fmt(e.contractDate),
-        ContractEndDate: fmt(e.contractEndDate),
-
-        ApprovalMode: fmt(e.approvalMode),
-        Status: e.isActive ? 'Active' : 'Inactive',
-
-        AL_Used: AL.used,
-        AL_Remain: AL.remain,
-
-        SP_Used: SP.used,
-        SP_Remain: SP.remain,
-
-        MC_Used: MC.used,
-        MC_Remain: MC.remain,
-
-        MA_Used: MA.used,
-        MA_Remain: MA.remain,
-
-        UL_Used: UL.used,
-        UL_Remain: UL.remain,
-
-        BL_Used: BL.used,
-        BL_Remain: BL.remain,
-      }
-    })
-
-    let sheetName = safeSheetName(managerName, 'Manager')
-    const used = usedNames.get(sheetName) || 0
-    usedNames.set(sheetName, used + 1)
-    if (used > 0) {
-      const suffix = ` (${used + 1})`
-      sheetName = safeSheetName(sheetName.slice(0, 31 - suffix.length) + suffix)
-    }
-
-    const ws = XLSX.utils.json_to_sheet(rows)
-
-    ws['!cols'] = [
-      { wch: 10 }, // GroupLabel
-      { wch: 24 }, // GroupManagerName
-
-      { wch: 12 }, // EmployeeID
-      { wch: 22 }, // Name
-      { wch: 22 }, // Department
-
-      { wch: 12 }, // JoinDate
-      { wch: 12 }, // ContractDate
-      { wch: 12 }, // ContractEndDate
-
-      { wch: 16 }, // ApprovalMode
-      { wch: 10 }, // Status
-
-      { wch: 8 }, { wch: 10 }, // AL
-      { wch: 8 }, { wch: 10 }, // SP
-      { wch: 8 }, { wch: 10 }, // MC
-      { wch: 8 }, { wch: 10 }, // MA
-      { wch: 8 }, { wch: 10 }, // UL
-      { wch: 8 }, { ech: 10 }, // BL
-    ]
-
-    XLSX.utils.book_append_sheet(wb, ws, sheetName)
-  }
 
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
   const filename = `ExpatProfiles-${scope}-${stamp}.xlsx`
@@ -909,7 +822,6 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
 
   showToast({ type: 'success', title: 'Export', message: `Saved: ${filename}` })
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    Modal scroll lock
@@ -1325,7 +1237,6 @@ onBeforeUnmount(() => {
           class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
         >
           <div class="flex flex-wrap items-center gap-3">
-            <!-- Rows per page (moved here) -->
             <div class="flex items-center gap-2">
               <select
                 v-model.number="pageSize"
@@ -1336,7 +1247,6 @@ onBeforeUnmount(() => {
               </select>
             </div>
           </div>
-
 
           <div class="flex items-center gap-2">
             <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="prevPage">

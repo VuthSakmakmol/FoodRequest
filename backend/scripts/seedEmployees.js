@@ -85,10 +85,20 @@ function loadEmployees() {
   
   return [
     // Expat Employee ===================================
+      {
+    "employeeId": "51210010",
+    "name": "Banchong Kaeokanda",
+    "department": "Management Production",
+    "position": "Maintenance Manager",
+    "contactNumber": "061 277 577",
+    "telegramChatId": "",
+    "isActive": true
+  },
   {
     "employeeId": "51210018",
     "name": "Ninart Kongjaroen",
     "department": "Management Office",
+    "position": "Infrastructor Manager",
     "contactNumber": "070 825 643",
     "telegramChatId": "",
     "isActive": true
@@ -97,7 +107,484 @@ function loadEmployees() {
     "employeeId": "51210020",
     "name": "Pollawut Patumpattanakit",
     "department": "Management Office",
+    "position": "CEO",
     "contactNumber": "096 470 7019",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210024",
+    "name": "Joel Tautoan Arcayan",
+    "department": "Management Production",
+    "position": "Mechanic Supervisor",
+    "contactNumber": "016 694 422",
+    "telegramChatId": "8271477569",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210027",
+    "name": "Chantip Jithaisong",
+    "department": "Management Office",
+    "position": "Import & Export Manager",
+    "contactNumber": "096 641 8799",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210028",
+    "name": "Saard Kaeokanda",
+    "department": "Management Production",
+    "position": "QC Supervisor",
+    "contactNumber": "061 832 908",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210032",
+    "name": "Nares Samoemuean",
+    "department": "Management Production",
+    "position": "Fabric warehouse Supervisor",
+    "contactNumber": "096 889 9675",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210034",
+    "name": "Cabidig Ricardo III Bugto",
+    "department": "Management Production",
+    "contactNumber": " 012-231 925",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210038",
+    "name": "Sompong Thanee",
+    "department": "Management Production",
+    "position": "Factory Manager",
+    "contactNumber": "017 922 956",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210039",
+    "name": "Boonmee Promsungyang",
+    "department": "Management Production",
+    "position": "Technician Supervisor",
+    "contactNumber": "096 881 7649",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51210040",
+    "name": "Kraingkrai Yubunchai",
+    "department": "Management Production",
+    "position": "Heat Transfer Supervisor",
+    "contactNumber": "096 8316562",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51410011",
+    "name": "Pittaya Kerdsriphan",
+    "department": "Management Office",
+    "position": "Financial Controller",
+    "contactNumber": "092 694 029",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51410012",
+    "name": "Evangeline Flores Igos",
+    "department": "Management Office",
+    "position": "adicomp & Acc WH Supervisor",
+    "contactNumber": "085 958 954",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51410014",
+    "name": "Boonkiat Jungsaisawangphan",
+    "department": "Management Office",
+    "position": "CoE Manager",
+    "contactNumber": "081284523",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51510015",
+    "name": "Sompan Purampha",
+    "department": "Management Production",
+    "position": "Finished Good WH Supervisor",
+    "contactNumber": "081 491 431",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51510019",
+    "name": "Kristopher Dino Guiam",
+    "department": "Management Office",
+    "position": "Merchandising Manager",
+    "contactNumber": "066418799",
+    "telegramChatId": "1894826858",
+    "isActive": true
+  },
+    {
+    "employeeId": "51510023",
+    "name": "Ratri Phunsahwat",
+    "department": "Management Production",
+    "position": "Cutting Manager",
+    "contactNumber": "0969462652",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51710015",
+    "name": "Arthit Sahwatnathi",
+    "department": "Management Production",
+    "position": "Supermarket Supervisor",
+    "contactNumber": "0965697544",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51810010",
+    "name": "Aldrin Emil Tipawan Dionco",
+    "department": "Management Production",
+    "position": "Marker Supervisor",
+    "contactNumber": "085259143",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51810026",
+    "name": "Bracamonte Justo Mark",
+    "department": "Management Production",
+    "position": "Planning Supervisor",
+    "contactNumber": "089 645 200",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51910011",
+    "name": "Shinnasorn Phimphasoot",
+    "department": "Management Office",
+    "position": "Chief Operation Officer",
+    "contactNumber": "089 333 785",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51910012",
+    "name": "Arcayan  Chona  Mantos",
+    "department": "Management Production",
+    "position": "Technician Supervisor",
+    "contactNumber": "017 245 475",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51910017",
+    "name": "Pathinya Chinnaruk",
+    "department": "Management Production",
+    "position": "Technician Supervisor",
+    "contactNumber": "081 491 431",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51910020",
+    "name": "Aiyarat Kittitanakasame",
+    "department": "Management Office",
+    "position": "Coder",
+    "contactNumber": "096 8316562",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52010003",
+    "name": "Amores Dexter Laurence Inderio",
+    "department": "Management Production",
+    "position": "Mechanic Supervisor",
+    "contactNumber": "096 420 5783",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52010006",
+    "name": "Pisiao Mala Elorde",
+    "department": "Management Office",
+    "position": "Merchandising Supervisor",
+    "contactNumber": "015452474",
+    "telegramChatId": "5075400953",
+    "isActive": true
+  },
+    {
+    "employeeId": "52110001",
+    "name": "ONTOG JETHRO JAMES THOMAS",
+    "department": "Management Production",
+    "position": "QA Upstream Supervisor",
+    "contactNumber": "099217362",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52210002",
+    "name": "Ananchanin Phekong",
+    "department": "Management Production",
+    "position": "PPC Supervisor",
+    "contactNumber": "0965642895",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52210007",
+    "name": "Koontip Kumwong ",
+    "department": "Management Office",
+    "position": "Finance & Accounting Manager",
+    "contactNumber": "095247266",
+    "telegramChatId": "6457848091",
+    "isActive": true
+  },
+    {
+    "employeeId": "52310003",
+    "name": "Amorin Jean Marie Agbones",
+    "department": "Management Production",
+    "position": "QC Supervisor",
+    "contactNumber": "085806945",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52310006",
+    "name": "Chatchanop Naksorn",
+    "department": "Management Production",
+    "position": "General Manager",
+    "contactNumber": "0",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52310007",
+    "name": "Rankoth pathiranage Hasintha Lakshan Jayasinghe",
+    "department": "Management Production",
+    "position": "IE Manager",
+    "contactNumber": "016833827",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410002",
+    "name": "DELOS REYES ELMER ARANA",
+    "department": "Management Production",
+    "position": "Mechanic Supervisor",
+    "contactNumber": "0",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410006",
+    "name": "MATIDIOS REMULTA JOYDEL",
+    "department": "ME MANAGER",
+    "position": "JOYDEL MATIDIOS  REMULTA",
+    "contactNumber": "0962606947",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410008",
+    "name": "DEGUIT RISTY CALUMBA",
+    "department": "Management Production",
+    "position": "Embroidery & Pad print Supervisor",
+    "contactNumber": "0963228920",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410009",
+    "name": "Kitthinon Thanklang",
+    "department": "Management Production",
+    "position": "Bonding Leader",
+    "contactNumber": "0966915161",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410010",
+    "name": "CASES ELIZABETH AMOR",
+    "department": "Management Production",
+    "position": "Planning Supervisor",
+    "contactNumber": "015454057",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410011",
+    "name": "Manano Mary Ann Sabelland",
+    "department": "Management Production",
+    "position": "Planning Supervisor",
+    "contactNumber": "010885473",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52410012",
+    "name": "Onofer Reynalyn Dizon",
+    "department": "Management Production",
+    "position": "QA Manager",
+    "contactNumber": "0966915161",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510002",
+    "name": "LANKASINGHE RAJITHA PRABHASHSHARA",
+    "department": "Management Production",
+    "position": "Planning Manager",
+    "contactNumber": "0962927673",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510004",
+    "name": "ZIN MINN PAING",
+    "department": "Management Office",
+    "position": "Merchandising Officer",
+    "contactNumber": "0",
+    "telegramChatId": "1682753821",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510005",
+    "name": "Boonyapa Pakare",
+    "department": "Management Production",
+    "position": "Heat Transfer PPC Officer",
+    "contactNumber": "0",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510006",
+    "name": "Raymundo Ripdos Villagonzalo",
+    "department": "Management Production",
+    "position": "QA Lab Supervisor",
+    "contactNumber": "0",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510007",
+    "name": "Kent  Quizada",
+    "department": "Management Production",
+    "position": "Heat Transfer Supervisor",
+    "contactNumber": "0",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510008",
+    "name": "MA. Cecilia Bondoc Santos",
+    "department": "Management Production",
+    "position": "Technician Supervisor",
+    "contactNumber": "0978701431",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510011",
+    "name": "Lara Jade Obispo Hernal",
+    "department": "Management Office",
+    "position": "Purchasing Officer",
+    "contactNumber": "069 330 678",
+    "telegramChatId": "8586270804",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510012",
+    "name": "Joven Teodosio Castaneda",
+    "department": "Management Production",
+    "position": "QA Supervisor",
+    "contactNumber": "0",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510013",
+    "name": "Ernie Jr Montajes",
+    "department": "Management Production",
+    "position": "Mechanic Supervisor",
+    "contactNumber": "076 601 0574",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52510014",
+    "name": "Pedrano Ulnie Kim Molejon",
+    "department": "Management Production",
+    "position": "IE Supervisor",
+    "contactNumber": "086 649 550",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52510015",
+    "name": "Moragolle Gedara Ruchira Sampath Chandrarathna",
+    "department": "Management Production",
+    "position": "Factory Manager",
+    "contactNumber": "097 465 7923",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52510016",
+    "name": "Mabini Ma.Franchezka Descalso",
+    "department": "Management Production",
+    "position": "Accessory Warehouse Leader",
+    "contactNumber": "077 896 053",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52510017",
+    "name": "Arenas Edlen Laurente",
+    "department": "Management Production",
+    "position": "Mechanic Supervisor",
+    "contactNumber": "076 309 4011",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52510018",
+    "name": "Cantorni Crispina Sabellano",
+    "department": "Management Production",
+    "position": "Technician Supervisor",
+    "contactNumber": "097 237 2294",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52510020",
+    "name": "Ranasinghe Kankanamge Lakshman",
+    "department": "Management Production",
+    "position": "FACTORY MANAGER",
+    "contactNumber": "070 352 006",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52610001",
+    "name": "Fuerte Nelcie Grace Jamelo",
+    "department": "Quality Assurance",
+    "position": "Lab Supervisor",
+    "contactNumber": "093 697 255",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52610002",
+    "name": "Bacanto Marilou Santelices",
+    "department": "Quality Assurance",
+    "position": "Quality Assurance",
+    "contactNumber": "096 323 90 80",
     "telegramChatId": "",
     "isActive": true
   },
@@ -690,75 +1177,11 @@ function loadEmployees() {
   },
  //........................................................
   {
-    "employeeId": "51210027",
-    "name": "Chantip Jithaisong",
-    "department": "Management Office",
-    "contactNumber": "096 641 8799",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51410011",
-    "name": "Pittaya Kerdsriphan",
-    "department": "Management Office",
-    "contactNumber": "092 694 029",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51410012",
-    "name": "Evangeline FloresIgos",
-    "department": "Management Office",
-    "contactNumber": "085 958 954",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51410014",
-    "name": "Boonkiat Jungsaisawangphan",
-    "department": "Management Office",
-    "contactNumber": "081284523",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51510019",
-    "name": "Kristopher GuiamDino",
-    "department": "Management Office",
-    "contactNumber": "066418799",
-    "telegramChatId": "1894826858",
-    "isActive": true
-  },
-  {
     "employeeId": "51910006",
     "name": "NIRATCHADAPORN  TANGJAI",
     "department": "Management Office",
     "contactNumber": "0",
     "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51910011",
-    "name": "SHINNASORN  PHIMPHASOOT",
-    "department": "Management Office",
-    "contactNumber": "089 333 785",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51910020",
-    "name": "Kittitanakasame  Aiyarat",
-    "department": "Management Office",
-    "contactNumber": "096 8316562",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52010006",
-    "name": "PISIAO MALA ELORDE",
-    "department": "Management Office",
-    "contactNumber": "015452474",
-    "telegramChatId": "5075400953",
     "isActive": true
   },
   {
@@ -770,130 +1193,10 @@ function loadEmployees() {
     "isActive": true
   },
   {
-    "employeeId": "52210007",
-    "name": "KUMWONG KOONTIP",
-    "department": "Management Office",
-    "contactNumber": "095247266",
-    "telegramChatId": "6457848091",
-    "isActive": true
-  },
-  {
     "employeeId": "52210008",
     "name": "MUNTHAWIN TIYAPHON",
     "department": "Management Office",
     "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510004",
-    "name": "ZIN MINN PAING",
-    "department": "Management Office",
-    "contactNumber": "0",
-    "telegramChatId": "1682753821",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510011",
-    "name": "Lara Jade Obispo Hernel",
-    "department": "Management Office",
-    "contactNumber": "0",
-    "telegramChatId": "8586270804",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210010",
-    "name": "Banchong Kaeokanda",
-    "department": "Management Production",
-    "contactNumber": "061 277 577",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210024",
-    "name": "Joel TautoanArcayan",
-    "department": "Management Production",
-    "contactNumber": "016 694 422",
-    "telegramChatId": "8271477569",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210028",
-    "name": "Saard Kaeokanda",
-    "department": "Management Production",
-    "contactNumber": "061 832 908",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210032",
-    "name": "Nares Samoemuean",
-    "department": "Management Production",
-    "contactNumber": "096 889 9675",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210034",
-    "name": "RicardoIII BugtoCabidig",
-    "department": "Management Production",
-    "contactNumber": "012231925",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210038",
-    "name": "Sompong Thanee",
-    "department": "Management Production",
-    "contactNumber": "017 922 956",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210039",
-    "name": "Boonmee Promsungyang",
-    "department": "Management Production",
-    "contactNumber": "096 881 7649",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51210040",
-    "name": "Kriangkrai Yubunchai",
-    "department": "Management Production",
-    "contactNumber": "096 8316562",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51510015",
-    "name": "Sompan Purampha",
-    "department": "Management Production",
-    "contactNumber": "081 491 431",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51510023",
-    "name": "Ratri Phunsahwat",
-    "department": "Management Production",
-    "contactNumber": "0969462652",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51710015",
-    "name": "Arthit Sahwatnathi",
-    "department": "Management Production",
-    "contactNumber": "096-5697544",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51810010",
-    "name": "AldrinEmil TipawanDionco",
-    "department": "Management Production",
-    "contactNumber": "085259143",
     "telegramChatId": "",
     "isActive": true
   },
@@ -906,86 +1209,6 @@ function loadEmployees() {
     "isActive": true
   },
   {
-    "employeeId": "51810026",
-    "name": "MARK  JUSTO  BRACAMONTE",
-    "department": "Management Production",
-    "contactNumber": "089 645 200",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51910012",
-    "name": "Arcayan  Chona  Mantos",
-    "department": "Management Production",
-    "contactNumber": "017 245 475",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51910017",
-    "name": "PATHINYA  CHINNARUK",
-    "department": "Management Production",
-    "contactNumber": "081 491 431",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52010003",
-    "name": "AMORES INDERIO DEXTER LAURENCE",
-    "department": "Management Production",
-    "contactNumber": "096 420 5783",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52110001",
-    "name": "JETHRO JAMES THOMAS",
-    "department": "Management Production",
-    "contactNumber": "099217362",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52210002",
-    "name": "Ananchanin Phekong",
-    "department": "Management Production",
-    "contactNumber": "0965642895",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52310003",
-    "name": "JEAN MARIE AGBONES",
-    "department": "Management Production",
-    "contactNumber": "085806945",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52310006",
-    "name": "Naksorn Chatchanop",
-    "department": "Management Production",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52310007",
-    "name": "Rankoth Pathiranage Hasintha Lakshan Jayasinghe",
-    "department": "Management Production",
-    "contactNumber": "016833827",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410002",
-    "name": "ARANA ELMER DELOS REYES",
-    "department": "Management Production",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
     "employeeId": "52410003",
     "name": "THAMMITAGE DUSHAN SAJITH THILAKASIRI",
     "department": "Management Production",
@@ -994,122 +1217,10 @@ function loadEmployees() {
     "isActive": true
   },
   {
-    "employeeId": "52410006",
-    "name": "MATIDIOS REMULTA JOYDEL",
-    "department": "Management Production",
-    "contactNumber": "0962606947",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410008",
-    "name": "DEGUIT CALUMBA RISTY",
-    "department": "Management Production",
-    "contactNumber": "0963228920",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410009",
-    "name": "THANKLANG KITTHINON",
-    "department": "Management Production",
-    "contactNumber": "0966915161",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410010",
-    "name": "CASES AMOR ELIZABETH",
-    "department": "Management Production",
-    "contactNumber": "015454057",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410011",
-    "name": "MANANO SABELLANO MARY ANN",
-    "department": "Management Production",
-    "contactNumber": "010885473",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410012",
-    "name": "ONOFRE DIZON REYNALYN",
-    "department": "Management Production",
-    "contactNumber": "0966915161",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510002",
-    "name": "Rajitha Prabhashshara",
-    "department": "Management Production",
-    "contactNumber": "0962927673",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510005",
-    "name": "BOONYAPA PAKARE",
-    "department": "Management Production",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510006",
-    "name": "RAYMUNDO VILLAGONZALO",
-    "department": "Management Production",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510007",
-    "name": "QUIZADA KENT ASEQUIA",
-    "department": "Management Production",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510008",
-    "name": "MA. CELILIA SANTOS",
-    "department": "Management Production",
-    "contactNumber": "0978701431",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
     "employeeId": "52510010",
     "name": "MARYVIC LICAY-LICAY",
     "department": "Management Production",
     "contactNumber": "097 700 2607",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510012",
-    "name": "Joven Teodosio Castaneda",
-    "department": "Management Production",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510013",
-    "name": "Montajes Munez Ernie Jr.",
-    "department": "Management Production",
-    "contactNumber": "076 601 0574",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510014",
-    "name": "Pedrano Ulnie Kim Molejon",
-    "department": "Management Production",
-    "contactNumber": "086 649 550",
     "telegramChatId": "",
     "isActive": true
   },
@@ -1946,46 +2057,6 @@ function loadEmployees() {
     "telegramChatId": "",
     "isActive": true
   },
-        {
-    "employeeId": "52510015",
-    "name": "Moragolle Gedara Ruchira Sampath Chandrarathna",
-    "department": "Management Production",
-    "contactNumber": "00000000000",
-    "telegramChatId": "",
-    "isActive": true
-  },
-        {
-    "employeeId": "52510016",
-    "name": "Mabini  Descalso Ma. Franchezka",
-    "department": "Management Production",
-    "contactNumber": "00000000000",
-    "telegramChatId": "",
-    "isActive": true
-  },
-          {
-    "employeeId": "52510017",
-    "name": "Arenas Laurente Edlen",
-    "department": "Management Production",
-    "contactNumber": "00000000000",
-    "telegramChatId": "",
-    "isActive": true
-  },
-          {
-    "employeeId": "52510018",
-    "name": "Cantorni Crispina Savellano",
-    "department": "Management Production",
-    "contactNumber": "00000000000",
-    "telegramChatId": "",
-    "isActive": true
-  },
-            {
-    "employeeId": "52510020",
-    "name": "RANASINGHE KANKANAMAGE LAKSHMAN",
-    "department": "Management Production",
-    "contactNumber": "00000000000",
-    "telegramChatId": "",
-    "isActive": true
-  },
   {
     "employeeId": "52620009",
     "name": "Heng Samedy",
@@ -2086,14 +2157,6 @@ function loadEmployees() {
                       {
     "employeeId": "52520945",
     "name": "Kem Chanthea",
-    "department": "Quality Assurance",
-    "contactNumber": "0000000000",
-    "telegramChatId": "",
-    "isActive": true
-  },
-                        {
-    "employeeId": "52610001",
-    "name": "Fuerte Nelcie Grace Jamelo",
     "department": "Quality Assurance",
     "contactNumber": "0000000000",
     "telegramChatId": "",
