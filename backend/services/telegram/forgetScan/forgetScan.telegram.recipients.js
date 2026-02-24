@@ -50,7 +50,7 @@ async function resolveChatId(key, requestId, label) {
       return chatId
     }
 
-    // loginId path (leave_admin / leave_gm / leave_coo etc.)
+    // loginId path (manager/gm user accounts)
     const user = await User.findOne({ loginId: k }, { loginId: 1, telegramChatId: 1, role: 1 }).lean()
     if (!user) {
       console.warn(`[ForgetScan DM lookup] ${label} User not found`, { loginId: k, requestId: rid })
@@ -80,40 +80,10 @@ async function resolveManagerChatId(doc) {
 async function resolveGmChatId(doc) {
   return resolveChatId(doc?.gmLoginId, doc?._id, 'gm')
 }
-async function resolveCooChatId(doc) {
-  return resolveChatId(doc?.cooLoginId, doc?._id, 'coo')
-}
-
-async function resolveAdminChatIds(requestId) {
-  const rid = s(requestId)
-  try {
-    const rows = await User.find(
-      { role: { $in: ['LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'] }, telegramChatId: { $exists: true, $ne: '' } },
-      { loginId: 1, telegramChatId: 1, role: 1 }
-    ).lean()
-
-    const ids = [...new Set((rows || []).map((u) => s(u.telegramChatId)).filter(Boolean))]
-
-    if (DEBUG) {
-      console.log('[ForgetScan DM lookup ✓ admins]', {
-        count: ids.length,
-        requestId: rid,
-        admins: (rows || []).map((u) => u.loginId),
-      })
-    }
-
-    return ids
-  } catch (e) {
-    console.error('[ForgetScan DM lookup ✗ admins] failed', { requestId: rid, error: e.message })
-    return []
-  }
-}
 
 module.exports = {
   resolveChatId,
   resolveEmployeeChatId,
   resolveManagerChatId,
   resolveGmChatId,
-  resolveCooChatId,
-  resolveAdminChatIds,
 }

@@ -84,9 +84,6 @@ router.get(
   ctrl.listCooInbox
 )
 
-// coo decision (NO admin bypass)
-router.post('/forget-scan/:id/coo-decision', requireRole('LEAVE_COO'), ctrl.cooDecision)
-
 /* ───────────────── Admin viewer ───────────────── */
 
 router.get('/forget-scan/admin', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminList)

@@ -1,5 +1,6 @@
 <!-- src/views/expat/gm/forgetScan/GmForgetScanInbox.vue
-  ✅ SAME STYLE as your ManagerSwapDayInbox / ManagerForgetScanInbox / CooForgetScanInbox
+  ✅ SAME STYLE as your ManagerSwapDayInbox / ManagerForgetScanInbox
+  ✅ SPECIAL FLOW: GM inbox shows ONLY requests where GM is involved (approvalMode = GM_AND_COO)
   ✅ Default filter = PENDING_GM
   ✅ Fetch scope=ALL then filter locally
   ✅ Approve/Reject only when status=PENDING_GM
@@ -42,7 +43,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL')
+const statusFilter = ref('PENDING_GM')
 
 /* pagination */
 const page = ref(1)
@@ -68,7 +69,7 @@ const COL_WIDTH = {
   created: '140px',
   employee: '260px',
   forgotDate: '140px',
-  forgotType: '140px',
+  forgotType: '180px',
   status: '150px',
   actions: '92px',
   reason: '200px',
@@ -77,9 +78,7 @@ const COL_WIDTH = {
 /* ───────────────── CONSTANTS ───────────────── */
 const STATUS_LABEL = {
   ALL: 'All',
-  PENDING_MANAGER: 'Pending (Mgr)',
   PENDING_GM: 'Pending (GM)',
-  PENDING_COO: 'Pending (COO)',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
@@ -90,18 +89,21 @@ const TYPE_LABEL = {
   FORGET_OUT: 'Forget OUT',
 }
 
+/* ───────────────── HELPERS ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
 }
 function up(v) {
   return s(v).toUpperCase()
 }
+function uniqUpper(arr) {
+  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
+}
 
 function fmtDateTime(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD HH:mm')
 }
-
 function fmtYmd(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD')
@@ -116,9 +118,26 @@ function statusBadgeUiClass(x) {
   return 'ui-badge'
 }
 
-function typeBadgeUiClass(x) {
-  const t = up(x)
-  if (t === 'FORGET_OUT') return 'ui-badge ui-badge-indigo'
+/** ✅ multi-type display (forgotTypes[]) + fallback old forgotType */
+function getTypesArr(row) {
+  const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
+  let types = uniqUpper(arr)
+  if (!types.length && row?.forgotType) types = [up(row.forgotType)]
+  return types.filter((t) => t === 'FORGET_IN' || t === 'FORGET_OUT')
+}
+
+function typesToText(row) {
+  const types = getTypesArr(row)
+  if (!types.length) return '—'
+  return types.map((t) => TYPE_LABEL[t] || t).join(' + ')
+}
+
+function typeBadgeUiClassByTypes(row) {
+  const types = getTypesArr(row)
+  const hasIn = types.includes('FORGET_IN')
+  const hasOut = types.includes('FORGET_OUT')
+  if (hasIn && hasOut) return 'ui-badge ui-badge-info'
+  if (hasOut) return 'ui-badge ui-badge-indigo'
   return 'ui-badge ui-badge-info'
 }
 
@@ -179,6 +198,9 @@ async function fetchInbox() {
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
+  // ✅ hide modes where GM is not involved in special flow
+  list = list.filter((r) => up(r?.approvalMode) === 'GM_AND_COO')
+
   if (statusFilter.value !== 'ALL') {
     list = list.filter((r) => up(r.status) === up(statusFilter.value))
   }
@@ -194,7 +216,8 @@ const filteredRows = computed(() => {
         r.reason,
         r.status,
         r.forgotDate,
-        r.forgotType,
+        (Array.isArray(r.forgotTypes) ? r.forgotTypes.join(' ') : r.forgotType),
+        r.approvalMode,
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -206,7 +229,7 @@ const filteredRows = computed(() => {
   return list
 })
 
-const totalCount = computed(() => rows.value.length)
+const totalCount = computed(() => filteredRows.value.length)
 const filteredCount = computed(() => filteredRows.value.length)
 
 const pageCount = computed(() => {
@@ -306,19 +329,16 @@ async function confirmDecision() {
     await api.post(`/leave/forget-scan/${row._id}/gm-decision`, {
       action,
       comment: note,
-      note,
-      reason: note,
     })
 
     showToast({
       type: 'success',
-      message: action === 'APPROVE' ? 'Approved and sent to next step.' : 'Rejected.',
+      message: action === 'APPROVE' ? 'Approved (Final).' : 'Rejected.',
     })
 
     closeConfirm(true)
     closeView()
 
-    // realtime updates, keep fetch as safety:
     await fetchInbox()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
@@ -337,12 +357,10 @@ function buildExcelRows(list) {
     EmployeeName: r.employeeName || r.name || '',
     Department: r.department || '',
     ForgotDate: r.forgotDate || '',
-    ForgotType: TYPE_LABEL[up(r.forgotType)] || r.forgotType || '',
+    ForgotType: typesToText(r),
     Status: r.status || '',
     Reason: compactText(r.reason),
-    Manager: r.managerLoginId || '',
     GM: r.gmLoginId || '',
-    COO: r.cooLoginId || '',
     ApprovalMode: r.approvalMode || '',
     RejectedReason: up(r.status) === 'REJECTED' ? getRejectedReason(r) : '',
   }))
@@ -376,8 +394,10 @@ async function exportExcel() {
 /* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
-  const id = String(doc._id)
+  // only keep rows where GM is involved
+  if (up(doc?.approvalMode) !== 'GM_AND_COO') return
 
+  const id = String(doc._id)
   const idx = rows.value.findIndex((x) => String(x._id) === id)
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
@@ -399,7 +419,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ join GM rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_GM' })
 
@@ -434,6 +453,9 @@ onBeforeUnmount(() => {
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="min-w-[240px]">
               <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
+              <div class="mt-1 text-[11px] text-white/80">
+                Showing only requests where GM is involved (ApprovalMode: GM_AND_COO).
+              </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -493,6 +515,9 @@ onBeforeUnmount(() => {
           <div v-else class="space-y-3">
             <div>
               <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
+              <div class="mt-1 text-[11px] text-white/80">
+                Only GM_AND_COO mode.
+              </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -576,8 +601,8 @@ onBeforeUnmount(() => {
                     Forgot:
                     <span class="font-extrabold">{{ row.forgotDate || '—' }}</span>
                     •
-                    <span :class="typeBadgeUiClass(row.forgotType)">
-                      {{ TYPE_LABEL[up(row.forgotType)] || row.forgotType }}
+                    <span :class="typeBadgeUiClassByTypes(row)">
+                      {{ typesToText(row) }}
                     </span>
                   </div>
                 </div>
@@ -677,8 +702,8 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <span :class="typeBadgeUiClass(row.forgotType)">
-                      {{ TYPE_LABEL[up(row.forgotType)] || row.forgotType }}
+                    <span :class="typeBadgeUiClassByTypes(row)">
+                      {{ typesToText(row) }}
                     </span>
                   </td>
 
@@ -723,7 +748,6 @@ onBeforeUnmount(() => {
                       {{ row.reason ? compactText(row.reason) : '—' }}
                     </p>
                   </td>
-
                 </tr>
               </tbody>
             </table>
@@ -806,7 +830,7 @@ onBeforeUnmount(() => {
             <div class="ui-card p-3">
               <div class="ui-section-title">Type</div>
               <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
-                {{ TYPE_LABEL[up(viewItem?.forgotType)] || viewItem?.forgotType || '—' }}
+                {{ typesToText(viewItem) }}
               </div>
             </div>
           </div>

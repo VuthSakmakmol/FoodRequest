@@ -11,8 +11,6 @@ const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://178.128.48.101:4
 const LINKS = {
   managerInbox: `${FRONTEND_URL}/leave/forget-scan/manager/inbox`,
   gmInbox: `${FRONTEND_URL}/leave/forget-scan/gm/inbox`,
-  cooInbox: `${FRONTEND_URL}/leave/forget-scan/coo/inbox`,
-  adminReport: `${FRONTEND_URL}/leave/forget-scan/admin/report`,
 }
 
 function ymd(v) {
@@ -29,19 +27,10 @@ function uniqUpper(arr) {
   return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
-function typeLabel(t) {
-  const v = up(t)
-  if (v === 'FORGET_IN') return 'FORGET IN'
-  if (v === 'FORGET_OUT') return 'FORGET OUT'
-  return v || '-'
-}
-
-/** ✅ NEW: supports multiple types (forgotTypes[]) with fallback to old forgotType */
+/** ✅ supports multiple types (forgotTypes[]) with fallback to old forgotType */
 function typesText(doc) {
   const arr = Array.isArray(doc?.forgotTypes) ? doc.forgotTypes : []
   let types = uniqUpper(arr)
-
-  // backward compatible fallback
   if (!types.length && doc?.forgotType) types = [up(doc.forgotType)]
 
   const hasIn = types.includes('FORGET_IN')
@@ -67,7 +56,6 @@ function summary(doc) {
   return [
     `📅 Date: <b>${esc(ymd(doc?.forgotDate))}</b>`,
     `🧾 Type: <b>${esc(typesText(doc))}</b>`,
-    // ✅ reason optional
     doc?.reason ? `📝 Reason: ${esc(doc.reason)}` : '',
   ]
     .filter(Boolean)
@@ -75,25 +63,31 @@ function summary(doc) {
 }
 
 function employeeSubmitted(doc) {
+  const st = up(doc?.status || '')
+  const waiting = st === 'PENDING_GM' ? 'GM' : 'Manager'
   return [
     '✅ <b>Forget Scan request submitted</b>',
     '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
-    `📌 Status: <b>${esc(String(doc?.status || 'SUBMITTED'))}</b>`,
+    `📌 Status: Waiting for <b>${waiting}</b> approval`,
   ]
     .filter(Boolean)
     .join('\n')
 }
 
+/**
+ * ✅ SPECIAL FLOW: first approver only
+ * Approve = FINAL (APPROVED), no next approver
+ */
 function managerNew(doc, employeeName) {
   return [
-    '🕘 <b>New Forget Scan request</b>',
+    '🕘 <b>Forget Scan request</b>',
     '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
-    '📌 Status: Waiting for Manager approval',
+    '📌 Action: <b> Waiting for Approval',
     '',
-    actionLinkLine(LINKS.managerInbox, 'Open Manager Inbox'),
+    actionLinkLine(LINKS.managerInbox, 'Click the link to Approve or Reject'),
   ]
     .filter(Boolean)
     .join('\n')
@@ -101,30 +95,13 @@ function managerNew(doc, employeeName) {
 
 function gmNew(doc, employeeName) {
   return [
-    '🕘 <b>New Forget Scan request (GM)</b>',
+    '🕘 <b>Forget Scan request pending (GM)</b>',
     '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
-    '📌 Status: Waiting for GM approval',
-    doc?.managerComment ? `💬 Manager comment: ${esc(doc.managerComment)}` : '',
+    '📌 Action: <b> Waiting for Approval',
     '',
-    actionLinkLine(LINKS.gmInbox, 'Open GM Inbox'),
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function cooNew(doc, employeeName) {
-  return [
-    '🕘 <b>New Forget Scan request (COO)</b>',
-    '━━━━━━━━━━━━━━━━━━━━',
-    employeeLabel(doc, employeeName),
-    summary(doc),
-    '📌 Status: Waiting for COO approval',
-    doc?.managerComment ? `💬 Manager comment: ${esc(doc.managerComment)}` : '',
-    doc?.gmComment ? `💬 GM comment: ${esc(doc.gmComment)}` : '',
-    '',
-    actionLinkLine(LINKS.cooInbox, 'Open COO Inbox'),
+    actionLinkLine(LINKS.gmInbox, 'Click the link to Approve or Reject'),
   ]
     .filter(Boolean)
     .join('\n')
@@ -135,43 +112,26 @@ function employeeDecision(doc, roleLabel) {
   const emoji = status === 'APPROVED' ? '✅' : status === 'REJECTED' ? '❌' : status === 'CANCELLED' ? '🚫' : 'ℹ️'
 
   let extra = ''
-  if (roleLabel === 'Manager' && doc?.managerComment) extra = `💬 Manager comment: ${esc(doc.managerComment)}`
-  if (roleLabel === 'GM' && doc?.gmComment) extra = `💬 GM comment: ${esc(doc.gmComment)}`
-  if (roleLabel === 'COO' && doc?.cooComment) extra = `💬 COO comment: ${esc(doc.cooComment)}`
+  if (roleLabel === 'Manager' && doc?.managerComment) extra = `💬 Manager note: ${esc(doc.managerComment)}`
+  if (roleLabel === 'GM' && doc?.gmComment) extra = `💬 GM note: ${esc(doc.gmComment)}`
+  if (roleLabel === 'System' && doc?.cancelledBy) extra = `👤 Cancelled by: ${esc(doc.cancelledBy)}`
+
+  const finalLine =
+    status === 'APPROVED'
+      ? '🎉 Result: <b>Approved</b>'
+      : status === 'REJECTED'
+      ? '⚠️ Result: <b>Rejected</b>'
+      : status === 'CANCELLED'
+      ? '🚫 Result: <b>Cancelled</b>'
+      : `📌 Status: <b>${esc(status || 'UPDATED')}</b>`
 
   return [
-    `${emoji} <b>Forget Scan ${esc(status || 'UPDATED')} by ${esc(roleLabel)}</b>`,
+    `${emoji} <b>Forget Scan update</b>`,
     '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
+    finalLine,
+    roleLabel ? `👤 By: <b>${esc(roleLabel)}</b>` : '',
     extra,
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function adminCreated(doc, employeeName) {
-  return [
-    '📣 <b>Forget Scan created</b>',
-    '━━━━━━━━━━━━━━━━━━━━',
-    employeeLabel(doc, employeeName),
-    summary(doc),
-    `📌 Status: <b>${esc(String(doc?.status || '-'))}</b>`,
-    '',
-    actionLinkLine(LINKS.adminReport, 'Open Admin Report'),
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function adminUpdated(doc, employeeName) {
-  return [
-    '📣 <b>Forget Scan updated</b>',
-    '━━━━━━━━━━━━━━━━━━━━',
-    employeeLabel(doc, employeeName),
-    summary(doc),
-    `📌 Status: <b>${esc(String(doc?.status || '-'))}</b>`,
-    '',
-    actionLinkLine(LINKS.adminReport, 'Open Admin Report'),
   ]
     .filter(Boolean)
     .join('\n')
@@ -181,8 +141,5 @@ module.exports = {
   employeeSubmitted,
   managerNew,
   gmNew,
-  cooNew,
   employeeDecision,
-  adminCreated,
-  adminUpdated,
 }

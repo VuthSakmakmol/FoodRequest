@@ -99,6 +99,37 @@ const TYPE_LABEL = {
   FORGET_OUT: 'Forget OUT',
 }
 
+function uniqUpper(arr) {
+  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
+}
+
+// ✅ supports new forgotTypes[] + fallback old forgotType
+function getTypesArr(row) {
+  const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
+  let types = uniqUpper(arr)
+
+  if (!types.length && row?.forgotType) types = [up(row.forgotType)] // backward compatible
+  return types.filter((t) => t === 'FORGET_IN' || t === 'FORGET_OUT')
+}
+
+function typesToText(row) {
+  const types = getTypesArr(row)
+  if (!types.length) return '—'
+  return types
+    .map((t) => TYPE_LABEL[t] || t)
+    .join(' + ')
+}
+
+// ✅ badge style: both -> info, OUT-only -> indigo, IN-only -> info
+function typeBadgeUiClassByTypes(row) {
+  const types = getTypesArr(row)
+  const hasIn = types.includes('FORGET_IN')
+  const hasOut = types.includes('FORGET_OUT')
+  if (hasIn && hasOut) return 'ui-badge ui-badge-info'
+  if (hasOut) return 'ui-badge ui-badge-indigo'
+  return 'ui-badge ui-badge-info'
+}
+
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -140,6 +171,7 @@ function canDecide(row) {
 
   return up(row?.status) === 'PENDING_MANAGER'
 }
+
 
 /* brief reason helpers */
 function compactText(v) {
@@ -211,7 +243,7 @@ const filteredRows = computed(() => {
         r.reason,
         r.status,
         r.forgotDate,
-        r.forgotType,
+        (Array.isArray(r.forgotTypes) ? r.forgotTypes.join(' ') : r.forgotType),
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -354,7 +386,7 @@ function buildExcelRows(list) {
     EmployeeName: r.employeeName || r.name || '',
     Department: r.department || '',
     ForgotDate: r.forgotDate || '',
-    ForgotType: TYPE_LABEL[up(r.forgotType)] || r.forgotType || '',
+    ForgotType: typesToText(r),
     Status: r.status || '',
     Reason: compactText(r.reason),
     Manager: r.managerLoginId || '',
@@ -592,8 +624,8 @@ onBeforeUnmount(() => {
                     Forgot:
                     <span class="font-extrabold">{{ row.forgotDate || '—' }}</span>
                     •
-                    <span :class="typeBadgeUiClass(row.forgotType)">
-                      {{ TYPE_LABEL[up(row.forgotType)] || row.forgotType }}
+                    <span :class="typeBadgeUiClassByTypes(row)">
+                      {{ typesToText(row) }}
                     </span>
                   </div>
                 </div>
@@ -693,8 +725,8 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <span :class="typeBadgeUiClass(row.forgotType)">
-                      {{ TYPE_LABEL[up(row.forgotType)] || row.forgotType }}
+                    <span :class="typeBadgeUiClassByTypes(row)">
+                      {{ typesToText(row) }}
                     </span>
                   </td>
 
@@ -821,8 +853,7 @@ onBeforeUnmount(() => {
             <div class="ui-card p-3">
               <div class="ui-section-title">Type</div>
               <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
-                {{ TYPE_LABEL[up(viewItem?.forgotType)] || viewItem?.forgotType || '—' }}
-              </div>
+                {{ typesToText(viewItem) }}              </div>
             </div>
           </div>
 
