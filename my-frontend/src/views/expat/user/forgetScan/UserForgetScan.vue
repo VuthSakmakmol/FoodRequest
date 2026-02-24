@@ -1,15 +1,10 @@
 <!-- src/views/expat/user/forgetScan/UserForgetScan.vue
-  ✅ Full realtime ready (SwapDay baseline)
-  ✅ ui-* design system
-  ✅ create + list + filter + detail modal + cancel confirm
-  ✅ Edit button (NO file attachment)
-  ✅ Edit allowed only when:
-      - status is pending
-      - and NO approval step has acted/approved/rejected
-  ✅ Realtime events:
-      - forgetscan:req:created
-      - forgetscan:req:updated
-  ✅ FIX: Edit dialog closes immediately after successful Save
+  ✅ Backend supports ONLY forgotType (single)
+  ✅ UI uses tick chips (can choose one or both)
+  ✅ If choose both -> frontend submits TWO requests (FORGET_IN + FORGET_OUT)
+  ✅ Edit = single request only (one forgotType)
+  ✅ No crash from ref unwrapping
+  ✅ Realtime: forgetscan:req:created / forgetscan:req:updated
 -->
 
 <script setup>
@@ -46,18 +41,18 @@ const createOpen = ref(false)
 const createBusy = ref(false)
 const form = ref({
   forgotDate: '',
-  forgotType: 'FORGET_IN',
+  forgotTypes: [], // ✅ UI only: ['FORGET_IN','FORGET_OUT']
   reason: '',
 })
 
-/* edit modal (NO attachments) */
+/* edit modal (single request only) */
 const editOpen = ref(false)
 const editBusy = ref(false)
 const editError = ref('')
 const editItem = ref(null)
 const editForm = ref({
   forgotDate: '',
-  forgotType: 'FORGET_IN',
+  forgotType: [], // ✅ backend field
   reason: '',
 })
 
@@ -81,10 +76,10 @@ const STATUS_LABEL = {
   CANCELLED: 'Cancelled',
 }
 
-const TYPE_LABEL = {
-  FORGET_IN: 'Forget IN',
-  FORGET_OUT: 'Forget OUT',
-}
+const TYPE_OPTIONS = [
+  { value: 'FORGET_IN', label: 'Forget IN' },
+  { value: 'FORGET_OUT', label: 'Forget OUT' },
+]
 
 /* ───────────────── HELPERS ───────────────── */
 function up(v) {
@@ -112,10 +107,50 @@ function statusBadgeUiClass(s) {
   if (st.includes('PENDING')) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
+
 function typeBadgeUiClass(t) {
   const tt = up(t)
   if (tt === 'FORGET_OUT') return 'ui-badge ui-badge-indigo'
   return 'ui-badge ui-badge-info'
+}
+
+function typeLabel(v) {
+  const t = up(v)
+  if (t === 'FORGET_IN') return 'Forget IN'
+  if (t === 'FORGET_OUT') return 'Forget OUT'
+  return v || '—'
+}
+
+/* ✅ safe for template ref unwrapping */
+function unwrapObj(maybeRef) {
+  return maybeRef?.value ?? maybeRef ?? {}
+}
+
+function isTypeChecked(maybeRefOrObj, typeValue) {
+  const obj = unwrapObj(maybeRefOrObj)
+  const v = up(typeValue)
+  const arr = Array.isArray(obj?.forgotTypes) ? obj.forgotTypes : []
+  return arr.some((x) => up(x) === v)
+}
+
+function toggleTypeInForm(maybeRefOrObj, typeValue) {
+  const obj = unwrapObj(maybeRefOrObj)
+  const v = up(typeValue)
+
+  const arr = Array.isArray(obj?.forgotTypes) ? obj.forgotTypes : []
+  const idx = arr.findIndex((x) => up(x) === v)
+
+  if (idx >= 0) arr.splice(idx, 1)
+  else arr.push(v)
+
+  // stable order
+  obj.forgotTypes = ['FORGET_IN', 'FORGET_OUT'].filter((x) => arr.includes(x))
+}
+
+function typesToText(arr) {
+  const a = Array.isArray(arr) ? arr : []
+  if (!a.length) return '—'
+  return a.map(typeLabel).join(' + ')
 }
 
 function isPending(item) {
@@ -123,10 +158,7 @@ function isPending(item) {
   return st === 'PENDING_MANAGER' || st === 'PENDING_GM' || st === 'PENDING_COO'
 }
 
-/**
- * ✅ Rule (same as swap-day):
- * requester cannot cancel after ANY approved step exists
- */
+/** requester cannot cancel after ANY approved step exists */
 function hasAnyApprovedStep(item) {
   const steps = Array.isArray(item?.approvals) ? item.approvals : []
   return steps.some((s) => up(s?.status) === 'APPROVED')
@@ -137,11 +169,7 @@ function canCancel(item) {
   return true
 }
 
-/**
- * ✅ Edit allowed only if NO one acted yet
- * - must be pending
- * - approvals: no approved, no rejected, no actedAt
- */
+/** Edit allowed only if NO one acted yet */
 function canEdit(item) {
   if (!isPending(item)) return false
   const approvals = Array.isArray(item?.approvals) ? item.approvals : []
@@ -169,7 +197,7 @@ async function fetchData() {
 
 /* ───────────────── CREATE ───────────────── */
 function openCreate() {
-  form.value = { forgotDate: '', forgotType: 'FORGET_IN', reason: '' }
+  form.value = { forgotDate: '', forgotTypes: [], reason: '' }
   createOpen.value = true
 }
 function closeCreate() {
@@ -177,19 +205,20 @@ function closeCreate() {
   createOpen.value = false
 }
 
-function validatePayload(v) {
+function validateCreate(v) {
   const d = String(v?.forgotDate || '').trim()
-  const t = up(v?.forgotType)
+  const types = Array.isArray(v?.forgotTypes) ? v.forgotTypes.map(up).filter(Boolean) : []
   const r = compactText(v?.reason)
 
   if (!d) return 'Forgot date is required.'
-  if (!['FORGET_IN', 'FORGET_OUT'].includes(t)) return 'Forgot type must be FORGET_IN or FORGET_OUT.'
-  if (!r || r.length < 3) return 'Reason is required (min 3 characters).'
+  if (!types.length) return 'Please tick Forget IN and/or Forget OUT.'
+  if (!types.every((t) => ['FORGET_IN', 'FORGET_OUT'].includes(t))) return 'Invalid type selection.'
+  if (!r || r.length < 3) return ''
   return ''
 }
 
 async function submitCreate() {
-  const err = validatePayload(form.value)
+  const err = validateCreate(form.value)
   if (err) {
     showToast({ type: 'warning', message: err })
     return
@@ -199,29 +228,27 @@ async function submitCreate() {
   try {
     const payload = {
       forgotDate: String(form.value.forgotDate || '').trim(),
-      forgotType: up(form.value.forgotType),
+      forgotTypes: [...new Set((form.value.forgotTypes || []).map(up).filter(Boolean))],
       reason: compactText(form.value.reason),
     }
 
     const res = await api.post('/leave/forget-scan', payload)
-    showToast({ type: 'success', message: 'Forget scan request submitted.' })
+    if (res?.data?._id) upsertRow(res.data)
 
-    const doc = res.data
-    if (doc?._id) upsertRow(doc)
-    else await fetchData()
+    showToast({
+      type: 'success',
+      message: payload.forgotTypes.length === 2 ? 'Forget IN + OUT submitted (one request).' : 'Forget scan submitted.',
+    })
 
     createOpen.value = false
   } catch (e) {
-    showToast({
-      type: 'error',
-      message: e?.response?.data?.message || 'Submit failed.',
-    })
+    showToast({ type: 'error', message: e?.response?.data?.message || 'Submit failed.' })
   } finally {
     createBusy.value = false
   }
 }
 
-/* ───────────────── EDIT (NO attachments) ───────────────── */
+/* ───────────────── EDIT (single request only) ───────────────── */
 function openEdit(item) {
   if (!item?._id) return
   if (!canEdit(item)) {
@@ -232,7 +259,7 @@ function openEdit(item) {
   editError.value = ''
   editForm.value = {
     forgotDate: String(item.forgotDate || '').trim(),
-    forgotType: up(item.forgotType || 'FORGET_IN'),
+    forgotTypes: Array.isArray(item.forgotTypes) ? item.forgotTypes.map(up) : [],
     reason: String(item.reason || ''),
   }
   editOpen.value = true
@@ -245,17 +272,28 @@ function closeEdit(force = false) {
   editItem.value = null
 }
 
+function validateEdit(v) {
+  const d = String(v?.forgotDate || '').trim()
+  const types = Array.isArray(v?.forgotTypes) ? v.forgotTypes.map(up).filter(Boolean) : []
+  const r = compactText(v?.reason)
+
+  if (!d) return 'Forgot date is required.'
+  if (!types.length) return 'Please tick Forget IN and/or Forget OUT.'
+  if (!types.every((t) => ['FORGET_IN', 'FORGET_OUT'].includes(t))) return 'Invalid type selection.'
+  if (!r || r.length < 3) return ''
+  return ''
+}
+
 async function submitEdit() {
   if (!editItem.value?._id) return
 
-  const err = validatePayload(editForm.value)
+  const err = validateEdit(editForm.value)
   if (err) {
     editError.value = err
     showToast({ type: 'warning', message: err })
     return
   }
 
-  // guard again
   if (!canEdit(editItem.value)) {
     showToast({ type: 'warning', message: 'This request cannot be edited after any approval action.' })
     closeEdit()
@@ -265,11 +303,13 @@ async function submitEdit() {
   editBusy.value = true
   editError.value = ''
   try {
-    const payload = {
-      forgotDate: String(editForm.value.forgotDate || '').trim(),
-      forgotType: up(editForm.value.forgotType),
-      reason: compactText(editForm.value.reason),
-    }
+  const payload = {
+    forgotDate: String(editForm.value.forgotDate || '').trim(),
+    forgotTypes: [...new Set((editForm.value.forgotTypes || []).map(up).filter(Boolean))],
+    reason: compactText(editForm.value.reason),
+  }
+  await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
+
 
     const res = await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
 
@@ -351,9 +391,9 @@ const filteredRows = computed(() => {
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
     result = result.filter((r) => {
-      const hay = [r.forgotDate, r.forgotType, r.status, r.reason]
-        .map((x) => String(x || '').toLowerCase())
-        .join(' ')
+    const hay = [r.forgotDate, (r.forgotTypes || []).join(','), r.forgotKey, r.status, r.reason]
+      .map((x) => String(x || '').toLowerCase())
+      .join(' ')
       return hay.includes(q)
     })
   }
@@ -371,12 +411,10 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  // keep detail modal synced
   if (viewItem.value?._id && String(viewItem.value._id) === id) {
     viewItem.value = { ...viewItem.value, ...doc }
   }
 
-  // keep edit form synced while open (optional)
   if (editItem.value?._id && String(editItem.value._id) === id) {
     editItem.value = { ...editItem.value, ...doc }
     if (editOpen.value) {
@@ -400,7 +438,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ subscribe rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_USER' })
 
@@ -431,7 +468,7 @@ onBeforeUnmount(() => {
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div class="text-sm font-extrabold">My Forget Scan</div>
+            <div class="text-sm font-extrabold">My Forget Scan</div>
 
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_auto] md:items-end">
               <div>
@@ -492,9 +529,7 @@ onBeforeUnmount(() => {
 
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
                     Type:
-                    <span :class="typeBadgeUiClass(item.forgotType)">
-                      {{ TYPE_LABEL[up(item.forgotType)] || item.forgotType }}
-                    </span>
+                    <span class="font-extrabold">{{ typesToText(item.forgotTypes) }}</span>
                   </div>
                 </div>
 
@@ -555,13 +590,10 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr v-for="item in filteredRows" :key="item._id" class="ui-tr-hover">
                   <td class="ui-td">{{ fmtDateTime(item.createdAt) }}</td>
-
                   <td class="ui-td">{{ item.forgotDate || '—' }}</td>
 
                   <td class="ui-td">
-                    <span :class="typeBadgeUiClass(item.forgotType)">
-                      {{ TYPE_LABEL[up(item.forgotType)] || item.forgotType }}
-                    </span>
+                    {{ typesToText(item.forgotTypes) }}
                   </td>
 
                   <td class="ui-td">
@@ -613,7 +645,9 @@ onBeforeUnmount(() => {
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">New Forget Scan</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">Choose date, type, and reason.</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">
+            Choose date, type(s), and reason. (Selecting both will create 2 requests.)
+          </div>
         </div>
         <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" :disabled="createBusy" @click="closeCreate">
           <i class="fa-solid fa-xmark text-[11px]" />
@@ -631,10 +665,27 @@ onBeforeUnmount(() => {
 
             <div class="ui-field">
               <label class="ui-label">Forgot Type</label>
-              <select v-model="form.forgotType" class="ui-select" :disabled="createBusy">
-                <option value="FORGET_IN">Forget IN</option>
-                <option value="FORGET_OUT">Forget OUT</option>
-              </select>
+
+              <div class="mt-1 flex flex-wrap gap-2">
+                <button
+                  v-for="opt in TYPE_OPTIONS"
+                  :key="opt.value"
+                  type="button"
+                  class="tick-chip"
+                  :class="isTypeChecked(form, opt.value) ? 'tick-chip-on' : ''"
+                  :disabled="createBusy"
+                  @click="toggleTypeInForm(form, opt.value)"
+                >
+                  <span class="tick-dot">
+                    <i v-if="isTypeChecked(form, opt.value)" class="fa-solid fa-check text-[10px]" />
+                  </span>
+                  <span class="font-extrabold text-[11px]">{{ opt.label }}</span>
+                </button>
+              </div>
+
+              <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                You can tick one or both.
+              </div>
             </div>
           </div>
 
@@ -647,10 +698,6 @@ onBeforeUnmount(() => {
               placeholder="Explain briefly..."
               :disabled="createBusy"
             />
-          </div>
-
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Tip: You cannot submit duplicate requests for the same date and type (unless cancelled/rejected).
           </div>
         </div>
 
@@ -668,13 +715,13 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <!-- ✅ EDIT MODAL (NO attachments) -->
+  <!-- ✅ EDIT MODAL (single request only) -->
   <div v-if="editOpen" class="ui-modal-backdrop">
     <div class="ui-modal p-0 overflow-hidden max-w-xl">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit Forget Scan</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">Allowed only before any approval action.</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">Edit is single request (one type).</div>
         </div>
         <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" :disabled="editBusy" @click="closeEdit">
           <i class="fa-solid fa-xmark text-[11px]" />
@@ -696,6 +743,9 @@ onBeforeUnmount(() => {
                 <option value="FORGET_IN">Forget IN</option>
                 <option value="FORGET_OUT">Forget OUT</option>
               </select>
+              <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                To create both IN+OUT, use “New Request”.
+              </div>
             </div>
           </div>
 
@@ -758,9 +808,7 @@ onBeforeUnmount(() => {
 
             <div>
               <div class="ui-label">Type</div>
-              <span :class="typeBadgeUiClass(viewItem?.forgotType)">
-                {{ TYPE_LABEL[up(viewItem?.forgotType)] || viewItem?.forgotType || '—' }}
-              </span>
+              <span :class="typeBadgeUiClass(viewItem?.forgotType)">{{ typeLabel(viewItem?.forgotType) }}</span>
             </div>
 
             <div class="md:text-right">
@@ -822,7 +870,6 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <!-- ✅ Confirm cancel -->
   <ConfirmDialog
     v-model="cancelOpen"
     tone="danger"
@@ -839,5 +886,26 @@ onBeforeUnmount(() => {
 .ui-icon-btn {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;
+}
+
+/* tick chips */
+.tick-chip {
+  @apply inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2
+         text-slate-700 hover:bg-slate-50 active:translate-y-[0.5px]
+         disabled:opacity-50 disabled:cursor-not-allowed
+         dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/40;
+}
+.tick-chip-on {
+  @apply border-sky-300 bg-sky-50 text-sky-800
+         dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200;
+}
+.tick-dot {
+  @apply grid place-items-center rounded-lg border border-slate-200 bg-white
+         dark:border-slate-800 dark:bg-slate-950/40;
+  width: 22px;
+  height: 22px;
+}
+.tick-chip-on .tick-dot {
+  @apply border-sky-300 bg-white dark:border-sky-700/60 dark:bg-slate-950/40;
 }
 </style>

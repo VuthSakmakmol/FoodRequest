@@ -47,6 +47,29 @@ async function safeNotify(fn, ...args) {
   }
 }
 
+const FORGOT_TYPES = ['FORGET_IN', 'FORGET_OUT']
+
+function normalizeForgotTypesFromBody(body) {
+  // accept either forgotTypes[] OR old forgotType (backward compatible)
+  let arr = Array.isArray(body?.forgotTypes) ? body.forgotTypes : []
+  if (!arr.length && body?.forgotType) arr = [body.forgotType]
+
+  arr = uniqUpper(arr).filter((x) => FORGOT_TYPES.includes(x))
+
+  if (arr.length < 1 || arr.length > 2) {
+    throw createError(400, 'forgotTypes must contain 1 or 2 items: FORGET_IN / FORGET_OUT')
+  }
+  return arr
+}
+
+function forgotTypesLabel(types = []) {
+  const t = uniqUpper(types)
+  if (t.includes('FORGET_IN') && t.includes('FORGET_OUT')) return 'FORGET_IN_OUT'
+  if (t.includes('FORGET_IN')) return 'FORGET_IN'
+  if (t.includes('FORGET_OUT')) return 'FORGET_OUT'
+  return ''
+}
+
 const { broadcastForgetScanRequest } = require('../../utils/forgetScan.realtime')
 
 function getIo(req) {
@@ -257,14 +280,12 @@ exports.createMyForgetScan = async (req, res, next) => {
     if (!employeeId) throw createError(400, 'Missing employeeId/loginId in token')
 
     const forgotDate = s(req.body?.forgotDate)
-    const forgotType = up(req.body?.forgotType)
-    const reason = s(req.body?.reason)
+    const reason = s(req.body?.reason || '')
 
-    if (!isValidYMD(forgotDate)) throw createError(400, 'forgotDate must be YYYY-MM-DD')
-    if (!['FORGET_IN', 'FORGET_OUT'].includes(forgotType)) {
-      throw createError(400, 'forgotType must be FORGET_IN or FORGET_OUT')
-    }
-    if (!reason) throw createError(400, 'reason is required')
+    // ✅ NEW: accept multiple
+    const forgotTypes = normalizeForgotTypesFromBody(req.body)
+    const keyPreview = forgotTypesLabel(forgotTypes)
+    if (!keyPreview) throw createError(400, 'forgotTypes must include FORGET_IN and/or FORGET_OUT')
 
     const prof = await LeaveProfile.findOne({ employeeId }).lean()
     if (!prof) throw createError(404, 'Leave profile not found')
@@ -275,7 +296,6 @@ exports.createMyForgetScan = async (req, res, next) => {
     const gmLoginId = s(prof.gmLoginId)
     const cooLoginId = s(prof.cooLoginId)
 
-    // ensure required approvers exist for that mode
     buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId })
 
     let doc
@@ -285,7 +305,8 @@ exports.createMyForgetScan = async (req, res, next) => {
         requesterLoginId: meLoginId,
 
         forgotDate,
-        forgotType,
+        forgotTypes, // ✅ store array (model will derive forgotKey)
+
         reason,
 
         approvalMode: mode,
@@ -297,9 +318,8 @@ exports.createMyForgetScan = async (req, res, next) => {
         approvals: buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }),
       })
     } catch (e) {
-      // unique index duplicate => treat as friendly 409
       if (e?.code === 11000) {
-        throw createError(409, 'You already submitted this forget scan request (same date and type).')
+        throw createError(409, 'You already submitted this forget scan request (same date and type set).')
       }
       throw e
     }
@@ -385,40 +405,25 @@ exports.updateMyForgetScan = async (req, res, next) => {
     const existing = await ExpatForgetScanRequest.findById(id)
     if (!existing) throw createError(404, 'Request not found')
 
-    // ✅ owner only (NO admin bypass for edit)
-    if (s(existing.requesterLoginId) !== meLoginId) {
-      throw createError(403, 'Not your request')
-    }
+    if (s(existing.requesterLoginId) !== meLoginId) throw createError(403, 'Not your request')
 
-    // ✅ only pending statuses
     const st = up(existing.status)
     if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) {
       throw createError(400, `Request is ${existing.status}. Cannot edit.`)
     }
 
-    // ✅ cannot edit after any approval action (strict)
     const approvals = Array.isArray(existing.approvals) ? existing.approvals : []
-    const anyApproved = approvals.some((a) => up(a?.status) === 'APPROVED')
-    const anyRejected = approvals.some((a) => up(a?.status) === 'REJECTED')
     const anyActed = approvals.some((a) => !!a?.actedAt)
-    if (anyApproved || anyRejected || anyActed) {
-      throw createError(400, 'Cannot edit after any approval action.')
-    }
+    if (anyActed) throw createError(400, 'Cannot edit after any approval action.')
 
-    // input
     const forgotDate = s(req.body?.forgotDate)
-    const forgotType = up(req.body?.forgotType)
-    const reason = s(req.body?.reason)
+    const reason = s(req.body?.reason || '')
 
-    if (!isValidYMD(forgotDate)) throw createError(400, 'forgotDate must be YYYY-MM-DD')
-    if (!['FORGET_IN', 'FORGET_OUT'].includes(forgotType)) {
-      throw createError(400, 'forgotType must be FORGET_IN or FORGET_OUT')
-    }
-    if (!reason) throw createError(400, 'reason is required')
+    // ✅ NEW: accept multiple
+    const forgotTypes = normalizeForgotTypesFromBody(req.body)
 
-    // ✅ update (keep approvalMode/approvers/status/approvals unchanged)
     existing.forgotDate = forgotDate
-    existing.forgotType = forgotType
+    existing.forgotTypes = forgotTypes
     existing.reason = reason
     existing.updatedAt = new Date()
 
@@ -426,7 +431,7 @@ exports.updateMyForgetScan = async (req, res, next) => {
       await existing.save()
     } catch (e) {
       if (e?.code === 11000) {
-        throw createError(409, 'You already submitted this forget scan request (same date and type).')
+        throw createError(409, 'You already submitted this forget scan request (same date and type set).')
       }
       throw e
     }
@@ -439,7 +444,6 @@ exports.updateMyForgetScan = async (req, res, next) => {
     next(e)
   }
 }
-
 /* ─────────────────────────────────────────────────────────────
    MANAGER INBOX
    GET /api/leave/forget-scan/manager/inbox?scope=ALL

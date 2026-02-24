@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
                 Back
               </button>
 
-              <button
+              <!-- <button
                 class="ui-hero-btn ui-hero-btn-primary"
                 type="button"
                 :disabled="saving || !canSubmit || (isEdit && !isPending)"
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
               >
                 <i v-if="saving" class="fa-solid fa-spinner animate-spin text-[11px]" />
                 {{ isEdit ? 'Save' : 'Submit' }}
-              </button>
+              </button> -->
             </div>
           </div>
         </div>
@@ -426,7 +426,7 @@ onBeforeUnmount(() => {
               <!-- Request working date -->
               <div class="ui-card p-4 space-y-3">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="ui-section-title">Request Working Date</div>
+                  <div class="ui-section-title">Swap (Sunday or Holiday)</div>
                   <span class="ui-badge ui-badge-info">{{ requestDays }} day(s)</span>
                 </div>
 
@@ -452,7 +452,7 @@ onBeforeUnmount(() => {
               <!-- Compensatory day off -->
               <div class="ui-card p-4 space-y-3">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="ui-section-title">Compensatory Day Off</div>
+                  <div class="ui-section-title">To (Working Day)</div>
 
                   <span :class="isDurationValid ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'">
                     {{ compDays }} day(s)

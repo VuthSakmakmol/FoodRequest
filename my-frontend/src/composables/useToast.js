@@ -8,7 +8,7 @@ function showToast({
   type = 'success',
   title = '',
   message = '',
-  timeout = 3000,
+  timeout = 5000,
   action = null, // { label: 'Undo', handler: () => {} }
 } = {}) {
   const id = idCounter++

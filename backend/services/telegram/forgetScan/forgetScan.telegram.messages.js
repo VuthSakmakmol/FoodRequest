@@ -21,11 +21,36 @@ function ymd(v) {
   return s.length >= 10 ? s.slice(0, 10) : s
 }
 
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function uniqUpper(arr) {
+  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
+}
+
 function typeLabel(t) {
-  const v = String(t || '').toUpperCase()
+  const v = up(t)
   if (v === 'FORGET_IN') return 'FORGET IN'
   if (v === 'FORGET_OUT') return 'FORGET OUT'
   return v || '-'
+}
+
+/** ✅ NEW: supports multiple types (forgotTypes[]) with fallback to old forgotType */
+function typesText(doc) {
+  const arr = Array.isArray(doc?.forgotTypes) ? doc.forgotTypes : []
+  let types = uniqUpper(arr)
+
+  // backward compatible fallback
+  if (!types.length && doc?.forgotType) types = [up(doc.forgotType)]
+
+  const hasIn = types.includes('FORGET_IN')
+  const hasOut = types.includes('FORGET_OUT')
+
+  if (hasIn && hasOut) return 'FORGET IN + FORGET OUT'
+  if (hasIn) return 'FORGET IN'
+  if (hasOut) return 'FORGET OUT'
+  return '-'
 }
 
 function employeeLabel(doc, employeeName) {
@@ -41,7 +66,8 @@ function actionLinkLine(url, label) {
 function summary(doc) {
   return [
     `📅 Date: <b>${esc(ymd(doc?.forgotDate))}</b>`,
-    `🧾 Type: <b>${esc(typeLabel(doc?.forgotType))}</b>`,
+    `🧾 Type: <b>${esc(typesText(doc))}</b>`,
+    // ✅ reason optional
     doc?.reason ? `📝 Reason: ${esc(doc.reason)}` : '',
   ]
     .filter(Boolean)
@@ -51,7 +77,7 @@ function summary(doc) {
 function employeeSubmitted(doc) {
   return [
     '✅ <b>Forget Scan request submitted</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
     `📌 Status: <b>${esc(String(doc?.status || 'SUBMITTED'))}</b>`,
   ]
@@ -62,7 +88,7 @@ function employeeSubmitted(doc) {
 function managerNew(doc, employeeName) {
   return [
     '🕘 <b>New Forget Scan request</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     '📌 Status: Waiting for Manager approval',
@@ -76,7 +102,7 @@ function managerNew(doc, employeeName) {
 function gmNew(doc, employeeName) {
   return [
     '🕘 <b>New Forget Scan request (GM)</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     '📌 Status: Waiting for GM approval',
@@ -91,7 +117,7 @@ function gmNew(doc, employeeName) {
 function cooNew(doc, employeeName) {
   return [
     '🕘 <b>New Forget Scan request (COO)</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     '📌 Status: Waiting for COO approval',
@@ -105,7 +131,7 @@ function cooNew(doc, employeeName) {
 }
 
 function employeeDecision(doc, roleLabel) {
-  const status = String(doc?.status || '').toUpperCase()
+  const status = up(doc?.status || '')
   const emoji = status === 'APPROVED' ? '✅' : status === 'REJECTED' ? '❌' : status === 'CANCELLED' ? '🚫' : 'ℹ️'
 
   let extra = ''
@@ -115,7 +141,7 @@ function employeeDecision(doc, roleLabel) {
 
   return [
     `${emoji} <b>Forget Scan ${esc(status || 'UPDATED')} by ${esc(roleLabel)}</b>`,
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
     extra,
   ]
@@ -126,7 +152,7 @@ function employeeDecision(doc, roleLabel) {
 function adminCreated(doc, employeeName) {
   return [
     '📣 <b>Forget Scan created</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     `📌 Status: <b>${esc(String(doc?.status || '-'))}</b>`,
@@ -140,7 +166,7 @@ function adminCreated(doc, employeeName) {
 function adminUpdated(doc, employeeName) {
   return [
     '📣 <b>Forget Scan updated</b>',
-    '━━━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
     `📌 Status: <b>${esc(String(doc?.status || '-'))}</b>`,
