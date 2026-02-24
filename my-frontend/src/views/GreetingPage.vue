@@ -189,16 +189,6 @@ const scrollToServices = () => {
                       Canteen
                     </span>
                   </div>
-                  <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                    Request meals, see order history, and track daily menu.
-                    <span class="block mt-0.5 text-[11px] text-slate-500 km-font">
-                      កក់អាហារ និងតាមដានការកក់របស់បុគ្គលិក។
-                    </span>
-                  </p>
-                  <div class="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>Less than 1 minute</span>
-                    <span>Telegram alert</span>
-                  </div>
                 </div>
 
                 <div class="hidden sm:block text-slate-400 group-hover:text-sky-500 transition">
@@ -230,15 +220,6 @@ const scrollToServices = () => {
                     <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
                       Transportation
                     </span>
-                  </div>
-                  <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                    Book company car or messenger, share destinations and time.
-                    <span class="block mt-0.5 text-[11px] text-slate-500 km-font">
-                      កក់ឡានក្រុមហ៊ុន ឬ messenger សម្រាប់ដឹកឯកសារ។
-                    </span>
-                  </p>
-                  <div class="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>Driver &amp; Messenger app</span>
                   </div>
                 </div>
 
@@ -272,16 +253,6 @@ const scrollToServices = () => {
                       Expat Portal
                     </span>
                   </div>
-                  <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                    Submit and track leave requests for expatriate employees.
-                    <span class="block mt-0.5 text-[11px] text-slate-500">
-                      Annual leave, sick leave, unpaid leave and more.
-                    </span>
-                  </p>
-                  <div class="flex flex-wrap gap-3 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span>Login required</span>
-                    <span>Manager Telegram alert</span>
-                  </div>
                 </div>
 
                 <div class="hidden sm:block text-slate-400 group-hover:text-amber-500 transition">
@@ -308,10 +279,6 @@ const scrollToServices = () => {
                     In development
                   </span>
                 </div>
-                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                  Book meeting rooms for internal discussions and visitors.
-                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
-                </p>
               </div>
             </div>
 
@@ -333,10 +300,6 @@ const scrollToServices = () => {
                     In development
                   </span>
                 </div>
-                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                  Approve overtime requests with role-based workflow.
-                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
-                </p>
               </div>
             </div>
 
@@ -358,10 +321,6 @@ const scrollToServices = () => {
                     In development
                   </span>
                 </div>
-                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                  Visitor logs, gate pass, and security approvals.
-                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
-                </p>
               </div>
             </div>
 
@@ -383,10 +342,6 @@ const scrollToServices = () => {
                     In development
                   </span>
                 </div>
-                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                  Send onboarding emails automatically when a new employee is created.
-                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
-                </p>
               </div>
             </div>
 
@@ -408,10 +363,6 @@ const scrollToServices = () => {
                     In development
                   </span>
                 </div>
-                <p class="text-xs sm:text-[13px] text-slate-600 dark:text-slate-300">
-                  Request office supplies and track stock levels by department.
-                  <span class="block mt-0.5 text-[11px] text-slate-500">Coming soon.</span>
-                </p>
               </div>
             </div>
 

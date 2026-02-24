@@ -129,6 +129,23 @@ function emitReq(req, docOrPlain, event = 'leave:req:updated') {
   }
 }
 
+function requiresAttachmentForDoc(doc) {
+  const t = up(doc?.leaveTypeCode)
+  const days = Number(doc?.totalDays || 0)
+
+  if (t === 'MA') return true
+  if (t === 'BL') return true
+  if ((t === 'SP' || t === 'SL') && days >= 3) return true
+
+  return false
+}
+
+function assertAttachmentIfRequired(doc) {
+  if (!requiresAttachmentForDoc(doc)) return
+  const count = Array.isArray(doc.attachments) ? doc.attachments.length : 0
+  if (count <= 0) throw createError(400, 'Attachment is required for this leave request.')
+}
+
 function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
   try {
     const io = getIo(req)
@@ -477,6 +494,10 @@ async function assertNoDuplicateDateHalf({ employeeId, normalized, excludeId = n
 /* ─────────────────────────────────────────────────────────────
    CREATE (employee)
    POST /api/leave/requests
+   NOTE: Attachments are uploaded AFTER create via:
+         POST /api/leave/requests/:id/attachments
+   So we cannot hard-block here for required-attachment types.
+   We enforce required attachments at APPROVAL time (manager/gm/coo).
 ───────────────────────────────────────────────────────────── */
 exports.createMyRequest = async (req, res, next) => {
   try {
@@ -665,7 +686,6 @@ exports.managerDecision = async (req, res, next) => {
       throw createError(400, 'This request does not require manager approval.')
     }
 
-    // ✅ must be the assigned manager
     if (s(existing.managerLoginId) !== me) throw createError(403, 'Not your request')
 
     if (s(existing.status) !== 'PENDING_MANAGER') {
@@ -673,6 +693,10 @@ exports.managerDecision = async (req, res, next) => {
     }
 
     const act = up(action)
+
+    // ✅ ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
+    if (act === 'APPROVE') assertAttachmentIfRequired(existing)
+
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
 
     let newStatus = ''
@@ -703,7 +727,7 @@ exports.managerDecision = async (req, res, next) => {
 
     await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver if pending
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     if (act === 'APPROVE') {
       if (newStatus === 'PENDING_GM') await safeNotify(notify?.notifyManagerApprovedToGm, doc)
@@ -777,6 +801,10 @@ exports.gmDecision = async (req, res, next) => {
     }
 
     const act = up(action)
+
+    // ✅ ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
+    if (act === 'APPROVE') assertAttachmentIfRequired(existing)
+
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
 
     let newStatus = ''
@@ -807,7 +835,7 @@ exports.gmDecision = async (req, res, next) => {
 
     await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver if pending
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     if (act === 'APPROVE' && newStatus === 'PENDING_COO') {
       await safeNotify(notify?.notifyGmApprovedToCoo, doc)
@@ -880,6 +908,10 @@ exports.cooDecision = async (req, res, next) => {
     }
 
     const act = up(action)
+
+    // ✅ ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
+    if (act === 'APPROVE') assertAttachmentIfRequired(existing)
+
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
 
     let newStatus = ''

@@ -14,6 +14,11 @@
   ✅ Hide attachments until Leave Type selected
   ✅ IMPORTANT: show ONLY clean name like "Annual Leave" (never "Annual Leave (AL)")
   ✅ FIX: enforce start/end must be working day (Mon–Sat, not holiday) + safer calc
+
+  ✅ NEW: Attachment required rules:
+     - MA always requires
+     - BL always requires
+     - Sick Leave (SP or SL) requires when requestedDays >= 3
 -->
 
 <script setup>
@@ -453,6 +458,32 @@ const requestedBreakdownText = computed(() => {
   return `You request ${totalStr} day(s) from ${baseStr} working day(s): ${parts.join(' + ')}`
 })
 
+/* ───────── Attachment Required Rules (MUST be AFTER form/evidence/requestedDays) ───────── */
+const leaveCode = computed(() => String(form.value.leaveTypeCode || '').toUpperCase())
+
+const attachmentRequired = computed(() => {
+  const t = leaveCode.value
+
+  // MA always requires
+  if (t === 'MA') return true
+
+  // BL always requires
+  if (t === 'BL') return true
+
+  // Sick leave rule: optional for 1-2 days, required for >=3 days
+  if (t === 'SP' || t === 'SL') {
+    const days = Number(requestedDays.value || 0)
+    return days >= 3
+  }
+
+  return false
+})
+
+const hasRequiredAttachment = computed(() => {
+  if (!attachmentRequired.value) return true
+  return (evidenceFiles.value.length || 0) > 0
+})
+
 /* ───────── Half selection (DIRECT) ───────── */
 function clearAllHalf() {
   form.value.singleHalf = ''
@@ -491,14 +522,15 @@ const canSubmit = computed(() => {
   // MA: start must be working day, no half allowed
   if (isMA.value) {
     if (!startIsWorking.value) return false
-    return !useHalf.value
+    if (useHalf.value) return false
+  } else {
+    // normal: start & end must be working
+    if (!startIsWorking.value || !endIsWorking.value) return false
+    if (workingRangeCount.value <= 0) return false
   }
 
-  // normal: start & end must be working
-  if (!startIsWorking.value || !endIsWorking.value) return false
-
-  // must have at least 1 working day in the range
-  if (workingRangeCount.value <= 0) return false
+  // ✅ attachment required rule
+  if (!hasRequiredAttachment.value) return false
 
   return true
 })
@@ -517,7 +549,6 @@ function resetForm() {
   formSuccess.value = ''
 }
 
-/* ───────── Keep dates safe ───────── */
 watch(
   () => [form.value.startDate, form.value.leaveTypeCode],
   () => {
@@ -582,12 +613,11 @@ async function submitRequest() {
   if (!form.value.leaveTypeCode) return (formError.value = 'Please select leave type.')
   if (!form.value.startDate) return (formError.value = 'Please select start date.')
   if (!form.value.endDate) return (formError.value = 'Please select end date.')
-  if (!isMA.value && form.value.endDate < form.value.startDate)
-    return (formError.value = 'End date cannot be earlier than start date.')
+  if (!isMA.value && form.value.endDate < form.value.startDate) return (formError.value = 'End date cannot be earlier than start date.')
 
   if (isMA.value && useHalf.value) return (formError.value = 'MA does not support half-day.')
 
-  // ✅ FIX: enforce working-day constraints like backend
+  // ✅ enforce working-day constraints
   if (isMA.value) {
     if (!isWorkingDay(form.value.startDate)) {
       formError.value = 'Start Date must be a working day (Mon–Sat, not holiday).'
@@ -602,6 +632,19 @@ async function submitRequest() {
       formError.value = 'No working days in selected range.'
       return
     }
+  }
+
+  // ✅ attachment required message
+  if (!hasRequiredAttachment.value) {
+    const t = leaveCode.value
+    let msg = 'Attachment is required for this leave type.'
+    if (t === 'SP' || t === 'SL') msg = 'Attachment is required for Sick Leave when requesting 3+ day(s).'
+    if (t === 'MA') msg = 'Attachment is required for Maternity Leave.'
+    if (t === 'BL') msg = 'Attachment is required for Business Leave.'
+
+    formError.value = msg
+    showToast({ type: 'error', title: 'Missing attachment', message: msg })
+    return
   }
 
   submitting.value = true
@@ -795,7 +838,9 @@ onBeforeUnmount(() => {
                       <div class="ui-balance-sub">Used</div>
                     </div>
                     <div class="ui-balance-block ui-balance-block-al">
-                      <div class="ui-balance-num ui-balance-num-al">{{ b.remaining }}</div>
+                      <div class="ui-balance-num ui-balance-num-al" :class="b.remaining < 0 ? 'al-remain-neg' : 'al-remain-pos'">
+                        {{ b.remaining }}
+                      </div>
                       <div class="ui-balance-sub">Remain</div>
                     </div>
                   </div>
@@ -812,7 +857,7 @@ onBeforeUnmount(() => {
               <div v-if="!balancesForUI.length && !loadingProfile" class="text-[11px] text-slate-500 dark:text-slate-400">
                 No balances found.
               </div>
-              </div>
+            </div>
           </div>
         </div>
 
@@ -870,21 +915,13 @@ onBeforeUnmount(() => {
 
                     <div class="date-right-slot">
                       <div v-if="!isMA && form.startDate && form.endDate && form.startDate === form.endDate" class="chip-row">
-                        <button type="button" class="sq-chip" :class="form.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="toggleSingleHalf('AM')">
-                          AM
-                        </button>
-                        <button type="button" class="sq-chip" :class="form.singleHalf === 'PM' ? 'sq-chip-on' : ''" @click="toggleSingleHalf('PM')">
-                          PM
-                        </button>
+                        <button type="button" class="sq-chip" :class="form.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="toggleSingleHalf('AM')">AM</button>
+                        <button type="button" class="sq-chip" :class="form.singleHalf === 'PM' ? 'sq-chip-on' : ''" @click="toggleSingleHalf('PM')">PM</button>
                       </div>
 
                       <div v-else-if="!isMA && isMultiDay" class="chip-row">
-                        <button type="button" class="sq-chip" :class="form.startHalfPart === 'AM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('start', 'AM')">
-                          AM
-                        </button>
-                        <button type="button" class="sq-chip" :class="form.startHalfPart === 'PM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('start', 'PM')">
-                          PM
-                        </button>
+                        <button type="button" class="sq-chip" :class="form.startHalfPart === 'AM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('start', 'AM')">AM</button>
+                        <button type="button" class="sq-chip" :class="form.startHalfPart === 'PM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('start', 'PM')">PM</button>
                       </div>
 
                       <div v-else class="slot-placeholder"></div>
@@ -907,12 +944,8 @@ onBeforeUnmount(() => {
 
                     <div class="date-right-slot">
                       <div v-if="!isMA && isMultiDay" class="chip-row">
-                        <button type="button" class="sq-chip" :class="form.endHalfPart === 'AM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('end', 'AM')">
-                          AM
-                        </button>
-                        <button type="button" class="sq-chip" :class="form.endHalfPart === 'PM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('end', 'PM')">
-                          PM
-                        </button>
+                        <button type="button" class="sq-chip" :class="form.endHalfPart === 'AM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('end', 'AM')">AM</button>
+                        <button type="button" class="sq-chip" :class="form.endHalfPart === 'PM' ? 'sq-chip-on' : ''" @click="toggleEdgeHalf('end', 'PM')">PM</button>
                       </div>
                       <div v-else class="slot-placeholder"></div>
                     </div>
@@ -958,8 +991,17 @@ onBeforeUnmount(() => {
               <!-- Evidence (only when type selected) -->
               <div v-if="form.leaveTypeCode" class="ui-card p-3">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Evidence (Optional)</div>
-                  <span class="ui-badge ui-badge-info text-[10px]">{{ evidenceFiles.length }} file(s)</span>
+                  <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">
+                    Evidence ({{ attachmentRequired ? 'Required' : 'Optional' }})
+                  </div>
+
+                  <span class="ui-badge text-[10px]" :class="attachmentRequired ? 'ui-badge-rose' : 'ui-badge-info'">
+                    {{ evidenceFiles.length }} file(s) {{ attachmentRequired ? '• Required' : '• Optional' }}
+                  </span>
+                </div>
+
+                <div v-if="attachmentRequired" class="mt-2 text-[11px] font-semibold text-rose-600 dark:text-rose-300">
+                  Attachment is required for this request.
                 </div>
 
                 <div class="mt-3">
@@ -1188,5 +1230,12 @@ onBeforeUnmount(() => {
 .sq-chip-on {
   @apply border-sky-300 bg-sky-50 text-sky-800
          dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200;
+}
+
+.al-remain-pos {
+  @apply text-emerald-600 dark:text-emerald-300;
+}
+.al-remain-neg {
+  @apply text-rose-600 dark:text-rose-300;
 }
 </style>
