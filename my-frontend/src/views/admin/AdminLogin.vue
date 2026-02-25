@@ -45,36 +45,56 @@ async function submit() {
       timeout: 2500,
     })
 
-    const role   = auth.user?.role
     const portal = route.meta?.portal || 'admin' // 'admin' or 'leave'
 
-    // ✅ LEAVE PORTAL ROUTING (updated for LEAVE_COO)
+    // ✅ support multi-role: user.role + user.roles[]
+    const roles = [
+      ...(Array.isArray(auth.user?.roles) ? auth.user.roles : []),
+      ...(auth.user?.role ? [auth.user.role] : []),
+    ].map(r => String(r || '').toUpperCase())
+
+    const PRIORITY = [
+      'LEAVE_ADMIN', 'LEAVE_COO', 'LEAVE_GM', 'LEAVE_MANAGER', 'LEAVE_USER',
+      'ROOT_ADMIN', 'ADMIN', 'CHEF', 'DRIVER', 'MESSENGER', 'EMPLOYEE',
+    ]
+    const role = PRIORITY.find(p => roles.includes(p)) || (roles[0] || '')
+
+    // ✅ LEAVE PORTAL ROUTING (supports ?next=...)
     if (portal === 'leave') {
+      const nextName = String(route.query?.next || '').trim()
+
+      // 🔥 if Greeting clicked a module → go directly there
+      if (nextName) {
+        router.replace({ name: nextName })
+        return
+      }
+
+      // Default landing by leave role
       if (role === 'LEAVE_ADMIN' || role === 'ADMIN') {
-        router.push({ name: 'leave-admin-types' })
+        router.replace({ name: 'leave-admin-types' })
       } else if (role === 'LEAVE_MANAGER') {
-        router.push({ name: 'leave-manager-inbox' })
+        router.replace({ name: 'leave-manager-inbox' })
       } else if (role === 'LEAVE_GM') {
-        router.push({ name: 'leave-gm-inbox' })
+        router.replace({ name: 'leave-gm-inbox' })
       } else if (role === 'LEAVE_COO') {
-        router.push({ name: 'leave-coo-inbox' })
+        router.replace({ name: 'leave-coo-inbox' })
       } else if (role === 'LEAVE_USER') {
-        router.push({ name: 'leave-user-request' })
+        router.replace({ name: 'leave-user-request' })
       } else {
-        router.push({ name: 'employee-request' })
+        router.replace({ name: 'employee-request' })
       }
       return
     }
 
     // ✅ ADMIN PORTAL ROUTING
     if (role === 'CHEF') {
-      router.push({ name: 'chef-requests' })
+      router.replace({ name: 'chef-requests' })
     } else if (role === 'DRIVER') {
-      router.push({ name: 'driver-car-booking' })
+      router.replace({ name: 'driver-car-booking' })
     } else if (role === 'MESSENGER') {
-      router.push({ name: 'messenger-assignment' })
+      router.replace({ name: 'messenger-assignment' })
     } else {
-      router.push({ name: 'admin-requests' })
+      router.replace({ name: 'admin-requests' })
     }
   } catch (e) {
     const msg = e?.response?.data?.message || e.message || 'Login failed.'

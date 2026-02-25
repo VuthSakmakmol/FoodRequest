@@ -6,26 +6,19 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const servicesRef = ref(null)
 
-/* Small helper */
 const go = (name) => router.push({ name })
 
-/* Always target employee layout for actions */
 const goFood = () => go('employee-request')
 const goCar  = () => go('employee-car-booking')
-
-/* Login button → go to login page (from there they choose role/layout by account) */
 const goLogin = () => go('admin-login')
 
-/* Leave Request (Expat) → dedicated leave login */
-const goLeave = () => go('leave-login')
+const goLeaveRequest = () => go('leave-start-request')
+const goSwapDay      = () => go('leave-start-swap-day')
+const goForgetScan   = () => go('leave-start-forget-scan')
 
-/* Scroll to services; if missing, fallback to employee food page */
 const scrollToServices = () => {
-  if (servicesRef.value) {
-    servicesRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  } else {
-    goFood()
-  }
+  if (servicesRef.value) servicesRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  else goFood()
 }
 </script>
 
@@ -40,14 +33,15 @@ const scrollToServices = () => {
              bg-gradient-to-r from-sky-500 via-indigo-500 to-emerald-500
              text-white shadow-lg"
     >
-      <!-- subtle radial accent -->
       <div
         class="pointer-events-none absolute inset-0 opacity-40 mix-blend-screen
                bg-[radial-gradient(circle_at_0%_0%,rgba(248,250,252,0.5),transparent_55%),radial-gradient(circle_at_100%_0%,rgba(224,231,255,0.5),transparent_55%)]"
       />
 
-      <div class="relative z-10 max-w-6xl mx-auto grid gap-8 md:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)] items-center">
-        <!-- Left: content -->
+      <div
+        class="relative z-10 max-w-6xl mx-auto grid gap-8
+               md:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)] items-center"
+      >
         <div>
           <p class="text-[11px] sm:text-xs uppercase tracking-[0.38em] text-sky-100/90 mb-3">
             Trax Apparel Cambodia
@@ -62,12 +56,11 @@ const scrollToServices = () => {
           <p class="text-sm sm:text-base text-sky-50/95 max-w-xl">
             Order meals, book transportation, and manage expat leave —
             all in one place.
-            <span class="block mt-1 text-xs sm:text-sm text-sky-100 km-font">
+            <span class="block mt-1 text-xs sm:text-sm text-sky-100 font-kh" lang="km">
               សេវាកម្មស្នើសុំទាំងអស់ នៅក្នុងប្រព័ន្ធតែមួយ។
             </span>
           </p>
 
-          <!-- CTA buttons -->
           <div class="mt-5 flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -75,7 +68,7 @@ const scrollToServices = () => {
               class="inline-flex items-center gap-2 rounded-xl bg-white text-slate-900 text-sm font-semibold px-4 py-2.5
                      shadow-[0_14px_35px_rgba(15,23,42,0.35)] hover:bg-slate-50 active:scale-[0.99] transition"
             >
-              <font-awesome-icon icon="user" class="text-sky-500" />
+              <i class="fa-solid fa-user text-sky-500"></i>
               <span>Login</span>
             </button>
 
@@ -86,10 +79,10 @@ const scrollToServices = () => {
                      bg-white/10 hover:bg-white/15 backdrop-blur-sm transition"
             >
               <span>Explore services</span>
+              <i class="fa-solid fa-arrow-down text-[12px] opacity-90"></i>
             </button>
           </div>
 
-          <!-- quick badges -->
           <div class="mt-4 flex flex-wrap gap-2 text-[11px] sm:text-xs">
             <div class="inline-flex items-center gap-1.5 rounded-full bg-sky-900/30 px-3 py-1 border border-sky-100/30">
               <span class="h-1.5 w-1.5 rounded-full bg-emerald-300" />
@@ -106,7 +99,7 @@ const scrollToServices = () => {
           </div>
         </div>
 
-        <!-- Right: simple “dashboard” style preview -->
+        <!-- Right preview -->
         <div class="hidden md:block">
           <div
             class="relative rounded-2xl bg-slate-950/10 backdrop-blur-md border border-sky-100/30
@@ -127,32 +120,29 @@ const scrollToServices = () => {
               <div class="rounded-xl bg-slate-950/40 border border-sky-100/15 px-3 py-2">
                 <p class="text-sky-100/70 mb-1">Food orders</p>
                 <p class="text-base font-bold text-white">128</p>
-                <p class="text-[10px] text-emerald-200 mt-0.5">+12 today</p>
               </div>
               <div class="rounded-xl bg-slate-950/40 border border-emerald-100/15 px-3 py-2">
                 <p class="text-sky-100/70 mb-1">Vehicle Reservation</p>
                 <p class="text-base font-bold text-white">36</p>
-                <p class="text-[10px] text-emerald-200 mt-0.5">3 in progress</p>
               </div>
               <div class="rounded-xl bg-slate-950/40 border border-amber-100/15 px-3 py-2">
                 <p class="text-sky-100/70 mb-1">Leave (expat)</p>
                 <p class="text-base font-bold text-white">9</p>
-                <p class="text-[10px] text-amber-200 mt-0.5">2 pending</p>
               </div>
             </div>
 
             <div class="mt-3 text-[10px] text-sky-100/80 flex items-center justify-between">
               <span>Powered by Trax IT</span>
-              <span>Real-time dashboard sample</span>
+              <span>Dashboard sample</span>
             </div>
           </div>
         </div>
       </div>
     </header>
 
-    <!-- MAIN CONTENT -->
+    <!-- MAIN -->
     <main class="flex-1">
-      <!-- SERVICES SECTION -->
+      <!-- SERVICES -->
       <section ref="servicesRef" class="px-4 sm:px-8 py-6 sm:py-8">
         <div class="max-w-6xl mx-auto">
           <div class="mb-4 sm:mb-6">
@@ -164,209 +154,231 @@ const scrollToServices = () => {
             </p>
           </div>
 
-          <div class="grid gap-4 md:grid-cols-2">
+          <!-- ✅ 1 col mobile / 2 col sm / 3 col lg -->
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <!-- Card template: icon + title + status -->
+
             <!-- Food Booking -->
             <button
               type="button"
               @click="goFood"
               class="group text-left rounded-2xl border border-slate-200 bg-white/90
-                     hover:border-sky-300 hover:shadow-xl hover:bg-white
-                     dark:bg-slate-900/80 dark:border-slate-600
+                     hover:border-sky-300 hover:shadow-lg hover:bg-white
+                     dark:bg-slate-900/80 dark:border-slate-700
                      dark:hover:border-sky-400/80 dark:hover:bg-slate-900
-                     transition overflow-hidden"
+                     transition overflow-hidden w-full h-[98px]"
             >
-              <div class="flex gap-4 items-center p-4 sm:p-5">
-                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-rose-400 text-slate-900 shadow-md">
-                  <font-awesome-icon icon="utensils" class="text-lg" />
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-rose-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-utensils text-[22px]"></i>
                 </div>
 
-                <div class="flex-1 space-y-1">
+                <div class="min-w-0 flex-1">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">
+                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
                       Food Booking
-                    </span>
-                    <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
+                    </p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
                       Canteen
                     </span>
                   </div>
                 </div>
-
-                <div class="hidden sm:block text-slate-400 group-hover:text-sky-500 transition">
-                  <font-awesome-icon icon="home" class="text-sm" />
-                </div>
               </div>
             </button>
 
-            <!-- Car Booking -->
+            <!-- Vehicle Reservation -->
             <button
               type="button"
               @click="goCar"
               class="group text-left rounded-2xl border border-slate-200 bg-white/90
-                     hover:border-emerald-300 hover:shadow-xl hover:bg-white
-                     dark:bg-slate-900/80 dark:border-slate-600
+                     hover:border-emerald-300 hover:shadow-lg hover:bg-white
+                     dark:bg-slate-900/80 dark:border-slate-700
                      dark:hover:border-emerald-400/80 dark:hover:bg-slate-900
-                     transition overflow-hidden"
+                     transition overflow-hidden w-full h-[98px]"
             >
-              <div class="flex gap-4 items-center p-4 sm:p-5">
-                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-sky-400 text-slate-900 shadow-md">
-                  <font-awesome-icon icon="car" class="text-lg" />
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-sky-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-car text-[22px]"></i>
                 </div>
 
-                <div class="flex-1 space-y-1">
+                <div class="min-w-0 flex-1">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">
+                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
                       Vehicle Reservation
-                    </span>
-                    <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
-                      Transportation
+                    </p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
+                      Transport
                     </span>
                   </div>
-                </div>
-
-                <div class="hidden sm:block text-slate-400 group-hover:text-emerald-500 transition">
-                  <font-awesome-icon icon="home" class="text-sm" />
                 </div>
               </div>
             </button>
 
-            <!-- Leave Request for Expat -->
+            <!-- Leave Request -->
             <button
               type="button"
-              @click="goLeave"
+              @click="goLeaveRequest"
               class="group text-left rounded-2xl border border-slate-200 bg-white/90
-                     hover:border-amber-300 hover:shadow-xl hover:bg-white
-                     dark:bg-slate-900/80 dark:border-slate-600
+                     hover:border-amber-300 hover:shadow-lg hover:bg-white
+                     dark:bg-slate-900/80 dark:border-slate-700
                      dark:hover:border-amber-400/80 dark:hover:bg-slate-900
-                     transition overflow-hidden"
+                     transition overflow-hidden w-full h-[98px]"
             >
-              <div class="flex gap-4 items-center p-4 sm:p-5">
-                <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-sky-400 text-slate-900 shadow-md">
-                  <span class="text-sm font-semibold">LV</span>
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-sky-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-calendar-check text-[22px]"></i>
                 </div>
 
-                <div class="flex-1 space-y-1">
+                <div class="min-w-0 flex-1">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="text-sm sm:text-base font-semibold text-slate-900 dark:text-slate-50">
-                      Leave Request (Expat)
-                    </span>
-                    <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2 py-0.5 text-[11px] font-medium">
-                      Expat Portal
+                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                      Leave Request
+                    </p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
+                      Expat
                     </span>
                   </div>
-                </div>
-
-                <div class="hidden sm:block text-slate-400 group-hover:text-amber-500 transition">
-                  <font-awesome-icon icon="home" class="text-sm" />
                 </div>
               </div>
             </button>
 
-            <!-- Booking Meeting Room (coming soon) -->
-            <div
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
-                     dark:bg-slate-900/60 dark:border-slate-700/80
-                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
+            <!-- Swap Working Day -->
+            <button
+              type="button"
+              @click="goSwapDay"
+              class="group text-left rounded-2xl border border-slate-200 bg-white/90
+                     hover:border-indigo-300 hover:shadow-lg hover:bg-white
+                     dark:bg-slate-900/80 dark:border-slate-700
+                     dark:hover:border-indigo-400/80 dark:hover:bg-slate-900
+                     transition overflow-hidden w-full h-[98px]"
             >
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-emerald-400 text-slate-900 shadow-md">
-                <span class="text-sm font-semibold">MR</span>
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-400 to-emerald-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-right-left text-[22px]"></i>
+                </div>
+
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                      Swap Working Day
+                    </p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
+                      Expat
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div class="flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
-                    Booking Meeting Room
-                  </span>
-                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
-                    In development
-                  </span>
+            </button>
+
+            <!-- Forget Scan -->
+            <button
+              type="button"
+              @click="goForgetScan"
+              class="group text-left rounded-2xl border border-slate-200 bg-white/90
+                     hover:border-rose-300 hover:shadow-lg hover:bg-white
+                     dark:bg-slate-900/80 dark:border-slate-700
+                     dark:hover:border-rose-400/80 dark:hover:bg-slate-900
+                     transition overflow-hidden w-full h-[98px]"
+            >
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-fingerprint text-[22px]"></i>
+                </div>
+
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                      Forget Scan
+                    </p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
+                      Expat
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </button>
+
+            <!-- Coming soon cards -->
+            <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-400 to-emerald-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-people-roof text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-700 dark:text-slate-100 truncate">Meeting Room</p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2.5 py-1 text-[11px] font-semibold">
+                      In dev
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- OT Approve (in development) -->
-            <div
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
-                     dark:bg-slate-900/60 dark:border-slate-700/80
-                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
-            >
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-rose-400 to-amber-400 text-slate-900 shadow-md">
-                <span class="text-sm font-semibold">OT</span>
-              </div>
-              <div class="flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
-                    OT Approve
-                  </span>
-                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
-                    In development
-                  </span>
+            <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-clock text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-700 dark:text-slate-100 truncate">OT Approve</p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2.5 py-1 text-[11px] font-semibold">
+                      In dev
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Factory Security (in development) -->
-            <div
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
-                     dark:bg-slate-900/60 dark:border-slate-700/80
-                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
-            >
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-slate-400 to-emerald-400 text-slate-900 shadow-md">
-                <span class="text-sm font-semibold">FS</span>
-              </div>
-              <div class="flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
-                    Factory Security
-                  </span>
-                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
-                    In development
-                  </span>
+            <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-400 to-emerald-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-shield-halved text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-700 dark:text-slate-100 truncate">Factory Security</p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2.5 py-1 text-[11px] font-semibold">
+                      In dev
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Auto Email for New comer (in development) -->
-            <div
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
-                     dark:bg-slate-900/60 dark:border-slate-700/80
-                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
-            >
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-sky-400 to-indigo-400 text-slate-900 shadow-md">
-                <span class="text-sm font-semibold">AE</span>
-              </div>
-              <div class="flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
-                    Auto Email for New comer
-                  </span>
-                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
-                    In development
-                  </span>
+            <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-indigo-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-envelope text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-700 dark:text-slate-100 truncate">Auto Email</p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2.5 py-1 text-[11px] font-semibold">
+                      In dev
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- Stationary management (in development) -->
-            <div
-              class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80
-                     dark:bg-slate-900/60 dark:border-slate-700/80
-                     text-left p-4 sm:p-5 flex gap-4 items-center opacity-80"
-            >
-              <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-400 to-amber-400 text-slate-900 shadow-md">
-                <span class="text-sm font-semibold">SM</span>
-              </div>
-              <div class="flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm sm:text-base font-semibold text-slate-700 dark:text-slate-100">
-                    Stationary management
-                  </span>
-                  <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2 py-0.5 text-[11px] font-semibold">
-                    In development
-                  </span>
+            <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
+              <div class="h-full px-5 py-4 flex items-center gap-4">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 to-amber-400 text-slate-900 shadow-md">
+                  <i class="fa-solid fa-box-archive text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-base font-extrabold text-slate-700 dark:text-slate-100 truncate">Stationary</p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2.5 py-1 text-[11px] font-semibold">
+                      In dev
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            
           </div>
         </div>
       </section>
@@ -375,7 +387,7 @@ const scrollToServices = () => {
       <section class="px-4 sm:px-8 pb-6 sm:pb-8">
         <div class="max-w-6xl mx-auto">
           <div class="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:bg-slate-900/80 dark:border-slate-700">
-            <div class="grid gap-2 sm:grid-cols-2 text-xs sm:text-sm">
+            <div class="grid grid-cols-2 gap-2 text-[11px] sm:text-sm">
               <div class="inline-flex items-center gap-2 rounded-xl bg-white/80 px-3 py-2 shadow-sm border border-slate-200 dark:bg-slate-800 dark:border-slate-600">
                 <span class="h-1.5 w-1.5 rounded-full bg-sky-500" />
                 <span>Telegram alerts for key roles (Admin, Chef, Driver, Messenger)</span>
@@ -405,11 +417,3 @@ const scrollToServices = () => {
     </footer>
   </div>
 </template>
-
-<style scoped>
-.km-font {
-  font-family: "Kantumruy Pro", system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Khmer OS Siemreap",
-    sans-serif;
-}
-</style>

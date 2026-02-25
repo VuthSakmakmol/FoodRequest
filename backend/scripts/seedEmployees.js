@@ -21,33 +21,32 @@ const INPUT_PATH = ARG_PATH || DEFAULT_JSON
 
 /* ───────── Normalize helper ───────── */
 function normalizeRow(row) {
-  // ID
   const employeeId = String(
     row.employeeId ?? row.EmployeeID ?? row.EMPLOYEE_ID ?? row.ID ?? row.Id ?? ''
   ).trim()
 
-  // Name
   const name = (
     row.name ?? row.Name ?? row.FullName ?? row['Full Name'] ?? row['Employee Name'] ?? ''
   ).toString().trim()
 
-  // Department
   const department = (
     row.department ?? row.Department ?? row.Dept ?? row['Department Name'] ?? 'Unknown'
   ).toString().trim()
 
-  // Contact number
+  // ✅ Position (add this)
+  const position = (
+    row.position ?? row.Position ?? row.JobTitle ?? row['Job Title'] ?? row.Title ?? ''
+  ).toString().trim()
+
   const contactNumber = (
     row.contactNumber ?? row.ContactNumber ?? row['Contact Number'] ??
     row.Phone ?? row.Mobile ?? row['Phone Number'] ?? ''
   ).toString().trim()
 
-  // Telegram Chat ID (✅ added)
   const telegramChatId = (
     row.telegramChatId ?? row.TelegramChatId ?? row.telegram ?? ''
   ).toString().trim()
 
-  // Active flag
   let isActive = row.isActive ?? row.Active ?? row.active ?? row.Status
   if (typeof isActive === 'string') {
     const s = isActive.toLowerCase().trim()
@@ -58,8 +57,8 @@ function normalizeRow(row) {
     isActive = true
   }
 
-  // Return full normalized object
-  return { employeeId, name, department, contactNumber, isActive, telegramChatId }
+  // ✅ Return position too
+  return { employeeId, name, department, position, contactNumber, isActive, telegramChatId }
 }
 
 /* ───────── Load source data ───────── */
@@ -1090,7 +1089,7 @@ function loadEmployees() {
     "employeeId": "52520351",
     "name": "Vuth Sakmakmol",
     "department": "HR and Payroll",
-    "position": "",
+    "position": "Human Resource Share Services",
     "contactNumber": "0979866163",
     "telegramChatId": "7163451169",
     "isActive": true

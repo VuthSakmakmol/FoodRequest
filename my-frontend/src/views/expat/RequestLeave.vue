@@ -803,6 +803,12 @@ onBeforeUnmount(() => {
                     {{ me.department || '—' }}
                   </div>
                 </div>
+                <div class="min-w-0">
+                  <div class="text-[12px] font-extrabold text-slate-700 dark:text-slate-200">Position</div>
+                  <div class="text-[14px] font-black leading-snug text-slate-900 break-words dark:text-slate-50">
+                    {{ me.position || '—' }}
+                  </div>
+                </div>
               </div>
             </div>
 

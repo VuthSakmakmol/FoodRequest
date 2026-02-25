@@ -70,9 +70,23 @@ const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeave
 // COO views
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
 
+// Helper for direct
+function startLeaveRoute(path, name, targetName) {
+  return {
+    path,
+    name,
+    meta: { public: true, portal: 'leave' },
+    beforeEnter: () => {
+      const auth = useAuth()
+      const roles = normalizeRoles(auth.user)
 
-// Manager/GM Profile views
-
+      if (!auth.token || !roles.length) {
+        return { name: 'leave-login', query: { next: targetName } }
+      }
+      return { name: targetName }
+    },
+  }
+}
 
 /* ─────────────────────────────────────────────
  * Roles helpers (supports user.role + user.roles[])
@@ -153,6 +167,10 @@ const router = createRouter({
     /* ──────────────────────────────
      * Public landing
      * ────────────────────────────── */
+    // Leave feature "start" routes (public links from Greeting)
+    startLeaveRoute('/leave/start/request', 'leave-start-request', 'leave-user-request'),
+    startLeaveRoute('/leave/start/swap-day', 'leave-start-swap-day', 'leave-user-swap-day-new'),
+    startLeaveRoute('/leave/start/forget-scan', 'leave-start-forget-scan', 'leave-user-forget-scan'),
     {
       path: '/',
       name: 'greeting',

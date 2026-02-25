@@ -4,8 +4,8 @@
    ✅ Dark mode via `.dark` on <html>
 */
 
-/* ✅ Optional Google fonts (keep only if you actually use them) */
-/* @import url("https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&family=Manrope:wght@400;500;600;700&family=Be+Vietnam+Pro:wght@400;500;600;700&display=swap"); */
+/* ✅ Khmer font (Google) */
+@import url("https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
@@ -80,9 +80,9 @@ Base Tokens (Light/Dark)
 ───────────────────────────────────────────────────────────── */
 @layer base {
   :root {
-    /* Typography (✅ single source of truth) */
-    --ui-font: "Arial Nova", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial,
-      "Noto Sans";
+    /* ✅ Typography */
+    --ui-font: "Arial Nova", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans";
+    --ui-font-kh: "Kantumruy Pro";
 
     /* ✅ Radii (SMALLER, compact look) */
     --ui-r-xs: 8px;
@@ -159,7 +159,17 @@ Base Tokens (Light/Dark)
   #app {
     height: 100%;
     width: 100%;
-    font-family: var(--ui-font) !important;
+    font-family: var(--ui-font) !important; /* ✅ Arial Nova default */
+  }
+
+  /* ✅ Khmer override (use Kantumruy Pro only where you want) */
+  .font-kh {
+    font-family: var(--ui-font-kh) !important;
+  }
+
+  /* ✅ Optional: auto apply Khmer font when element has lang="km" */
+  :where([lang="km"]) {
+    font-family: var(--ui-font-kh) !important;
   }
 
   html {
@@ -389,7 +399,7 @@ Base Tokens (Light/Dark)
   }
 
   .ui-btn-emerald {
-    /* example: make it blue */
+    /* ✅ example: make it blue */
     background: rgb(var(--ui-primary));
     border-color: rgb(var(--ui-primary) / 0.7);
     color: #fff;
