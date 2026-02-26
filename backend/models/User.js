@@ -50,6 +50,9 @@ const UserSchema = new mongoose.Schema(
     // Telegram private DM linkage
     telegramChatId: { type: String, default: '' },
     telegramUsername: { type: String, default: '' },
+
+    passwordChangedAt: { type: Date, default: null },
+    passwordVersion: { type: Number, default: 0 },
   },
   { timestamps: true }
 )
@@ -104,9 +107,19 @@ UserSchema.pre('validate', function (next) {
   }
 })
 
+
+UserSchema.methods.setPassword = async function (plain) {
+  const next = String(plain || '')
+  this.passwordHash = await bcrypt.hash(next, 10)
+  this.passwordChangedAt = new Date()
+  this.passwordVersion = Number(this.passwordVersion || 0) + 1
+}
+
 UserSchema.methods.verifyPassword = function (plain) {
   return bcrypt.compare(String(plain || ''), this.passwordHash)
 }
+
+
 
 UserSchema.statics.ROLES = ROLES
 

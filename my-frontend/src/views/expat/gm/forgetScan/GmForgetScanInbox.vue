@@ -453,9 +453,6 @@ onBeforeUnmount(() => {
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="min-w-[240px]">
               <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
-              <div class="mt-1 text-[11px] text-white/80">
-                Showing only requests where GM is involved (ApprovalMode: GM_AND_COO).
-              </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>

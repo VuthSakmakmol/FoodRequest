@@ -1,5 +1,6 @@
 // backend/middlewares/auth.js
 const jwt = require('jsonwebtoken')
+const User = require('../models/User')
 
 function normalizeRole(r) {
   return String(r || '').trim().toUpperCase()
@@ -21,6 +22,7 @@ function isPublic(req) {
 
   // auth login should stay public
   if (url.startsWith('/api/auth/login')) return true
+  if (url.startsWith('/api/auth/chef/login')) return true // optional if you use it
 
   // all public APIs
   if (url.startsWith('/api/public/')) return true
@@ -31,7 +33,16 @@ function isPublic(req) {
   return false
 }
 
-exports.requireAuth = (req, res, next) => {
+/**
+ * ✅ requireAuth (with passwordVersion revoke)
+ * - verifies JWT
+ * - normalizes roles
+ * - checks DB:
+ *    - user exists
+ *    - user active
+ *    - token.passwordVersion matches user.passwordVersion (revokes old sessions)
+ */
+exports.requireAuth = async (req, res, next) => {
   // ✅ allow public endpoints
   if (isPublic(req)) return next()
 
@@ -66,6 +77,39 @@ exports.requireAuth = (req, res, next) => {
     if (!payload.role && payload.roles.length) payload.role = payload.roles[0]
 
     console.log('[MW] requireAuth user=', payload.loginId, 'roles=', payload.roles)
+
+    // ✅ token revocation check
+    const userId = String(payload.sub || '').trim()
+    if (!userId) {
+      console.log('[MW] requireAuth ❌ missing payload.sub')
+      return res.status(401).json({ message: 'Invalid token' })
+    }
+
+    const u = await User.findById(userId).select('isActive passwordVersion').lean()
+    if (!u) {
+      console.log('[MW] requireAuth ❌ user not found for sub=', userId)
+      return res.status(401).json({ message: 'Invalid token' })
+    }
+
+    if (u.isActive === false) {
+      console.log('[MW] requireAuth ❌ account disabled loginId=', payload.loginId)
+      return res.status(403).json({ message: 'Account disabled' })
+    }
+
+    const tokenVer = Number(payload.passwordVersion || 0)
+    const dbVer = Number(u.passwordVersion || 0)
+
+    if (tokenVer !== dbVer) {
+      console.log(
+        '[MW] requireAuth ❌ token revoked loginId=',
+        payload.loginId,
+        'tokenVer=',
+        tokenVer,
+        'dbVer=',
+        dbVer
+      )
+      return res.status(401).json({ message: 'Session expired. Please login again.' })
+    }
 
     req.user = payload
     next()

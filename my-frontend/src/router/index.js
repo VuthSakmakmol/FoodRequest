@@ -316,6 +316,12 @@ const router = createRouter({
           component: () => import('@/views/expat/user/forgetScan/UserForgetScan.vue'),
           meta: { title: 'Expat Forget Scan' },
         },
+        {
+          path: 'change-password',
+          name: 'leave-user-change-password',
+          component: () => import('@/views/auth/ChangePassword.vue'),
+          meta: { title: 'Change Password' },
+        },
       ]
     },
 

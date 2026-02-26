@@ -822,6 +822,7 @@ exports.recalculateBalances = async (req, res) => {
    body: { password }
    - Admin sets new password directly (no old password)
 ───────────────────────────────────────────────────────────── */
+// backend/controllers/leave/leaveProfiles.admin.controller.js
 exports.resetUserPassword = async (req, res) => {
   const employeeId = s(req.params.employeeId)
   const { password } = req.body || {}
@@ -838,8 +839,16 @@ exports.resetUserPassword = async (req, res) => {
   const user = await User.findOne({ loginId })
   if (!user) throw createError(404, 'User account not found for this profile')
 
-  user.passwordHash = await bcrypt.hash(s(password), 10)
-  await user.save()
+  // ✅ IMPORTANT: use shared method -> bumps passwordVersion
+  if (typeof user.setPassword === 'function') {
+    await user.setPassword(password)
+  } else {
+    // fallback safety (if method not deployed yet)
+    user.passwordHash = await bcrypt.hash(s(password), 10)
+    user.passwordChangedAt = new Date()
+    user.passwordVersion = Number(user.passwordVersion || 0) + 1
+  }
 
+  await user.save()
   return res.json({ ok: true, loginId })
 }

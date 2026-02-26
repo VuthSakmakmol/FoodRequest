@@ -65,6 +65,7 @@ const groups = computed(() => {
         { label: 'History Leave Requested', icon: 'fa-solid fa-list-ul', to: { name: 'leave-user-my-requests' } },
         { label: 'Swap Working Day', icon: 'fa-solid fa-arrows-rotate', to: { name: 'leave-user-swap-day' } },
         { label: 'Forget Scan', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-user-forget-scan' } },
+        { label: 'Change Password', icon: 'fa-solid fa-key', to: { name: 'leave-user-change-password' } },
       ],
     })
   }

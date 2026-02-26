@@ -48,6 +48,8 @@ const signToken = (user) => {
       name: user.name || '',
       role: primary,
       roles,
+
+      passwordVersion: Number(user.passwordVersion || 0),
     },
     process.env.JWT_SECRET || 'dev_secret',
     { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
@@ -126,6 +128,7 @@ exports.login = async (req, res, next) => {
         name: user.name,
         role: primary,
         roles,
+        passwordVersion: Number(user.passwordVersion || 0),
       },
       portal: portal || null,
     })
@@ -204,6 +207,39 @@ exports.me = async (req, res, next) => {
     })
   } catch (e) {
     console.log('[AUTH] ERROR in me:', e?.message)
+    next(e)
+  }
+}
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const userId = req.user?.sub
+    const oldPassword = String(req.body?.oldPassword || '')
+    const newPassword = String(req.body?.newPassword || '')
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ message: 'oldPassword and newPassword required' })
+    }
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters' })
+    }
+    if (newPassword === oldPassword) {
+      return res.status(400).json({ message: 'New password must be different from old password' })
+    }
+
+    const user = await User.findById(userId)
+    if (!user) return res.status(404).json({ message: 'Not found' })
+    if (user.isActive === false) return res.status(403).json({ message: 'Account disabled' })
+
+    const ok = await user.verifyPassword(oldPassword)
+    if (!ok) return res.status(400).json({ message: 'Old password is incorrect' })
+
+    // ✅ bump version -> revoke sessions
+    await user.setPassword(newPassword)
+    await user.save()
+
+    return res.json({ ok: true, message: 'Password updated. Please login again.' })
+  } catch (e) {
     next(e)
   }
 }

@@ -13,5 +13,6 @@ router.post('/chef/login', (req, res, next) => {
 
 // ✅ ADMIN can create users (multi-role supported now)
 router.post('/users', requireAuth, requireRole('ADMIN'), ctrl.createUser)
+router.post('/change-password', requireAuth, ctrl.changePassword)
 
 module.exports = router
