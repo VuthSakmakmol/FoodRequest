@@ -338,7 +338,7 @@ function excelRows(list) {
     RequestTo: fmtYmd(r.requestEndDate),
     OffFrom: fmtYmd(r.offStartDate),
     OffTo: fmtYmd(r.offEndDate),
-    Files: safeFileCount(r),
+    // Files: safeFileCount(r),
     Reason: reasonText(r), //  always export reason
     // ManagerLoginId: s(r.managerLoginId),
     // GmLoginId: s(r.gmLoginId),
@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="mt-3 flex items-center justify-between gap-2" @click.stop>
+              <!-- <div class="mt-3 flex items-center justify-between gap-2" @click.stop>
                 <button
                   v-if="row.attachments?.length"
                   type="button"
@@ -578,7 +578,7 @@ onBeforeUnmount(() => {
                 <span v-else class="text-[11px] text-slate-400">No files</span>
 
                 <span class="text-[11px] text-slate-400">Tap to view</span>
-              </div>
+              </div> -->
             </article>
           </div>
 
@@ -591,7 +591,7 @@ onBeforeUnmount(() => {
                 <col :style="{ width: COL_WIDTH.mode }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
                 <col :style="{ width: COL_WIDTH.swapDate }" />
-                <col :style="{ width: COL_WIDTH.file }" />
+                <!-- <col :style="{ width: COL_WIDTH.file }" /> -->
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
               </colgroup>
@@ -603,7 +603,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Mode</th>
                   <th class="ui-th">Work (Request)</th>
                   <th class="ui-th">Swap (Off)</th>
-                  <th class="ui-th text-center">File</th>
+                  <!-- <th class="ui-th text-center">File</th> -->
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
                 </tr>
@@ -632,7 +632,7 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
 
-                  <td class="ui-td text-center" @click.stop>
+                  <!-- <td class="ui-td text-center" @click.stop>
                     <button
                       v-if="row.attachments?.length"
                       type="button"
@@ -646,7 +646,7 @@ onBeforeUnmount(() => {
                       <span class="ml-1">{{ row.attachments.length }}</span>
                     </button>
                     <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
+                  </td> -->
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
@@ -692,10 +692,10 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="flex items-center gap-2">
-            <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
+            <!-- <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
               <i class="fa-solid fa-paperclip text-[11px]" />
               Attachments
-            </button>
+            </button> -->
 
             <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
               <i class="fa-solid fa-xmark text-[11px]" />
@@ -728,14 +728,14 @@ onBeforeUnmount(() => {
 
           <div class="grid gap-3 md:grid-cols-2">
             <div class="ui-card p-3">
-              <div class="ui-section-title">Request Non-working Date(s)</div>
+              <div class="ui-section-title">Swap (Sunday or Holiday)</div>
               <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
                 {{ fmtYmd(viewItem?.requestStartDate) }} → {{ fmtYmd(viewItem?.requestEndDate) }}
               </div>
             </div>
 
             <div class="ui-card p-3">
-              <div class="ui-section-title">Compensatory Working Day(s)</div>
+              <div class="ui-section-title">To (Working Day)</div>
               <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
                 {{ fmtYmd(viewItem?.offStartDate) }} → {{ fmtYmd(viewItem?.offEndDate) }}
               </div>
@@ -757,7 +757,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ATTACHMENT PREVIEW MODAL -->
-    <AttachmentPreviewModal
+    <!-- <AttachmentPreviewModal
       v-model="filesOpen"
       :request-id="filesRequest?._id"
       title="Attachments"
@@ -767,7 +767,7 @@ onBeforeUnmount(() => {
       :delete-path="null"
       :can-delete="false"
       @refresh="refreshFilesAgain()"
-    />
+    /> -->
   </div>
 </template>
 

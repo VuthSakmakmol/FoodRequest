@@ -832,7 +832,7 @@ onBeforeUnmount(() => {
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div class="min-w-[220px]">
-              <div class="text-sm font-extrabold">My Leave Requests</div>
+              <div class="text-sm font-extrabold">History Leave Requested</div>
             </div>
 
             <!-- Controls -->
@@ -914,7 +914,6 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="flex items-center gap-2">
-                    <!-- ✅ Files (SwapDay style): only when exist -->
                     <button
                       v-if="item.attachments?.length"
                       class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"

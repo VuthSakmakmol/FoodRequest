@@ -19,6 +19,8 @@
      - MA always requires
      - BL always requires
      - Sick Leave (SP or SL) requires when requestedDays >= 3
+
+  ✅ FIX: MA end date auto = start + 89 days (90 days inclusive)
 -->
 
 <script setup>
@@ -345,6 +347,15 @@ const isMultiDay = computed(() => {
   return form.value.endDate > form.value.startDate
 })
 
+/* ✅ MA: 90 calendar days inclusive => end = start + 89 days */
+const MA_DAYS = 90
+function calcMaEnd(startYmd) {
+  if (!startYmd) return ''
+  const d = dayjs(startYmd)
+  if (!d.isValid()) return ''
+  return d.add(MA_DAYS - 1, 'day').format('YYYY-MM-DD')
+}
+
 /* ───────── Half usage derived (no checkbox) ───────── */
 const useHalf = computed(() => {
   return !!(form.value.singleHalf || form.value.startHalfPart || form.value.endHalfPart)
@@ -381,7 +392,7 @@ function countWorkingDaysInclusive(startYmd, endYmd) {
 
 /* ✅ FIX: explicit working checks */
 const startIsWorking = computed(() => isWorkingDay(form.value.startDate))
-const endIsWorking = computed(() => isWorkingDay(isMA.value ? form.value.startDate : form.value.endDate))
+const endIsWorking = computed(() => isWorkingDay(form.value.endDate))
 
 const workingRangeCount = computed(() => {
   if (!form.value.startDate || !form.value.endDate) return 0
@@ -392,9 +403,10 @@ const workingRangeCount = computed(() => {
 /* Requested days final (safe) */
 const requestedDays = computed(() => {
   const start = form.value.startDate
-  const end = isMA.value ? form.value.startDate : form.value.endDate
+  const end = form.value.endDate
   if (!start || !end) return 0
-  if (isMA.value) return 0
+
+  if (isMA.value) return MA_DAYS
 
   // backend requires start/end must be working day
   if (!isWorkingDay(start) || !isWorkingDay(end)) return 0
@@ -415,11 +427,9 @@ const requestedDays = computed(() => {
 })
 
 const requestedDaysText = computed(() => {
-  if (isMA.value) return 'MA: 90 days (auto)'
   const v = requestedDays.value
   if (!v) return '—'
-  const pretty = Number.isInteger(v) ? String(v) : String(v)
-  return `${pretty} day(s)`
+  return `${v} day(s)`
 })
 
 /* Breakdown hint */
@@ -427,7 +437,7 @@ const requestedBreakdownText = computed(() => {
   if (!form.value.leaveTypeCode) return ''
   if (!form.value.startDate || !form.value.endDate) return ''
 
-  if (isMA.value) return 'You request MA (90 days auto).'
+  if (isMA.value) return `You request MA (${MA_DAYS} calendar day(s) auto).`
 
   const start = form.value.startDate
   const end = form.value.endDate
@@ -451,11 +461,8 @@ const requestedBreakdownText = computed(() => {
   }
 
   const base = workingRangeCount.value
-  const baseStr = Number.isInteger(base) ? String(base) : String(base)
-  const totalStr = Number.isInteger(total) ? String(total) : String(total)
-
-  if (!parts.length) return `You request ${totalStr} day(s)`
-  return `You request ${totalStr} day(s) from ${baseStr} working day(s): ${parts.join(' + ')}`
+  if (!parts.length) return `You request ${total} day(s)`
+  return `You request ${total} day(s) from ${base} working day(s): ${parts.join(' + ')}`
 })
 
 /* ───────── Attachment Required Rules (MUST be AFTER form/evidence/requestedDays) ───────── */
@@ -517,7 +524,6 @@ const canSubmit = computed(() => {
   if (!form.value.leaveTypeCode) return false
   if (!form.value.startDate) return false
   if (!form.value.endDate) return false
-  if (!isMA.value && form.value.endDate < form.value.startDate) return false
 
   // MA: start must be working day, no half allowed
   if (isMA.value) {
@@ -527,6 +533,7 @@ const canSubmit = computed(() => {
     // normal: start & end must be working
     if (!startIsWorking.value || !endIsWorking.value) return false
     if (workingRangeCount.value <= 0) return false
+    if (form.value.endDate < form.value.startDate) return false
   }
 
   // ✅ attachment required rule
@@ -549,13 +556,14 @@ function resetForm() {
   formSuccess.value = ''
 }
 
+/* ✅ Dates sync + MA auto end */
 watch(
   () => [form.value.startDate, form.value.leaveTypeCode],
   () => {
     if (!form.value.startDate) return
 
     if (isMA.value) {
-      form.value.endDate = form.value.startDate
+      form.value.endDate = calcMaEnd(form.value.startDate) // ✅ 90 days inclusive
       clearAllHalf()
       return
     }
@@ -593,8 +601,9 @@ watch(
   () => form.value.leaveTypeCode,
   (v) => {
     if (!v) resetEvidence()
+
     if (String(v || '').toUpperCase() === 'MA') {
-      if (form.value.startDate) form.value.endDate = form.value.startDate
+      if (form.value.startDate) form.value.endDate = calcMaEnd(form.value.startDate) // ✅
       clearAllHalf()
     }
   }
@@ -652,7 +661,7 @@ async function submitRequest() {
     const payload = {
       leaveTypeCode: form.value.leaveTypeCode,
       startDate: form.value.startDate,
-      endDate: isMA.value ? form.value.startDate : form.value.endDate,
+      endDate: form.value.endDate, // ✅ MA already auto-calculated, normal uses chosen end
       reason: form.value.reason || '',
     }
 
@@ -770,8 +779,7 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-chart-pie" />
                 </div>
                 <div>
-                  <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">My Leave</div>
-                  <div class="text-[11px] font-semibold opacity-90">Balances</div>
+                  <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">My Balance</div>
                 </div>
               </div>
             </div>
@@ -877,7 +885,7 @@ onBeforeUnmount(() => {
                 </div>
                 <div>
                   <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Request Leave</div>
-                  <div class="text-[11px] font-semibold opacity-90">{{ isMA ? 'MA: 90 days auto' : 'Create request' }}</div>
+                  <div class="text-[11px] font-semibold opacity-90">{{ isMA ? `MA: ${MA_DAYS} days auto` : '' }}</div>
                 </div>
               </div>
 
@@ -988,7 +996,7 @@ onBeforeUnmount(() => {
                     class="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700
                            dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-200"
                   >
-                    <span class="font-extrabold">Calculation:</span>
+                    <span class="font-extrabold">Remark:</span>
                     <span class="opacity-90"> {{ requestedBreakdownText }} </span>
                   </div>
                 </div>
@@ -1093,13 +1101,11 @@ onBeforeUnmount(() => {
 /* ─────────────────────────────────────────────────────────────
    Balance Cards (Bigger + 3 per row)
 ───────────────────────────────────────────────────────────── */
-
 .balance-grid {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-
 @media (min-width: 640px) {
   .balance-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr)); /* ✅ 3 per row */
@@ -1109,15 +1115,14 @@ onBeforeUnmount(() => {
 .ui-balance-card {
   @apply rounded-2xl border border-slate-200 bg-white p-3 shadow-sm
          dark:border-slate-800 dark:bg-slate-950/40;
-
-  height: 156px; /* ✅ bigger */
+  height: 156px;
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
 .ui-balance-card-al {
-  height: 156px; /* same height, content differs */
+  height: 156px;
 }
 
 .ui-balance-head {
@@ -1150,7 +1155,6 @@ onBeforeUnmount(() => {
 .ui-balance-one {
   @apply rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-center
          dark:border-slate-800 dark:bg-slate-900/40;
-
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1169,7 +1173,6 @@ onBeforeUnmount(() => {
 .ui-balance-block {
   @apply rounded-2xl border border-slate-200 bg-slate-50 px-2 text-center
          dark:border-slate-800 dark:bg-slate-900/40;
-
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1180,14 +1183,14 @@ onBeforeUnmount(() => {
   @apply text-slate-900 dark:text-slate-50;
   font-weight: 900;
   line-height: 1;
-  font-size: clamp(26px, 3.2vw, 38px); /* ✅ bigger number */
+  font-size: clamp(26px, 3.2vw, 38px);
 }
 
 .ui-balance-num-al {
   @apply text-slate-900 dark:text-slate-50;
   font-weight: 900;
   line-height: 1;
-  font-size: clamp(28px, 3.6vw, 40px); /* ✅ bigger number */
+  font-size: clamp(28px, 3.6vw, 40px);
 }
 
 .ui-balance-sub {
@@ -1228,7 +1231,6 @@ onBeforeUnmount(() => {
          hover:bg-slate-50 active:translate-y-[0.5px]
          disabled:opacity-40 disabled:cursor-not-allowed
          dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200 dark:hover:bg-slate-900/40;
-
   width: 42px;
   height: 42px;
 }

@@ -58,11 +58,11 @@ const groups = computed(() => {
   if (canUser.value || canManager.value || canGm.value || canCoo.value) {
     out.push({
       key: 'my-leave',
-      header: 'My Leave',
+      header: 'Leave Request',
       icon: 'fa-solid fa-plane-departure',
       children: [
         { label: 'Request Leave', icon: 'fa-regular fa-calendar-plus', to: { name: 'leave-user-request' } },
-        { label: 'My Leave Requests', icon: 'fa-solid fa-list-ul', to: { name: 'leave-user-my-requests' } },
+        { label: 'History Leave Requested', icon: 'fa-solid fa-list-ul', to: { name: 'leave-user-my-requests' } },
         { label: 'Swap Working Day', icon: 'fa-solid fa-arrows-rotate', to: { name: 'leave-user-swap-day' } },
         { label: 'Forget Scan', icon: 'fa-solid fa-fingerprint', to: { name: 'leave-user-forget-scan' } },
       ],

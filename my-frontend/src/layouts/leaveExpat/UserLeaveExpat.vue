@@ -40,7 +40,7 @@ function closeMobileDrawer() {
 const groups = [
   {
     key: 'my-leave',
-    header: 'My Leave',
+    header: 'Leave',
     icon: 'fa-solid fa-plane-departure',
     children: [
       { label: 'Request Leave', icon: 'fa-regular fa-calendar-plus', to: { name: 'leave-user-request' } },

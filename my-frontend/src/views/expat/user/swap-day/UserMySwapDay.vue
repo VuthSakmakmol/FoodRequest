@@ -281,7 +281,7 @@ onBeforeUnmount(() => {
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div>
-              <div class="text-sm font-extrabold">My Swap Working Day</div>
+              <div class="text-sm font-extrabold">Swap Working Day</div>
             </div>
 
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_auto] md:items-end">
@@ -358,7 +358,7 @@ onBeforeUnmount(() => {
                     </button>
 
                     <!-- Files -->
-                    <button
+                    <!-- <button
                       v-if="item.attachments?.length"
                       class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
                       type="button"
@@ -367,7 +367,7 @@ onBeforeUnmount(() => {
                     >
                       <i class="fa-solid fa-paperclip text-[12px]" />
                       <span class="ml-1">{{ item.attachments.length }}</span>
-                    </button>
+                    </button> -->
                   </div>
                 </div>
               </div>
@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
-                  <th class="ui-th text-center">File</th>
+                  <!-- <th class="ui-th text-center">File</th> -->
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
                   <th class="ui-th text-center">Actions</th>
@@ -420,7 +420,7 @@ onBeforeUnmount(() => {
                   <td class="ui-td">{{ item.offStartDate }} → {{ item.offEndDate }}</td>
 
                   <!-- File column -->
-                  <td class="ui-td text-center">
+                  <!-- <td class="ui-td text-center">
                     <button
                       v-if="item.attachments?.length"
                       class="ui-btn ui-btn-soft ui-btn-xs"
@@ -432,7 +432,7 @@ onBeforeUnmount(() => {
                       <span class="ml-1">{{ item.attachments.length }}</span>
                     </button>
                     <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
+                  </td> -->
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(item.status)">
@@ -490,7 +490,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex items-center gap-2">
-          <button
+          <!-- <button
             v-if="viewItem?.attachments?.length"
             class="ui-btn ui-btn-soft ui-btn-xs"
             type="button"
@@ -499,7 +499,7 @@ onBeforeUnmount(() => {
           >
             <i class="fa-solid fa-paperclip text-[11px]" />
             Attachments
-          </button>
+          </button> -->
 
           <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeDetail">
             <i class="fa-solid fa-xmark text-[11px]" />
@@ -530,14 +530,14 @@ onBeforeUnmount(() => {
 
         <div class="grid gap-3 md:grid-cols-2">
           <div class="ui-card p-3">
-            <div class="ui-section-title">Request Working Date</div>
+            <div class="ui-section-title">Swap (Sunday or Holiday)</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
               {{ fmtYmd(viewItem?.requestStartDate) }} → {{ fmtYmd(viewItem?.requestEndDate) }}
             </div>
           </div>
 
           <div class="ui-card p-3">
-            <div class="ui-section-title">Compensatory Day Off</div>
+            <div class="ui-section-title">To (Working Day)</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
               {{ fmtYmd(viewItem?.offStartDate) }} → {{ fmtYmd(viewItem?.offEndDate) }}
             </div>
@@ -594,7 +594,7 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- Attachment Preview Modal -->
-  <AttachmentPreviewModal
+  <!-- <AttachmentPreviewModal
     v-model="filesOpen"
     :request-id="filesRequest?._id"
     title="Attachments"
@@ -604,7 +604,7 @@ onBeforeUnmount(() => {
     :delete-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}`"
     :can-delete="canEditOrCancel(filesRequest)"
     @refresh="refreshFilesAgain()"
-  />
+  /> -->
 
   <!-- Confirm cancel -->
   <ConfirmDialog

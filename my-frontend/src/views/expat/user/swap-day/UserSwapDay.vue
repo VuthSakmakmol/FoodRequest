@@ -389,7 +389,7 @@ onBeforeUnmount(() => {
           <div class="flex items-end justify-between gap-3">
             <div class="min-w-0">
               <div class="text-sm font-extrabold">
-                {{ isEdit ? 'Edit Swap Working Day' : 'New Swap Working Day' }}
+                {{ isEdit ? 'Edit Swap Working Day' : 'Swap Working Day' }}
               </div>
               <div v-if="isEdit" class="mt-0.5 text-[11px] text-white/85">
                 Status: <span class="font-extrabold">{{ status || '—' }}</span>
@@ -478,7 +478,7 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div v-if="form.compStart && form.requestStart && !isDurationValid" class="text-[11px] text-rose-600 font-semibold">
-                  Compensatory days must equal request days.
+                  Working day days must equal request days.
                 </div>
               </div>
             </div>
@@ -498,7 +498,7 @@ onBeforeUnmount(() => {
               </div>
 
               <!-- Attachments (NEW + EDIT) -->
-              <div class="ui-card p-4 space-y-3">
+              <!-- <div class="ui-card p-4 space-y-3">
                 <div class="flex items-center justify-between gap-2">
                   <div class="ui-section-title">Attachments</div>
 
@@ -514,7 +514,6 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
 
-                <!-- upload input -->
                 <input
                   id="fileInputSwap"
                   type="file"
@@ -547,7 +546,6 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
 
-                <!-- queued list -->
                 <div v-if="queuedFiles.length" class="space-y-2">
                   <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
                     Selected (will upload when you {{ isEdit ? 'Save' : 'Submit' }})
@@ -575,7 +573,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <!-- existing quick info -->
+          
                 <div v-if="existingAttachments.length" class="ui-frame p-3">
                   <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
                     Existing files: {{ existingAttachments.length }}
@@ -588,7 +586,7 @@ onBeforeUnmount(() => {
                 <div v-else class="text-[11px] text-slate-500 dark:text-slate-400">
                   No existing attachments.
                 </div>
-              </div>
+              </div> -->
             </div>
 
             <!-- footer buttons -->

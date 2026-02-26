@@ -13,8 +13,7 @@ const goCar  = () => go('employee-car-booking')
 const goLogin = () => go('admin-login')
 
 const goLeaveRequest = () => go('leave-start-request')
-const goSwapDay      = () => go('leave-start-swap-day')
-const goForgetScan   = () => go('leave-start-forget-scan')
+
 
 const scrollToServices = () => {
   if (servicesRef.value) servicesRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -232,7 +231,7 @@ const scrollToServices = () => {
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center justify-between gap-2">
                     <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
-                      Leave Request
+                      e-Leave
                     </p>
                     <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
                       Expat
@@ -242,61 +241,8 @@ const scrollToServices = () => {
               </div>
             </button>
 
-            <!-- Swap Working Day -->
-            <button
-              type="button"
-              @click="goSwapDay"
-              class="group text-left rounded-2xl border border-slate-200 bg-white/90
-                     hover:border-indigo-300 hover:shadow-lg hover:bg-white
-                     dark:bg-slate-900/80 dark:border-slate-700
-                     dark:hover:border-indigo-400/80 dark:hover:bg-slate-900
-                     transition overflow-hidden w-full h-[98px]"
-            >
-              <div class="h-full px-5 py-4 flex items-center gap-4">
-                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-400 to-emerald-400 text-slate-900 shadow-md">
-                  <i class="fa-solid fa-right-left text-[22px]"></i>
-                </div>
-
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
-                      Swap Working Day
-                    </p>
-                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
-                      Expat
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </button>
-
-            <!-- Forget Scan -->
-            <button
-              type="button"
-              @click="goForgetScan"
-              class="group text-left rounded-2xl border border-slate-200 bg-white/90
-                     hover:border-rose-300 hover:shadow-lg hover:bg-white
-                     dark:bg-slate-900/80 dark:border-slate-700
-                     dark:hover:border-rose-400/80 dark:hover:bg-slate-900
-                     transition overflow-hidden w-full h-[98px]"
-            >
-              <div class="h-full px-5 py-4 flex items-center gap-4">
-                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 text-slate-900 shadow-md">
-                  <i class="fa-solid fa-fingerprint text-[22px]"></i>
-                </div>
-
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center justify-between gap-2">
-                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
-                      Forget Scan
-                    </p>
-                    <span class="shrink-0 inline-flex items-center rounded-full bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200 px-2.5 py-1 text-[11px] font-semibold">
-                      Expat
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </button>
+            
+            
 
             <!-- Coming soon cards -->
             <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
