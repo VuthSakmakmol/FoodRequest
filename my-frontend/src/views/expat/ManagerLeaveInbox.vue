@@ -2,14 +2,14 @@
   ✅ Same UI system (ui-page / ui-card / ui-hero-gradient / ui-table)
   ✅ TRUE FULL WIDTH on laptop (no container max-width)
   ✅ Responsive: mobile cards + desktop table
-  ✅ Filters: search + requested date range + optional expat id
-  ✅ Actions: Export CSV + Refresh + Clear
-  ✅ Approve + Reject (Manager) = ICON ONLY (save column width)
-  ✅ Realtime refresh
-  ✅ Attachments: READ-ONLY + blob preview (fix 401)
-  ✅ NO SweetAlert / NO window.alert (custom modals)
+  ✅ Filters: search + requested date range + optional employee id
+  ✅ Actions: Export XLSX + Refresh + Clear
+  ✅ Approve + Reject (Manager) = ICON ONLY
+  ✅ Realtime refresh (leave:req:created / leave:req:updated)
+  ✅ Attachments: READ-ONLY + blob preview (fix 401) + safe URL built from attId
+  ✅ Modal UX: ESC closes, backdrop closes, body scroll lock
+  ✅ No SweetAlert / No window.alert (useToast + custom modals)
 -->
-
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -37,7 +37,7 @@ const rows = ref([])
 
 const search = ref('')
 const fromDate = ref('') // Requested at (createdAt)
-const toDate = ref('') // Requested at (createdAt)
+const toDate = ref('')   // Requested at (createdAt)
 const employeeFilter = ref('') // optional expat id filter
 
 /* Pagination */
@@ -46,16 +46,36 @@ const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
 /* ───────── helpers ───────── */
+function s(v) {
+  return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
+}
+
+const STATUS_LABEL = {
+  PENDING_MANAGER: 'Pending (Mgr)',
+  PENDING_GM: 'Pending (GM)',
+  PENDING_COO: 'Pending (COO)',
+  APPROVED: 'Approved',
+  REJECTED: 'Rejected',
+  CANCELLED: 'Cancelled',
+}
+function statusLabel(st) {
+  const k = up(st)
+  return STATUS_LABEL[k] || k || '—'
+}
+
 function formatRange(row) {
-  const s = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
-  const e = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
-  if (!s && !e) return '—'
-  if (s === e) return s
-  return `${s} → ${e}`
+  const ss = row.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
+  const ee = row.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
+  if (!ss && !ee) return '—'
+  if (ss === ee) return ss
+  return `${ss} → ${ee}`
 }
 
 function statusChipClasses(status) {
-  switch (String(status || '').toUpperCase()) {
+  switch (up(status)) {
     case 'PENDING_MANAGER':
       return 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
     case 'PENDING_GM':
@@ -72,22 +92,15 @@ function statusChipClasses(status) {
   }
 }
 
-function statusWeight(s) {
-  switch (String(s || '').toUpperCase()) {
-    case 'PENDING_MANAGER':
-      return 0
-    case 'PENDING_GM':
-      return 1
-    case 'PENDING_COO':
-      return 2
-    case 'APPROVED':
-      return 3
-    case 'REJECTED':
-      return 4
-    case 'CANCELLED':
-      return 5
-    default:
-      return 99
+function statusWeight(st) {
+  switch (up(st)) {
+    case 'PENDING_MANAGER': return 0
+    case 'PENDING_GM': return 1
+    case 'PENDING_COO': return 2
+    case 'APPROVED': return 3
+    case 'REJECTED': return 4
+    case 'CANCELLED': return 5
+    default: return 99
   }
 }
 
@@ -98,12 +111,35 @@ function clearFilters() {
   employeeFilter.value = ''
 }
 
+/* ───────── roles helpers ───────── */
+const roles = computed(() => {
+  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  const one = auth.user?.role ? [auth.user.role] : []
+  return [...new Set([...raw, ...one].map((r) => up(r)))]
+})
+
+const isAdminViewer = computed(() =>
+  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
+)
+
+const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
+
+/**
+ * Policy:
+ * ✅ Only real manager can decide
+ * ❌ Admin viewers cannot decide even if they can view
+ */
+const canDecide = (row) =>
+  isRealManager.value &&
+  !isAdminViewer.value &&
+  up(row?.status) === 'PENDING_MANAGER'
+
 /* ───────── API ───────── */
 async function fetchInbox() {
   try {
     loading.value = true
     const res = await api.get('/leave/requests/manager/inbox?scope=ALL')
-    rows.value = (Array.isArray(res.data) ? res.data : []).map(r => ({
+    rows.value = (Array.isArray(res.data) ? res.data : []).map((r) => ({
       ...r,
       attachments: Array.isArray(r.attachments) ? r.attachments : [],
     }))
@@ -129,15 +165,20 @@ const filteredRows = computed(() => {
   if (empQ) list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
 
   if (q) {
-    list = list.filter(
-      (r) =>
-        String(r.employeeId || '').toLowerCase().includes(q) ||
-        String(r.employeeName || '').toLowerCase().includes(q) ||
-        String(r.department || '').toLowerCase().includes(q) ||
-        String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
-        String(r.reason || '').toLowerCase().includes(q) ||
-        String(r.status || '').toLowerCase().includes(q)
-    )
+    list = list.filter((r) => {
+      const hay = [
+        r.employeeId,
+        r.employeeName,
+        r.department,
+        r.leaveTypeCode,
+        r.reason,
+        r.status,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
   }
 
   const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
@@ -185,39 +226,7 @@ watch(
   }
 )
 
-/* Helper */
-const roles = computed(() => {
-  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
-  const one = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...one].map(r => String(r || '').trim().toUpperCase()))]
-})
-
-const isAdminViewer = computed(() =>
-  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
-)
-
-const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
-
-/* ───────── Export CSV ───────── */
-function csvEscape(v) {
-  const s = String(v ?? '')
-  const needs = /[",\n\r]/.test(s)
-  const escaped = s.replace(/"/g, '""')
-  return needs ? `"${escaped}"` : escaped
-}
-
-function downloadTextFile(filename, text, mime = 'text/csv;charset=utf-8') {
-  const blob = new Blob([text], { type: mime })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 3000)
-}
-
+/* ───────── Export XLSX ───────── */
 function buildExportRows(list) {
   return (list || []).map((r) => ({
     RequestedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
@@ -229,7 +238,7 @@ function buildExportRows(list) {
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
     TotalDays: Number(r.totalDays || 0),
     Status: r.status || '',
-    Reason: (r.reason || '').replace(/\s+/g, ' ').trim(),
+    Reason: String(r.reason || '').replace(/\s+/g, ' ').trim(),
   }))
 }
 
@@ -241,26 +250,22 @@ function exportExcel(scope = 'FILTERED') {
       return
     }
 
-    // data rows (LeaveType includes BL automatically)
     const data = buildExportRows(list)
 
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(data)
-
-    // nice widths (optional)
     ws['!cols'] = [
       { wch: 18 }, // RequestedAt
       { wch: 12 }, // EmployeeId
       { wch: 22 }, // EmployeeName
       { wch: 20 }, // Department
-      { wch: 10 }, // LeaveType (AL/SP/BL/etc)
+      { wch: 10 }, // LeaveType
       { wch: 12 }, // LeaveStart
       { wch: 12 }, // LeaveEnd
       { wch: 10 }, // TotalDays
       { wch: 16 }, // Status
       { wch: 45 }, // Reason
     ]
-
     XLSX.utils.book_append_sheet(wb, ws, 'ManagerInbox')
 
     const tag =
@@ -284,12 +289,6 @@ const decideId = ref('')
 const decideAction = ref('') // 'APPROVE' | 'REJECT'
 const rejectNote = ref('')
 
-const canDecide = (row) =>
-  isRealManager.value &&
-  !isAdminViewer.value &&
-  String(row?.status || '').toUpperCase() === 'PENDING_MANAGER'
-
-  
 function openApprove(row) {
   if (!row?._id) return
   decideId.value = row._id
@@ -329,7 +328,7 @@ async function confirmDecision() {
     showToast({
       type: 'success',
       title: action === 'APPROVE' ? 'Approved' : 'Rejected',
-      message: action === 'APPROVE' ? 'Sent to GM queue.' : 'Request rejected.',
+      message: action === 'APPROVE' ? 'Request approved (sent to next step).' : 'Request rejected.',
     })
 
     closeDecisionModal(true)
@@ -367,17 +366,17 @@ function niceBytes(n) {
 }
 
 function iconForMime(m) {
-  const s = String(m || '').toLowerCase()
-  if (s.includes('pdf')) return 'fa-file-pdf'
-  if (s.includes('word')) return 'fa-file-word'
-  if (s.includes('excel') || s.includes('spreadsheet')) return 'fa-file-excel'
-  if (s.includes('image')) return 'fa-file-image'
+  const t = String(m || '').toLowerCase()
+  if (t.includes('pdf')) return 'fa-file-pdf'
+  if (t.includes('word')) return 'fa-file-word'
+  if (t.includes('excel') || t.includes('spreadsheet')) return 'fa-file-excel'
+  if (t.includes('image')) return 'fa-file-image'
   return 'fa-file'
 }
 
 function canPreviewInline(m) {
-  const s = String(m || '').toLowerCase()
-  return s.startsWith('image/') || s.includes('pdf')
+  const t = String(m || '').toLowerCase()
+  return t.startsWith('image/') || t.includes('pdf')
 }
 
 /* Preview uses blob URLs to avoid 401 */
@@ -400,11 +399,24 @@ function closePreview() {
   previewName.value = ''
 }
 
+/**
+ * ✅ SAFE: build URL from requestId + attId
+ * backend should support:
+ * GET /leave/requests/:id/attachments/:attId/content  (blob)
+ */
+function buildAttContentUrl(requestId, attId) {
+  const rid = s(requestId)
+  const aid = s(attId)
+  if (!rid || !aid) return ''
+  return `/leave/requests/${rid}/attachments/${aid}/content`
+}
+
 async function openPreview(item) {
-  if (!item?.url) return
+  const url = s(item?.url)
+  if (!url) return
   try {
     const res = await api.request({
-      url: item.url, // backend returns /api/leave/...
+      url,
       method: 'GET',
       responseType: 'blob',
     })
@@ -425,22 +437,23 @@ async function openPreview(item) {
 }
 
 async function downloadAttachment(it) {
-  if (!it?.url) return
+  const url = s(it?.url)
+  if (!url) return
   try {
     const res = await api.request({
-      url: it.url,
+      url,
       method: 'GET',
       responseType: 'blob',
     })
 
-    const url = URL.createObjectURL(res.data)
+    const bUrl = URL.createObjectURL(res.data)
     const a = document.createElement('a')
-    a.href = url
+    a.href = bUrl
     a.download = it.filename || 'attachment'
     document.body.appendChild(a)
     a.click()
     a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 2000)
+    setTimeout(() => URL.revokeObjectURL(bUrl), 2000)
   } catch (e) {
     console.error('downloadAttachment error', e)
     showToast({ type: 'error', title: 'Download failed', message: e?.message || 'Unable to download.' })
@@ -458,8 +471,24 @@ async function openAttachments(row) {
   try {
     attLoading.value = true
     const res = await api.get(`/leave/requests/${row._id}/attachments`)
-    const items = Array.isArray(res?.data?.items) ? res.data.items : []
-    attItems.value = items
+    const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
+
+    // ✅ normalize + build safe url
+    attItems.value = (items || [])
+      .map((x) => {
+        const attId = s(x?.attId)
+        return {
+          attId,
+          filename: s(x?.filename || 'Attachment') || 'Attachment',
+          contentType: s(x?.contentType || ''),
+          size: Number(x?.size || 0),
+          uploadedAt: x?.uploadedAt || null,
+          uploadedBy: s(x?.uploadedBy || ''),
+          note: s(x?.note || ''),
+          url: buildAttContentUrl(row._id, attId),
+        }
+      })
+      .filter((x) => !!x.attId)
   } catch (e) {
     console.error('openAttachments error', e)
     attError.value = e?.response?.data?.message || 'Unable to load attachments.'
@@ -494,24 +523,48 @@ function setupRealtime() {
     company: auth.user?.companyCode,
   })
 
-  const offCreated = onSocket('leave:req:created', () => triggerRealtimeRefresh())
-  const offUpdated = onSocket('leave:req:updated', () => triggerRealtimeRefresh())
-  const offManager = onSocket('leave:req:manager-decision', () => triggerRealtimeRefresh())
-  const offGm = onSocket('leave:req:gm-decision', () => triggerRealtimeRefresh())
-  const offCoo = onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh())
-
-  offHandlers.push(offCreated, offUpdated, offManager, offGm, offCoo)
+  // ✅ your backend emits only created/updated
+  offHandlers.push(
+    onSocket('leave:req:created', () => triggerRealtimeRefresh()),
+    onSocket('leave:req:updated', () => triggerRealtimeRefresh())
+  )
 }
 
+/* ───────── modal UX: body scroll lock + ESC ───────── */
+function lockBodyScroll(on) {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('overflow-hidden', !!on)
+}
+
+const decisionOpen = computed(() => !!decideAction.value)
+
+watch([attOpen, previewOpen, decisionOpen], ([a, p, d]) => {
+  lockBodyScroll(!!(a || p || d))
+})
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (previewOpen.value) return closePreview()
+  if (attOpen.value) return closeAttachments()
+  if (decisionOpen.value) return closeDecisionModal()
+}
+
+/* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
   await fetchInbox()
   setupRealtime()
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
   if (refreshTimer) clearTimeout(refreshTimer)
   offHandlers.forEach((off) => {
     try {
@@ -519,6 +572,8 @@ onBeforeUnmount(() => {
     } catch {}
   })
   closePreview()
+  closeAttachments()
+  lockBodyScroll(false)
 })
 </script>
 
@@ -555,6 +610,22 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
+              <!-- Employee id filter -->
+              <div class="min-w-[180px] max-w-[220px]">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
+                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                    <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
+                    <input
+                      v-model="employeeFilter"
+                      type="text"
+                      placeholder="Ex: 51820386"
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                    />
+                  </div>
+                </div>
+              </div>
+
               <!-- Requested at range filter -->
               <div class="flex items-end gap-2">
                 <div class="ui-field w-[150px]">
@@ -566,6 +637,7 @@ onBeforeUnmount(() => {
                   <input v-model="toDate" type="date" class="ui-date" />
                 </div>
               </div>
+
               <!-- Actions -->
               <div class="flex items-center gap-2">
                 <button
@@ -580,7 +652,7 @@ onBeforeUnmount(() => {
                 </button>
 
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading" title="Refresh">
-                  <i class="fa-solid fa-rotate text-[11px]" />
+                  <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
                 </button>
 
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading" title="Clear filters">
@@ -614,6 +686,19 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
+                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
+                  <input
+                    v-model="employeeFilter"
+                    type="text"
+                    placeholder="Ex: 51820386"
+                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                  />
+                </div>
+              </div>
+
               <div class="grid grid-cols-2 gap-2">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
@@ -637,7 +722,7 @@ onBeforeUnmount(() => {
                 </button>
 
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading" title="Refresh">
-                  <i class="fa-solid fa-rotate text-[11px]" />
+                  <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
                 </button>
 
                 <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading" title="Clear">
@@ -698,7 +783,7 @@ onBeforeUnmount(() => {
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
                       :class="statusChipClasses(row.status)"
                     >
-                      {{ row.status }}
+                      {{ statusLabel(row.status) }}
                     </span>
                   </div>
                 </div>
@@ -709,21 +794,22 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-3 flex items-center justify-between gap-2">
-              <!-- ✅ Files (SwapDay/MyRequests style): only show if exist -->
-              <button
-                v-if="row.attachments?.length"
-                type="button"
-                class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                @click="openAttachments(row)"
-                :disabled="loading"
-                title="View attachments"
-                aria-label="View attachments"
-              >
-                <i class="fa-solid fa-paperclip text-[11px]" />
-                <span class="ml-1">{{ row.attachments.length }}</span>
-              </button>
+                <!-- ✅ Files (SwapDay/MyRequests style): only show if exist -->
+                <button
+                  v-if="row.attachments?.length"
+                  type="button"
+                  class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
+                  @click="openAttachments(row)"
+                  :disabled="loading"
+                  title="View attachments"
+                  aria-label="View attachments"
+                >
+                  <i class="fa-solid fa-paperclip text-[11px]" />
+                  <span class="ml-1">{{ row.attachments.length }}</span>
+                </button>
+                <span v-else class="text-[11px] text-slate-400">—</span>
 
-                <!-- ✅ ICON ONLY actions on mobile too -->
+                <!-- ✅ ICON ONLY actions -->
                 <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
                   <button
                     type="button"
@@ -753,7 +839,6 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <!-- ✅ Use full-width responsive table (no overflow unless needed) -->
             <table class="ui-table text-left w-full min-w-[1100px]">
               <colgroup>
                 <col class="w-[150px]" />
@@ -818,11 +903,11 @@ onBeforeUnmount(() => {
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
                       :class="statusChipClasses(row.status)"
                     >
-                      {{ row.status }}
+                      {{ statusLabel(row.status) }}
                     </span>
                   </td>
 
-                  <!-- ✅ File column (SwapDay/MyRequests style) -->
+                  <!-- Files -->
                   <td class="ui-td align-top text-center">
                     <button
                       v-if="row.attachments?.length"
@@ -839,7 +924,7 @@ onBeforeUnmount(() => {
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
-                  <!-- ✅ Actions (ICON ONLY) -->
+                  <!-- Actions (ICON ONLY) -->
                   <td class="ui-td align-top text-center">
                     <div v-if="canDecide(row)" class="flex items-center justify-center gap-1">
                       <button
@@ -865,11 +950,11 @@ onBeforeUnmount(() => {
                       </button>
                     </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
-                    </td>
+                  </td>
 
-                    <td class="ui-td text-left align-top">
-                      <p class="reason-cell">{{ row.reason || '—' }}</p>
-                    </td>
+                  <td class="ui-td text-left align-top">
+                    <p class="reason-cell">{{ row.reason || '—' }}</p>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -896,7 +981,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ✅ Confirm modal (Approve / Reject) -->
-    <div v-if="!!decideAction" class="fixed inset-0 z-[60]">
+    <div v-if="decisionOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
         <div class="ui-card w-full max-w-lg p-4">

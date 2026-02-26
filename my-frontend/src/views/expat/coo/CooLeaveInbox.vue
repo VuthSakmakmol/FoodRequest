@@ -7,6 +7,7 @@
   ✅ Approve/Reject with confirm modal (auto close on success)
   ✅ Attachments: READ-ONLY (preview/download like GM inbox)
   ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included via api instance)
+  ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
 -->
 
 <script setup>
@@ -16,7 +17,7 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import { subscribeRoleIfNeeded, onSocket } from '@/utils/socket'
-import * as XLSX from 'xlsx' // ✅ ONLY ADD: Excel export
+import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'CooLeaveInbox' })
 
@@ -29,7 +30,9 @@ const roles = computed(() => {
   const base = auth.user?.role ? [auth.user.role] : []
   return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
-const canCooDecide = computed(() => roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER'))
+const canCooDecide = computed(() =>
+  roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER')
+)
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -52,17 +55,25 @@ const page = ref(1)
 const perPage = ref(20)
 const perPageOptions = [20, 50, 100, 'All']
 
+/* ───────── helpers ───────── */
+function s(v) {
+  return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
+}
+
 /* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
 function formatRange(row) {
-  const s = row?.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
-  const e = row?.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
-  if (!s && !e) return '—'
-  if (s === e) return s
-  return `${s} → ${e}`
+  const a = row?.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
+  const b = row?.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
+  if (!a && !b) return '—'
+  if (a === b) return a
+  return `${a} → ${b}`
 }
 
 function statusChipClasses(status) {
-  switch (String(status || '').toUpperCase()) {
+  switch (up(status)) {
     case 'PENDING_MANAGER':
       return 'bg-amber-100 text-amber-700 border border-amber-200 dark:bg-amber-900/40 dark:text-amber-200 dark:border-amber-700/80'
     case 'PENDING_GM':
@@ -80,8 +91,8 @@ function statusChipClasses(status) {
 }
 
 /* Sort: COO pending first, then GM/Manager pending, then finished */
-function statusWeight(s) {
-  switch (String(s || '').toUpperCase()) {
+function statusWeight(st) {
+  switch (up(st)) {
     case 'PENDING_COO':
       return 0
     case 'PENDING_GM':
@@ -101,15 +112,15 @@ function statusWeight(s) {
 
 /* ✅ Reject reason + who rejected */
 function getRejectReason(row) {
-  const coo = String(row?.cooComment || '').trim()
-  const gm = String(row?.gmComment || '').trim()
-  const mgr = String(row?.managerComment || '').trim()
+  const coo = s(row?.cooComment)
+  const gm = s(row?.gmComment)
+  const mgr = s(row?.managerComment)
   return coo || gm || mgr || ''
 }
 function rejectedByLabel(row) {
-  const coo = String(row?.cooComment || '').trim()
-  const gm = String(row?.gmComment || '').trim()
-  const mgr = String(row?.managerComment || '').trim()
+  const coo = s(row?.cooComment)
+  const gm = s(row?.gmComment)
+  const mgr = s(row?.managerComment)
   if (coo) return 'Rejected by COO'
   if (gm) return 'Rejected by GM'
   if (mgr) return 'Rejected by Manager'
@@ -156,18 +167,23 @@ const filteredRows = computed(() => {
   if (empQ) list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
 
   if (q) {
-    list = list.filter(
-      (r) =>
-        String(r.employeeId || '').toLowerCase().includes(q) ||
-        String(r.employeeName || '').toLowerCase().includes(q) ||
-        String(r.department || '').toLowerCase().includes(q) ||
-        String(r.leaveTypeCode || '').toLowerCase().includes(q) ||
-        String(r.reason || '').toLowerCase().includes(q) ||
-        String(r.status || '').toLowerCase().includes(q) ||
-        String(r.cooComment || '').toLowerCase().includes(q) ||
-        String(r.gmComment || '').toLowerCase().includes(q) ||
-        String(r.managerComment || '').toLowerCase().includes(q)
-    )
+    list = list.filter((r) => {
+      const hay = [
+        r.employeeId,
+        r.employeeName,
+        r.department,
+        r.leaveTypeCode,
+        r.reason,
+        r.status,
+        r.cooComment,
+        r.gmComment,
+        r.managerComment,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(q)
+    })
   }
 
   // Requested date filter by createdAt
@@ -217,11 +233,12 @@ watch(
 
 /* ───────── ✅ Export to REAL Excel (.xlsx) (ONE export only) ───────── */
 function safeSheetName(name, fallback = 'Inbox') {
-  let s = String(name || '').trim() || fallback
-  s = s.replace(/[\\\/\?\*\[\]\:]/g, ' ')
-  s = s.replace(/\s+/g, ' ').trim()
-  if (s.length > 31) s = s.slice(0, 31).trim()
-  return s || fallback
+  let x = String(name || '').trim() || fallback
+  x = x.replace(/[\\\/\?\*\[\]\:]/g, ' ')
+  x = x.replace(/\s+/g, ' ').trim()
+  if (!x) x = fallback
+  if (x.length > 31) x = x.slice(0, 31).trim()
+  return x || fallback
 }
 
 function buildExportRows(list) {
@@ -230,14 +247,14 @@ function buildExportRows(list) {
     EmployeeId: r.employeeId || '',
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
-    LeaveType: r.leaveTypeCode || '', // ✅ includes BL automatically
+    LeaveType: r.leaveTypeCode || '',
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
     TotalDays: Number(r.totalDays || 0),
     Status: String(r.status || ''),
-    RejectBy: String(r.status || '').toUpperCase() === 'REJECTED' ? rejectedByLabel(r) : '',
-    RejectReason: String(r.status || '').toUpperCase() === 'REJECTED' ? getRejectReason(r) : '',
-    RequestReason: (r.reason || '').replace(/\s+/g, ' ').trim(),
+    RejectBy: up(r.status) === 'REJECTED' ? rejectedByLabel(r) : '',
+    RejectReason: up(r.status) === 'REJECTED' ? getRejectReason(r) : '',
+    RequestReason: String(r.reason || '').replace(/\s+/g, ' ').trim(),
   }))
 }
 
@@ -261,7 +278,6 @@ function exportExcel() {
       { wch: 10 }, // LeaveType
       { wch: 12 }, // LeaveStart
       { wch: 12 }, // LeaveEnd
-      { wch: 18 }, // LeaveRange
       { wch: 10 }, // TotalDays
       { wch: 16 }, // Status
       { wch: 18 }, // RejectBy
@@ -275,7 +291,7 @@ function exportExcel() {
     const filename = `CooInbox_ALL_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
     XLSX.writeFile(wb, filename)
 
-    showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx) — ALL leave types.' })
+    showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx).' })
   } catch (e) {
     console.error('exportExcel error', e)
     showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })
@@ -288,7 +304,9 @@ const decideRow = ref(null)
 const decideAction = ref('') // 'APPROVE' | 'REJECT'
 const rejectNote = ref('')
 
-const canDecide = (row) => canCooDecide.value && String(row?.status || '').toUpperCase() === 'PENDING_COO'
+const decisionOpen = computed(() => !!decideAction.value)
+
+const canDecideRow = (row) => canCooDecide.value && up(row?.status) === 'PENDING_COO'
 
 function openApprove(row) {
   if (!row?._id) return
@@ -335,6 +353,7 @@ async function confirmDecision() {
       message: 'COO decision saved.',
     })
 
+    // ✅ auto close on success
     closeDecisionModal(true)
     await fetchInbox(true)
   } catch (e) {
@@ -354,7 +373,7 @@ const attOpen = ref(false)
 const attLoading = ref(false)
 const attError = ref('')
 const attReq = ref(null)
-const attItems = ref([]) // { attId, filename, contentType, size, uploadedAt, url }
+const attItems = ref([])
 
 function niceBytes(n) {
   const v = Number(n || 0)
@@ -370,20 +389,28 @@ function niceBytes(n) {
 }
 
 function iconForMime(m) {
-  const s = String(m || '').toLowerCase()
-  if (s.includes('pdf')) return 'fa-file-pdf'
-  if (s.includes('word')) return 'fa-file-word'
-  if (s.includes('excel') || s.includes('spreadsheet')) return 'fa-file-excel'
-  if (s.includes('image')) return 'fa-file-image'
+  const t = String(m || '').toLowerCase()
+  if (t.includes('pdf')) return 'fa-file-pdf'
+  if (t.includes('word')) return 'fa-file-word'
+  if (t.includes('excel') || t.includes('spreadsheet')) return 'fa-file-excel'
+  if (t.includes('image')) return 'fa-file-image'
   return 'fa-file'
 }
 
 function canPreviewInline(m) {
-  const s = String(m || '').toLowerCase()
-  return s.startsWith('image/') || s.includes('pdf')
+  const t = String(m || '').toLowerCase()
+  return t.startsWith('image/') || t.includes('pdf')
 }
 
-/* Preview uses blob URLs to avoid 401 */
+/* ✅ build safe content URL (works with your api baseURL) */
+function buildAttContentUrl(requestId, attId) {
+  const rid = s(requestId)
+  const aid = s(attId)
+  if (!rid || !aid) return ''
+  return `/leave/requests/${rid}/attachments/${aid}/content`
+}
+
+/* Preview via blob URLs */
 const previewOpen = ref(false)
 const previewUrl = ref('')
 const previewType = ref('')
@@ -393,6 +420,14 @@ function revokeBlobUrl(url) {
   try {
     if (url && String(url).startsWith('blob:')) URL.revokeObjectURL(url)
   } catch {}
+}
+
+function closePreview() {
+  revokeBlobUrl(previewUrl.value)
+  previewOpen.value = false
+  previewUrl.value = ''
+  previewType.value = ''
+  previewName.value = ''
 }
 
 async function openPreview(item) {
@@ -440,14 +475,6 @@ async function downloadAttachment(it) {
   }
 }
 
-function closePreview() {
-  revokeBlobUrl(previewUrl.value)
-  previewOpen.value = false
-  previewUrl.value = ''
-  previewType.value = ''
-  previewName.value = ''
-}
-
 async function openAttachments(row) {
   if (!row?._id) return
   attOpen.value = true
@@ -459,8 +486,24 @@ async function openAttachments(row) {
   try {
     attLoading.value = true
     const res = await api.get(`/leave/requests/${row._id}/attachments`)
-    const items = Array.isArray(res?.data?.items) ? res.data.items : []
-    attItems.value = items
+    const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
+
+    // ✅ normalize + ensure url exists
+    attItems.value = (items || [])
+      .map((x) => {
+        const attId = s(x?.attId)
+        return {
+          attId,
+          filename: s(x?.filename || 'Attachment') || 'Attachment',
+          contentType: s(x?.contentType || ''),
+          size: Number(x?.size || 0),
+          uploadedAt: x?.uploadedAt || null,
+          uploadedBy: s(x?.uploadedBy || ''),
+          note: s(x?.note || ''),
+          url: x?.url ? s(x.url) : buildAttContentUrl(row._id, attId),
+        }
+      })
+      .filter((x) => !!x.attId)
   } catch (e) {
     console.error('openAttachments error', e)
     attError.value = e?.response?.data?.message || 'Unable to load attachments.'
@@ -500,33 +543,52 @@ function setupRealtime() {
     onSocket('leave:req:updated', () => triggerRealtimeRefresh()),
     onSocket('leave:req:manager-decision', () => triggerRealtimeRefresh()),
     onSocket('leave:req:gm-decision', () => triggerRealtimeRefresh()),
-    onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh()),
-    onSocket('leave:profile:updated', () => triggerRealtimeRefresh()),
-    onSocket('leave:profile:recalculated', () => triggerRealtimeRefresh())
+    onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh())
   )
 }
 
-function teardownRealtime() {
-  offHandlers.forEach((off) => {
-    try {
-      off && off()
-    } catch {}
-  })
-  offHandlers.length = 0
+/* ───────── modal UX: body scroll lock + ESC ───────── */
+function lockBodyScroll(on) {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('overflow-hidden', !!on)
 }
 
+watch([attOpen, previewOpen, decisionOpen], ([a, p, d]) => {
+  lockBodyScroll(!!(a || p || d))
+})
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (previewOpen.value) return closePreview()
+  if (attOpen.value) return closeAttachments()
+  if (decisionOpen.value) return closeDecisionModal()
+}
+
+/* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
   await fetchInbox(true)
   setupRealtime()
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
   if (refreshTimer) clearTimeout(refreshTimer)
-  teardownRealtime()
+  offHandlers.forEach((off) => {
+    try {
+      off && off()
+    } catch {}
+  })
   closePreview()
+  closeAttachments()
+  lockBodyScroll(false)
 })
 </script>
 
@@ -547,7 +609,7 @@ onBeforeUnmount(() => {
 
             <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
               <!-- Search -->
-              <div class="min-w-[240px] max-w-xs">
+              <div class="min-w-[260px] max-w-sm">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Search</label>
                   <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
@@ -556,6 +618,22 @@ onBeforeUnmount(() => {
                       v-model="search"
                       type="text"
                       placeholder="Employee / type / reason / status / note..."
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Employee filter -->
+              <div class="min-w-[180px] max-w-[220px]">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
+                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                    <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
+                    <input
+                      v-model="employeeFilter"
+                      type="text"
+                      placeholder="Ex: 51820386"
                       class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                     />
                   </div>
@@ -618,6 +696,19 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
+                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
+                  <input
+                    v-model="employeeFilter"
+                    type="text"
+                    placeholder="Ex: 51820386"
+                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                  />
+                </div>
+              </div>
+
               <div class="grid grid-cols-2 gap-2">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
@@ -669,16 +760,9 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
 
-                  <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
-                    {{ row.employeeId || '—' }}
-                  </div>
-                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                    {{ row.employeeName || '—' }}
-                  </div>
-
-                  <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ row.department }}
-                  </div>
+                  <div class="text-xs font-mono text-slate-900 dark:text-slate-50">{{ row.employeeId || '—' }}</div>
+                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">{{ row.employeeName || '—' }}</div>
+                  <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">{{ row.department }}</div>
 
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
                     Date: <span class="font-semibold">{{ formatRange(row) }}</span>
@@ -704,7 +788,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div
-                v-if="String(row.status || '').toUpperCase() === 'REJECTED'"
+                v-if="up(row.status) === 'REJECTED'"
                 class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
                        dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
               >
@@ -728,7 +812,7 @@ onBeforeUnmount(() => {
 
                 <span v-else class="text-[11px] text-slate-400">—</span>
 
-                <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
+                <div v-if="canDecideRow(row)" class="flex items-center justify-end gap-2">
                   <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
                     <i class="fa-solid fa-circle-check text-[11px]" />
                   </button>
@@ -742,17 +826,17 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left min-w-[1080px]">
+            <table class="ui-table text-left w-full min-w-[1200px]">
               <colgroup>
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
-                <col class="w-[58px]" />
+                <col class="w-[92px]" />
                 <col class="w-[160px]" />
                 <col class="w-[80px]" />
-                <col class="w-[130px]" />
-                <col class="w-[120px]" />
-                <col class="w-[120px]" />
-                <col class="w-[200px]" />
+                <col class="w-[170px]" />
+                <col class="w-[96px]" />
+                <col class="w-[110px]" />
+                <col />
               </colgroup>
 
               <thead>
@@ -782,30 +866,19 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td text-left align-top">
-                    <div class="text-xs font-mono text-slate-900 dark:text-slate-50">
-                      {{ row.employeeId || '—' }}
-                    </div>
-                    <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                      {{ row.employeeName || '—' }}
-                    </div>
-                    <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">
-                      {{ row.department }}
-                    </div>
+                    <div class="text-xs font-mono text-slate-900 dark:text-slate-50">{{ row.employeeId || '—' }}</div>
+                    <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">{{ row.employeeName || '—' }}</div>
+                    <div v-if="row.department" class="text-[11px] text-slate-500 dark:text-slate-400">{{ row.department }}</div>
                   </td>
 
                   <td class="ui-td text-left align-top">
                     <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
                   </td>
 
-                  <td class="ui-td text-left whitespace-nowrap align-top">
-                    {{ formatRange(row) }}
-                  </td>
+                  <td class="ui-td text-left whitespace-nowrap align-top">{{ formatRange(row) }}</td>
 
-                  <td class="ui-td text-right align-top tabular-nums">
-                    {{ Number(row.totalDays || 0).toLocaleString() }}
-                  </td>
+                  <td class="ui-td text-right align-top tabular-nums">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
 
-                  
                   <td class="ui-td align-top">
                     <span
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
@@ -827,12 +900,11 @@ onBeforeUnmount(() => {
                       <i class="fa-solid fa-paperclip text-[11px]" />
                       <span class="ml-1">{{ row.attachments.length }}</span>
                     </button>
-
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
                   <td class="ui-td align-top text-center">
-                    <div v-if="canDecide(row)" class="flex items-center justify-center gap-2">
+                    <div v-if="canDecideRow(row)" class="flex items-center justify-center gap-2">
                       <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
                         <i class="fa-solid fa-circle-check text-[11px]" />
                       </button>
@@ -842,19 +914,19 @@ onBeforeUnmount(() => {
                     </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
+
                   <td class="ui-td text-left align-top">
                     <p class="reason-cell">{{ row.reason || '—' }}</p>
 
                     <div
-                      v-if="String(row.status || '').toUpperCase() === 'REJECTED' && getRejectReason(row)"
-                      class="mt-2 inline-flex max-w-[640px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                      v-if="up(row.status) === 'REJECTED' && getRejectReason(row)"
+                      class="mt-2 inline-flex max-w-[680px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
                              dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
                     >
                       <span class="font-extrabold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
                       <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
                     </div>
                   </td>
-
                 </tr>
               </tbody>
             </table>
@@ -880,11 +952,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- ✅ Confirm modal + Attachments modal kept exactly as your original below -->
-    <!-- (No change needed; your original code continues here.) -->
-
     <!-- ✅ Confirm modal (Approve / Reject) -->
-    <div v-if="!!decideAction" class="fixed inset-0 z-[60]">
+    <div v-if="decisionOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal()" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
         <div class="ui-card w-full max-w-lg p-4">
@@ -894,6 +963,13 @@ onBeforeUnmount(() => {
                 {{ decideAction === 'APPROVE' ? 'Approve request' : 'Reject request' }}
               </p>
               <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">This will update the request status immediately.</p>
+              <p v-if="decideRow" class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                <span class="font-mono">{{ decideRow.employeeId }}</span>
+                <span class="mx-1 opacity-60">•</span>
+                <span class="font-semibold">{{ decideRow.employeeName }}</span>
+                <span class="mx-1 opacity-60">•</span>
+                <span class="ui-badge ui-badge-info">{{ decideRow.leaveTypeCode }}</span>
+              </p>
             </div>
             <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
               <i class="fa-solid fa-xmark" />
@@ -979,9 +1055,7 @@ onBeforeUnmount(() => {
                       <i class="fa-solid" :class="iconForMime(it.contentType)" />
                     </div>
                     <div class="min-w-0">
-                      <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
-                        {{ it.filename || 'Attachment' }}
-                      </p>
+                      <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">{{ it.filename || 'Attachment' }}</p>
                       <p class="text-[11px] text-slate-500 dark:text-slate-400">
                         {{ niceBytes(it.size) }}
                         <span v-if="it.uploadedAt"> · {{ dayjs(it.uploadedAt).format('YYYY-MM-DD HH:mm') }}</span>

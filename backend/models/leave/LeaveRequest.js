@@ -16,9 +16,16 @@ const STATUS = Object.freeze([
 const DAY_PART = Object.freeze(['AM', 'PM'])
 
 /**
- * ✅ Only 3 approval modes in the whole system
+ * ✅ Approval modes (semantic)
+ * (now includes MANAGER_ONLY + GM_ONLY)
  */
-const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
+const APPROVAL_MODE = Object.freeze([
+  'MANAGER_AND_GM',
+  'MANAGER_AND_COO',
+  'GM_AND_COO',
+  'MANAGER_ONLY', // ✅ NEW
+  'GM_ONLY', // ✅ NEW
+])
 
 const APPROVAL_LEVEL = Object.freeze(['MANAGER', 'GM', 'COO'])
 
@@ -28,29 +35,63 @@ const APPROVAL_STATUS = Object.freeze(['PENDING', 'APPROVED', 'REJECTED'])
 function s(v) {
   return String(v ?? '').trim()
 }
+function up(v) {
+  return s(v).toUpperCase()
+}
+
+function modeInvolvesManager(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+}
+function modeInvolvesGm(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+}
+function modeInvolvesCoo(mode) {
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
+}
 
 function normalizeMode(v) {
-  const raw = s(v).toUpperCase()
+  const raw = up(v)
 
+  // ✅ new + canonical
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
+  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
 
-  // legacy
-  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
+  // legacy aliases (keep safe)
   if (raw === 'GM_OR_COO') return 'GM_AND_COO'
   if (raw === 'GM_COO') return 'GM_AND_COO'
   if (raw === 'COO_AND_GM') return 'GM_AND_COO'
   if (raw === 'GM_THEN_COO') return 'GM_AND_COO'
+
+  // legacy weird: some old data stored GM_ONLY meaning MANAGER_AND_GM (keep)
+  // (but if you truly used GM_ONLY before, now it becomes real GM_ONLY above)
+  // so only map if it contains extra spaces or different spelling
+  if (raw === 'GM ONLY') return 'GM_ONLY'
 
   return 'MANAGER_AND_GM'
 }
 
 function normalizeStatusForMode(mode, status) {
   const m = normalizeMode(mode)
-  const st = s(status).toUpperCase()
+  const st = up(status)
 
   if (['APPROVED', 'REJECTED', 'CANCELLED'].includes(st)) return st
+
+  // ✅ MANAGER_ONLY => only manager can be pending
+  if (m === 'MANAGER_ONLY') {
+    if (st === 'PENDING_MANAGER') return 'PENDING_MANAGER'
+    // any other pending -> normalize back to manager
+    return 'PENDING_MANAGER'
+  }
+
+  // ✅ GM_ONLY => only GM can be pending
+  if (m === 'GM_ONLY') {
+    if (st === 'PENDING_GM') return 'PENDING_GM'
+    // any other pending -> normalize back to GM
+    return 'PENDING_GM'
+  }
 
   // GM_AND_COO starts at GM
   if (m === 'GM_AND_COO') {
@@ -78,7 +119,10 @@ function normalizeStatusForMode(mode, status) {
 
 function defaultStatusForMode(mode) {
   const m = normalizeMode(mode)
-  return m === 'GM_AND_COO' ? 'PENDING_GM' : 'PENDING_MANAGER'
+  if (m === 'GM_AND_COO') return 'PENDING_GM'
+  if (m === 'GM_ONLY') return 'PENDING_GM' // ✅ NEW
+  // MANAGER_AND_GM / MANAGER_AND_COO / MANAGER_ONLY => manager first
+  return 'PENDING_MANAGER'
 }
 
 /* ─────────────────────────────────────────────
@@ -179,8 +223,20 @@ LeaveRequestSchema.pre('validate', function (next) {
     if (this.gmLoginId === null) this.gmLoginId = ''
     if (this.cooLoginId === null) this.cooLoginId = ''
 
+    // normalize
     this.approvalMode = normalizeMode(this.approvalMode)
 
+    // ✅ BIG: auto-clear unused approvers by mode (keeps DB consistent)
+    const mode = this.approvalMode
+    this.managerLoginId = s(this.managerLoginId)
+    this.gmLoginId = s(this.gmLoginId)
+    this.cooLoginId = s(this.cooLoginId)
+
+    if (!modeInvolvesManager(mode)) this.managerLoginId = ''
+    if (!modeInvolvesGm(mode)) this.gmLoginId = ''
+    if (!modeInvolvesCoo(mode)) this.cooLoginId = ''
+
+    // status normalize
     if (!s(this.status)) {
       this.status = defaultStatusForMode(this.approvalMode)
     }

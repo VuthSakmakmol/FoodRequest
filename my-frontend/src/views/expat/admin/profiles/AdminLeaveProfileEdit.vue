@@ -10,10 +10,11 @@
      - computeBalances() already applies carry into balances.used + balances.remaining
      - Frontend must NOT apply carry again
 
-  ✅ FIXED:
-     - Added MANAGER_AND_COO to dropdown
-     - GM_AND_COO hides manager input
-     - If mode does NOT involve manager => managerLoginId will be cleared (null)
+  ✅ UPDATED:
+     - Added MANAGER_ONLY, GM_ONLY to dropdown
+     - Mode-based show/hide for Manager / GM / COO inputs
+     - Clears unused approvers on mode switch
+     - Validation matches backend rules (manager optional concept)
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -104,28 +105,51 @@ const APPROVAL_MODES = [
   { value: 'MANAGER_AND_GM', label: 'Manager + GM', hint: 'Manager approves first, then GM.' },
   { value: 'MANAGER_AND_COO', label: 'Manager + COO', hint: 'Manager approves first, then COO.' },
   { value: 'GM_AND_COO', label: 'GM + COO', hint: 'GM approves first, then COO.' },
+  { value: 'MANAGER_ONLY', label: 'Manager only', hint: 'Manager approves and finishes.' }, // ✅ NEW
+  { value: 'GM_ONLY', label: 'GM only', hint: 'GM approves and finishes.' }, // ✅ NEW
 ]
 
 function normApprovalMode(v) {
-  const s = up(v)
-  if (s === 'GM_AND_COO') return 'GM_AND_COO'
-  if (s === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
-  if (s === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  const s1 = up(v)
+  if (s1 === 'GM_AND_COO') return 'GM_AND_COO'
+  if (s1 === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
+  if (s1 === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  if (s1 === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
+  if (s1 === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
+
   // backward aliases
-  if (s === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
-  if (s === 'GM_ONLY') return 'MANAGER_AND_GM'
-  if (s === 'MANAGER+GM') return 'MANAGER_AND_GM'
+  if (s1 === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
+  if (s1 === 'MANAGER+GM') return 'MANAGER_AND_GM'
+
   return 'MANAGER_AND_GM'
 }
 
-const needManager = computed(() => {
-  const m = normApprovalMode(form.approvalMode)
-  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO'
-})
-const needCoo = computed(() => {
-  const m = normApprovalMode(form.approvalMode)
-  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO'
-})
+function modeInvolvesManager(mode) {
+  const m = normApprovalMode(mode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
+}
+function modeInvolvesGm(mode) {
+  const m = normApprovalMode(mode)
+  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
+}
+function modeInvolvesCoo(mode) {
+  const m = normApprovalMode(mode)
+  return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO'
+}
+
+const needManager = computed(() => modeInvolvesManager(form.approvalMode))
+const needGm = computed(() => modeInvolvesGm(form.approvalMode))
+const needCoo = computed(() => modeInvolvesCoo(form.approvalMode))
+
+// Your backend concept: manager may be empty even in manager modes.
+// So only show "required" badge in UI if you want strict (you said optional) -> keep optional always.
+const managerIsRequired = computed(() => false)
+
+// GM required only when GM is involved
+const gmIsRequired = computed(() => needGm.value)
+
+// COO required only when COO is involved
+const cooIsRequired = computed(() => needCoo.value)
 
 /* ───────────────── balances normalize (NO carry math here) ───────────────── */
 function normalizeBalances(rawBalances = []) {
@@ -302,21 +326,23 @@ function fillFormFromProfile(p) {
   form.cooLoginId = String(p?.cooLoginId || '')
   form.isActive = p?.isActive === false ? false : true
   originalJoinDate.value = toInputDate(p?.joinDate)
+
+  // ✅ ensure unused fields are cleared on load too
+  const mode = normApprovalMode(form.approvalMode)
+  if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
+  if (!modeInvolvesGm(mode)) form.gmLoginId = ''
+  if (!modeInvolvesCoo(mode)) form.cooLoginId = ''
 }
 
-/* If switching to a mode that doesn't involve manager => clear manager value */
+/* ✅ On mode switch, clear fields that don't apply */
 watch(
   () => form.approvalMode,
   () => {
-    const m = normApprovalMode(form.approvalMode)
+    const mode = normApprovalMode(form.approvalMode)
 
-    if (m === 'GM_AND_COO') {
-      form.managerEmployeeId = ''
-    }
-    if (m === 'MANAGER_AND_GM') {
-      // optional: clear COO on mode switch
-      form.cooLoginId = ''
-    }
+    if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
+    if (!modeInvolvesGm(mode)) form.gmLoginId = ''
+    if (!modeInvolvesCoo(mode)) form.cooLoginId = ''
   }
 )
 
@@ -390,16 +416,14 @@ async function forceRecalcBalances() {
 function validateApprovers() {
   const mode = normApprovalMode(form.approvalMode)
 
-  // your backend requires GM in all modes (validateModeApprovers)
-  if (!String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
+  // ✅ GM required only when mode involves GM
+  if (modeInvolvesGm(mode) && !String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
 
-  if ((mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO') && !String(form.managerEmployeeId || '').trim()) {
-    return 'Manager Employee ID is required.'
-  }
+  // ✅ COO required only when mode involves COO
+  if (modeInvolvesCoo(mode) && !String(form.cooLoginId || '').trim()) return 'COO Login ID is required.'
 
-  if ((mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') && !String(form.cooLoginId || '').trim()) {
-    return 'COO Login ID is required.'
-  }
+  // ✅ Manager is OPTIONAL by your backend concept (no hard requirement)
+  // If you want to enforce for some modes, change here.
 
   return ''
 }
@@ -425,11 +449,13 @@ async function saveProfile() {
         joinDate: form.joinDate ? String(form.joinDate) : null,
         approvalMode: mode,
 
-        // ✅ KEY FIX: backend expects managerLoginId, not managerEmployeeId
-        // ✅ If mode doesn't involve manager => null removes it from manager grouping
+        // backend expects managerLoginId (optional)
         managerLoginId: needManager.value ? String(form.managerEmployeeId || '').trim() || null : null,
 
-        gmLoginId: String(form.gmLoginId || '').trim() || null,
+        // backend: GM required for GM modes, else null
+        gmLoginId: needGm.value ? String(form.gmLoginId || '').trim() || null : null,
+
+        // backend: COO required for COO modes, else null
         cooLoginId: needCoo.value ? String(form.cooLoginId || '').trim() || null : null,
 
         isActive: form.isActive !== false,
@@ -471,12 +497,12 @@ const pwd = reactive({
 })
 
 function validateStrongPassword(p) {
-  const s = String(p || '')
-  if (s.length < 13) return 'Password must be at least 13 characters.'
-  const hasUpper = /[A-Z]/.test(s)
-  const hasLower = /[a-z]/.test(s)
-  const hasNum = /\d/.test(s)
-  const hasSym = /[^A-Za-z0-9]/.test(s)
+  const s1 = String(p || '')
+  if (s1.length < 13) return 'Password must be at least 13 characters.'
+  const hasUpper = /[A-Z]/.test(s1)
+  const hasLower = /[a-z]/.test(s1)
+  const hasNum = /\d/.test(s1)
+  const hasSym = /[^A-Za-z0-9]/.test(s1)
   const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
   if (score < 3) return 'Password must include at least 3 of: uppercase, lowercase, number, symbol.'
   return ''
@@ -738,19 +764,21 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- ✅ show only if mode needs manager -->
+                    <!-- ✅ show only if mode involves manager -->
                     <div v-if="needManager" class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required for Manager modes">
-                        Manager employee ID <span class="ml-2 ui-badge">required</span>
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Manager loginId/employeeId (optional by policy)">
+                        Manager employee ID
+                        <span class="ml-2 ui-badge">optional</span>
                       </div>
                       <div class="mt-1">
                         <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
                       </div>
                     </div>
 
-                    <div class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM (required)">
-                        GM login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
+                    <!-- ✅ show only if mode involves GM -->
+                    <div v-if="needGm" class="ui-card !rounded-2xl px-3 py-2">
+                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM">
+                        GM login ID <span v-if="gmIsRequired" class="ml-1 text-rose-600 font-extrabold">*</span>
                       </div>
                       <div class="mt-1">
                         <input v-model="form.gmLoginId" type="text" placeholder="Example: leave_gm" class="ui-input w-full" />
@@ -760,7 +788,7 @@ onBeforeUnmount(() => {
                     <!-- ✅ show COO when needed -->
                     <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
                       <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode includes COO">
-                        COO login ID <span class="ml-1 text-rose-600 font-extrabold">*</span>
+                        COO login ID <span v-if="cooIsRequired" class="ml-1 text-rose-600 font-extrabold">*</span>
                       </div>
                       <div class="mt-1">
                         <input v-model="form.cooLoginId" type="text" placeholder="Example: leave_coo" class="ui-input w-full" />

@@ -82,13 +82,23 @@ function statusChipClasses(active) {
 }
 function modeChipClasses(mode) {
   const m = up(mode)
+
+  // COO involved -> indigo
   if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO') return 'ui-badge ui-badge-indigo'
+
+  // single approver -> emerald/sky (you can choose)
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
+
+  // default -> info
   return 'ui-badge ui-badge-info'
 }
+
 function modeLabel(mode) {
   const m = up(mode)
   if (m === 'GM_AND_COO') return 'GM + COO'
   if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
   return 'Manager + GM'
 }
 

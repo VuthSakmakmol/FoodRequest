@@ -4,15 +4,19 @@
 // ✅ Viewers: LEAVE_ADMIN/ADMIN/ROOT_ADMIN can VIEW inbox (pending + ALL via scope)
 // ❌ But they CANNOT approve/reject on behalf of manager/gm/coo
 //
-// ✅ Supports ONLY 3 approval modes (semantic):
+// ✅ Supports approval modes (semantic):
 //    - MANAGER_AND_GM
 //    - MANAGER_AND_COO
 //    - GM_AND_COO
+//    - MANAGER_ONLY      ✅ NEW
+//    - GM_ONLY           ✅ NEW
 //
 // ✅ Flow by mode:
 //    MANAGER_AND_GM   : PENDING_MANAGER -> PENDING_GM  -> APPROVED
 //    MANAGER_AND_COO  : PENDING_MANAGER -> PENDING_COO -> APPROVED
 //    GM_AND_COO       : PENDING_GM      -> PENDING_COO -> APPROVED   (manager skipped)
+//    MANAGER_ONLY     : PENDING_MANAGER -> APPROVED
+//    GM_ONLY          : PENDING_GM      -> APPROVED
 //
 // ✅ Status values:
 //    PENDING_MANAGER, PENDING_GM, PENDING_COO, APPROVED, REJECTED, CANCELLED
@@ -254,6 +258,8 @@ function normalizeMode(v) {
 function initialStatusForMode(mode) {
   const m = normalizeMode(mode)
   if (m === 'GM_AND_COO') return 'PENDING_GM'
+  if (m === 'GM_ONLY') return 'PENDING_GM' // ✅ NEW
+  // MANAGER_AND_GM / MANAGER_AND_COO / MANAGER_ONLY
   return 'PENDING_MANAGER'
 }
 
@@ -264,6 +270,18 @@ function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
     const id = s(v)
     if (!id) throw createError(400, `${label} approver is missing in profile`)
     return id
+  }
+
+  if (m === 'MANAGER_ONLY') {
+    return [
+      { level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' },
+    ]
+  }
+
+  if (m === 'GM_ONLY') {
+    return [
+      { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
+    ]
   }
 
   if (m === 'MANAGER_AND_GM') {
@@ -308,12 +326,14 @@ function markApproval(approvals, level, status, note = '') {
 
 function nextStatusAfterManagerApprove(mode) {
   const m = normalizeMode(mode)
+  if (m === 'MANAGER_ONLY') return 'APPROVED' // ✅ NEW
   if (m === 'MANAGER_AND_COO') return 'PENDING_COO'
   return 'PENDING_GM'
 }
 
 function nextStatusAfterGmApprove(mode) {
   const m = normalizeMode(mode)
+  if (m === 'GM_ONLY') return 'APPROVED' // ✅ NEW
   if (m === 'GM_AND_COO') return 'PENDING_COO'
   return 'APPROVED'
 }
@@ -575,10 +595,9 @@ exports.createMyRequest = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    LIST MY REQUESTS
-   GET /api/leave/requests/my
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.listMyRequests = async (req, res, next) => {
   try {
     const meLoginId = actorLoginId(req)
@@ -594,10 +613,9 @@ exports.listMyRequests = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    CANCEL MY REQUEST
-   POST /api/leave/requests/:id/cancel
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.cancelMyRequest = async (req, res, next) => {
   try {
     const meLoginId = actorLoginId(req)
@@ -635,10 +653,9 @@ exports.cancelMyRequest = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    MANAGER INBOX
-   GET /api/leave/requests/manager/inbox?scope=ALL
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.listManagerInbox = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -646,7 +663,7 @@ exports.listManagerInbox = async (req, res, next) => {
     if (!canViewManagerInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '') // 'ALL' or ''
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] }
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] } // ✅ NEW
 
     // ✅ Admin viewers can view all managers; normal manager sees only own rows
     const base = isAdminViewer(req)
@@ -665,10 +682,9 @@ exports.listManagerInbox = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    MANAGER DECISION
-   POST /api/leave/requests/:id/manager-decision
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.managerDecision = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -682,7 +698,7 @@ exports.managerDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'].includes(mode)) {
       throw createError(400, 'This request does not require manager approval.')
     }
 
@@ -742,10 +758,9 @@ exports.managerDecision = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    GM INBOX
-   GET /api/leave/requests/gm/inbox?scope=ALL
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.listGmInbox = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -753,7 +768,7 @@ exports.listGmInbox = async (req, res, next) => {
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '')
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] }
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] } // ✅ NEW
 
     const base = isAdminViewer(req)
       ? { approvalMode: modeFilter }
@@ -773,10 +788,9 @@ exports.listGmInbox = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    GM DECISION
-   POST /api/leave/requests/:id/gm-decision
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.gmDecision = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -790,7 +804,7 @@ exports.gmDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_GM', 'GM_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'].includes(mode)) {
       throw createError(400, 'This request does not require GM approval.')
     }
 
@@ -849,10 +863,9 @@ exports.gmDecision = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    COO INBOX
-   GET /api/leave/requests/coo/inbox?scope=ALL
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.listCooInbox = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -860,7 +873,7 @@ exports.listCooInbox = async (req, res, next) => {
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '')
-    const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] }
+    const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] } // (no COO in new modes)
 
     const base = isAdminViewer(req)
       ? { approvalMode: modeFilter }
@@ -880,10 +893,9 @@ exports.listCooInbox = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    COO DECISION
-   POST /api/leave/requests/:id/coo-decision
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.cooDecision = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -951,10 +963,9 @@ exports.cooDecision = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────
    UPDATE MY REQUEST (only before any approval happened)
-   PATCH /api/leave/requests/:id
-───────────────────────────────────────────────────────────── */
+───────────────────────────────────────────── */
 exports.updateMyRequest = async (req, res, next) => {
   try {
     const meLoginId = actorLoginId(req)

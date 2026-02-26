@@ -11,15 +11,14 @@
   ✅ Delete attachment confirm modal (locked after approval started)
   ✅ Edit request (only before any approval happened)
 
-  ✅ EDIT MODAL UPDATED:
-     - NO "Enable half-day" checkbox (auto UI)
-     - NO "½" button
-     - Half-day uses AM/PM directly:
-         • Single-day: AM or PM (required)
-         • Multi-day: Start day AM/PM optional, End day AM/PM optional (at least one edge required)
-     - Hint text shows what user is selecting (1 day, half day, multi-day edges)
-     - Evidence uses "Upload Files" button (no "No file chosen")
-     - Existing attached files list shown in edit modal; click to preview (re-uses Files modal)
+  ✅ EDIT MODAL UPDATED (FIXED):
+     - Single-day can be FULL or HALF (AM/PM)
+     - Multi-day: Start day AM/PM optional, End day AM/PM optional (at least one edge required)
+     - Hint text shows what user is selecting
+
+  ✅ Cancel FIX:
+     - allow cancel while pending at ANY level (PENDING_MANAGER / PENDING_GM / PENDING_COO)
+     - supports new modes like GM_ONLY (starts at PENDING_GM)
 
   ✅ Dialog/Modal improvements:
      - ESC closes top-most modal
@@ -86,9 +85,13 @@ function statusBadgeUiClass(s) {
   return 'ui-badge'
 }
 
+/**
+ * ✅ Cancel allowed while pending at any level
+ * (supports GM_ONLY which starts at PENDING_GM)
+ */
 function canCancel(item) {
-  // cancel only before manager approves
-  return String(item?.status || '').toUpperCase() === 'PENDING_MANAGER'
+  const st = String(item?.status || '').toUpperCase()
+  return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)
 }
 
 /**
@@ -120,7 +123,7 @@ function closeCancel() {
 async function confirmCancel() {
   if (!cancelItem.value?._id) return
   if (!canCancel(cancelItem.value)) {
-    showToast({ type: 'info', title: 'Cannot cancel', message: 'You can only cancel before manager approval.' })
+    showToast({ type: 'info', title: 'Cannot cancel', message: 'You can only cancel while request is still pending.' })
     closeCancel()
     return
   }
@@ -346,7 +349,8 @@ async function confirmDeleteAttachment() {
 
 /* ─────────────────────────────────────────────────────────────
    EDIT REQUEST modal
-   ✅ Auto half-day UI, no checkbox, no ½ button
+   ✅ Single-day can be FULL or HALF (AM/PM)
+   ✅ Multi-day edges optional (at least one required)
 ───────────────────────────────────────────────────────────── */
 const editOpen = ref(false)
 const editItem = ref(null)
@@ -359,8 +363,8 @@ const editForm = ref({
   endDate: '',
   reason: '',
 
-  // single-day
-  singleHalf: 'AM', // required (AM/PM)
+  // single-day: '' = FULL, 'AM'/'PM' = half-day
+  singleHalf: '',
 
   // multi-day edges (optional but at least 1 edge required)
   startHalfPart: '', // AM/PM or ''
@@ -427,11 +431,10 @@ const requestedDaysEdit = computed(() => {
   const work = baseWorkingDaysEdit.value
   if (!work) return 0
 
-  // single-day always half-day by design (AM/PM required)
-  if (!isMultiDayEdit.value) return 0.5
+  // single-day: FULL = 1, AM/PM = 0.5
+  if (!isMultiDayEdit.value) return editForm.value.singleHalf ? 0.5 : 1
 
   // multi-day edges
-  // total = working days - 0.5 for each edge chosen
   let total = work
   if (editForm.value.startHalfPart) total -= 0.5
   if (editForm.value.endHalfPart) total -= 0.5
@@ -448,7 +451,10 @@ const editBreakdownText = computed(() => {
   if (!total) return '—'
   const totalStr = Number.isInteger(total) ? String(total) : String(total)
 
-  if (!isMultiDayEdit.value) return `You request ${totalStr} day (half day: ${String(editForm.value.singleHalf || 'AM').toUpperCase()})`
+  if (!isMultiDayEdit.value) {
+    if (!editForm.value.singleHalf) return `You request ${totalStr} day (FULL)`
+    return `You request ${totalStr} day (half day: ${String(editForm.value.singleHalf).toUpperCase()})`
+  }
 
   const parts = []
   if (editForm.value.startHalfPart) parts.push(`Start (${String(editForm.value.startHalfPart).toUpperCase()})`)
@@ -460,11 +466,12 @@ const editBreakdownText = computed(() => {
 const halfHintText = computed(() => {
   const s = editForm.value.startDate
   const e = editForm.value.endDate
-  if (!s || !e) return 'Select dates, then choose AM/PM.'
+  if (!s || !e) return 'Select dates, then choose FULL / AM / PM (or edges for multi-day).'
 
   if (!isMultiDayEdit.value) {
-    const part = editForm.value.singleHalf || 'AM'
-    return `You are requesting 0.5 day on ${s} (${part}).`
+    const part = editForm.value.singleHalf
+    if (!part) return `Single-day: FULL day on ${s}.`
+    return `Single-day: 0.5 day on ${s} (${part}).`
   }
 
   const a = editForm.value.startHalfPart
@@ -564,7 +571,11 @@ function openEdit(item) {
   const startHalf = item?.startHalf ? String(item.startHalf).toUpperCase() : ''
   const endHalf = item?.endHalf ? String(item.endHalf).toUpperCase() : ''
 
+  const legacyHalf = !!item?.isHalfDay
+  const legacyPart = item?.dayPart ? String(item.dayPart).toUpperCase() : ''
+
   const isMulti = end > start
+  const partForSingle = startHalf || legacyPart || ''
 
   editForm.value = {
     leaveTypeCode: String(item.leaveTypeCode || '').toUpperCase(),
@@ -572,8 +583,10 @@ function openEdit(item) {
     endDate: end,
     reason: String(item.reason || ''),
 
-    singleHalf: !isMulti ? (startHalf || 'AM') : 'AM',
-    // multi-day: default both empty, user must choose at least one
+    // single-day: FULL if not half-day
+    singleHalf: !isMulti ? (legacyHalf ? (partForSingle || 'AM') : '') : '',
+
+    // multi-day: allow edges based on existing data
     startHalfPart: isMulti ? (startHalf || '') : '',
     endHalfPart: isMulti ? (endHalf || '') : '',
   }
@@ -598,15 +611,14 @@ watch(
     if (!editForm.value.endDate) editForm.value.endDate = editForm.value.startDate
     if (editForm.value.endDate < editForm.value.startDate) editForm.value.endDate = editForm.value.startDate
 
-    // when switching from multi -> single, keep singleHalf valid
+    // when switching from multi -> single
     if (!isMultiDayEdit.value) {
-      if (!editForm.value.singleHalf) editForm.value.singleHalf = 'AM'
-      // clear multi edges
+      // single day: clear edges
       editForm.value.startHalfPart = ''
       editForm.value.endHalfPart = ''
     } else {
-      // multi-day: singleHalf irrelevant but keep stable
-      if (!editForm.value.singleHalf) editForm.value.singleHalf = 'AM'
+      // multi-day: singleHalf irrelevant
+      if (!editForm.value.singleHalf) editForm.value.singleHalf = ''
     }
   }
 )
@@ -619,8 +631,8 @@ const canSaveEdit = computed(() => {
   if (!editForm.value.endDate) return false
   if (editForm.value.endDate < editForm.value.startDate) return false
 
-  // single-day: AM/PM required
-  if (!isMultiDayEdit.value) return !!editForm.value.singleHalf
+  // single-day: FULL or half allowed
+  if (!isMultiDayEdit.value) return true
 
   // multi-day: at least one edge required
   return !!(editForm.value.startHalfPart || editForm.value.endHalfPart)
@@ -644,11 +656,18 @@ async function saveEdit() {
     }
 
     if (!isMultiDayEdit.value) {
-      const part = String(editForm.value.singleHalf || 'AM').toUpperCase()
-      payload.isHalfDay = true
-      payload.dayPart = part
-      payload.startHalf = part
-      payload.endHalf = null
+      const part = String(editForm.value.singleHalf || '').toUpperCase()
+      if (part) {
+        payload.isHalfDay = true
+        payload.dayPart = part
+        payload.startHalf = part
+        payload.endHalf = null
+      } else {
+        payload.isHalfDay = false
+        payload.dayPart = ''
+        payload.startHalf = null
+        payload.endHalf = null
+      }
     } else {
       payload.isHalfDay = false
       payload.dayPart = ''
@@ -1074,7 +1093,7 @@ onBeforeUnmount(() => {
             <div class="flex-1">
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Cancel this request?</div>
               <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-                You can only cancel <span class="font-extrabold">before manager approval</span>.
+                You can only cancel while request is still <span class="font-extrabold">pending</span>.
               </div>
 
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
@@ -1326,7 +1345,7 @@ onBeforeUnmount(() => {
               <div class="mt-3">
                 <div class="flex items-start justify-between gap-2">
                   <div>
-                    <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Half-day (AM / PM)</div>
+                    <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">Half-day (FULL / AM / PM)</div>
                     <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{{ halfHintText }}</div>
                   </div>
                 </div>
@@ -1334,6 +1353,9 @@ onBeforeUnmount(() => {
                 <div class="mt-2 space-y-2">
                   <!-- single day -->
                   <div v-if="!isMultiDayEdit" class="flex justify-end gap-2">
+                    <button type="button" class="sq-chip" :class="!editForm.singleHalf ? 'sq-chip-on' : ''" @click="editForm.singleHalf=''">
+                      FULL
+                    </button>
                     <button type="button" class="sq-chip" :class="editForm.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf='AM'">
                       AM
                     </button>

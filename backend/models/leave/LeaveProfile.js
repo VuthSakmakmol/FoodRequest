@@ -43,17 +43,35 @@ function endFromStartYMD(startYMD) {
 }
 
 /**
- * ✅ Only 3 approval modes in the whole system (semantic)
+ * ✅ Approval modes (semantic)
  */
-const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
+const APPROVAL_MODE = Object.freeze([
+  'MANAGER_AND_GM',
+  'MANAGER_AND_COO',
+  'GM_AND_COO',
+  'MANAGER_ONLY', // ✅ NEW
+  'GM_ONLY', // ✅ NEW
+])
 
 function normalizeApprovalMode(v) {
   const raw = up(v)
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
+  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
   // safest default
   return 'MANAGER_AND_GM'
+}
+
+function modeInvolvesManager(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+}
+function modeInvolvesGm(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+}
+function modeInvolvesCoo(mode) {
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
 }
 
 function normalizeCarryObj(c) {
@@ -198,12 +216,24 @@ function pickLatestContract(list) {
    - contractNo auto-assigned if missing
    - endDate auto-filled from startDate if missing
    - contractDate/contractEndDate pointers always match latest contract
+   - ✅ BIG: approver ids auto-cleared based on approvalMode
 ───────────────────────────────────────────────────────────── */
 
 LeaveProfileSchema.pre('validate', function (next) {
   try {
     // normalize approvalMode
     this.approvalMode = normalizeApprovalMode(this.approvalMode)
+
+    // ✅ normalize approver ids
+    this.managerLoginId = s(this.managerLoginId)
+    this.gmLoginId = s(this.gmLoginId)
+    this.cooLoginId = s(this.cooLoginId)
+
+    // ✅ BIG: auto-clear unused approvers by mode (keeps DB clean)
+    const mode = this.approvalMode
+    if (!modeInvolvesManager(mode)) this.managerLoginId = ''
+    if (!modeInvolvesGm(mode)) this.gmLoginId = ''
+    if (!modeInvolvesCoo(mode)) this.cooLoginId = ''
 
     // normalize required strings
     this.employeeId = s(this.employeeId)

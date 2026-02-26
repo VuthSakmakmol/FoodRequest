@@ -2,10 +2,12 @@
 // backend/controllers/leave/leaveProfiles.admin.controller.js
 //
 // ✅ Admin leave profile management (CLEAN VERSION)
-// ✅ Only 3 approval modes:
+// ✅ Approval modes:
 //    - MANAGER_AND_GM
 //    - MANAGER_AND_COO
 //    - GM_AND_COO
+//    - MANAGER_ONLY      ✅ NEW
+//    - GM_ONLY           ✅ NEW
 //
 // ✅ Concept (your requirement):
 //    - Create profile creates ONLY employee account (User) + employee leave profile
@@ -52,9 +54,16 @@ function ymdToUTCDate(ymd) {
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1))
 }
 
-const APPROVAL_MODES = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
+const APPROVAL_MODES = Object.freeze([
+  'MANAGER_AND_GM',
+  'MANAGER_AND_COO',
+  'GM_AND_COO',
+  'MANAGER_ONLY', // ✅ NEW
+  'GM_ONLY', // ✅ NEW
+])
 
 function normalizeApprovalMode(v) {
+  // ✅ Use model's normalize if available (updated in LeaveProfile model)
   if (typeof LeaveProfile?.normalizeApprovalMode === 'function') {
     return LeaveProfile.normalizeApprovalMode(v)
   }
@@ -62,7 +71,19 @@ function normalizeApprovalMode(v) {
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
+  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
   return 'MANAGER_AND_GM'
+}
+
+function modeInvolvesManager(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+}
+function modeInvolvesGm(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+}
+function modeInvolvesCoo(mode) {
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
 }
 
 /**
@@ -72,6 +93,15 @@ function normalizeApprovalMode(v) {
  */
 function validateModeApprovers(mode, { gmLoginId, cooLoginId }) {
   const m = normalizeApprovalMode(mode)
+
+  // MANAGER_ONLY: manager is OPTIONAL by concept (can be empty). No gm/coo required.
+  if (m === 'MANAGER_ONLY') return
+
+  // GM_ONLY: gm is REQUIRED. No coo.
+  if (m === 'GM_ONLY') {
+    if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for GM_ONLY')
+    return
+  }
 
   if (m === 'MANAGER_AND_GM') {
     if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for MANAGER_AND_GM')
@@ -113,12 +143,12 @@ function normalizeCarryObj(c) {
     UL: num(src.UL),
   }
 
+  // ✅ SP borrows from AL (store into AL carry; SP carry forced 0)
   out.AL = num(out.AL) + num(out.SP)
   out.SP = 0
 
   return out
 }
-
 
 function getIo(req) {
   return req.io || req.app?.get('io') || null
@@ -185,12 +215,6 @@ async function inferRolesFromProfiles(loginId) {
   const isManager = await LeaveProfile.exists({ managerLoginId: id })
   if (isManager) roles.push('LEAVE_MANAGER')
 
-  // (Optional for future)
-  // const isGm = await LeaveProfile.exists({ gmLoginId: id })
-  // if (isGm) roles.push('LEAVE_GM')
-  // const isCoo = await LeaveProfile.exists({ cooLoginId: id })
-  // if (isCoo) roles.push('LEAVE_COO')
-
   return roles
 }
 
@@ -199,7 +223,6 @@ async function ensureManagerRole(managerLoginId) {
   if (!id) return
   await ensureUserHasRoles(id, ['LEAVE_MANAGER'])
 }
-
 
 /**
  * ✅ Creates ONLY the employee account (User) when needed.
@@ -251,7 +274,6 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
 
   return user
 }
-
 
 async function attachEmployeeDirectory(profilePlain) {
   const employeeId = s(profilePlain?.employeeId)
@@ -424,8 +446,10 @@ exports.createProfileSingle = async (req, res) => {
   const approvalMode = normalizeApprovalMode(body.approvalMode)
   const managerLoginId = s(body.managerLoginId) // ✅ optional
   if (managerLoginId) await ensureManagerRole(managerLoginId)
-  const gmLoginId = s(body.gmLoginId)
-  const cooLoginId = s(body.cooLoginId)
+
+  // ✅ BIG: only keep approvers needed by mode
+  const gmLoginId = modeInvolvesGm(approvalMode) ? s(body.gmLoginId) : ''
+  const cooLoginId = modeInvolvesCoo(approvalMode) ? s(body.cooLoginId) : ''
 
   validateModeApprovers(approvalMode, { gmLoginId, cooLoginId })
 
@@ -467,7 +491,7 @@ exports.createProfileSingle = async (req, res) => {
   const doc = await LeaveProfile.create({
     employeeId,
     employeeLoginId,
-    managerLoginId, // ✅ optional
+    managerLoginId, // ✅ optional (model will auto-clear if mode doesn't involve manager)
     gmLoginId,
     cooLoginId,
     approvalMode,
@@ -497,8 +521,11 @@ exports.createManagerWithEmployees = async (req, res) => {
   const approvalMode = normalizeApprovalMode(body.approvalMode)
 
   const managerLoginId = s(body.managerLoginId) // ✅ optional
-  const gmLoginId = s(body.gmLoginId)
-  const cooLoginId = s(body.cooLoginId)
+  if (managerLoginId) await ensureManagerRole(managerLoginId)
+
+  // ✅ BIG: only keep approvers needed by mode
+  const gmLoginId = modeInvolvesGm(approvalMode) ? s(body.gmLoginId) : ''
+  const cooLoginId = modeInvolvesCoo(approvalMode) ? s(body.cooLoginId) : ''
 
   validateModeApprovers(approvalMode, { gmLoginId, cooLoginId })
 
@@ -515,7 +542,6 @@ exports.createManagerWithEmployees = async (req, res) => {
     if (exists) continue
 
     const employeeLoginId = s(e.employeeLoginId || e.loginId || employeeId)
-    if (managerLoginId) await ensureManagerRole(managerLoginId)
     if (!employeeLoginId) throw createError(400, `employeeLoginId missing for employeeId=${employeeId}`)
 
     // ✅ Create ONLY employee account
@@ -588,21 +614,21 @@ exports.updateProfile = async (req, res) => {
 
   const nextApprovalMode = normalizeApprovalMode(body.approvalMode ?? doc.approvalMode)
 
-  // ✅ manager is allowed ONLY in manager modes
-  const managerAllowed =
-    nextApprovalMode === 'MANAGER_AND_GM' || nextApprovalMode === 'MANAGER_AND_COO'
+  // ✅ BIG: allow manager in MANAGER_ONLY too
+  const managerAllowed = modeInvolvesManager(nextApprovalMode)
 
   // ✅ If mode doesn't involve manager -> force remove managerLoginId
   const nextManager = managerAllowed ? s(body.managerLoginId ?? doc.managerLoginId) : ''
+  if (nextManager) await ensureManagerRole(nextManager)
 
-  const nextGm = s(body.gmLoginId ?? doc.gmLoginId)
-  const nextCoo = s(body.cooLoginId ?? doc.cooLoginId)
+  // ✅ BIG: clear approvers that don't apply
+  const nextGm = modeInvolvesGm(nextApprovalMode) ? s(body.gmLoginId ?? doc.gmLoginId) : ''
+  const nextCoo = modeInvolvesCoo(nextApprovalMode) ? s(body.cooLoginId ?? doc.cooLoginId) : ''
 
   validateModeApprovers(nextApprovalMode, { gmLoginId: nextGm, cooLoginId: nextCoo })
 
   doc.approvalMode = nextApprovalMode
   doc.managerLoginId = nextManager
-  if (nextManager) await ensureManagerRole(nextManager)
   doc.gmLoginId = nextGm
   doc.cooLoginId = nextCoo
 
