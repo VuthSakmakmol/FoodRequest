@@ -1,4 +1,11 @@
-<!-- src/views/expat/user/swap-day/UserSwapDay.vue -->
+<!-- src/views/expat/user/swap-day/UserSwapDay.vue
+  ✅ Attachments REMOVED completely
+  ✅ Supports new backend lock rule:
+     - can edit ONLY when status is PENDING_* AND approvals have NO activity (actedAt/APPROVED/REJECTED)
+  ✅ Works with new approval modes MANAGER_ONLY / GM_ONLY automatically (backend handles flow)
+  ✅ Realtime: if approval starts while user is editing → UI locks instantly
+  ✅ UI: same layout style, responsive, professional
+-->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
@@ -8,8 +15,6 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
 import { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded, onSocket } from '@/utils/socket'
-
-import AttachmentPreviewModal from './AttachmentPreviewModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 defineOptions({ name: 'UserSwapDay' })
@@ -35,65 +40,44 @@ const form = ref({
   reason: '',
 })
 
-/** existing attachments from backend (must contain attId) */
-const existingAttachments = ref([]) // [{ attId,fileId,filename,contentType,uploadedAt,size,uploadedBy,note }]
+/** status + approvals (for lock logic) */
+const status = ref('') // PENDING_MANAGER, APPROVED...
+const approvals = ref([]) // [{level,loginId,status,actedAt,note}]
 
-/** new selected files (queue) */
-const queuedFiles = ref([]) // File[]
-
-/** status (from backend) for permission (pending only) */
-const status = ref('') // e.g. PENDING_MANAGER, APPROVED...
 const isPending = computed(() => String(status.value || '').toUpperCase().includes('PENDING'))
+
+const hasApprovalActivity = computed(() => {
+  const arr = Array.isArray(approvals.value) ? approvals.value : []
+  return arr.some((a) => {
+    const st = String(a?.status || '').toUpperCase()
+    return !!a?.actedAt || st === 'APPROVED' || st === 'REJECTED'
+  })
+})
+
+/** ✅ FINAL permission (matches backend rule) */
+const canEditNow = computed(() => isPending.value && !hasApprovalActivity.value)
 
 /* ───────────────── dirty tracking ───────────────── */
 const initialSnapshot = ref('')
-const isDirty = computed(() => JSON.stringify(form.value) !== initialSnapshot.value || queuedFiles.value.length > 0)
+const isDirty = computed(() => JSON.stringify(form.value) !== initialSnapshot.value)
 
 /* ───────────────── dialogs ───────────────── */
 const confirmLeaveOpen = ref(false)
 const confirmSaveOpen = ref(false)
 const confirmBusy = ref(false)
 
-/* ───────────────── attachments modal ───────────────── */
-const filesOpen = ref(false)
-const filesItems = computed(() => existingAttachments.value || [])
-
-async function fetchAttachments(requestId) {
-  const rid = String(requestId || '').trim()
-  if (!rid) return
-  try {
-    const res = await api.get(`/leave/swap-working-day/${rid}/evidence`)
-    existingAttachments.value = Array.isArray(res.data) ? res.data : []
-  } catch (e) {
-    existingAttachments.value = []
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments.' })
-  }
-}
-
-function openFilesModal() {
-  filesOpen.value = true
-}
-
 /* ───────────────── date helpers ─────────────────
    ✅ When "From" changes, auto set "To" = "From" (both sections)
    ✅ If "To" becomes earlier than "From", clamp it back.
 */
-const requestEndManuallyEdited = ref(false)
-const compEndManuallyEdited = ref(false)
-
-function onRequestEndInput() {
-  requestEndManuallyEdited.value = true
-}
-function onCompEndInput() {
-  compEndManuallyEdited.value = true
-}
+function onRequestEndInput() {}
+function onCompEndInput() {}
 
 watch(
   () => form.value.requestStart,
   (v) => {
     if (!v) return
     form.value.requestEnd = v
-    requestEndManuallyEdited.value = false
   }
 )
 
@@ -102,7 +86,6 @@ watch(
   (v) => {
     if (!v) return
     form.value.compEnd = v
-    compEndManuallyEdited.value = false
   }
 )
 
@@ -110,11 +93,10 @@ watch(
   () => form.value.requestEnd,
   (v) => {
     if (!v || !form.value.requestStart) return
-    const s = dayjs(form.value.requestStart)
-    const e = dayjs(v)
-    if (s.isValid() && e.isValid() && e.isBefore(s, 'day')) {
+    const s0 = dayjs(form.value.requestStart)
+    const e0 = dayjs(v)
+    if (s0.isValid() && e0.isValid() && e0.isBefore(s0, 'day')) {
       form.value.requestEnd = form.value.requestStart
-      requestEndManuallyEdited.value = false
     }
   }
 )
@@ -123,21 +105,20 @@ watch(
   () => form.value.compEnd,
   (v) => {
     if (!v || !form.value.compStart) return
-    const s = dayjs(form.value.compStart)
-    const e = dayjs(v)
-    if (s.isValid() && e.isValid() && e.isBefore(s, 'day')) {
+    const s0 = dayjs(form.value.compStart)
+    const e0 = dayjs(v)
+    if (s0.isValid() && e0.isValid() && e0.isBefore(s0, 'day')) {
       form.value.compEnd = form.value.compStart
-      compEndManuallyEdited.value = false
     }
   }
 )
 
 function calcDays(start, end) {
   if (!start || !end) return 0
-  const s = dayjs(start)
-  const e = dayjs(end)
-  if (!s.isValid() || !e.isValid()) return 0
-  return e.diff(s, 'day') + 1
+  const s0 = dayjs(start)
+  const e0 = dayjs(end)
+  if (!s0.isValid() || !e0.isValid()) return 0
+  return e0.diff(s0, 'day') + 1
 }
 
 const requestDays = computed(() => calcDays(form.value.requestStart, form.value.requestEnd))
@@ -148,46 +129,12 @@ const canSubmit = computed(() => {
   return !!form.value.requestStart && !!form.value.compStart && isDurationValid.value
 })
 
-/* ───────────────── file picking ───────────────── */
-
-function isAllowed(file) {
-  const t = String(file.type || '').toLowerCase()
-  const name = String(file.name || '').toLowerCase()
-  return (
-    t.includes('pdf') ||
-    t.startsWith('image/') ||
-    name.endsWith('.pdf') ||
-    name.endsWith('.png') ||
-    name.endsWith('.jpg') ||
-    name.endsWith('.jpeg') ||
-    name.endsWith('.webp')
-  )
-}
-
-function pickFile(e) {
-  const files = Array.from(e.target.files || [])
-  for (const f of files) {
-    if (!isAllowed(f)) {
-      showToast({ type: 'error', message: 'Only PDF or image allowed.' })
-      continue
-    }
-    if (f.size > 5 * 1024 * 1024) {
-      showToast({ type: 'error', message: 'Max file size 5MB.' })
-      continue
-    }
-    queuedFiles.value.push(f)
-  }
-  e.target.value = ''
-}
-
-function removeQueued(idx) {
-  queuedFiles.value.splice(idx, 1)
-}
-
 /* ───────────────── load edit ───────────────── */
 async function loadForEdit() {
   if (!isEdit.value) {
+    // new request
     status.value = 'PENDING_MANAGER'
+    approvals.value = []
     initialSnapshot.value = JSON.stringify(form.value)
     return
   }
@@ -206,9 +153,14 @@ async function loadForEdit() {
     }
 
     status.value = d.status || ''
-    await fetchAttachments(id.value)
+    approvals.value = Array.isArray(d.approvals) ? d.approvals : []
 
     initialSnapshot.value = JSON.stringify(form.value)
+
+    // If already locked, inform user once
+    if (!canEditNow.value) {
+      showToast({ type: 'info', message: 'This request is locked because approval has started.' })
+    }
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load request.' })
     router.push({ name: 'leave-user-swap-day' })
@@ -219,22 +171,6 @@ async function loadForEdit() {
 
 onMounted(loadForEdit)
 
-/* ───────────────── upload queued files ───────────────── */
-async function uploadQueuedFiles(requestId) {
-  const rid = String(requestId || '').trim()
-  if (!rid) return
-  if (!queuedFiles.value.length) return
-
-  const fd = new FormData()
-  for (const f of queuedFiles.value) fd.append('files', f) // ✅ field name: "files"
-
-  // ✅ IMPORTANT: do NOT set multipart header manually
-  await api.post(`/leave/swap-working-day/${rid}/evidence`, fd)
-
-  queuedFiles.value = []
-  await fetchAttachments(rid)
-}
-
 /* ───────────────── submit/save ───────────────── */
 function askPrimary() {
   if (saving.value) return
@@ -244,18 +180,23 @@ function askPrimary() {
     return
   }
 
-  // ✅ NEW: submit immediately (no confirm)
+  // ✅ EDIT lock check (matches backend)
+  if (isEdit.value && !canEditNow.value) {
+    showToast({ type: 'warning', message: 'This request is locked because approval has started.' })
+    return
+  }
+
+  // ✅ New: submit immediately (no confirm)
   if (!isEdit.value) {
     doSubmitNew()
     return
   }
 
-  // ✅ EDIT: confirm save
+  // ✅ Edit: confirm save
   confirmSaveOpen.value = true
 }
 
 async function doSubmitNew() {
-  let createdId = null
   saving.value = true
   confirmBusy.value = true
   try {
@@ -267,23 +208,7 @@ async function doSubmitNew() {
       reason: form.value.reason,
     }
 
-    const res = await api.post('/leave/swap-working-day', payload)
-    createdId = res.data?._id
-
-    // ✅ Upload evidence if any (do NOT auto-cancel if upload fails)
-    if (createdId && queuedFiles.value.length) {
-      try {
-        await uploadQueuedFiles(createdId)
-      } catch (e2) {
-        // Request exists — show warning and go edit so user can retry upload
-        showToast({
-          type: 'warning',
-          message: e2?.response?.data?.message || 'Request created, but evidence upload failed. You can upload again in Edit.',
-        })
-        router.push({ name: 'leave-user-swap-day-edit', params: { id: createdId } })
-        return
-      }
-    }
+    await api.post('/leave/swap-working-day', payload)
 
     showToast({ type: 'success', message: 'Swap working day submitted.' })
     router.push({ name: 'leave-user-swap-day' })
@@ -297,6 +222,14 @@ async function doSubmitNew() {
 
 async function doSaveEdit() {
   if (!isEdit.value) return
+
+  // ✅ double-check lock right before saving
+  if (!canEditNow.value) {
+    showToast({ type: 'warning', message: 'This request is locked because approval has started.' })
+    confirmSaveOpen.value = false
+    return
+  }
+
   saving.value = true
   confirmBusy.value = true
   try {
@@ -310,11 +243,6 @@ async function doSaveEdit() {
 
     await api.put(`/leave/swap-working-day/${id.value}`, payload)
 
-    // ✅ upload in edit too (only if still allowed; backend will enforce lock)
-    if (queuedFiles.value.length) {
-      await uploadQueuedFiles(id.value)
-    }
-
     showToast({ type: 'success', message: 'Changes saved.' })
     initialSnapshot.value = JSON.stringify(form.value)
     confirmSaveOpen.value = false
@@ -327,7 +255,7 @@ async function doSaveEdit() {
   }
 }
 
-/* ───────────────── cancel/leave ───────────────── */
+/* ───────────────── leave / discard ───────────────── */
 function askLeave() {
   if (isDirty.value) confirmLeaveOpen.value = true
   else router.back()
@@ -337,9 +265,9 @@ function confirmLeave() {
   router.back()
 }
 
-/* ───────────────── REALTIME (optional) ─────────────────
-   If someone approves while user is on edit page:
-   - update status
+/* ───────────────── REALTIME ─────────────────
+   If approval starts while user is on edit page:
+   - update status + approvals
    - lock UI
 */
 let offUpdated = null
@@ -350,12 +278,16 @@ function applyRealtime(doc) {
   if (!doc?._id) return
   if (String(doc._id) !== String(id.value)) return
 
-  const newStatus = doc.status || ''
-  if (newStatus && newStatus !== status.value) {
-    status.value = newStatus
-    if (!String(newStatus).toUpperCase().includes('PENDING')) {
-      showToast({ type: 'warning', message: `This request is now ${newStatus}. Editing is locked.` })
-    }
+  const nextStatus = doc.status || ''
+  const nextApprovals = Array.isArray(doc.approvals) ? doc.approvals : approvals.value
+
+  const wasEditable = canEditNow.value
+
+  if (nextStatus) status.value = nextStatus
+  approvals.value = nextApprovals
+
+  if (wasEditable && !canEditNow.value) {
+    showToast({ type: 'warning', message: 'Approval has started. Editing is now locked.' })
   }
 }
 
@@ -393,6 +325,9 @@ onBeforeUnmount(() => {
               </div>
               <div v-if="isEdit" class="mt-0.5 text-[11px] text-white/85">
                 Status: <span class="font-extrabold">{{ status || '—' }}</span>
+                <span v-if="!canEditNow" class="ml-2 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-extrabold text-white/90">
+                  LOCKED
+                </span>
               </div>
             </div>
 
@@ -401,17 +336,6 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-arrow-left text-[11px]" />
                 Back
               </button>
-
-              <!-- <button
-                class="ui-hero-btn ui-hero-btn-primary"
-                type="button"
-                :disabled="saving || !canSubmit || (isEdit && !isPending)"
-                :title="isEdit && !isPending ? 'Only pending request can be edited.' : ''"
-                @click="askPrimary"
-              >
-                <i v-if="saving" class="fa-solid fa-spinner animate-spin text-[11px]" />
-                {{ isEdit ? 'Save' : 'Submit' }}
-              </button> -->
             </div>
           </div>
         </div>
@@ -421,7 +345,7 @@ onBeforeUnmount(() => {
           <div v-if="loading" class="ui-skeleton h-14 w-full" />
 
           <template v-else>
-            <!-- ✅ Row 1: Dates together -->
+            <!-- Row 1: Dates -->
             <div class="grid gap-3 lg:grid-cols-2">
               <!-- Request working date -->
               <div class="ui-card p-4 space-y-3">
@@ -433,7 +357,7 @@ onBeforeUnmount(() => {
                 <div class="grid gap-3 sm:grid-cols-2">
                   <div class="ui-field">
                     <label class="ui-label">From</label>
-                    <input type="date" v-model="form.requestStart" class="ui-date" :disabled="isEdit && !isPending" />
+                    <input type="date" v-model="form.requestStart" class="ui-date" :disabled="isEdit && !canEditNow" />
                   </div>
 
                   <div class="ui-field">
@@ -442,7 +366,7 @@ onBeforeUnmount(() => {
                       type="date"
                       v-model="form.requestEnd"
                       class="ui-date"
-                      :disabled="isEdit && !isPending"
+                      :disabled="isEdit && !canEditNow"
                       @input="onRequestEndInput"
                     />
                   </div>
@@ -462,7 +386,7 @@ onBeforeUnmount(() => {
                 <div class="grid gap-3 sm:grid-cols-2">
                   <div class="ui-field">
                     <label class="ui-label">From</label>
-                    <input type="date" v-model="form.compStart" class="ui-date" :disabled="isEdit && !isPending" />
+                    <input type="date" v-model="form.compStart" class="ui-date" :disabled="isEdit && !canEditNow" />
                   </div>
 
                   <div class="ui-field">
@@ -471,7 +395,7 @@ onBeforeUnmount(() => {
                       type="date"
                       v-model="form.compEnd"
                       class="ui-date"
-                      :disabled="isEdit && !isPending"
+                      :disabled="isEdit && !canEditNow"
                       @input="onCompEndInput"
                     />
                   </div>
@@ -483,9 +407,8 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- ✅ Row 2: Reason + Attachments together -->
+            <!-- Row 2: Reason -->
             <div class="grid gap-3 lg:grid-cols-2">
-              <!-- Reason -->
               <div class="ui-card p-4 space-y-2">
                 <div class="ui-section-title">Reason</div>
                 <textarea
@@ -493,100 +416,27 @@ onBeforeUnmount(() => {
                   rows="5"
                   class="ui-textarea"
                   placeholder="Explain why you swap working day..."
-                  :disabled="isEdit && !isPending"
+                  :disabled="isEdit && !canEditNow"
                 />
               </div>
 
-              <!-- Attachments (NEW + EDIT) -->
-              <!-- <div class="ui-card p-4 space-y-3">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="ui-section-title">Attachments</div>
-
-                  <button
-                    class="ui-btn ui-btn-soft ui-btn-sm"
-                    type="button"
-                    :disabled="!isEdit || (!existingAttachments.length && !queuedFiles.length)"
-                    @click="openFilesModal"
-                    title="Preview / manage attachments"
-                  >
-                    <i class="fa-solid fa-paperclip text-[11px]" />
-                    Preview ({{ existingAttachments?.length || 0 }})
-                  </button>
+              <!-- Right side: small info card -->
+              <div class="ui-card p-4 space-y-2">
+                <div class="ui-section-title">Info</div>
+                <div class="ui-frame p-3 text-[11px] text-slate-700 dark:text-slate-200">
+                  <div class="font-extrabold">Rules</div>
+                  <ul class="mt-1 list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-300">
+                    <li>Swap dates must be non-working days (Sunday/Holiday).</li>
+                    <li>Working day dates must be working days.</li>
+                    <li>Total days must match on both sides.</li>
+                    <li v-if="isEdit">Editing is locked once approval starts.</li>
+                  </ul>
                 </div>
 
-                <input
-                  id="fileInputSwap"
-                  type="file"
-                  multiple
-                  accept=".pdf,.jpg,.jpeg,.png,.webp"
-                  class="hidden"
-                  :disabled="isEdit && !isPending"
-                  @change="pickFile"
-                />
-
-                <div class="flex flex-wrap gap-2">
-                  <label
-                    for="fileInputSwap"
-                    class="ui-btn ui-btn-soft cursor-pointer"
-                    :class="(isEdit && !isPending) ? 'opacity-60 pointer-events-none' : ''"
-                  >
-                    <i class="fa-solid fa-upload" />
-                    Add Files
-                  </label>
-
-                  <button
-                    v-if="isEdit"
-                    class="ui-btn ui-btn-soft"
-                    type="button"
-                    @click="openFilesModal"
-                    :disabled="!existingAttachments.length"
-                  >
-                    <i class="fa-solid fa-eye text-[11px]" />
-                    View Existing
-                  </button>
+                <div v-if="isEdit && !canEditNow" class="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  This request is locked because approval has started.
                 </div>
-
-                <div v-if="queuedFiles.length" class="space-y-2">
-                  <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
-                    Selected (will upload when you {{ isEdit ? 'Save' : 'Submit' }})
-                  </div>
-
-                  <div v-for="(f, idx) in queuedFiles" :key="idx" class="flex items-center justify-between ui-frame p-2">
-                    <div class="min-w-0">
-                      <div class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                        {{ f.name }}
-                      </div>
-                      <div class="text-[10px] text-slate-500 dark:text-slate-400">
-                        {{ Math.ceil((f.size || 0) / 1024) }} KB
-                      </div>
-                    </div>
-
-                    <button
-                      class="ui-btn ui-btn-ghost ui-btn-xs"
-                      type="button"
-                      :disabled="isEdit && !isPending"
-                      @click="removeQueued(idx)"
-                      title="Remove"
-                    >
-                      <i class="fa-solid fa-xmark" />
-                    </button>
-                  </div>
-                </div>
-
-          
-                <div v-if="existingAttachments.length" class="ui-frame p-3">
-                  <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">
-                    Existing files: {{ existingAttachments.length }}
-                  </div>
-                  <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                    Click “Preview” to view/delete (pending only).
-                  </div>
-                </div>
-
-                <div v-else class="text-[11px] text-slate-500 dark:text-slate-400">
-                  No existing attachments.
-                </div>
-              </div> -->
+              </div>
             </div>
 
             <!-- footer buttons -->
@@ -596,7 +446,8 @@ onBeforeUnmount(() => {
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"
-                :disabled="saving || !canSubmit || (isEdit && !isPending)"
+                :disabled="saving || !canSubmit || (isEdit && !canEditNow)"
+                :title="isEdit && !canEditNow ? 'Locked after approval started.' : ''"
                 @click="askPrimary"
               >
                 <i v-if="saving" class="fa-solid fa-spinner animate-spin text-[11px]" />
@@ -608,19 +459,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
-
-  <!-- ✅ Attachment Preview Modal -->
-  <AttachmentPreviewModal
-    v-model="filesOpen"
-    :request-id="isEdit ? id : ''"
-    title="Attachments"
-    :subtitle="form.requestStart ? `${form.requestStart} → ${form.requestEnd || form.requestStart}` : ''"
-    :items="filesItems"
-    :fetch-content-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}/content`"
-    :delete-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}`"
-    :can-delete="isEdit && isPending"
-    @refresh="() => fetchAttachments(id)"
-  />
 
   <!-- Confirm leave -->
   <ConfirmDialog

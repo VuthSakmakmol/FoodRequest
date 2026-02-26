@@ -165,7 +165,6 @@ app.use('/api/leave', require('./routes/leave/leave.public.routes'))
 
 // Swap Working Day (Requests + Evidence)
 app.use('/api/leave', require('./routes/leave/swapWorkingDay.routes'))
-app.use('/api/leave', require('./routes/leave/swapWorkingDay.evidence.routes'))
 
 app.use('/api/leave', require('./routes/forgetScan/forgetScan.routes'))
 

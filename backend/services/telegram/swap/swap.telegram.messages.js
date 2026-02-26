@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 // backend/services/telegram/swap/swap.telegram.messages.js
 
 const esc = (s = '') =>
@@ -60,6 +61,11 @@ function actionLinkLine(url, label) {
   return `🔗 ${esc(label)}: ${esc(url)}`
 }
 
+function statusLine(doc) {
+  const st = String(doc?.status || '').trim()
+  return st ? `📌 Status: <b>${esc(st)}</b>` : ''
+}
+
 function managerNewSwap(doc, employeeName) {
   return [
     '🔁 <b>New Swap Working Day request</b>',
@@ -109,11 +115,12 @@ function cooNewSwap(doc, employeeName) {
 }
 
 function employeeSubmitted(doc) {
+  // ✅ show real status (PENDING_MANAGER / PENDING_GM etc.)
   return [
     '✅ <b>Swap Working Day request submitted</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
     swapSummary(doc),
-    '📌 Status: Submitted',
+    statusLine(doc),
     reasonLine(doc),
   ]
     .filter(Boolean)

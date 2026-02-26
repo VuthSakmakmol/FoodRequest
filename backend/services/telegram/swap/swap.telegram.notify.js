@@ -30,7 +30,6 @@ async function dmAdmins(doc, text) {
   const chatIds = await rec.resolveAdminChatIds(doc?._id)
   if (!chatIds.length) return log('skip admins (no chatIds)')
 
-  // send sequentially to reduce spam risk
   for (const cid of chatIds) {
     try {
       await sendSwapDM(cid, text)
@@ -63,7 +62,7 @@ async function notifyAdminsOnCreate(doc) {
     const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
     const text = [
       '📣 <b>Swap request created</b>',
-      `👤 Employee: <b>${employeeName}</b>`,
+      `👤 Employee: <b>${s(employeeName) || '-'}</b>`,
       `📌 Status: <b>${s(doc.status) || '-'}</b>`,
     ].join('\n')
 
@@ -79,7 +78,7 @@ async function notifyAdminsOnUpdate(doc) {
     const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
     const text = [
       '📣 <b>Swap request updated</b>',
-      `👤 Employee: <b>${employeeName}</b>`,
+      `👤 Employee: <b>${s(employeeName) || '-'}</b>`,
       `📌 Status: <b>${s(doc.status) || '-'}</b>`,
     ].join('\n')
 
@@ -131,14 +130,29 @@ async function notifySwapToCoo(doc) {
   }
 }
 
-/* Notify current approver based on STATUS (queue-style) */
+/**
+ * Notify current approver based on STATUS (queue-style)
+ *
+ * ✅ Works automatically with new modes:
+ * - MANAGER_ONLY -> status PENDING_MANAGER only
+ * - GM_ONLY      -> status PENDING_GM only
+ *
+ * So this function needs only status to route.
+ */
 async function notifyCurrentApprover(doc) {
   try {
     if (!doc) return
     const st = up(doc.status)
+
+    // ✅ explicit final guards (clean + safe)
+    if (st === 'APPROVED' || st === 'REJECTED' || st === 'CANCELLED') return
+
     if (st === 'PENDING_MANAGER') return await notifySwapToManager(doc)
     if (st === 'PENDING_GM') return await notifySwapToGm(doc)
     if (st === 'PENDING_COO') return await notifySwapToCoo(doc)
+
+    // unknown status => do nothing
+    if (DEBUG) log('skip notifyCurrentApprover (unknown status)', st, doc?._id)
   } catch (err) {
     console.error('[swap.notify] notifyCurrentApprover error:', err.message)
   }

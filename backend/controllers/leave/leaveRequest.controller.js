@@ -144,6 +144,14 @@ function requiresAttachmentForDoc(doc) {
   return false
 }
 
+function hasAnyApprovalActivity(doc) {
+  const approvals = Array.isArray(doc?.approvals) ? doc.approvals : []
+  return approvals.some((a) => {
+    const st = up(a?.status)
+    return !!a?.actedAt || st === 'APPROVED' || st === 'REJECTED'
+  })
+}
+
 function assertAttachmentIfRequired(doc) {
   if (!requiresAttachmentForDoc(doc)) return
   const count = Array.isArray(doc.attachments) ? doc.attachments.length : 0
@@ -632,6 +640,9 @@ exports.cancelMyRequest = async (req, res, next) => {
 
     if (['APPROVED', 'REJECTED', 'CANCELLED'].includes(up(existing.status))) {
       throw createError(400, `Request is ${existing.status}. Cannot cancel.`)
+    }
+    if (hasAnyApprovalActivity(existing)) {
+      throw createError(400, 'This request has already been processed. Cannot cancel.')
     }
 
     existing.status = 'CANCELLED'

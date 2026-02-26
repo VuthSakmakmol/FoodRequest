@@ -1,4 +1,16 @@
+/* eslint-disable no-console */
 // backend/services/telegram/leave/leave.telegram.messages.js
+//
+// ✅ Updated for NEW approval modes:
+//    - MANAGER_ONLY  (Manager is final approver)
+//    - GM_ONLY       (GM is final approver)
+//
+// ✅ Messages:
+//    - Manager/GM inbox messages show "(final)" when they are the last approver
+//    - COO inbox message always shows "(final)"
+//    - Employee decision message shows "🏁 Final approval completed." when applicable
+//
+// ✅ Safe HTML escaping + Telegram parse_mode=HTML compatible
 
 const esc = (s = '') =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -10,6 +22,10 @@ const LINKS = {
   gmInbox: `${FRONTEND_URL}/leave/requests/gm/inbox`,
   cooInbox: `${FRONTEND_URL}/leave/requests/coo/inbox`,
   adminReport: `${FRONTEND_URL}/leave/reports/admin`, // adjust if different
+}
+
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
 }
 
 function ymd(v) {
@@ -28,7 +44,7 @@ function halfLabel(doc) {
   const sh = doc?.startHalf ? ` start:${doc.startHalf}` : ''
   const eh = doc?.endHalf ? ` end:${doc.endHalf}` : ''
   const legacy = doc?.isHalfDay && doc?.dayPart ? ` ${doc.dayPart}` : ''
-  return (sh || eh || legacy) ? `🌓 Half:${esc((sh + eh + legacy).trim())}` : ''
+  return sh || eh || legacy ? `🌓 Half: ${esc((sh + eh + legacy).trim())}` : ''
 }
 
 function summary(doc) {
@@ -48,6 +64,9 @@ function actionLinkLine(url, label) {
   return `🔗 ${esc(label)}: ${esc(url)}`
 }
 
+/* ─────────────────────────────
+   Employee: created/submit confirm
+───────────────────────────── */
 function employeeSubmitted(doc) {
   return [
     '✅ <b>Leave request submitted</b>',
@@ -59,13 +78,24 @@ function employeeSubmitted(doc) {
     .join('\n')
 }
 
+/* ─────────────────────────────
+   Approver inbox: Manager
+   - show "(final)" for MANAGER_ONLY
+───────────────────────────── */
 function managerNew(doc, employeeName) {
+  const mode = up(doc?.approvalMode)
+
+  const note =
+    mode === 'MANAGER_ONLY'
+      ? '📌 Status: Waiting for Manager approval (final)'
+      : '📌 Status: Waiting for Manager approval'
+
   return [
     '🗓️ <b>New Leave request</b>',
     '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
-    '📌 Status: Waiting for Manager approval',
+    note,
     '',
     actionLinkLine(LINKS.managerInbox, 'Open Manager Inbox'),
   ]
@@ -73,13 +103,24 @@ function managerNew(doc, employeeName) {
     .join('\n')
 }
 
+/* ─────────────────────────────
+   Approver inbox: GM
+   - show "(final)" for GM_ONLY
+───────────────────────────── */
 function gmNew(doc, employeeName) {
+  const mode = up(doc?.approvalMode)
+
+  const note =
+    mode === 'GM_ONLY'
+      ? '📌 Status: Waiting for GM approval (final)'
+      : '📌 Status: Waiting for GM approval'
+
   return [
     '🗓️ <b>New Leave request (GM)</b>',
     '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
-    '📌 Status: Waiting for GM approval',
+    note,
     doc?.managerComment ? `💬 Manager comment: ${esc(doc.managerComment)}` : '',
     '',
     actionLinkLine(LINKS.gmInbox, 'Open GM Inbox'),
@@ -88,13 +129,16 @@ function gmNew(doc, employeeName) {
     .join('\n')
 }
 
+/* ─────────────────────────────
+   Approver inbox: COO (always final)
+───────────────────────────── */
 function cooNew(doc, employeeName) {
   return [
     '🗓️ <b>New Leave request (COO)</b>',
     '━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     summary(doc),
-    '📌 Status: Waiting for COO approval',
+    '📌 Status: Waiting for COO approval (final)',
     doc?.managerComment ? `💬 Manager comment: ${esc(doc.managerComment)}` : '',
     doc?.gmComment ? `💬 GM comment: ${esc(doc.gmComment)}` : '',
     '',
@@ -104,8 +148,14 @@ function cooNew(doc, employeeName) {
     .join('\n')
 }
 
+/* ─────────────────────────────
+   Employee: decision messages
+   - show "🏁 Final approval completed." when applicable
+───────────────────────────── */
 function employeeDecision(doc, roleLabel) {
-  const status = String(doc?.status || '').toUpperCase()
+  const status = up(doc?.status)
+  const mode = up(doc?.approvalMode)
+
   const emoji = status === 'APPROVED' ? '✅' : status === 'REJECTED' ? '❌' : status === 'CANCELLED' ? '🚫' : 'ℹ️'
 
   let extra = ''
@@ -113,16 +163,28 @@ function employeeDecision(doc, roleLabel) {
   if (roleLabel === 'GM' && doc?.gmComment) extra = `💬 GM comment: ${esc(doc.gmComment)}`
   if (roleLabel === 'COO' && doc?.cooComment) extra = `💬 COO comment: ${esc(doc.cooComment)}`
 
+  const finalHint =
+    status === 'APPROVED' &&
+    ((mode === 'MANAGER_ONLY' && roleLabel === 'Manager') ||
+      (mode === 'GM_ONLY' && roleLabel === 'GM') ||
+      roleLabel === 'COO')
+      ? '🏁 Final approval completed.'
+      : ''
+
   return [
     `${emoji} <b>Leave request ${esc(status || 'UPDATED')} by ${esc(roleLabel)}</b>`,
     '━━━━━━━━━━━━━━━━━━━━',
     summary(doc),
+    finalHint,
     extra,
   ]
     .filter(Boolean)
     .join('\n')
 }
 
+/* ─────────────────────────────
+   Admin messages
+───────────────────────────── */
 function adminCreated(doc, employeeName) {
   return [
     '📣 <b>Leave request created</b>',

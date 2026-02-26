@@ -1,8 +1,14 @@
 <!-- src/views/coo/GmSwapDayInbox.vue
-  ✅ GM bulk approve/reject (multi-select)
+  ✅ FULL CODE (NO ATTACHMENTS VERSION)
+  ✅ Supports new approval modes:
+     - GM_ONLY          ✅ included in GM inbox, approve -> APPROVED
+     - GM_AND_COO       ✅ included
+     - MANAGER_AND_GM   ✅ included (after manager approve)
+     - MANAGER_ONLY     ❌ not shown in GM inbox (GM not involved)
+     - MANAGER_AND_COO  ❌ not shown in GM inbox (GM not involved)
   ✅ Admin viewers can VIEW but CANNOT decide
   ✅ Realtime swap:req:created / swap:req:updated
-  ✅ Attachments preview (read-only)
+  ✅ Bulk approve/reject
   ✅ Excel export
 -->
 <script setup>
@@ -12,13 +18,11 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
-// ✅ realtime (same as User/Manager)
+// ✅ realtime
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
 // ✅ Excel export
 import * as XLSX from 'xlsx'
-
-import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
 
 defineOptions({ name: 'GmSwapDayInbox' })
 
@@ -49,11 +53,6 @@ const perPageOptions = [20, 50, 100, 'All']
 const viewOpen = ref(false)
 const viewItem = ref(null)
 
-/* attachments modal */
-const filesOpen = ref(false)
-const filesRequest = ref(null)
-const filesItems = ref([])
-
 /* single decision confirm modal */
 const confirmOpen = ref(false)
 const confirmBusy = ref(false)
@@ -70,7 +69,7 @@ const bulkDecisionNote = ref('')
 /* export */
 const exporting = ref(false)
 
-/* Helper */
+/* roles */
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const one = auth.user?.role ? [auth.user.role] : []
@@ -80,7 +79,6 @@ const roles = computed(() => {
 const isAdminViewer = computed(() =>
   roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
 )
-
 const isRealGm = computed(() => roles.value.includes('LEAVE_GM'))
 
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
@@ -90,10 +88,9 @@ const COL_WIDTH = {
   employee: '240px',
   workDate: '200px',
   swapDate: '200px',
-  file: '110px',
   status: '140px',
   actions: '92px',
-  reason: '200px',
+  reason: '260px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -118,7 +115,6 @@ function fmtDateTime(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD HH:mm')
 }
-
 function fmtYmd(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD')
@@ -133,8 +129,10 @@ function statusBadgeUiClass(x) {
   return 'ui-badge'
 }
 
+
 /**
- * ✅ GM can decide ONLY when the request is pending for GM.
+ * ✅ GM can decide ONLY when status=PENDING_GM
+ * Admin viewers cannot decide.
  */
 function canDecide(row) {
   if (isAdminViewer.value) return false
@@ -146,7 +144,7 @@ function canDecide(row) {
 function compactText(v) {
   return String(v || '').replace(/\s+/g, ' ').trim()
 }
-function briefReason(v, max = 70) {
+function briefReason(v, max = 80) {
   const t = compactText(v)
   if (!t) return '—'
   if (t.length <= max) return t
@@ -180,6 +178,7 @@ function getRejectedReason(row) {
 async function fetchInbox() {
   try {
     loading.value = true
+    // Backend should include GM_ONLY in GM inbox scope.
     const res = await api.get('/leave/swap-working-day/gm/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
@@ -211,6 +210,7 @@ const filteredRows = computed(() => {
         r.requestEndDate,
         r.offStartDate,
         r.offEndDate,
+        r.approvalMode,
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -254,42 +254,6 @@ function openView(row) {
 function closeView() {
   viewOpen.value = false
   viewItem.value = null
-}
-
-/* ───────────────── ATTACHMENTS ───────────────── */
-function normalizeEvidenceList(list) {
-  const arr = Array.isArray(list) ? list : []
-  return arr
-    .map((x) => ({ ...x, attId: x?.attId || x?.fileId || '' }))
-    .filter((x) => x.attId)
-}
-
-async function openFiles(row) {
-  filesRequest.value = row
-  filesItems.value = []
-  try {
-    const res = await api.get(`/leave/swap-working-day/${row._id}/evidence`)
-    filesItems.value = normalizeEvidenceList(res.data)
-  } catch (e) {
-    filesItems.value = normalizeEvidenceList(row.attachments || [])
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments list' })
-  } finally {
-    filesOpen.value = true
-  }
-}
-
-async function refreshFilesAgain() {
-  const req = filesRequest.value
-  if (!req?._id) return
-  try {
-    const res = await api.get(`/leave/swap-working-day/${req._id}/evidence`)
-    filesItems.value = normalizeEvidenceList(res.data)
-
-    const idx = rows.value.findIndex((r) => String(r._id) === String(req._id))
-    if (idx >= 0) rows.value[idx].attachments = filesItems.value
-  } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Refresh attachments failed' })
-  }
 }
 
 /* ───────────────── SINGLE DECISION ───────────────── */
@@ -489,9 +453,8 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  // keep modals synced
+  // keep modal synced
   if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
-  if (filesRequest.value?._id && String(filesRequest.value._id) === id) filesRequest.value = { ...filesRequest.value, ...doc }
 
   // if moved out of pending_gm, auto-unselect
   if (up(doc?.status) !== 'PENDING_GM') {
@@ -534,7 +497,6 @@ function exportExcel() {
       OffDays: r.offTotalDays ?? '',
       Status: r.status || '',
       Reason: r.reason || '',
-      Attachments: Array.isArray(r.attachments) ? r.attachments.length : 0,
     }))
 
     if (!list.length) {
@@ -562,7 +524,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ join GM rooms (critical)
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_GM' })
 
@@ -581,7 +542,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-
   socket.off('swap:req:created', onSwapCreated)
   socket.off('swap:req:updated', onSwapUpdated)
 })
@@ -612,7 +572,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -631,7 +591,6 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center gap-2">
-                <!-- Bulk controls -->
                 <template v-if="isRealGm && !isAdminViewer">
                   <button
                     class="ui-btn ui-btn-sm ui-btn-soft"
@@ -694,7 +653,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -754,7 +713,9 @@ onBeforeUnmount(() => {
 
           <!-- ✅ MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">No items found.</div>
+            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
+              No items found.
+            </div>
 
             <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
               <div class="flex items-start justify-between gap-3">
@@ -769,6 +730,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">ID: {{ row.employeeId || '—' }}</div>
+
                 </div>
 
                 <div class="shrink-0 text-right space-y-1 flex items-start gap-2">
@@ -799,52 +761,35 @@ onBeforeUnmount(() => {
 
                 <div class="ui-frame p-2">
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Reason</div>
-                  <div class="mt-0.5">{{ briefReason(row.reason, 140) }}</div>
+                  <div class="mt-0.5">{{ briefReason(row.reason, 160) }}</div>
                 </div>
               </div>
 
-              <div class="mt-3 flex items-center justify-between gap-2" @click.stop>
-                <button
-                  v-if="row.attachments?.length"
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                  :disabled="loading"
-                  @click="openFiles(row)"
-                  title="Attachments"
-                  aria-label="Attachments"
-                >
-                  <i class="fa-solid fa-paperclip text-[12px]" />
-                  <span class="ml-1">{{ row.attachments.length }}</span>
-                </button>
-                <span v-else class="text-[11px] text-slate-400">No files</span>
+              <div class="mt-3 flex items-center justify-end gap-2" @click.stop>
+                <template v-if="canDecide(row)">
+                  <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
+                    <i class="fa-solid fa-circle-check text-[12px]" />
+                  </button>
 
-                <div class="flex items-center gap-2">
-                  <template v-if="canDecide(row)">
-                    <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
-                      <i class="fa-solid fa-circle-check text-[12px]" />
-                    </button>
+                  <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
+                    <i class="fa-solid fa-circle-xmark text-[12px]" />
+                  </button>
+                </template>
 
-                    <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
-                      <i class="fa-solid fa-circle-xmark text-[12px]" />
-                    </button>
-                  </template>
-
-                  <span v-else class="text-[11px] text-slate-400">—</span>
-                </div>
+                <span v-else class="text-[11px] text-slate-400">—</span>
               </div>
             </article>
           </div>
 
           <!-- ✅ DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1150px]">
+            <table class="ui-table table-fixed w-full min-w-[1180px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
                 <col :style="{ width: COL_WIDTH.swapDate }" />
-                <col :style="{ width: COL_WIDTH.file }" />
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
@@ -866,7 +811,6 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
-                  <th class="ui-th text-center">File</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -893,22 +837,6 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td"><div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div></td>
                   <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
-
-                  <td class="ui-td text-center" @click.stop>
-                    <button
-                      v-if="row.attachments?.length"
-                      type="button"
-                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                      :disabled="loading"
-                      @click="openFiles(row)"
-                      title="Attachments"
-                      aria-label="Attachments"
-                    >
-                      <i class="fa-solid fa-paperclip text-[12px]" />
-                      <span class="ml-1">{{ row.attachments.length }}</span>
-                    </button>
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
@@ -969,17 +897,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="flex items-center gap-2">
-            <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
-              <i class="fa-solid fa-paperclip text-[11px]" />
-              Attachments
-            </button>
-
-            <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
-              <i class="fa-solid fa-xmark text-[11px]" />
-              Close
-            </button>
-          </div>
+          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
+            <i class="fa-solid fa-xmark text-[11px]" />
+            Close
+          </button>
         </div>
 
         <div class="p-4 space-y-3">
@@ -1019,6 +940,29 @@ onBeforeUnmount(() => {
           <div class="ui-card p-3">
             <div class="ui-section-title">Reason</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">{{ viewItem?.reason || '—' }}</div>
+          </div>
+
+          <div class="ui-card p-3">
+            <div class="ui-section-title">Approvals</div>
+            <div class="mt-2 grid gap-2">
+              <div
+                v-for="(step, idx) in (Array.isArray(viewItem?.approvals) ? viewItem.approvals : [])"
+                :key="idx"
+                class="ui-frame p-2 flex items-center justify-between text-[11px]"
+              >
+                <div class="font-extrabold text-slate-700 dark:text-slate-200">{{ step.level }} · {{ step.loginId }}</div>
+                <div class="flex items-center gap-2">
+                  <span
+                    class="ui-badge"
+                    :class="up(step.status)==='APPROVED' ? 'ui-badge-success' : (up(step.status)==='REJECTED' ? 'ui-badge-danger' : 'ui-badge-warning')"
+                  >
+                    {{ step.status }}
+                  </span>
+                  <span class="text-slate-500 dark:text-slate-400">{{ step.actedAt ? fmtDateTime(step.actedAt) : '—' }}</span>
+                </div>
+              </div>
+              <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500 dark:text-slate-400">—</div>
+            </div>
           </div>
 
           <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
@@ -1139,19 +1083,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-
-    <!-- ATTACHMENT PREVIEW MODAL -->
-    <AttachmentPreviewModal
-      v-model="filesOpen"
-      :request-id="filesRequest?._id"
-      title="Attachments"
-      :subtitle="filesRequest ? `${fmtYmd(filesRequest.requestStartDate)} → ${fmtYmd(filesRequest.requestEndDate)}` : ''"
-      :items="filesItems"
-      :fetch-content-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}/content`"
-      :delete-path="null"
-      :can-delete="false"
-      @refresh="refreshFilesAgain()"
-    />
   </div>
 </template>
 

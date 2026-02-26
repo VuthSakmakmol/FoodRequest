@@ -1,4 +1,10 @@
-<!-- src/views/coo/CooSwapDayInbox.vue -->
+<!-- src/views/coo/CooSwapDayInbox.vue
+  ✅ COO bulk approve/reject (multi-select)
+  ✅ Admin viewers can VIEW but CANNOT decide
+  ✅ Realtime swap:req:created / swap:req:updated
+  ✅ NO attachments (Swap Working Day no longer uses evidence)
+  ✅ Excel export (NO attachments column)
+-->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -11,8 +17,6 @@ import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUser
 
 // ✅ Excel export
 import * as XLSX from 'xlsx'
-
-import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
 
 defineOptions({ name: 'CooSwapDayInbox' })
 
@@ -42,11 +46,6 @@ const perPageOptions = [20, 50, 100, 'All']
 /* view modal */
 const viewOpen = ref(false)
 const viewItem = ref(null)
-
-/* attachments modal */
-const filesOpen = ref(false)
-const filesRequest = ref(null)
-const filesItems = ref([])
 
 /* single decision confirm modal */
 const confirmOpen = ref(false)
@@ -83,10 +82,9 @@ const COL_WIDTH = {
   employee: '240px',
   workDate: '200px',
   swapDate: '200px',
-  file: '110px',
   status: '140px',
   actions: '92px',
-  reason: '200px',
+  reason: '240px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -250,40 +248,6 @@ function openView(row) {
 function closeView() {
   viewOpen.value = false
   viewItem.value = null
-}
-
-/* ───────────────── ATTACHMENTS ───────────────── */
-function normalizeEvidenceList(list) {
-  const arr = Array.isArray(list) ? list : []
-  return arr.map((x) => ({ ...x, attId: x?.attId || x?.fileId }))
-}
-
-async function openFiles(row) {
-  filesRequest.value = row
-  filesItems.value = []
-  try {
-    const res = await api.get(`/leave/swap-working-day/${row._id}/evidence`)
-    filesItems.value = normalizeEvidenceList(res.data)
-  } catch (e) {
-    filesItems.value = normalizeEvidenceList(row.attachments || [])
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments list' })
-  } finally {
-    filesOpen.value = true
-  }
-}
-
-async function refreshFilesAgain() {
-  const req = filesRequest.value
-  if (!req?._id) return
-  try {
-    const res = await api.get(`/leave/swap-working-day/${req._id}/evidence`)
-    filesItems.value = normalizeEvidenceList(res.data)
-
-    const idx = rows.value.findIndex((r) => String(r._id) === String(req._id))
-    if (idx >= 0) rows.value[idx].attachments = filesItems.value
-  } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Refresh attachments failed' })
-  }
 }
 
 /* ───────────────── SINGLE DECISION ───────────────── */
@@ -477,7 +441,6 @@ function upsertRow(doc) {
   else rows.value.unshift(doc)
 
   if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
-  if (filesRequest.value?._id && String(filesRequest.value._id) === id) filesRequest.value = { ...filesRequest.value, ...doc }
 
   // If moved out of pending_coo, auto-unselect
   if (up(doc?.status) !== 'PENDING_COO') {
@@ -520,7 +483,6 @@ function exportExcel() {
       OffDays: r.offTotalDays ?? '',
       Status: r.status || '',
       Reason: r.reason || '',
-      Attachments: Array.isArray(r.attachments) ? r.attachments.length : 0,
     }))
 
     if (!list.length) {
@@ -629,36 +591,17 @@ onBeforeUnmount(() => {
                     <span class="ml-1">{{ selectedCount }}</span>
                   </button>
 
-                  <button
-                    class="ui-btn ui-btn-sm ui-btn-emerald"
-                    type="button"
-                    :disabled="loading || deciding || !selectedCount"
-                    @click="openBulkApprove"
-                    title="Approve selected"
-                  >
+                  <button class="ui-btn ui-btn-sm ui-btn-emerald" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkApprove">
                     <i class="fa-solid fa-circle-check text-[11px]" />
                     Approve ({{ selectedCount }})
                   </button>
 
-                  <button
-                    class="ui-btn ui-btn-sm ui-btn-rose"
-                    type="button"
-                    :disabled="loading || deciding || !selectedCount"
-                    @click="openBulkReject"
-                    title="Reject selected"
-                  >
+                  <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
                     <i class="fa-solid fa-circle-xmark text-[11px]" />
                     Reject ({{ selectedCount }})
                   </button>
 
-                  <button
-                    v-if="selectedCount"
-                    class="ui-btn ui-btn-sm ui-btn-ghost"
-                    type="button"
-                    :disabled="loading || deciding"
-                    @click="clearSelection"
-                    title="Clear selection"
-                  >
+                  <button v-if="selectedCount" class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading || deciding" @click="clearSelection" title="Clear selection">
                     <i class="fa-solid fa-xmark text-[11px]" />
                   </button>
                 </template>
@@ -667,13 +610,7 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                 </button>
 
-                <button
-                  class="ui-btn ui-btn-sm ui-btn-soft"
-                  type="button"
-                  :disabled="loading || exporting"
-                  @click="exportExcel"
-                  title="Export to Excel"
-                >
+                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel" title="Export to Excel">
                   <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
                 </button>
@@ -724,12 +661,7 @@ onBeforeUnmount(() => {
 
               <div class="flex flex-wrap items-center justify-end gap-2">
                 <template v-if="isRealCoo && !isAdminViewer">
-                  <button
-                    class="ui-btn ui-btn-sm ui-btn-soft"
-                    type="button"
-                    :disabled="loading || deciding || !selectableRows.length"
-                    @click="toggleSelectAll"
-                  >
+                  <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || deciding || !selectableRows.length" @click="toggleSelectAll">
                     <i class="fa-solid fa-check-double text-[11px]" />
                     Select ({{ selectedCount }})
                   </button>
@@ -769,7 +701,9 @@ onBeforeUnmount(() => {
 
           <!-- ✅ MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">No items found.</div>
+            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
+              No items found.
+            </div>
 
             <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
               <div class="flex items-start justify-between gap-3">
@@ -818,50 +752,31 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="mt-3 flex items-center justify-between gap-2" @click.stop>
-                <!-- Files -->
-                <button
-                  v-if="row.attachments?.length"
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                  :disabled="loading"
-                  @click="openFiles(row)"
-                  title="Attachments"
-                  aria-label="Attachments"
-                >
-                  <i class="fa-solid fa-paperclip text-[12px]" />
-                  <span class="ml-1">{{ row.attachments.length }}</span>
-                </button>
-                <span v-else class="text-[11px] text-slate-400">No files</span>
+              <div class="mt-3 flex items-center justify-end gap-2" @click.stop>
+                <template v-if="canDecide(row)">
+                  <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
+                    <i class="fa-solid fa-circle-check text-[12px]" />
+                  </button>
 
-                <!-- Actions -->
-                <div class="flex items-center gap-2">
-                  <template v-if="canDecide(row)">
-                    <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
-                      <i class="fa-solid fa-circle-check text-[12px]" />
-                    </button>
+                  <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
+                    <i class="fa-solid fa-circle-xmark text-[12px]" />
+                  </button>
+                </template>
 
-                    <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
-                      <i class="fa-solid fa-circle-xmark text-[12px]" />
-                    </button>
-                  </template>
-
-                  <span v-else class="text-[11px] text-slate-400">—</span>
-                </div>
+                <span v-else class="text-[11px] text-slate-400">—</span>
               </div>
             </article>
           </div>
 
           <!-- ✅ DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1150px]">
+            <table class="ui-table table-fixed w-full min-w-[1040px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
                 <col :style="{ width: COL_WIDTH.swapDate }" />
-                <col :style="{ width: COL_WIDTH.file }" />
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
@@ -883,7 +798,6 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
-                  <th class="ui-th text-center">File</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -892,7 +806,7 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
                 </tr>
 
                 <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
@@ -913,23 +827,6 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td"><div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div></td>
                   <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
-
-                  <!-- Files -->
-                  <td class="ui-td text-center" @click.stop>
-                    <button
-                      v-if="row.attachments?.length"
-                      type="button"
-                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                      :disabled="loading"
-                      @click="openFiles(row)"
-                      title="Attachments"
-                      aria-label="Attachments"
-                    >
-                      <i class="fa-solid fa-paperclip text-[12px]" />
-                      <span class="ml-1">{{ row.attachments.length }}</span>
-                    </button>
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
@@ -991,17 +888,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="flex items-center gap-2">
-            <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
-              <i class="fa-solid fa-paperclip text-[11px]" />
-              Attachments
-            </button>
-
-            <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
-              <i class="fa-solid fa-xmark text-[11px]" />
-              Close
-            </button>
-          </div>
+          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
+            <i class="fa-solid fa-xmark text-[11px]" />
+            Close
+          </button>
         </div>
 
         <div class="p-4 space-y-3">
@@ -1167,19 +1057,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-
-    <!-- ATTACHMENT PREVIEW MODAL -->
-    <AttachmentPreviewModal
-      v-model="filesOpen"
-      :request-id="filesRequest?._id"
-      title="Attachments"
-      :subtitle="filesRequest ? `${fmtYmd(filesRequest.requestStartDate)} → ${fmtYmd(filesRequest.requestEndDate)}` : ''"
-      :items="filesItems"
-      :fetch-content-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}/content`"
-      :delete-path="null"
-      :can-delete="false"
-      @refresh="refreshFilesAgain()"
-    />
   </div>
 </template>
 

@@ -16,9 +16,9 @@
      - Multi-day: Start day AM/PM optional, End day AM/PM optional (at least one edge required)
      - Hint text shows what user is selecting
 
-  ✅ Cancel FIX:
-     - allow cancel while pending at ANY level (PENDING_MANAGER / PENDING_GM / PENDING_COO)
-     - supports new modes like GM_ONLY (starts at PENDING_GM)
+  ✅ NEW RULE (YOUR REQUEST):
+     - If there is ANY approval activity (actedAt / APPROVED / REJECTED),
+       user CANNOT edit OR cancel (even if still pending at another level)
 
   ✅ Dialog/Modal improvements:
      - ESC closes top-most modal
@@ -85,26 +85,29 @@ function statusBadgeUiClass(s) {
   return 'ui-badge'
 }
 
-/**
- * ✅ Cancel allowed while pending at any level
- * (supports GM_ONLY which starts at PENDING_GM)
- */
-function canCancel(item) {
-  const st = String(item?.status || '').toUpperCase()
-  return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)
+/* ─────────────────────────────────────────────────────────────
+   ✅ NEW RULE: lock edit/cancel after ANY approval activity
+───────────────────────────────────────────────────────────── */
+function hasAnyApprovalActivity(item) {
+  const approvals = Array.isArray(item?.approvals) ? item.approvals : []
+  return approvals.some((a) => {
+    const st = String(a?.status || '').toUpperCase()
+    return !!a?.actedAt || st === 'APPROVED' || st === 'REJECTED'
+  })
 }
 
-/**
- * ✅ Edit allowed only if NO one approved/acted yet
- */
+/** ✅ Cancel allowed only when pending AND no approval activity */
+function canCancel(item) {
+  const st = String(item?.status || '').toUpperCase()
+  if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) return false
+  return !hasAnyApprovalActivity(item)
+}
+
+/** ✅ Edit allowed only when pending AND no approval activity */
 function canEdit(item) {
   const st = String(item?.status || '').toUpperCase()
   if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) return false
-  const approvals = Array.isArray(item?.approvals) ? item.approvals : []
-  const anyApproved = approvals.some((a) => String(a?.status || '').toUpperCase() === 'APPROVED')
-  const anyRejected = approvals.some((a) => String(a?.status || '').toUpperCase() === 'REJECTED')
-  const anyActed = approvals.some((a) => !!a?.actedAt)
-  return !(anyApproved || anyRejected || anyActed)
+  return !hasAnyApprovalActivity(item)
 }
 
 /* ───────── Cancel modal ───────── */
@@ -113,6 +116,17 @@ const cancelItem = ref(null)
 const cancelling = ref(false)
 
 function openCancel(item) {
+  if (!item?._id) return
+  if (!canCancel(item)) {
+    showToast({
+      type: 'info',
+      title: 'Cannot cancel',
+      message: hasAnyApprovalActivity(item)
+        ? 'This request is locked because approval has started.'
+        : 'You can only cancel while request is still pending.',
+    })
+    return
+  }
   cancelItem.value = item
   cancelOpen.value = true
 }
@@ -123,7 +137,13 @@ function closeCancel() {
 async function confirmCancel() {
   if (!cancelItem.value?._id) return
   if (!canCancel(cancelItem.value)) {
-    showToast({ type: 'info', title: 'Cannot cancel', message: 'You can only cancel while request is still pending.' })
+    showToast({
+      type: 'info',
+      title: 'Cannot cancel',
+      message: hasAnyApprovalActivity(cancelItem.value)
+        ? 'This request is locked because approval has started.'
+        : 'You can only cancel while request is still pending.',
+    })
     closeCancel()
     return
   }
@@ -350,7 +370,7 @@ async function confirmDeleteAttachment() {
 /* ─────────────────────────────────────────────────────────────
    EDIT REQUEST modal
    ✅ Single-day can be FULL or HALF (AM/PM)
-   ✅ Multi-day edges optional (at least one required)
+   ✅ Multi-day edges optional (at least 1 edge required)
 ───────────────────────────────────────────────────────────── */
 const editOpen = ref(false)
 const editItem = ref(null)
@@ -555,7 +575,13 @@ async function previewExistingEditFile(file) {
 function openEdit(item) {
   if (!item?._id) return
   if (!canEdit(item)) {
-    showToast({ type: 'info', title: 'Cannot edit', message: 'This request is already processed.' })
+    showToast({
+      type: 'info',
+      title: 'Cannot edit',
+      message: hasAnyApprovalActivity(item)
+        ? 'This request is locked because approval has started.'
+        : 'This request is already processed.',
+    })
     return
   }
 
@@ -698,7 +724,9 @@ async function saveEdit() {
 /* ───────── COMPUTED: list/pagination ───────── */
 const processedRequests = computed(() => {
   const items = [...myRequests.value]
-  items.sort((a, b) => (b.createdAt ? dayjs(b.createdAt).valueOf() : 0) - (a.createdAt ? dayjs(a.createdAt).valueOf() : 0))
+  items.sort(
+    (a, b) => (b.createdAt ? dayjs(b.createdAt).valueOf() : 0) - (a.createdAt ? dayjs(a.createdAt).valueOf() : 0)
+  )
 
   let result = items
 
@@ -750,6 +778,7 @@ async function fetchMyRequests(silent = false) {
     myRequests.value = list.map((r) => ({
       ...r,
       attachments: Array.isArray(r.attachments) ? r.attachments : [],
+      approvals: Array.isArray(r.approvals) ? r.approvals : [],
     }))
   } catch (e) {
     loadError.value = e?.response?.data?.message || 'Unable to load your leave requests.'
@@ -1093,7 +1122,8 @@ onBeforeUnmount(() => {
             <div class="flex-1">
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Cancel this request?</div>
               <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-                You can only cancel while request is still <span class="font-extrabold">pending</span>.
+                You can only cancel if the request is still <span class="font-extrabold">pending</span>
+                and <span class="font-extrabold">no approval has started</span>.
               </div>
 
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
@@ -1101,12 +1131,20 @@ onBeforeUnmount(() => {
                 <span class="mx-1 opacity-60">•</span>
                 <span class="">{{ cancelItem?.startDate }} → {{ cancelItem?.endDate }}</span>
               </div>
+
+              <div
+                v-if="cancelItem && hasAnyApprovalActivity(cancelItem)"
+                class="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800
+                       dark:border-amber-500/50 dark:bg-amber-950/30 dark:text-amber-200"
+              >
+                Locked: approval has already started.
+              </div>
             </div>
           </div>
 
           <div class="mt-4 flex justify-end gap-2">
             <button type="button" class="ui-btn ui-btn-ghost" :disabled="cancelling" @click="closeCancel">Close</button>
-            <button type="button" class="ui-btn ui-btn-rose" :disabled="cancelling" @click="confirmCancel">
+            <button type="button" class="ui-btn ui-btn-rose" :disabled="cancelling || !canCancel(cancelItem)" @click="confirmCancel">
               <i v-if="cancelling" class="fa-solid fa-spinner animate-spin text-[11px]" />
               Confirm Cancel
             </button>
@@ -1303,7 +1341,7 @@ onBeforeUnmount(() => {
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit request</div>
-              <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">Allowed only before any approval.</div>
+              <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">Allowed only before any approval started.</div>
             </div>
             <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeEdit">
               <i class="fa-solid fa-xmark text-[11px]" />

@@ -10,10 +10,12 @@ const mongoose = require('mongoose')
  *  - reason
  *  - attachments (GridFS)
  *
- * Approval flow (same semantic modes as LeaveRequest):
+ * Approval flow (semantic modes same as LeaveProfile / LeaveRequest):
  *  - MANAGER_AND_GM   : PENDING_MANAGER -> PENDING_GM  -> APPROVED
  *  - MANAGER_AND_COO  : PENDING_MANAGER -> PENDING_COO -> APPROVED
  *  - GM_AND_COO       : PENDING_GM      -> PENDING_COO -> APPROVED
+ *  - MANAGER_ONLY     : PENDING_MANAGER -> APPROVED
+ *  - GM_ONLY          : PENDING_GM      -> APPROVED
  *
  * NOTE:
  * - NO "SKIPPED" anywhere (only PENDING/APPROVED/REJECTED)
@@ -28,7 +30,14 @@ const STATUS = Object.freeze([
   'CANCELLED',
 ])
 
-const APPROVAL_MODE = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
+const APPROVAL_MODE = Object.freeze([
+  'MANAGER_AND_GM',
+  'MANAGER_AND_COO',
+  'GM_AND_COO',
+  'MANAGER_ONLY', // ✅ NEW
+  'GM_ONLY', // ✅ NEW
+])
+
 const APPROVAL_LEVEL = Object.freeze(['MANAGER', 'GM', 'COO'])
 const APPROVAL_STATUS = Object.freeze(['PENDING', 'APPROVED', 'REJECTED'])
 
@@ -42,15 +51,19 @@ function isValidYMD(x) {
   return /^\d{4}-\d{2}-\d{2}$/.test(s(x))
 }
 
+/* ─────────────────────────────────────────────
+   Normalize approvalMode (match LeaveProfile semantics)
+───────────────────────────────────────────── */
 function normalizeMode(v) {
   const raw = up(v)
 
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
+  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
 
   // legacy compatibility (optional)
-  if (raw === 'GM_ONLY') return 'MANAGER_AND_GM'
   if (raw === 'GM_COO') return 'GM_AND_COO'
   if (raw === 'GM_OR_COO') return 'GM_AND_COO'
   if (raw === 'COO_AND_GM') return 'GM_AND_COO'
@@ -59,25 +72,53 @@ function normalizeMode(v) {
   return 'MANAGER_AND_GM'
 }
 
+function defaultStatusForMode(mode) {
+  const m = normalizeMode(mode)
+  if (m === 'GM_AND_COO') return 'PENDING_GM'
+  if (m === 'GM_ONLY') return 'PENDING_GM' // ✅ NEW
+  // MANAGER_AND_GM / MANAGER_AND_COO / MANAGER_ONLY
+  return 'PENDING_MANAGER'
+}
+
+/**
+ * Normalize status against mode:
+ * - if request mode doesn't include manager => never keep PENDING_MANAGER
+ * - if request mode doesn't include coo => never keep PENDING_COO
+ * - allow APPROVED/REJECTED/CANCELLED always
+ */
 function normalizeStatusForMode(mode, status) {
   const m = normalizeMode(mode)
   const st = up(status)
 
   if (['APPROVED', 'REJECTED', 'CANCELLED'].includes(st)) return st
 
+  // GM_ONLY: only GM stage exists
+  if (m === 'GM_ONLY') {
+    if (st === 'PENDING_GM') return 'PENDING_GM'
+    return 'PENDING_GM'
+  }
+
+  // MANAGER_ONLY: only Manager stage exists
+  if (m === 'MANAGER_ONLY') {
+    if (st === 'PENDING_MANAGER') return 'PENDING_MANAGER'
+    return 'PENDING_MANAGER'
+  }
+
+  // GM_AND_COO: starts at GM; manager not involved
   if (m === 'GM_AND_COO') {
-    // manager is not part of this mode, so pending must start at GM
     if (st === 'PENDING_MANAGER') return 'PENDING_GM'
     if (st === 'PENDING_GM' || st === 'PENDING_COO') return st
     return 'PENDING_GM'
   }
 
+  // MANAGER_AND_GM: manager then gm
   if (m === 'MANAGER_AND_GM') {
     if (st === 'PENDING_MANAGER' || st === 'PENDING_GM') return st
     if (st === 'PENDING_COO') return 'PENDING_GM'
     return 'PENDING_MANAGER'
   }
 
+  // MANAGER_AND_COO: manager then coo
   if (m === 'MANAGER_AND_COO') {
     if (st === 'PENDING_MANAGER' || st === 'PENDING_COO') return st
     if (st === 'PENDING_GM') return 'PENDING_MANAGER'
@@ -85,11 +126,6 @@ function normalizeStatusForMode(mode, status) {
   }
 
   return 'PENDING_MANAGER'
-}
-
-function defaultStatusForMode(mode) {
-  const m = normalizeMode(mode)
-  return m === 'GM_AND_COO' ? 'PENDING_GM' : 'PENDING_MANAGER'
 }
 
 /* ─────────────────────────────────────────────
@@ -112,7 +148,6 @@ const ApprovalStepSchema = new mongoose.Schema(
 const AttachmentSchema = new mongoose.Schema(
   {
     attId: { type: String, required: true }, // stable frontend id
-
     fileId: { type: mongoose.Schema.Types.ObjectId, required: true }, // GridFS ObjectId
     filename: { type: String, default: '' },
     contentType: { type: String, default: '' },
@@ -163,7 +198,6 @@ const SwapWorkingDayRequestSchema = new mongoose.Schema(
 
     cooComment: { type: String, default: '' },
     cooDecisionAt: { type: Date, default: null },
-    
 
     approvals: { type: [ApprovalStepSchema], default: [] },
 
@@ -178,6 +212,8 @@ const SwapWorkingDayRequestSchema = new mongoose.Schema(
 
 /* ─────────────────────────────────────────────
    Pre-validate normalization
+   ✅ NEW: auto-clear unused approvers like LeaveProfile
+   (keeps DB clean; avoids wrong recipient lookups)
 ───────────────────────────────────────────── */
 SwapWorkingDayRequestSchema.pre('validate', function (next) {
   try {
@@ -196,6 +232,16 @@ SwapWorkingDayRequestSchema.pre('validate', function (next) {
 
     // normalize mode + status
     this.approvalMode = normalizeMode(this.approvalMode)
+
+    // ✅ auto-clear unused approvers by mode
+    const m = this.approvalMode
+    const involvesManager = m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
+    const involvesGm = m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
+    const involvesCoo = m === 'MANAGER_AND_COO' || m === 'GM_AND_COO'
+    if (!involvesManager) this.managerLoginId = ''
+    if (!involvesGm) this.gmLoginId = ''
+    if (!involvesCoo) this.cooLoginId = ''
+
     if (!s(this.status)) this.status = defaultStatusForMode(this.approvalMode)
     this.status = normalizeStatusForMode(this.approvalMode, this.status)
 
@@ -231,5 +277,7 @@ SwapWorkingDayRequestSchema.index({ employeeId: 1, offStartDate: 1 })
 SwapWorkingDayRequestSchema.statics.STATUS = STATUS
 SwapWorkingDayRequestSchema.statics.APPROVAL_MODE = APPROVAL_MODE
 SwapWorkingDayRequestSchema.statics.normalizeMode = normalizeMode
+SwapWorkingDayRequestSchema.statics.defaultStatusForMode = defaultStatusForMode
+SwapWorkingDayRequestSchema.statics.normalizeStatusForMode = normalizeStatusForMode
 
 module.exports = mongoose.model('SwapWorkingDayRequest', SwapWorkingDayRequestSchema)

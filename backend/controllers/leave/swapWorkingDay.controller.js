@@ -1,5 +1,18 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/swapWorkingDayRequest.controller.js
+//
+// ✅ UPDATED to support NEW approval modes from LeaveProfile:
+//    - MANAGER_ONLY : PENDING_MANAGER -> APPROVED
+//    - GM_ONLY      : PENDING_GM      -> APPROVED
+//
+// ✅ UPDATED lock rule:
+//    - Once ANY approval activity happened (actedAt / APPROVED / REJECTED),
+//      requester CANNOT edit or cancel.
+//
+// ✅ REMOVED attachments usage:
+//    - Controller no longer reads/writes attachments from request body
+//    - (Evidence endpoints can remain in a separate controller if you have one;
+//       this file does not use attachments anymore.)
 
 const createError = require('http-errors')
 
@@ -77,6 +90,7 @@ function dateRangesOverlap(aStart, aEnd, bStart, bEnd) {
   return s(aStart) <= s(bEnd) && s(aEnd) >= s(bStart)
 }
 
+/** ✅ support old numeric employeeId data + new string employeeId */
 function buildEmpIdIn(employeeId) {
   const sid = String(employeeId || '').trim()
   const n = Number(sid)
@@ -130,14 +144,17 @@ function canCooDecide(req) {
   return hasRole(req, 'LEAVE_COO')
 }
 
-/* ✅ lock edit/cancel once ANY approval is approved */
-function hasAnyApproved(approvals) {
+/* ✅ lock edit/cancel once ANY approval activity happened */
+function hasAnyApprovalActivity(approvals) {
   const arr = Array.isArray(approvals) ? approvals : []
-  return arr.some((a) => up(a?.status) === 'APPROVED')
+  return arr.some((a) => {
+    const st = up(a?.status)
+    return !!a?.actedAt || st === 'APPROVED' || st === 'REJECTED'
+  })
 }
 function ensureRequesterCanEditOrCancel(doc) {
-  if (hasAnyApproved(doc?.approvals)) {
-    throw createError(400, 'This request already has an approval. You cannot edit or cancel it.')
+  if (hasAnyApprovalActivity(doc?.approvals)) {
+    throw createError(400, 'This request already started approval. You cannot edit or cancel it.')
   }
 }
 
@@ -166,6 +183,7 @@ function emitSwap(req, payload, event = 'swap:req:updated') {
     if (requester) io.to(`user:${requester}`).emit(event, payload)
     if (empId) io.to(`user:${empId}`).emit(event, payload) // optional fallback
 
+    // current approver first (inbox realtime)
     if (st === 'PENDING_MANAGER' && manager) {
       io.to(`user:${manager}`).emit(event, payload)
       return
@@ -179,6 +197,7 @@ function emitSwap(req, payload, event = 'swap:req:updated') {
       return
     }
 
+    // otherwise broadcast to all approvers
     if (manager) io.to(`user:${manager}`).emit(event, payload)
     if (gm) io.to(`user:${gm}`).emit(event, payload)
     if (coo) io.to(`user:${coo}`).emit(event, payload)
@@ -234,9 +253,20 @@ function normalizeMode(v) {
   return SwapWorkingDayRequest.normalizeMode ? SwapWorkingDayRequest.normalizeMode(v) : up(v)
 }
 
+function allowedStatusesForInboxLevel(level) {
+  const lvl = up(level)
+  if (lvl === 'MANAGER') return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+  if (lvl === 'GM') return ['PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+  if (lvl === 'COO') return ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+  return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
+}
+
 function initialStatusForMode(mode) {
   const m = normalizeMode(mode)
-  return m === 'GM_AND_COO' ? 'PENDING_GM' : 'PENDING_MANAGER'
+  if (m === 'GM_AND_COO') return 'PENDING_GM'
+  if (m === 'GM_ONLY') return 'PENDING_GM' // ✅ NEW
+  // MANAGER_AND_GM / MANAGER_AND_COO / MANAGER_ONLY
+  return 'PENDING_MANAGER'
 }
 
 function buildApprovalsOrThrow(mode, { managerLoginId, gmLoginId, cooLoginId }) {
@@ -246,6 +276,14 @@ function buildApprovalsOrThrow(mode, { managerLoginId, gmLoginId, cooLoginId }) 
     const v = s(id)
     if (!v) throw createError(400, `${label} is required for approvalMode ${m}`)
     return v
+  }
+
+  if (m === 'MANAGER_ONLY') {
+    return [{ level: 'MANAGER', loginId: reqLogin('managerLoginId', managerLoginId), status: 'PENDING', actedAt: null, note: '' }]
+  }
+
+  if (m === 'GM_ONLY') {
+    return [{ level: 'GM', loginId: reqLogin('gmLoginId', gmLoginId), status: 'PENDING', actedAt: null, note: '' }]
   }
 
   if (m === 'MANAGER_AND_GM') {
@@ -262,6 +300,7 @@ function buildApprovalsOrThrow(mode, { managerLoginId, gmLoginId, cooLoginId }) 
     ]
   }
 
+  // GM_AND_COO
   return [
     { level: 'GM', loginId: reqLogin('gmLoginId', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
     { level: 'COO', loginId: reqLogin('cooLoginId', cooLoginId), status: 'PENDING', actedAt: null, note: '' },
@@ -282,12 +321,16 @@ function markApproval(approvals, level, status, note = '') {
 
 function nextStatusAfterManagerApprove(mode) {
   const m = normalizeMode(mode)
-  return m === 'MANAGER_AND_COO' ? 'PENDING_COO' : 'PENDING_GM'
+  if (m === 'MANAGER_ONLY') return 'APPROVED' // ✅ NEW
+  if (m === 'MANAGER_AND_COO') return 'PENDING_COO'
+  return 'PENDING_GM'
 }
 
 function nextStatusAfterGmApprove(mode) {
   const m = normalizeMode(mode)
-  return m === 'GM_AND_COO' ? 'PENDING_COO' : 'APPROVED'
+  if (m === 'GM_ONLY') return 'APPROVED' // ✅ NEW
+  if (m === 'GM_AND_COO') return 'PENDING_COO'
+  return 'APPROVED'
 }
 
 function nextStatusAfterCooApprove() {
@@ -329,22 +372,6 @@ function assertAllWorking(startYmd, endYmd, label) {
   for (const d of iterYmdInclusive(startYmd, endYmd)) {
     if (!isWorkingDay(d)) throw createError(400, `${label} must be working day(s). "${d}" is not a working day.`)
   }
-}
-
-function normalizeAttachments(arr) {
-  const list = Array.isArray(arr) ? arr : []
-  return list
-    .map((a) => ({
-      attId: s(a?.attId),
-      fileId: a?.fileId,
-      filename: s(a?.filename),
-      contentType: s(a?.contentType),
-      size: Number(a?.size || 0) || 0,
-      uploadedAt: a?.uploadedAt ? new Date(a.uploadedAt) : new Date(),
-      uploadedBy: s(a?.uploadedBy),
-      note: s(a?.note),
-    }))
-    .filter((a) => a.attId && a.fileId)
 }
 
 async function assertNoSwapOverlap({ employeeId, reqStart, reqEnd, offStart, offEnd, excludeId = null }) {
@@ -467,7 +494,9 @@ exports.createMySwapRequest = async (req, res, next) => {
       cooLoginId,
 
       approvals,
-      attachments: normalizeAttachments(req.body?.attachments),
+
+      // ✅ attachments NOT used here
+      attachments: [],
     })
 
     const payload = await attachEmployeeInfoToOne(doc)
@@ -500,7 +529,7 @@ exports.listMySwapRequests = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   CANCEL MY  ✅ LOCK if any APPROVED in approvals
+   CANCEL MY  ✅ LOCK if any approval activity happened
 ───────────────────────────────────────────────────────────── */
 exports.cancelMySwapRequest = async (req, res, next) => {
   try {
@@ -534,7 +563,7 @@ exports.cancelMySwapRequest = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MANAGER INBOX
+   MANAGER INBOX  ✅ includes MANAGER_ONLY
 ───────────────────────────────────────────────────────────── */
 exports.listManagerInbox = async (req, res, next) => {
   try {
@@ -542,20 +571,20 @@ exports.listManagerInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewManagerInbox(req)) throw createError(403, 'Forbidden')
 
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] }
+    const scope = up(req.query?.scope || '')
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] }
 
-    if (isAdminViewer(req)) {
-      const scope = up(req.query?.scope || '')
-      const query = scope === 'ALL' ? { approvalMode: modeFilter } : { approvalMode: modeFilter, status: 'PENDING_MANAGER' }
-      const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
-      return res.json(await attachEmployeeInfo(rows || []))
-    }
+    const base = isAdminViewer(req)
+      ? { approvalMode: modeFilter }
+      : { approvalMode: modeFilter, managerLoginId: me }
 
-    const query = {
-      approvalMode: modeFilter,
-      managerLoginId: me,
-      status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
-    }
+    const query = isAdminViewer(req)
+      ? scope === 'ALL'
+        ? { ...base }
+        : { ...base, status: 'PENDING_MANAGER' }
+      : scope === 'ALL'
+        ? { ...base, status: { $in: allowedStatusesForInboxLevel('MANAGER') } }
+        : { ...base, status: 'PENDING_MANAGER' }
 
     const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -565,7 +594,7 @@ exports.listManagerInbox = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MANAGER DECISION
+   MANAGER DECISION ✅ supports MANAGER_ONLY
 ───────────────────────────────────────────────────────────── */
 exports.managerDecision = async (req, res, next) => {
   try {
@@ -580,10 +609,14 @@ exports.managerDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO'].includes(mode)) throw createError(400, 'This request does not require manager approval.')
+    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'].includes(mode)) {
+      throw createError(400, 'This request does not require manager approval.')
+    }
 
     if (s(existing.managerLoginId) !== me) throw createError(403, 'Not your request')
-    if (s(existing.status) !== 'PENDING_MANAGER') throw createError(400, `Request is ${existing.status}. Manager can only decide when status is PENDING_MANAGER.`)
+    if (s(existing.status) !== 'PENDING_MANAGER') {
+      throw createError(400, `Request is ${existing.status}. Manager can only decide when status is PENDING_MANAGER.`)
+    }
 
     const now = new Date()
     const newStatus = action === 'APPROVE' ? nextStatusAfterManagerApprove(mode) : 'REJECTED'
@@ -629,7 +662,7 @@ exports.managerDecision = async (req, res, next) => {
     emitSwap(req, payload, 'swap:req:updated')
     await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // DM next approver
+    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver (if any)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -637,7 +670,7 @@ exports.managerDecision = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   GM INBOX
+   GM INBOX ✅ includes GM_ONLY
 ───────────────────────────────────────────────────────────── */
 exports.listGmInbox = async (req, res, next) => {
   try {
@@ -645,22 +678,20 @@ exports.listGmInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] }
+    const scope = up(req.query?.scope || '')
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] }
 
-    if (isAdminViewer(req)) {
-      const scope = up(req.query?.scope || '')
-      const query = scope === 'ALL' ? { approvalMode: modeFilter } : { approvalMode: modeFilter, status: 'PENDING_GM' }
-      const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
-      return res.json(await attachEmployeeInfo(rows || []))
-    }
+    const base = isAdminViewer(req)
+      ? { approvalMode: modeFilter }
+      : { approvalMode: modeFilter, gmLoginId: me }
 
-    const query = {
-      gmLoginId: me,
-      $or: [
-        { approvalMode: 'MANAGER_AND_GM', status: { $in: ['PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED'] } },
-        { approvalMode: 'GM_AND_COO', status: { $in: ['PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] } },
-      ],
-    }
+    const query = isAdminViewer(req)
+      ? scope === 'ALL'
+        ? { ...base }
+        : { ...base, status: 'PENDING_GM' }
+      : scope === 'ALL'
+        ? { ...base, status: { $in: allowedStatusesForInboxLevel('GM') } }
+        : { ...base, status: 'PENDING_GM' }
 
     const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -670,7 +701,7 @@ exports.listGmInbox = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   GM DECISION
+   GM DECISION ✅ supports GM_ONLY
 ───────────────────────────────────────────────────────────── */
 exports.gmDecision = async (req, res, next) => {
   try {
@@ -685,10 +716,14 @@ exports.gmDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_GM', 'GM_AND_COO'].includes(mode)) throw createError(400, 'This request does not require GM approval.')
+    if (!['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'].includes(mode)) {
+      throw createError(400, 'This request does not require GM approval.')
+    }
 
     if (s(existing.gmLoginId) !== me) throw createError(403, 'Not your request')
-    if (s(existing.status) !== 'PENDING_GM') throw createError(400, `Request is ${existing.status}. GM can only decide when status is PENDING_GM.`)
+    if (s(existing.status) !== 'PENDING_GM') {
+      throw createError(400, `Request is ${existing.status}. GM can only decide when status is PENDING_GM.`)
+    }
 
     const now = new Date()
     const newStatus = action === 'APPROVE' ? nextStatusAfterGmApprove(mode) : 'REJECTED'
@@ -734,7 +769,7 @@ exports.gmDecision = async (req, res, next) => {
     emitSwap(req, payload, 'swap:req:updated')
     await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // DM next approver (COO in GM_AND_COO)
+    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver (if any)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -742,7 +777,7 @@ exports.gmDecision = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   COO INBOX
+   COO INBOX (COO only in MANAGER_AND_COO / GM_AND_COO)
 ───────────────────────────────────────────────────────────── */
 exports.listCooInbox = async (req, res, next) => {
   try {
@@ -750,20 +785,20 @@ exports.listCooInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
+    const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] }
 
-    if (isAdminViewer(req)) {
-      const scope = up(req.query?.scope || '')
-      const query = scope === 'ALL' ? { approvalMode: modeFilter } : { approvalMode: modeFilter, status: 'PENDING_COO' }
-      const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
-      return res.json(await attachEmployeeInfo(rows || []))
-    }
+    const base = isAdminViewer(req)
+      ? { approvalMode: modeFilter }
+      : { approvalMode: modeFilter, cooLoginId: me }
 
-    const query = {
-      approvalMode: modeFilter,
-      cooLoginId: me,
-      status: { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
-    }
+    const query = isAdminViewer(req)
+      ? scope === 'ALL'
+        ? { ...base }
+        : { ...base, status: 'PENDING_COO' }
+      : scope === 'ALL'
+        ? { ...base, status: { $in: allowedStatusesForInboxLevel('COO') } }
+        : { ...base, status: 'PENDING_COO' }
 
     const rows = await SwapWorkingDayRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -788,13 +823,17 @@ exports.cooDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_COO', 'GM_AND_COO'].includes(mode)) throw createError(400, 'This request does not require COO approval.')
+    if (!['MANAGER_AND_COO', 'GM_AND_COO'].includes(mode)) {
+      throw createError(400, 'This request does not require COO approval.')
+    }
 
     if (s(existing.cooLoginId) !== me) throw createError(403, 'Not your request')
-    if (s(existing.status) !== 'PENDING_COO') throw createError(400, `Request is ${existing.status}. COO can only decide when status is PENDING_COO.`)
+    if (s(existing.status) !== 'PENDING_COO') {
+      throw createError(400, `Request is ${existing.status}. COO can only decide when status is PENDING_COO.`)
+    }
 
     const now = new Date()
-    const newStatus = action === 'APPROVE' ? nextStatusAfterCooApprove(mode) : 'REJECTED'
+    const newStatus = action === 'APPROVE' ? nextStatusAfterCooApprove() : 'REJECTED'
 
     const setPayload =
       action === 'APPROVE'
@@ -902,7 +941,7 @@ exports.getOne = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   UPDATE (LEAVE_USER) ✅ LOCK if any APPROVED in approvals
+   UPDATE (LEAVE_USER) ✅ LOCK if any approval activity happened
 ───────────────────────────────────────────────────────────── */
 exports.updateMySwapRequest = async (req, res, next) => {
   try {
@@ -961,6 +1000,7 @@ exports.updateMySwapRequest = async (req, res, next) => {
     doc.offTotalDays = offTotalDays
     doc.reason = s(req.body?.reason || '')
 
+    // ✅ attachments NOT used here
     await doc.save()
 
     const payload = await attachEmployeeInfoToOne(doc)
@@ -973,9 +1013,7 @@ exports.updateMySwapRequest = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MANAGER BULK DECISION
-   POST /leave/swap-working-day/manager/bulk-decision
-   body: { ids: string[], action: "APPROVE"|"REJECT", note?: string }
+   MANAGER BULK DECISION ✅ supports MANAGER_ONLY
 ───────────────────────────────────────────────────────────── */
 exports.managerBulkDecision = async (req, res, next) => {
   try {
@@ -986,43 +1024,21 @@ exports.managerBulkDecision = async (req, res, next) => {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map((x) => s(x)).filter(Boolean) : []
     if (!ids.length) throw createError(400, 'ids is required')
 
-    const { action, note } = parseDecisionBody(req) // uses action/note from body
+    const { action, note } = parseDecisionBody(req)
     const now = new Date()
 
-    // Load docs (for validation + mode-specific next status)
     const docs = await SwapWorkingDayRequest.find({
       _id: { $in: ids },
       status: 'PENDING_MANAGER',
       managerLoginId: me,
-      approvalMode: { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] },
+      approvalMode: { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] },
     })
 
     if (!docs.length) {
       return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
     }
 
-    // Validate each doc is still valid (defensive)
-    const toUpdate = []
-    const skipped = []
-    for (const d of docs) {
-      const mode = normalizeMode(d.approvalMode)
-      if (!['MANAGER_AND_GM', 'MANAGER_AND_COO'].includes(mode)) {
-        skipped.push(String(d._id))
-        continue
-      }
-      if (s(d.managerLoginId) !== me || s(d.status) !== 'PENDING_MANAGER') {
-        skipped.push(String(d._id))
-        continue
-      }
-      toUpdate.push(d)
-    }
-
-    if (!toUpdate.length) {
-      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
-    }
-
-    // Build bulk ops
-    const ops = toUpdate.map((d) => {
+    const ops = docs.map((d) => {
       const mode = normalizeMode(d.approvalMode)
       const newStatus = action === 'APPROVE' ? nextStatusAfterManagerApprove(mode) : 'REJECTED'
 
@@ -1062,18 +1078,14 @@ exports.managerBulkDecision = async (req, res, next) => {
 
     await SwapWorkingDayRequest.bulkWrite(ops, { ordered: false })
 
-    // Fetch updated docs to return + emit realtime/telegram per doc
-    const updatedDocs = await SwapWorkingDayRequest.find({ _id: { $in: toUpdate.map((x) => x._id) } }).lean()
+    const updatedDocs = await SwapWorkingDayRequest.find({ _id: { $in: docs.map((x) => x._id) } }).lean()
     const enriched = await attachEmployeeInfo(updatedDocs)
 
-    // Realtime + Telegram best-effort
     for (const p of enriched) {
       emitSwap(req, p, 'swap:req:updated')
       await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyManagerDecisionToEmployee, p)
-      if (action === 'APPROVE') {
-        await safeNotify(notify?.notifyCurrentApprover, p) // DM next approver
-      }
+      if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p)
     }
 
     return res.json({
@@ -1088,6 +1100,9 @@ exports.managerBulkDecision = async (req, res, next) => {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   GM BULK DECISION ✅ supports GM_ONLY
+───────────────────────────────────────────────────────────── */
 exports.gmBulkDecision = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -1100,12 +1115,11 @@ exports.gmBulkDecision = async (req, res, next) => {
     const { action, note } = parseDecisionBody(req)
     const now = new Date()
 
-    // only GM-valid modes
     const docs = await SwapWorkingDayRequest.find({
       _id: { $in: ids },
       status: 'PENDING_GM',
       gmLoginId: me,
-      approvalMode: { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] },
+      approvalMode: { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] },
     })
 
     if (!docs.length) {
@@ -1159,7 +1173,7 @@ exports.gmBulkDecision = async (req, res, next) => {
       emitSwap(req, p, 'swap:req:updated')
       await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyGmDecisionToEmployee, p)
-      if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p) // DM next approver (COO in GM_AND_COO)
+      if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p)
     }
 
     return res.json({
@@ -1174,7 +1188,9 @@ exports.gmBulkDecision = async (req, res, next) => {
   }
 }
 
-
+/* ─────────────────────────────────────────────────────────────
+   COO BULK DECISION (COO only in MANAGER_AND_COO / GM_AND_COO)
+───────────────────────────────────────────────────────────── */
 exports.cooBulkDecision = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -1199,7 +1215,7 @@ exports.cooBulkDecision = async (req, res, next) => {
     }
 
     const ops = docs.map((d) => {
-      const newStatus = action === 'APPROVE' ? nextStatusAfterCooApprove(d.approvalMode) : 'REJECTED'
+      const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
 
       const setPayload =
         action === 'APPROVE'

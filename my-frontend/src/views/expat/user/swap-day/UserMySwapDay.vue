@@ -1,4 +1,13 @@
-<!-- src/views/expat/user/swap-day/UserMySwapDay.vue -->
+<!-- src/views/expat/user/swap-day/UserMySwapDay.vue
+  ✅ FULL CODE (Attachments REMOVED)
+  ✅ Supports new approval modes automatically (MANAGER_ONLY / GM_ONLY)
+  ✅ UI lock rule matches backend:
+     - requester can edit/cancel ONLY when status is PENDING_* AND approvals have NO activity
+       (actedAt / APPROVED / REJECTED)
+  ✅ Responsive: mobile cards + desktop table
+  ✅ Detail modal included
+  ✅ Realtime: swap:req:created / swap:req:updated
+-->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -7,8 +16,6 @@ import { useRouter } from 'vue-router'
 import { useAuth } from '@/store/auth'
 
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
-
-import AttachmentPreviewModal from './AttachmentPreviewModal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 import { swapWorkingDayApi } from '@/utils/swapWorkingDay.api'
@@ -32,11 +39,6 @@ function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
-
-/* attachments modal state */
-const filesOpen = ref(false)
-const filesRequest = ref(null)
-const filesItems = ref([])
 
 /* cancel confirm */
 const cancelOpen = ref(false)
@@ -87,19 +89,23 @@ function compactText(v) {
 }
 
 /**
- * ✅ Business rule (UI):
- * requester cannot edit/cancel when there is ANY approved step (any level)
- * - Also allow only while status is pending.
+ * ✅ Backend lock rule:
+ * requester cannot edit/cancel when approvals have ANY activity:
+ * - actedAt exists OR status is APPROVED/REJECTED
+ * also only while status is pending.
  */
-function hasAnyApprovedStep(item) {
+function hasApprovalActivity(item) {
   const steps = Array.isArray(item?.approvals) ? item.approvals : []
-  return steps.some((s) => up(s?.status) === 'APPROVED')
+  return steps.some((s) => {
+    const st = up(s?.status)
+    return !!s?.actedAt || st === 'APPROVED' || st === 'REJECTED'
+  })
 }
 
 function canEditOrCancel(item) {
   const st = up(item?.status)
   if (!st.startsWith('PENDING')) return false
-  if (hasAnyApprovedStep(item)) return false
+  if (hasApprovalActivity(item)) return false
   return true
 }
 
@@ -143,7 +149,7 @@ watch(
 /* ───────────────── CANCEL (with confirm) ───────────────── */
 function askCancel(item) {
   if (!canEditOrCancel(item)) {
-    showToast({ type: 'warning', message: 'This request cannot be cancelled after any approval.' })
+    showToast({ type: 'warning', message: 'This request is locked because approval has started.' })
     return
   }
   cancelTarget.value = item
@@ -167,34 +173,6 @@ async function confirmCancel() {
   }
 }
 
-/* ───────────────── OPEN FILES MODAL ───────────────── */
-async function openFiles(item) {
-  filesRequest.value = item
-  filesItems.value = []
-  try {
-    const data = await swapWorkingDayApi.listEvidence(item._id)
-    filesItems.value = Array.isArray(data) ? data : item.attachments || []
-  } catch (e) {
-    filesItems.value = item.attachments || []
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load attachments list' })
-  } finally {
-    filesOpen.value = true
-  }
-}
-
-async function refreshFilesAgain() {
-  const req = filesRequest.value
-  if (!req?._id) return
-  try {
-    const res = await swapWorkingDayApi.listEvidence(req._id)
-    filesItems.value = Array.isArray(res.data) ? res.data : []
-    const idx = rows.value.findIndex((r) => String(r._id) === String(req._id))
-    if (idx >= 0) rows.value[idx].attachments = filesItems.value
-  } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Refresh attachments failed' })
-  }
-}
-
 /* ───────────────── FILTERED LIST ───────────────── */
 const filteredRows = computed(() => {
   let result = [...rows.value]
@@ -206,14 +184,23 @@ const filteredRows = computed(() => {
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
     result = result.filter((r) => {
-      const hay = [r.reason, r.status, r.requestStartDate, r.requestEndDate, r.offStartDate, r.offEndDate]
+      const hay = [
+        r.reason,
+        r.status,
+        r.requestStartDate,
+        r.requestEndDate,
+        r.offStartDate,
+        r.offEndDate,
+        r.employeeName,
+        r.department,
+      ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
       return hay.includes(q)
     })
   }
 
-  result.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+  result.sort((a, b) => (b.createdAt ? dayjs(b.createdAt).valueOf() : 0) - (a.createdAt ? dayjs(a.createdAt).valueOf() : 0))
   return result
 })
 
@@ -229,10 +216,7 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  // keep modals synced
-  if (filesRequest.value?._id && String(filesRequest.value._id) === String(doc._id)) {
-    filesRequest.value = { ...filesRequest.value, ...doc }
-  }
+  // keep modal synced
   if (viewItem.value?._id && String(viewItem.value._id) === String(doc._id)) {
     viewItem.value = { ...viewItem.value, ...doc }
   }
@@ -321,7 +305,7 @@ onBeforeUnmount(() => {
         <div class="p-3">
           <div v-if="loading" class="ui-skeleton h-14 w-full" />
 
-          <div v-else-if="!filteredRows.length" class="ui-frame p-4 text-center text-[12px] text-slate-500">
+          <div v-else-if="!filteredRows.length" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
             No swap requests found.
           </div>
 
@@ -352,22 +336,9 @@ onBeforeUnmount(() => {
                   </span>
 
                   <div class="flex items-center justify-end gap-2">
-                    <!-- Detail -->
                     <button class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn" type="button" title="Detail" @click="openDetail(item)">
                       <i class="fa-solid fa-eye text-[12px]" />
                     </button>
-
-                    <!-- Files -->
-                    <!-- <button
-                      v-if="item.attachments?.length"
-                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                      type="button"
-                      title="Attachments"
-                      @click="openFiles(item)"
-                    >
-                      <i class="fa-solid fa-paperclip text-[12px]" />
-                      <span class="ml-1">{{ item.attachments.length }}</span>
-                    </button> -->
                   </div>
                 </div>
               </div>
@@ -389,7 +360,7 @@ onBeforeUnmount(() => {
                   </button>
                 </template>
 
-                <span v-else class="text-[11px] text-slate-400">—</span>
+                <span v-else class="text-[11px] text-slate-400 dark:text-slate-500">—</span>
               </div>
             </article>
           </div>
@@ -402,7 +373,6 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
-                  <!-- <th class="ui-th text-center">File</th> -->
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
                   <th class="ui-th text-center">Actions</th>
@@ -411,40 +381,25 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-for="item in filteredRows" :key="item._id" class="ui-tr-hover">
-                  <td class="ui-td">
+                  <td class="ui-td whitespace-nowrap">
                     {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                   </td>
 
-                  <td class="ui-td">{{ item.requestStartDate }} → {{ item.requestEndDate }}</td>
+                  <td class="ui-td whitespace-nowrap">{{ item.requestStartDate }} → {{ item.requestEndDate }}</td>
+                  <td class="ui-td whitespace-nowrap">{{ item.offStartDate }} → {{ item.offEndDate }}</td>
 
-                  <td class="ui-td">{{ item.offStartDate }} → {{ item.offEndDate }}</td>
-
-                  <!-- File column -->
-                  <!-- <td class="ui-td text-center">
-                    <button
-                      v-if="item.attachments?.length"
-                      class="ui-btn ui-btn-soft ui-btn-xs"
-                      type="button"
-                      @click="openFiles(item)"
-                      title="Preview attachments"
-                    >
-                      <i class="fa-solid fa-paperclip text-[11px]" />
-                      <span class="ml-1">{{ item.attachments.length }}</span>
-                    </button>
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td> -->
-
-                  <td class="ui-td">
+                  <td class="ui-td whitespace-nowrap">
                     <span :class="statusBadgeUiClass(item.status)">
                       {{ STATUS_LABEL[item.status] || item.status }}
                     </span>
                   </td>
 
-                  <td class="ui-td truncate" :title="compactText(item.reason)">
-                    {{ item.reason ? compactText(item.reason) : '—' }}
+                  <td class="ui-td">
+                    <span class="block w-full truncate" :title="compactText(item.reason)">
+                      {{ item.reason ? compactText(item.reason) : '—' }}
+                    </span>
                   </td>
 
-                  <!-- Actions -->
                   <td class="ui-td text-center">
                     <div class="flex justify-center gap-2">
                       <button
@@ -468,6 +423,8 @@ onBeforeUnmount(() => {
                           Edit
                         </button>
                       </template>
+
+                      <span v-else class="text-[11px] text-slate-400 dark:text-slate-500">—</span>
                     </div>
                   </td>
                 </tr>
@@ -481,31 +438,20 @@ onBeforeUnmount(() => {
   </div>
 
   <!-- ✅ DETAIL MODAL -->
-  <div v-if="viewOpen" class="ui-modal-backdrop">
+  <div v-if="viewOpen" class="ui-modal-backdrop" @click.self="closeDetail">
     <div class="ui-modal p-0 overflow-hidden">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Swap Request Detail</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">Created: {{ fmtDateTime(viewItem?.createdAt) }}</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            Created: {{ fmtDateTime(viewItem?.createdAt) }}
+          </div>
         </div>
 
-        <div class="flex items-center gap-2">
-          <!-- <button
-            v-if="viewItem?.attachments?.length"
-            class="ui-btn ui-btn-soft ui-btn-xs"
-            type="button"
-            @click="openFiles(viewItem)"
-            title="Attachments"
-          >
-            <i class="fa-solid fa-paperclip text-[11px]" />
-            Attachments
-          </button> -->
-
-          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeDetail">
-            <i class="fa-solid fa-xmark text-[11px]" />
-            Close
-          </button>
-        </div>
+        <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeDetail">
+          <i class="fa-solid fa-xmark text-[11px]" />
+          Close
+        </button>
       </div>
 
       <div class="p-4 space-y-3">
@@ -555,23 +501,29 @@ onBeforeUnmount(() => {
           <div class="ui-section-title">Approvals</div>
           <div class="mt-2 grid gap-2">
             <div
-              v-for="(s, idx) in (Array.isArray(viewItem?.approvals) ? viewItem.approvals : [])"
+              v-for="(step, idx) in (Array.isArray(viewItem?.approvals) ? viewItem.approvals : [])"
               :key="idx"
               class="ui-frame p-2 flex items-center justify-between text-[11px]"
             >
-              <div class="font-extrabold text-slate-700 dark:text-slate-200">{{ s.level }} · {{ s.loginId }}</div>
+              <div class="font-extrabold text-slate-700 dark:text-slate-200">
+                {{ step.level }} · {{ step.loginId }}
+              </div>
               <div class="flex items-center gap-2">
                 <span
                   class="ui-badge"
-                  :class="up(s.status)==='APPROVED' ? 'ui-badge-success' : (up(s.status)==='REJECTED' ? 'ui-badge-danger' : 'ui-badge-warning')"
+                  :class="up(step.status)==='APPROVED' ? 'ui-badge-success' : (up(step.status)==='REJECTED' ? 'ui-badge-danger' : 'ui-badge-warning')"
                 >
-                  {{ s.status }}
+                  {{ step.status }}
                 </span>
-                <span class="text-slate-500 dark:text-slate-400">{{ s.actedAt ? fmtDateTime(s.actedAt) : '—' }}</span>
+                <span class="text-slate-500 dark:text-slate-400">
+                  {{ step.actedAt ? fmtDateTime(step.actedAt) : '—' }}
+                </span>
               </div>
             </div>
 
-            <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500">—</div>
+            <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500 dark:text-slate-400">
+              —
+            </div>
           </div>
         </div>
 
@@ -592,19 +544,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
-
-  <!-- Attachment Preview Modal -->
-  <!-- <AttachmentPreviewModal
-    v-model="filesOpen"
-    :request-id="filesRequest?._id"
-    title="Attachments"
-    :subtitle="filesRequest ? `${filesRequest.requestStartDate} → ${filesRequest.requestEndDate}` : ''"
-    :items="filesItems"
-    :fetch-content-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}/content`"
-    :delete-path="(requestId, attId) => `/leave/swap-working-day/${requestId}/evidence/${attId}`"
-    :can-delete="canEditOrCancel(filesRequest)"
-    @refresh="refreshFilesAgain()"
-  /> -->
 
   <!-- Confirm cancel -->
   <ConfirmDialog
