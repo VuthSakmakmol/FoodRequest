@@ -1,16 +1,20 @@
 /* eslint-disable no-console */
 // backend/controllers/forgetScan/forgetScan.controller.js
 //
-// ✅ ExpatForgetScan (special)
+// ✅ ExpatForgetScan (updated)
 // ✅ Approval modes SAME as LeaveProfile:
 //    - MANAGER_AND_GM
 //    - MANAGER_AND_COO
 //    - GM_AND_COO
+//    - MANAGER_ONLY   ✅ NEW
+//    - GM_ONLY        ✅ NEW
 //
-// ✅ SPECIAL RULE (Forget Scan):
-//    - Only FIRST approver is required.
-//    - If first approver APPROVES => status becomes APPROVED immediately.
-//    - No second approver step (no disturbing GM/COO).
+// ✅ Flow by mode (NOW matches Leave/Swap logic):
+//    MANAGER_AND_GM   : PENDING_MANAGER -> PENDING_GM  -> APPROVED
+//    MANAGER_AND_COO  : PENDING_MANAGER -> PENDING_COO -> APPROVED
+//    GM_AND_COO       : PENDING_GM      -> PENDING_COO -> APPROVED
+//    MANAGER_ONLY     : PENDING_MANAGER -> APPROVED
+//    GM_ONLY          : PENDING_GM      -> APPROVED
 //
 // ✅ Viewers: LEAVE_ADMIN/ADMIN/ROOT_ADMIN can VIEW inbox (pending + ALL via scope)
 // ❌ But they CANNOT approve/reject on behalf of manager/gm/coo
@@ -18,7 +22,7 @@
 // ✅ Roles who can DECIDE (NO admin bypass):
 //    - managerDecision: LEAVE_MANAGER only
 //    - gmDecision     : LEAVE_GM only
-//    - cooDecision    : LEAVE_COO only (kept for compatibility, but requests will not reach PENDING_COO)
+//    - cooDecision    : LEAVE_COO only
 //
 // ✅ Status values:
 //    PENDING_MANAGER, PENDING_GM, PENDING_COO, APPROVED, REJECTED, CANCELLED
@@ -31,9 +35,7 @@ const ExpatForgetScanRequest = require('../../models/forgetScan/ExpatForgetScanR
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
-/* ───────────────── helpers ───────────────── */
-
-/* Notify (Telegram) */
+/* ───────────────── Notify (Telegram) ───────────────── */
 let notify = null
 try {
   notify = require('../../services/telegram/forgetScan')
@@ -52,6 +54,7 @@ async function safeNotify(fn, ...args) {
   }
 }
 
+/* ───────────────── realtime ───────────────── */
 const { broadcastForgetScanRequest } = require('../../utils/forgetScan.realtime')
 
 function getIo(req) {
@@ -68,6 +71,7 @@ function emitForget(req, doc, event = 'forgetscan:req:updated') {
   }
 }
 
+/* ───────────────── helpers ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -131,7 +135,6 @@ function isValidYMD(v) {
 }
 
 /* ───────────────── forgot types ───────────────── */
-
 const FORGOT_TYPES = ['FORGET_IN', 'FORGET_OUT']
 
 function normalizeForgotTypesFromBody(body) {
@@ -147,18 +150,22 @@ function normalizeForgotTypesFromBody(body) {
   return arr
 }
 
+/* ───────────────── approval mode logic (UPDATED) ───────────────── */
 function normalizeMode(v) {
   const raw = up(v)
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
+  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
   return 'MANAGER_AND_GM'
 }
 
 function initialStatusForMode(mode) {
   const m = normalizeMode(mode)
   if (m === 'GM_AND_COO') return 'PENDING_GM'
-  return 'PENDING_MANAGER'
+  if (m === 'GM_ONLY') return 'PENDING_GM' // ✅ NEW
+  return 'PENDING_MANAGER' // MANAGER_AND_GM / MANAGER_AND_COO / MANAGER_ONLY
 }
 
 function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
@@ -168,6 +175,14 @@ function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
     const id = s(v)
     if (!id) throw createError(400, `${label} approver is missing in profile`)
     return id
+  }
+
+  if (m === 'MANAGER_ONLY') {
+    return [{ level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' }]
+  }
+
+  if (m === 'GM_ONLY') {
+    return [{ level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' }]
   }
 
   if (m === 'MANAGER_AND_GM') {
@@ -184,17 +199,10 @@ function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
     ]
   }
 
-  if (m === 'GM_AND_COO') {
-    return [
-      { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
-      { level: 'COO', loginId: need('COO', cooLoginId), status: 'PENDING', actedAt: null, note: '' },
-    ]
-  }
-
-  // fallback
+  // GM_AND_COO
   return [
-    { level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' },
     { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
+    { level: 'COO', loginId: need('COO', cooLoginId), status: 'PENDING', actedAt: null, note: '' },
   ]
 }
 
@@ -210,17 +218,30 @@ function markApproval(approvals, level, status, note = '') {
   return arr
 }
 
-/* ✅ Forget Scan special: first approver APPROVE => APPROVED immediately */
-function nextStatusAfterManagerApprove() {
-  return 'APPROVED'
+function nextStatusAfterManagerApprove(mode) {
+  const m = normalizeMode(mode)
+  if (m === 'MANAGER_ONLY') return 'APPROVED'
+  if (m === 'MANAGER_AND_COO') return 'PENDING_COO'
+  return 'PENDING_GM' // MANAGER_AND_GM
 }
-function nextStatusAfterGmApprove() {
-  return 'APPROVED'
+
+function nextStatusAfterGmApprove(mode) {
+  const m = normalizeMode(mode)
+  if (m === 'GM_ONLY') return 'APPROVED'
+  if (m === 'GM_AND_COO') return 'PENDING_COO'
+  return 'APPROVED' // MANAGER_AND_GM final
 }
+
 function nextStatusAfterCooApprove() {
   return 'APPROVED'
 }
 
+function isFinalStatus(st) {
+  const x = up(st)
+  return x === 'APPROVED' || x === 'REJECTED' || x === 'CANCELLED'
+}
+
+/* ───────────────── attach employee info ───────────────── */
 async function attachEmployeeInfo(rows = []) {
   const ids = [...new Set((rows || []).map((d) => s(d.employeeId)).filter(Boolean))]
   if (!ids.length) return rows
@@ -248,10 +269,7 @@ async function attachEmployeeInfoToOne(doc) {
   const employeeId = s(raw.employeeId)
   if (!employeeId) return raw
 
-  const emp = await EmployeeDirectory.findOne(
-    { employeeId },
-    { employeeId: 1, name: 1, department: 1 }
-  ).lean()
+  const emp = await EmployeeDirectory.findOne({ employeeId }, { employeeId: 1, name: 1, department: 1 }).lean()
 
   return {
     ...raw,
@@ -275,10 +293,7 @@ exports.createMyForgetScan = async (req, res, next) => {
     const forgotDate = s(req.body?.forgotDate)
     if (!isValidYMD(forgotDate)) throw createError(400, 'forgotDate must be YYYY-MM-DD')
 
-    // ✅ reason optional
     const reason = s(req.body?.reason || '')
-
-    // ✅ accept multiple types in ONE request
     const forgotTypes = normalizeForgotTypesFromBody(req.body)
 
     const prof = await LeaveProfile.findOne({ employeeId }).lean()
@@ -290,6 +305,7 @@ exports.createMyForgetScan = async (req, res, next) => {
     const gmLoginId = s(prof.gmLoginId)
     const cooLoginId = s(prof.cooLoginId)
 
+    // validate approver presence early
     buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId })
 
     let doc
@@ -320,8 +336,9 @@ exports.createMyForgetScan = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitForget(req, payload, 'forgetscan:req:created')
 
+    await safeNotify(notify?.notifyAdminsOnCreate, payload)
     await safeNotify(notify?.notifyForgetCreatedToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // sends only to first approver at create
+    await safeNotify(notify?.notifyCurrentApprover, payload) // first approver
     return res.status(201).json(payload)
   } catch (e) {
     next(e)
@@ -360,7 +377,6 @@ exports.cancelMyForgetScan = async (req, res, next) => {
     const existing = await ExpatForgetScanRequest.findById(id)
     if (!existing) throw createError(404, 'Request not found')
 
-    // employees can only cancel their own request; admins can cancel any (viewer only)
     if (!isAdminViewer(req) && s(existing.requesterLoginId) !== meLoginId) {
       throw createError(403, 'Not your request')
     }
@@ -368,6 +384,10 @@ exports.cancelMyForgetScan = async (req, res, next) => {
     if (['APPROVED', 'REJECTED', 'CANCELLED'].includes(up(existing.status))) {
       throw createError(400, `Request is ${existing.status}. Cannot cancel.`)
     }
+
+    const approvals = Array.isArray(existing.approvals) ? existing.approvals : []
+    const anyActed = approvals.some((a) => !!a?.actedAt)
+    if (anyActed) throw createError(400, 'This request has already been processed. Cannot cancel.')
 
     existing.status = 'CANCELLED'
     existing.cancelledAt = new Date()
@@ -377,6 +397,7 @@ exports.cancelMyForgetScan = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(existing)
     emitForget(req, payload, 'forgetscan:req:updated')
 
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyCancelledToEmployee, payload)
     return res.json(payload)
   } catch (e) {
@@ -387,7 +408,6 @@ exports.cancelMyForgetScan = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    UPDATE MY REQUEST (employee)
    PATCH /api/leave/forget-scan/:id
-   body: { forgotDate, forgotTypes, reason }
 ───────────────────────────────────────────────────────────── */
 exports.updateMyForgetScan = async (req, res, next) => {
   try {
@@ -405,7 +425,6 @@ exports.updateMyForgetScan = async (req, res, next) => {
       throw createError(400, `Request is ${existing.status}. Cannot edit.`)
     }
 
-    // ✅ cannot edit after any approval action
     const approvals = Array.isArray(existing.approvals) ? existing.approvals : []
     const anyActed = approvals.some((a) => !!a?.actedAt)
     if (anyActed) throw createError(400, 'Cannot edit after any approval action.')
@@ -413,7 +432,7 @@ exports.updateMyForgetScan = async (req, res, next) => {
     const forgotDate = s(req.body?.forgotDate)
     if (!isValidYMD(forgotDate)) throw createError(400, 'forgotDate must be YYYY-MM-DD')
 
-    const reason = s(req.body?.reason || '') // ✅ optional
+    const reason = s(req.body?.reason || '')
     const forgotTypes = normalizeForgotTypesFromBody(req.body)
 
     existing.forgotDate = forgotDate
@@ -450,7 +469,8 @@ exports.listManagerInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewManagerInbox(req)) throw createError(403, 'Forbidden')
 
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO'] }
+    // ✅ include MANAGER_ONLY
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] }
 
     // Admin viewer: keep scope logic
     if (isAdminViewer(req)) {
@@ -464,11 +484,11 @@ exports.listManagerInbox = async (req, res, next) => {
       return res.json(await attachEmployeeInfo(rows || []))
     }
 
-    // ✅ Manager: pending + history
+    // Manager: pending + history (only those assigned)
     const query = {
       approvalMode: modeFilter,
       managerLoginId: me,
-      status: { $in: ['PENDING_MANAGER', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+      status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
     }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
@@ -481,7 +501,6 @@ exports.listManagerInbox = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    MANAGER DECISION
    POST /api/leave/forget-scan/:id/manager-decision
-   body: { action: APPROVE|REJECT, comment? }
 ───────────────────────────────────────────────────────────── */
 exports.managerDecision = async (req, res, next) => {
   try {
@@ -496,12 +515,11 @@ exports.managerDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'].includes(mode)) {
       throw createError(400, 'This request does not require manager approval.')
     }
 
     if (s(existing.managerLoginId) !== me) throw createError(403, 'Not your request')
-
     if (s(existing.status) !== 'PENDING_MANAGER') {
       throw createError(400, `Request is ${existing.status}. Manager can only decide when status is PENDING_MANAGER.`)
     }
@@ -510,9 +528,11 @@ exports.managerDecision = async (req, res, next) => {
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
 
     let newStatus = ''
-    if (act === 'APPROVE') newStatus = nextStatusAfterManagerApprove()
+    if (act === 'APPROVE') newStatus = nextStatusAfterManagerApprove(mode)
     else if (act === 'REJECT') newStatus = 'REJECTED'
     else throw createError(400, 'Invalid action')
+
+    const now = new Date()
 
     const doc = await ExpatForgetScanRequest.findOneAndUpdate(
       { _id: id, status: 'PENDING_MANAGER', managerLoginId: me },
@@ -520,7 +540,7 @@ exports.managerDecision = async (req, res, next) => {
         $set: {
           status: newStatus,
           managerComment: s(comment || ''),
-          managerDecisionAt: new Date(),
+          managerDecisionAt: now,
           approvals: markApproval(existing.approvals, 'MANAGER', act === 'APPROVE' ? 'APPROVED' : 'REJECTED', comment),
         },
       },
@@ -538,8 +558,8 @@ exports.managerDecision = async (req, res, next) => {
     await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
 
-    // ✅ only notify next approver if still pending (in forget scan it won't)
-    if (String(payload?.status || '').toUpperCase().startsWith('PENDING_')) {
+    // ✅ notify next approver only when still pending (GM or COO)
+    if (!isFinalStatus(payload?.status)) {
       await safeNotify(notify?.notifyCurrentApprover, payload)
     }
 
@@ -559,7 +579,7 @@ exports.listGmInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO'] }
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] } // ✅ include GM_ONLY
 
     if (isAdminViewer(req)) {
       const scope = up(req.query?.scope || '')
@@ -572,21 +592,14 @@ exports.listGmInbox = async (req, res, next) => {
       return res.json(await attachEmployeeInfo(rows || []))
     }
 
-    // ✅ Forget scan special:
-    // - MANAGER_AND_GM: GM never gets PENDING_GM; GM sees history only.
-    // - GM_AND_COO: GM is first approver => PENDING_GM + history.
+    // GM sees:
+    // - MANAGER_AND_GM: pending GM + history (because manager can forward to GM)
+    // - GM_AND_COO: pending GM + history
+    // - GM_ONLY: pending GM + history
     const query = {
+      approvalMode: modeFilter,
       gmLoginId: me,
-      $or: [
-        {
-          approvalMode: 'MANAGER_AND_GM',
-          status: { $in: ['APPROVED', 'REJECTED', 'CANCELLED'] },
-        },
-        {
-          approvalMode: 'GM_AND_COO',
-          status: { $in: ['PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED'] },
-        },
-      ],
+      status: { $in: ['PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
     }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
@@ -599,7 +612,6 @@ exports.listGmInbox = async (req, res, next) => {
 /* ─────────────────────────────────────────────────────────────
    GM DECISION
    POST /api/leave/forget-scan/:id/gm-decision
-   body: { action: APPROVE|REJECT, comment? }
 ───────────────────────────────────────────────────────────── */
 exports.gmDecision = async (req, res, next) => {
   try {
@@ -614,13 +626,11 @@ exports.gmDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_GM', 'GM_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'].includes(mode)) {
       throw createError(400, 'This request does not require GM approval.')
     }
 
-    // GM can only decide if assigned AND status PENDING_GM
     if (s(existing.gmLoginId) !== me) throw createError(403, 'Not your request')
-
     if (s(existing.status) !== 'PENDING_GM') {
       throw createError(400, `Request is ${existing.status}. GM can only decide when status is PENDING_GM.`)
     }
@@ -629,9 +639,11 @@ exports.gmDecision = async (req, res, next) => {
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
 
     let newStatus = ''
-    if (act === 'APPROVE') newStatus = nextStatusAfterGmApprove()
+    if (act === 'APPROVE') newStatus = nextStatusAfterGmApprove(mode)
     else if (act === 'REJECT') newStatus = 'REJECTED'
     else throw createError(400, 'Invalid action')
+
+    const now = new Date()
 
     const doc = await ExpatForgetScanRequest.findOneAndUpdate(
       { _id: id, status: 'PENDING_GM', gmLoginId: me },
@@ -639,7 +651,7 @@ exports.gmDecision = async (req, res, next) => {
         $set: {
           status: newStatus,
           gmComment: s(comment || ''),
-          gmDecisionAt: new Date(),
+          gmDecisionAt: now,
           approvals: markApproval(existing.approvals, 'GM', act === 'APPROVE' ? 'APPROVED' : 'REJECTED', comment),
         },
       },
@@ -657,7 +669,8 @@ exports.gmDecision = async (req, res, next) => {
     await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
 
-    if (String(payload?.status || '').toUpperCase().startsWith('PENDING_')) {
+    // ✅ if GM forwarded to COO (GM_AND_COO), notify COO
+    if (!isFinalStatus(payload?.status)) {
       await safeNotify(notify?.notifyCurrentApprover, payload)
     }
 
@@ -677,6 +690,7 @@ exports.listCooInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
+    // COO only required in COO modes
     const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] }
 
     if (isAdminViewer(req)) {
@@ -690,11 +704,11 @@ exports.listCooInbox = async (req, res, next) => {
       return res.json(await attachEmployeeInfo(rows || []))
     }
 
-    // ✅ Forget scan special: COO is never required; show history only
+    // COO sees pending + history assigned to them
     const query = {
       approvalMode: modeFilter,
       cooLoginId: me,
-      status: { $in: ['APPROVED', 'REJECTED', 'CANCELLED'] },
+      status: { $in: ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
     }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
@@ -704,6 +718,71 @@ exports.listCooInbox = async (req, res, next) => {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   COO DECISION
+   POST /api/leave/forget-scan/:id/coo-decision
+───────────────────────────────────────────────────────────── */
+exports.cooDecision = async (req, res, next) => {
+  try {
+    const me = actorLoginId(req)
+    if (!me) throw createError(400, 'Missing user identity')
+    if (!canCooDecide(req)) throw createError(403, 'Forbidden')
+
+    const { id } = req.params
+    const { action, comment = '' } = req.body || {}
+
+    const existing = await ExpatForgetScanRequest.findById(id)
+    if (!existing) throw createError(404, 'Request not found')
+
+    const mode = normalizeMode(existing.approvalMode)
+    if (!['MANAGER_AND_COO', 'GM_AND_COO'].includes(mode)) {
+      throw createError(400, 'This request does not require COO approval.')
+    }
+
+    if (s(existing.cooLoginId) !== me) throw createError(403, 'Not your request')
+    if (s(existing.status) !== 'PENDING_COO') {
+      throw createError(400, `Request is ${existing.status}. COO can only decide when status is PENDING_COO.`)
+    }
+
+    const act = up(action)
+    if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
+
+    let newStatus = ''
+    if (act === 'APPROVE') newStatus = nextStatusAfterCooApprove()
+    else if (act === 'REJECT') newStatus = 'REJECTED'
+    else throw createError(400, 'Invalid action')
+
+    const now = new Date()
+
+    const doc = await ExpatForgetScanRequest.findOneAndUpdate(
+      { _id: id, status: 'PENDING_COO', cooLoginId: me },
+      {
+        $set: {
+          status: newStatus,
+          cooComment: s(comment || ''),
+          cooDecisionAt: now,
+          approvals: markApproval(existing.approvals, 'COO', act === 'APPROVE' ? 'APPROVED' : 'REJECTED', comment),
+        },
+      },
+      { new: true }
+    )
+
+    if (!doc) {
+      const latest = await ExpatForgetScanRequest.findById(id).lean()
+      throw createError(409, `Someone already decided this request (${latest?.status || 'UNKNOWN'}).`)
+    }
+
+    const payload = await attachEmployeeInfoToOne(doc)
+    emitForget(req, payload, 'forgetscan:req:updated')
+
+    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    await safeNotify(notify?.notifyCooDecisionToEmployee, payload)
+
+    return res.json(payload)
+  } catch (e) {
+    next(e)
+  }
+}
 
 /* ─────────────────────────────────────────────────────────────
    ADMIN LIST (viewer)

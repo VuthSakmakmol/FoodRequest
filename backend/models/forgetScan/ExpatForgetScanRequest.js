@@ -14,9 +14,15 @@ function uniqUpper(arr) {
   return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
-
 /* ───────────────── enums ───────────────── */
-const APPROVAL_MODES = Object.freeze(['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'])
+// ✅ UPDATED: include new modes
+const APPROVAL_MODES = Object.freeze([
+  'MANAGER_AND_GM',
+  'MANAGER_AND_COO',
+  'GM_AND_COO',
+  'MANAGER_ONLY', // ✅ NEW
+  'GM_ONLY',      // ✅ NEW
+])
 
 const STATUSES = Object.freeze([
   'PENDING_MANAGER',
@@ -30,6 +36,7 @@ const STATUSES = Object.freeze([
 const FORGOT_TYPES = Object.freeze(['FORGET_IN', 'FORGET_OUT'])
 const FORGOT_KEYS = Object.freeze(['FORGET_IN', 'FORGET_OUT', 'FORGET_IN_OUT'])
 
+// approval levels still the same set
 const APPROVAL_LEVELS = Object.freeze(['MANAGER', 'GM', 'COO'])
 const APPROVAL_ITEM_STATUSES = Object.freeze(['PENDING', 'APPROVED', 'REJECTED'])
 
@@ -45,6 +52,35 @@ const ApprovalItemSchema = new mongoose.Schema(
   { _id: false }
 )
 
+/* ───────────────── normalization helpers ───────────────── */
+function buildForgotKey(forgotTypes = []) {
+  const arr = uniqUpper(forgotTypes).filter((x) => FORGOT_TYPES.includes(x))
+  const hasIn = arr.includes('FORGET_IN')
+  const hasOut = arr.includes('FORGET_OUT')
+  if (hasIn && hasOut) return 'FORGET_IN_OUT'
+  if (hasIn) return 'FORGET_IN'
+  if (hasOut) return 'FORGET_OUT'
+  return '' // invalid
+}
+
+// ✅ recommended: same pattern as LeaveRequest/SwapRequest
+function normalizeMode(v) {
+  const raw = up(v)
+  if (APPROVAL_MODES.includes(raw)) return raw
+  return 'MANAGER_AND_GM'
+}
+
+// ✅ used by LeaveProfile too (keep DB clean)
+function modeInvolvesManager(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+}
+function modeInvolvesGm(mode) {
+  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+}
+function modeInvolvesCoo(mode) {
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
+}
+
 /* ───────────────── main schema ───────────────── */
 const ExpatForgetScanRequestSchema = new mongoose.Schema(
   {
@@ -55,7 +91,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
     forgotDate: { type: String, required: true, index: true },
 
     /**
-     * ✅ NEW: store multiple types in ONE request
+     * ✅ store multiple types in ONE request
      * - [FORGET_IN]
      * - [FORGET_OUT]
      * - [FORGET_IN, FORGET_OUT]
@@ -82,6 +118,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
 
     reason: { type: String, default: '' },
 
+    // ✅ UPDATED enum supports MANAGER_ONLY / GM_ONLY
     approvalMode: { type: String, enum: APPROVAL_MODES, required: true },
 
     managerLoginId: { type: String, default: '' },
@@ -106,17 +143,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
-/* ───────────────── normalization ───────────────── */
-function buildForgotKey(forgotTypes = []) {
-  const arr = uniqUpper(forgotTypes).filter((x) => FORGOT_TYPES.includes(x))
-  const hasIn = arr.includes('FORGET_IN')
-  const hasOut = arr.includes('FORGET_OUT')
-  if (hasIn && hasOut) return 'FORGET_IN_OUT'
-  if (hasIn) return 'FORGET_IN'
-  if (hasOut) return 'FORGET_OUT'
-  return '' // invalid
-}
-
+/* ───────────────── pre-validate (normalize) ───────────────── */
 ExpatForgetScanRequestSchema.pre('validate', function (next) {
   try {
     this.employeeId = s(this.employeeId)
@@ -133,10 +160,19 @@ ExpatForgetScanRequestSchema.pre('validate', function (next) {
     if (!key) return next(new Error('forgotTypes must include FORGET_IN and/or FORGET_OUT.'))
     this.forgotKey = key
 
-    this.approvalMode = up(this.approvalMode)
+    // ✅ normalize mode
+    this.approvalMode = normalizeMode(this.approvalMode)
+
+    // normalize approver ids
     this.managerLoginId = s(this.managerLoginId)
     this.gmLoginId = s(this.gmLoginId)
     this.cooLoginId = s(this.cooLoginId)
+
+    // ✅ auto-clear unused approvers (same as LeaveProfile)
+    const mode = this.approvalMode
+    if (!modeInvolvesManager(mode)) this.managerLoginId = ''
+    if (!modeInvolvesGm(mode)) this.gmLoginId = ''
+    if (!modeInvolvesCoo(mode)) this.cooLoginId = ''
 
     this.status = up(this.status)
 
@@ -157,8 +193,6 @@ ExpatForgetScanRequestSchema.pre('validate', function (next) {
 
 /* ───────────────── indexes ─────────────────
    ✅ Prevent duplicates per employee + date + "type set"
-   - FORGET_IN and FORGET_OUT are separate keys
-   - BOTH is a third key (FORGET_IN_OUT)
    Allows re-submit if previous was REJECTED/CANCELLED.
 ──────────────────────────────────────────────── */
 ExpatForgetScanRequestSchema.index(
@@ -176,5 +210,9 @@ ExpatForgetScanRequestSchema.index({ requesterLoginId: 1, createdAt: -1 })
 ExpatForgetScanRequestSchema.index({ managerLoginId: 1, status: 1, createdAt: -1 })
 ExpatForgetScanRequestSchema.index({ gmLoginId: 1, status: 1, createdAt: -1 })
 ExpatForgetScanRequestSchema.index({ cooLoginId: 1, status: 1, createdAt: -1 })
+
+/* ───────────────── statics (optional but useful) ───────────────── */
+ExpatForgetScanRequestSchema.statics.APPROVAL_MODES = APPROVAL_MODES
+ExpatForgetScanRequestSchema.statics.normalizeMode = normalizeMode
 
 module.exports = mongoose.model('ExpatForgetScanRequest', ExpatForgetScanRequestSchema)

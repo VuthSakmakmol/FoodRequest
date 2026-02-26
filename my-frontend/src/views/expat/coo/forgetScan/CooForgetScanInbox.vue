@@ -8,8 +8,16 @@
   ✅ Uses /leave/forget-scan/coo/inbox?scope=ALL
      and /leave/forget-scan/:id/coo-decision
   ✅ Realtime hooks: forgetscan:req:created / forgetscan:req:updated
--->
 
+  ✅ UPDATED for NEW ForgetScan schema:
+     - forgotTypes: ['FORGET_IN','FORGET_OUT'] (array)
+     - forgotKey: FORGET_IN / FORGET_OUT / FORGET_IN_OUT
+
+  ✅ FIXED: Type badge duplication
+     - Show ONE badge:
+       - if BOTH => "FORGET_IN_OUT"
+       - else => single type
+-->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -51,7 +59,7 @@ const perPageOptions = [20, 50, 100, 'All']
 const viewOpen = ref(false)
 const viewItem = ref(null)
 
-/* decision modal (custom, same as your swap-day) */
+/* decision modal */
 const confirmOpen = ref(false)
 const confirmBusy = ref(false)
 const confirmType = ref('') // 'APPROVE' | 'REJECT'
@@ -66,7 +74,7 @@ const COL_WIDTH = {
   created: '140px',
   employee: '260px',
   forgotDate: '140px',
-  forgotType: '140px',
+  forgotType: '220px',
   status: '150px',
   actions: '92px',
   reason: 'auto',
@@ -86,6 +94,7 @@ const STATUS_LABEL = {
 const TYPE_LABEL = {
   FORGET_IN: 'Forget IN',
   FORGET_OUT: 'Forget OUT',
+  FORGET_IN_OUT: 'Forget IN & OUT',
 }
 
 function s(v) {
@@ -118,6 +127,44 @@ function typeBadgeUiClass(x) {
   const t = up(x)
   if (t === 'FORGET_OUT') return 'ui-badge ui-badge-indigo'
   return 'ui-badge ui-badge-info'
+}
+
+/* ───────────────── Type (no-duplicate) ───────────────── */
+/** New schema: forgotTypes[] (array). Keep safe display. */
+function getTypesArray(row) {
+  const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
+  if (arr.length) return arr.map((x) => up(x)).filter(Boolean)
+  // backward compat if old field exists
+  const legacy = up(row?.forgotType)
+  return legacy ? [legacy] : []
+}
+
+function getTypeKey(row) {
+  const key = up(row?.forgotKey)
+  if (key) return key
+  const arr = getTypesArray(row)
+  const hasIn = arr.includes('FORGET_IN')
+  const hasOut = arr.includes('FORGET_OUT')
+  if (hasIn && hasOut) return 'FORGET_IN_OUT'
+  if (hasIn) return 'FORGET_IN'
+  if (hasOut) return 'FORGET_OUT'
+  return ''
+}
+
+/** ✅ FIX: show ONE badge only */
+function getTypeBadges(row) {
+  const key = getTypeKey(row)
+  const types = getTypesArray(row)
+
+  // both => one combined badge
+  if (key === 'FORGET_IN_OUT') {
+    return [{ key: 'FORGET_IN_OUT', label: TYPE_LABEL.FORGET_IN_OUT, cls: 'ui-badge ui-badge-info' }]
+  }
+
+  // otherwise => one badge only
+  const t = types[0] || key
+  if (!t) return []
+  return [{ key: t, label: TYPE_LABEL[t] || t, cls: typeBadgeUiClass(t) }]
 }
 
 /** COO can decide only when pending at COO */
@@ -160,9 +207,7 @@ function getRejectedReason(row) {
   return '—'
 }
 
-/* ───────────────── FETCH ─────────────────
-   Always fetch scope=ALL then filter locally
-*/
+/* ───────────────── FETCH ───────────────── */
 async function fetchInbox() {
   try {
     loading.value = true
@@ -186,6 +231,7 @@ const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
   if (q) {
     list = list.filter((r) => {
+      const types = getTypesArray(r).join(' ')
       const hay = [
         r.employeeId,
         r.employeeName,
@@ -194,7 +240,12 @@ const filteredRows = computed(() => {
         r.reason,
         r.status,
         r.forgotDate,
-        r.forgotType,
+        r.forgotKey,
+        types,
+        r.approvalMode,
+        r.managerLoginId,
+        r.gmLoginId,
+        r.cooLoginId,
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -318,7 +369,6 @@ async function confirmDecision() {
     closeConfirm(true)
     closeView()
 
-    // realtime will also update; keep fetch as safety
     await fetchInbox()
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
@@ -330,22 +380,27 @@ async function confirmDecision() {
 
 /* ───────────────── EXPORT EXCEL ───────────────── */
 function buildExcelRows(list) {
-  return (list || []).map((r, idx) => ({
-    No: idx + 1,
-    CreatedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
-    EmployeeID: r.employeeId || '',
-    EmployeeName: r.employeeName || r.name || '',
-    Department: r.department || '',
-    ForgotDate: r.forgotDate || '',
-    ForgotType: TYPE_LABEL[up(r.forgotType)] || r.forgotType || '',
-    Status: r.status || '',
-    Reason: compactText(r.reason),
-    Manager: r.managerLoginId || '',
-    GM: r.gmLoginId || '',
-    COO: r.cooLoginId || '',
-    ApprovalMode: r.approvalMode || '',
-    RejectedReason: up(r.status) === 'REJECTED' ? getRejectedReason(r) : '',
-  }))
+  return (list || []).map((r, idx) => {
+    const key = getTypeKey(r)
+    const types = getTypesArray(r)
+    return {
+      No: idx + 1,
+      CreatedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+      EmployeeID: r.employeeId || '',
+      EmployeeName: r.employeeName || r.name || '',
+      Department: r.department || '',
+      ForgotDate: r.forgotDate || '',
+      ForgotKey: key || r.forgotKey || '',
+      ForgotTypes: types.map((t) => TYPE_LABEL[t] || t).join(', '),
+      Status: r.status || '',
+      Reason: compactText(r.reason),
+      Manager: r.managerLoginId || '',
+      GM: r.gmLoginId || '',
+      COO: r.cooLoginId || '',
+      ApprovalMode: r.approvalMode || '',
+      RejectedReason: up(r.status) === 'REJECTED' ? getRejectedReason(r) : '',
+    }
+  })
 }
 
 async function exportExcel() {
@@ -399,7 +454,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ join COO rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_COO' })
 
@@ -552,7 +606,7 @@ onBeforeUnmount(() => {
 
           <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
+            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
               No items found.
             </div>
 
@@ -576,8 +630,12 @@ onBeforeUnmount(() => {
                     Forgot:
                     <span class="font-extrabold">{{ row.forgotDate || '—' }}</span>
                     •
-                    <span :class="typeBadgeUiClass(row.forgotType)">
-                      {{ TYPE_LABEL[up(row.forgotType)] || row.forgotType }}
+                    <span
+                      v-for="b in getTypeBadges(row)"
+                      :key="row._id + '-mb-' + b.key"
+                      :class="b.cls"
+                    >
+                      {{ b.label }}
                     </span>
                   </div>
                 </div>
@@ -628,7 +686,7 @@ onBeforeUnmount(() => {
 
           <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1050px]">
+            <table class="ui-table table-fixed w-full min-w-[1100px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
@@ -676,10 +734,17 @@ onBeforeUnmount(() => {
                     <div class="truncate">{{ row.forgotDate || '—' }}</div>
                   </td>
 
-                  <td class="ui-td">
-                    <span :class="typeBadgeUiClass(row.forgotType)">
-                      {{ TYPE_LABEL[up(row.forgotType)] || row.forgotType }}
-                    </span>
+                  <td class="ui-td text-center">
+                    <div class="flex flex-wrap items-center justify-center gap-1">
+                      <span
+                        v-for="b in getTypeBadges(row)"
+                        :key="row._id + '-tb-' + b.key"
+                        :class="b.cls"
+                      >
+                        {{ b.label }}
+                      </span>
+                      <span v-if="!getTypeBadges(row).length" class="text-[11px] text-slate-400">—</span>
+                    </div>
                   </td>
 
                   <td class="ui-td">
@@ -804,8 +869,15 @@ onBeforeUnmount(() => {
 
             <div class="ui-card p-3">
               <div class="ui-section-title">Type</div>
-              <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200">
-                {{ TYPE_LABEL[up(viewItem?.forgotType)] || viewItem?.forgotType || '—' }}
+              <div class="mt-2 flex flex-wrap items-center gap-1">
+                <span
+                  v-for="b in getTypeBadges(viewItem)"
+                  :key="String(viewItem?._id || 'x') + '-db-' + b.key"
+                  :class="b.cls"
+                >
+                  {{ b.label }}
+                </span>
+                <span v-if="!getTypeBadges(viewItem).length" class="text-[11px] text-slate-400">—</span>
               </div>
             </div>
           </div>

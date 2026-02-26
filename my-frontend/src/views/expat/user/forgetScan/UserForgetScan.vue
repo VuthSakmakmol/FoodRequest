@@ -27,7 +27,7 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL')
+const statusFilter = ref('All')
 
 /* responsive */
 const isMobile = ref(false)

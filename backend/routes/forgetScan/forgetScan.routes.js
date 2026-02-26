@@ -2,18 +2,19 @@
 // backend/routes/forgetScan/forgetScan.routes.js
 //
 // ✅ ExpatForgetScan routes
-// ✅ Base mount: /api/leave   (recommended) OR mount directly: /api/forget-scan
+// ✅ Base mount: /api/leave
 //
-// If mounted at /api/leave, final paths are:
+// Final paths:
 //  POST   /api/leave/forget-scan
 //  GET    /api/leave/forget-scan/my
 //  POST   /api/leave/forget-scan/:id/cancel
+//  PATCH  /api/leave/forget-scan/:id
 //  GET    /api/leave/forget-scan/manager/inbox?scope=ALL
 //  POST   /api/leave/forget-scan/:id/manager-decision
 //  GET    /api/leave/forget-scan/gm/inbox?scope=ALL
 //  POST   /api/leave/forget-scan/:id/gm-decision
 //  GET    /api/leave/forget-scan/coo/inbox?scope=ALL
-//  POST   /api/leave/forget-scan/:id/coo-decision
+//  POST   /api/leave/forget-scan/:id/coo-decision        ✅ ADD
 //  GET    /api/leave/forget-scan/admin?employeeId=&status=&from=&to=&limit=&skip=
 //  GET    /api/leave/forget-scan/:id
 
@@ -83,6 +84,9 @@ router.get(
   requireRole('LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
   ctrl.listCooInbox
 )
+
+// ✅ coo decision (NO admin bypass)  <-- REQUIRED for GM_AND_COO / MANAGER_AND_COO final step
+router.post('/forget-scan/:id/coo-decision', requireRole('LEAVE_COO'), ctrl.cooDecision)
 
 /* ───────────────── Admin viewer ───────────────── */
 
