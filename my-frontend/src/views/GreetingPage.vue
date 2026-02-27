@@ -48,16 +48,15 @@ const scrollToServices = () => {
 
           <h1 class="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight mb-3">
             <span class="bg-gradient-to-r from-white via-amber-200 to-rose-200 bg-clip-text text-transparent">
-              Trax Requestor System
+              HR e-Connect
             </span>
           </h1>
 
           <p class="text-sm sm:text-base text-sky-50/95 max-w-xl">
-            Order meals, book transportation, and manage expat leave —
-            all in one place.
-            <span class="block mt-1 text-xs sm:text-sm text-sky-100 font-kh" lang="km">
+           Connect all services through a digital system.
+            <!-- <span class="block mt-1 text-xs sm:text-sm text-sky-100 font-kh" lang="km">
               សេវាកម្មស្នើសុំទាំងអស់ នៅក្នុងប្រព័ន្ធតែមួយ។
-            </span>
+            </span> -->
           </p>
 
           <div class="mt-5 flex flex-wrap items-center gap-3">

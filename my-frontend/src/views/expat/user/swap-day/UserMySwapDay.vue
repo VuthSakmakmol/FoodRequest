@@ -33,6 +33,10 @@ const rows = ref([])
 const search = ref('')
 const statusFilter = ref('ALL')
 
+/* ✅ NEW: date-to-date filter (Work Date range: requestStartDate/requestEndDate) */
+const dateFrom = ref('') // YYYY-MM-DD
+const dateTo = ref('') // YYYY-MM-DD
+
 /* responsive */
 const isMobile = ref(false)
 function updateIsMobile() {
@@ -109,6 +113,23 @@ function canEditOrCancel(item) {
   return true
 }
 
+/* ✅ NEW: date-to-date filter helper (overlap check on requestStartDate/requestEndDate) */
+function passDateFilterByWorkRange(item, from, to) {
+  const f1 = String(from || '').trim()
+  const f2 = String(to || '').trim()
+  if (!f1 && !f2) return true
+
+  const fromYmd = f1 || f2
+  const toYmd = f2 || f1
+
+  const s = String(item?.requestStartDate || '').trim()
+  const e = String(item?.requestEndDate || '').trim()
+  if (!s || !e) return false
+
+  // overlap check: [s,e] intersects [from,to]
+  return s <= toYmd && e >= fromYmd
+}
+
 /* ───────────────── FETCH ───────────────── */
 async function fetchData() {
   try {
@@ -180,6 +201,9 @@ const filteredRows = computed(() => {
   if (statusFilter.value !== 'ALL') {
     result = result.filter((r) => up(r.status) === up(statusFilter.value))
   }
+
+  /* ✅ NEW: date-to-date filter by WORK date range */
+  result = result.filter((r) => passDateFilterByWorkRange(r, dateFrom.value, dateTo.value))
 
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
@@ -268,7 +292,8 @@ onBeforeUnmount(() => {
               <div class="text-sm font-extrabold">Swap Working Day</div>
             </div>
 
-            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_auto] md:items-end">
+            <!-- ✅ ONLY CHANGE: add Date From / Date To in the filter bar -->
+            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_170px_170px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
                 <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
@@ -292,6 +317,24 @@ onBeforeUnmount(() => {
                     {{ label }}
                   </option>
                 </select>
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+                <input
+                  v-model="dateFrom"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
               </div>
 
               <button class="ui-btn ui-btn-primary" type="button" @click="router.push({ name: 'leave-user-swap-day-new' })">

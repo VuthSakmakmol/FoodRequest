@@ -20,6 +20,10 @@
      - If there is ANY approval activity (actedAt / APPROVED / REJECTED),
        user CANNOT edit OR cancel (even if still pending at another level)
 
+  ✅ NEW FILTER (YOUR REQUEST):
+     - Filter by LEAVE DATE range (startDate/endDate overlap),
+       NOT by request created date.
+
   ✅ Dialog/Modal improvements:
      - ESC closes top-most modal
      - backdrop click closes (files/fullscreen)
@@ -57,6 +61,10 @@ const myRequests = ref([])
 
 const search = ref('')
 const statusFilter = ref('ALL')
+
+/* ✅ NEW: leave date range filter */
+const leaveFrom = ref('') // YYYY-MM-DD
+const leaveTo = ref('') // YYYY-MM-DD
 
 // pagination
 const page = ref(1)
@@ -108,6 +116,28 @@ function canEdit(item) {
   const st = String(item?.status || '').toUpperCase()
   if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) return false
   return !hasAnyApprovalActivity(item)
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ✅ Leave-date overlap filter (startDate/endDate vs leaveFrom/leaveTo)
+   - If only one side set, it becomes both from/to.
+   - Overlap condition: reqEnd >= from && reqStart <= to
+───────────────────────────────────────────────────────────── */
+function overlapsRange(reqStart, reqEnd, filterFrom, filterTo) {
+  const rs = String(reqStart || '').trim()
+  const re = String(reqEnd || rs).trim()
+  const f1 = String(filterFrom || '').trim()
+  const f2 = String(filterTo || '').trim()
+
+  if (!f1 && !f2) return true
+
+  const from = f1 || f2
+  const to = f2 || f1
+
+  if (!from || !to) return true
+  if (!rs || !re) return false
+
+  return re >= from && rs <= to
 }
 
 /* ───────── Cancel modal ───────── */
@@ -724,6 +754,8 @@ async function saveEdit() {
 /* ───────── COMPUTED: list/pagination ───────── */
 const processedRequests = computed(() => {
   const items = [...myRequests.value]
+
+  // keep your existing default sort (request createdAt desc)
   items.sort(
     (a, b) => (b.createdAt ? dayjs(b.createdAt).valueOf() : 0) - (a.createdAt ? dayjs(a.createdAt).valueOf() : 0)
   )
@@ -734,6 +766,9 @@ const processedRequests = computed(() => {
     const st = String(statusFilter.value || '').toUpperCase()
     result = result.filter((r) => String(r.status || '').toUpperCase() === st)
   }
+
+  // ✅ NEW: filter by leave date overlap (startDate/endDate)
+  result = result.filter((r) => overlapsRange(r.startDate, r.endDate, leaveFrom.value, leaveTo.value))
 
   const q = search.value.trim().toLowerCase()
   if (q) {
@@ -762,7 +797,8 @@ const pageCount = computed(() => {
   return Math.ceil(processedRequests.value.length / per) || 1
 })
 
-watch([search, statusFilter, perPage], () => {
+// ✅ reset page when filters change
+watch([search, statusFilter, perPage, leaveFrom, leaveTo], () => {
   page.value = 1
 })
 
@@ -884,7 +920,7 @@ onBeforeUnmount(() => {
             </div>
 
             <!-- Controls -->
-            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_220px_auto] md:items-end">
+            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[240px_180px_160px_160px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
                 <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
@@ -912,6 +948,26 @@ onBeforeUnmount(() => {
                   <option value="REJECTED">Rejected</option>
                   <option value="CANCELLED">Cancelled</option>
                 </select>
+              </div>
+
+              <!-- ✅ NEW: Leave From -->
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Leave From</label>
+                <input
+                  v-model="leaveFrom"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
+              </div>
+
+              <!-- ✅ NEW: Leave To -->
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Leave To</label>
+                <input
+                  v-model="leaveTo"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
               </div>
 
               <button
@@ -1114,7 +1170,7 @@ onBeforeUnmount(() => {
           <div class="flex items-start gap-3">
             <div
               class="grid h-10 w-10 place-items-center rounded-2xl border"
-              style="border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.10); color: rgb(var(--ui-danger));"
+              style="border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.1); color: rgb(var(--ui-danger));"
             >
               <i class="fa-solid fa-triangle-exclamation" />
             </div>
@@ -1129,7 +1185,7 @@ onBeforeUnmount(() => {
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <span class="ui-badge ui-badge-info">{{ cancelItem?.leaveTypeCode }}</span>
                 <span class="mx-1 opacity-60">•</span>
-                <span class="">{{ cancelItem?.startDate }} → {{ cancelItem?.endDate }}</span>
+                <span>{{ cancelItem?.startDate }} → {{ cancelItem?.endDate }}</span>
               </div>
 
               <div
@@ -1191,9 +1247,11 @@ onBeforeUnmount(() => {
                   :key="f.attId"
                   type="button"
                   class="w-full text-left rounded-2xl border px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-900/40"
-                  :class="selectedAttId === f.attId
-                    ? 'border-sky-300 bg-sky-50 dark:border-sky-700/60 dark:bg-sky-950/40'
-                    : 'border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/30'"
+                  :class="
+                    selectedAttId === f.attId
+                      ? 'border-sky-300 bg-sky-50 dark:border-sky-700/60 dark:bg-sky-950/40'
+                      : 'border-slate-200 bg-white/60 dark:border-slate-800 dark:bg-slate-950/30'
+                  "
                   @click="selectFile(f.attId)"
                 >
                   <div class="flex items-start justify-between gap-2">
@@ -1239,13 +1297,13 @@ onBeforeUnmount(() => {
                 <template v-else>
                   <div class="rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950/40 overflow-hidden">
                     <iframe
-                      v-if="isPdfType(filesItems.find(x => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
+                      v-if="isPdfType(filesItems.find((x) => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
                       :src="previewUrlMap[selectedAttId]"
                       class="w-full h-[55vh] md:h-[520px]"
                       style="border: 0;"
                     />
                     <img
-                      v-else-if="isImageType(filesItems.find(x => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
+                      v-else-if="isImageType(filesItems.find((x) => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
                       :src="previewUrlMap[selectedAttId]"
                       class="w-full h-[55vh] md:h-[520px] object-contain bg-white dark:bg-slate-950/40"
                     />
@@ -1275,7 +1333,7 @@ onBeforeUnmount(() => {
               <div class="min-w-0">
                 <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Fullscreen preview</div>
                 <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                  {{ filesItems.find(x => x.attId === selectedAttId)?.filename || '' }}
+                  {{ filesItems.find((x) => x.attId === selectedAttId)?.filename || '' }}
                 </div>
               </div>
               <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeFullscreen">
@@ -1285,13 +1343,13 @@ onBeforeUnmount(() => {
             </div>
 
             <iframe
-              v-if="isPdfType(filesItems.find(x => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
+              v-if="isPdfType(filesItems.find((x) => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
               :src="previewUrlMap[selectedAttId]"
               class="w-full h-[calc(100%-52px)]"
-              style="border:0;"
+              style="border: 0;"
             />
             <img
-              v-else-if="isImageType(filesItems.find(x => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
+              v-else-if="isImageType(filesItems.find((x) => x.attId === selectedAttId)?.contentType) && previewUrlMap[selectedAttId]"
               :src="previewUrlMap[selectedAttId]"
               class="w-full h-[calc(100%-52px)] object-contain bg-white dark:bg-slate-950"
             />
@@ -1308,7 +1366,7 @@ onBeforeUnmount(() => {
           <div class="flex items-start gap-3">
             <div
               class="grid h-10 w-10 place-items-center rounded-2xl border"
-              style="border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.10); color: rgb(var(--ui-danger));"
+              style="border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.1); color: rgb(var(--ui-danger));"
             >
               <i class="fa-solid fa-trash" />
             </div>
@@ -1391,13 +1449,13 @@ onBeforeUnmount(() => {
                 <div class="mt-2 space-y-2">
                   <!-- single day -->
                   <div v-if="!isMultiDayEdit" class="flex justify-end gap-2">
-                    <button type="button" class="sq-chip" :class="!editForm.singleHalf ? 'sq-chip-on' : ''" @click="editForm.singleHalf=''">
+                    <button type="button" class="sq-chip" :class="!editForm.singleHalf ? 'sq-chip-on' : ''" @click="editForm.singleHalf = ''">
                       FULL
                     </button>
-                    <button type="button" class="sq-chip" :class="editForm.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf='AM'">
+                    <button type="button" class="sq-chip" :class="editForm.singleHalf === 'AM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf = 'AM'">
                       AM
                     </button>
-                    <button type="button" class="sq-chip" :class="editForm.singleHalf === 'PM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf='PM'">
+                    <button type="button" class="sq-chip" :class="editForm.singleHalf === 'PM' ? 'sq-chip-on' : ''" @click="editForm.singleHalf = 'PM'">
                       PM
                     </button>
                   </div>
@@ -1411,7 +1469,7 @@ onBeforeUnmount(() => {
                           type="button"
                           class="sq-chip"
                           :class="editForm.startHalfPart === 'AM' ? 'sq-chip-on' : ''"
-                          @click="editForm.startHalfPart = (editForm.startHalfPart === 'AM' ? '' : 'AM')"
+                          @click="editForm.startHalfPart = editForm.startHalfPart === 'AM' ? '' : 'AM'"
                         >
                           AM
                         </button>
@@ -1419,7 +1477,7 @@ onBeforeUnmount(() => {
                           type="button"
                           class="sq-chip"
                           :class="editForm.startHalfPart === 'PM' ? 'sq-chip-on' : ''"
-                          @click="editForm.startHalfPart = (editForm.startHalfPart === 'PM' ? '' : 'PM')"
+                          @click="editForm.startHalfPart = editForm.startHalfPart === 'PM' ? '' : 'PM'"
                         >
                           PM
                         </button>
@@ -1434,7 +1492,7 @@ onBeforeUnmount(() => {
                           type="button"
                           class="sq-chip"
                           :class="editForm.endHalfPart === 'AM' ? 'sq-chip-on' : ''"
-                          @click="editForm.endHalfPart = (editForm.endHalfPart === 'AM' ? '' : 'AM')"
+                          @click="editForm.endHalfPart = editForm.endHalfPart === 'AM' ? '' : 'AM'"
                         >
                           AM
                         </button>
@@ -1442,7 +1500,7 @@ onBeforeUnmount(() => {
                           type="button"
                           class="sq-chip"
                           :class="editForm.endHalfPart === 'PM' ? 'sq-chip-on' : ''"
-                          @click="editForm.endHalfPart = (editForm.endHalfPart === 'PM' ? '' : 'PM')"
+                          @click="editForm.endHalfPart = editForm.endHalfPart === 'PM' ? '' : 'PM'"
                         >
                           PM
                         </button>
@@ -1451,7 +1509,10 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <div v-if="isMultiDayEdit && !editForm.startHalfPart && !editForm.endHalfPart" class="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                  <div
+                    v-if="isMultiDayEdit && !editForm.startHalfPart && !editForm.endHalfPart"
+                    class="text-[11px] font-semibold text-rose-600 dark:text-rose-400"
+                  >
                     Choose AM/PM for Start and/or End day (at least one).
                   </div>
                 </div>

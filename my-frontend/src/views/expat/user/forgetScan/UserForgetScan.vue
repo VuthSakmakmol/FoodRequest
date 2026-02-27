@@ -27,7 +27,11 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('All')
+const statusFilter = ref('ALL')
+
+/* ✅ NEW: date-to-date filter (Forgot Date) */
+const dateFrom = ref('') // YYYY-MM-DD
+const dateTo = ref('') // YYYY-MM-DD
 
 /* responsive */
 const isMobile = ref(false)
@@ -67,7 +71,7 @@ const cancelTarget = ref(null)
 
 /* ───────────────── CONSTANTS ───────────────── */
 const STATUS_LABEL = {
-  ALL: 'All',
+  ALL: 'ALL',
   PENDING_MANAGER: 'Pending (Mgr)',
   PENDING_GM: 'Pending (GM)',
   PENDING_COO: 'Pending (COO)',
@@ -177,6 +181,20 @@ function canEdit(item) {
   const anyRejected = approvals.some((a) => up(a?.status) === 'REJECTED')
   const anyActed = approvals.some((a) => !!a?.actedAt)
   return !(anyApproved || anyRejected || anyActed)
+}
+
+/* ✅ NEW: date-to-date filter helper (Forgot Date) */
+function passDateFilter(forgotDate, from, to) {
+  const d = String(forgotDate || '').trim()
+  const f1 = String(from || '').trim()
+  const f2 = String(to || '').trim()
+
+  if (!f1 && !f2) return true
+  const fromYmd = f1 || f2
+  const toYmd = f2 || f1
+
+  if (!d) return false
+  return d >= fromYmd && d <= toYmd
 }
 
 /* ───────────────── FETCH ───────────────── */
@@ -303,13 +321,12 @@ async function submitEdit() {
   editBusy.value = true
   editError.value = ''
   try {
-  const payload = {
-    forgotDate: String(editForm.value.forgotDate || '').trim(),
-    forgotTypes: [...new Set((editForm.value.forgotTypes || []).map(up).filter(Boolean))],
-    reason: compactText(editForm.value.reason),
-  }
-  await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
-
+    const payload = {
+      forgotDate: String(editForm.value.forgotDate || '').trim(),
+      forgotTypes: [...new Set((editForm.value.forgotTypes || []).map(up).filter(Boolean))],
+      reason: compactText(editForm.value.reason),
+    }
+    await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
 
     const res = await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
 
@@ -388,12 +405,15 @@ const filteredRows = computed(() => {
     result = result.filter((r) => up(r.status) === up(statusFilter.value))
   }
 
+  /* ✅ NEW: apply date-to-date filter by forgotDate */
+  result = result.filter((r) => passDateFilter(r?.forgotDate, dateFrom.value, dateTo.value))
+
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
     result = result.filter((r) => {
-    const hay = [r.forgotDate, (r.forgotTypes || []).join(','), r.forgotKey, r.status, r.reason]
-      .map((x) => String(x || '').toLowerCase())
-      .join(' ')
+      const hay = [r.forgotDate, (r.forgotTypes || []).join(','), r.forgotKey, r.status, r.reason]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ')
       return hay.includes(q)
     })
   }
@@ -468,9 +488,10 @@ onBeforeUnmount(() => {
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div class="text-sm font-extrabold">My Forget Scan</div>
+            <div class="text-sm font-extrabold">Forget Scan</div>
 
-            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_auto] md:items-end">
+            <!-- ✅ ONLY CHANGE: add Date From / Date To in the filter bar -->
+            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_170px_170px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
                 <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
@@ -494,6 +515,24 @@ onBeforeUnmount(() => {
                     {{ label }}
                   </option>
                 </select>
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+                <input
+                  v-model="dateFrom"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
               </div>
 
               <button class="ui-btn ui-btn-primary" type="button" @click="openCreate">

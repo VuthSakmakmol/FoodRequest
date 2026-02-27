@@ -259,7 +259,12 @@ function startBotInstance() {
     'Instruction:\n' +
     '- This chat robot is for notification only!\n' +
     '- Please do not reply to this robot.\n' +
-    '======================================\n' +
+    '- When you succeed login, please change your initial password.\n'+
+    '============================\n' +
+    'This is your initial Account.\n' +
+    '- Your ID card number : 5252.....\n' +
+    '- Password : FirstPassword@123\n' +
+    '============================\n' +
     'please click this link to see our services.\n' +
     'http://178.128.48.101:4333/'
 

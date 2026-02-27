@@ -19,6 +19,7 @@ const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
 const GMLeaveExpat = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
 const COOLeaveExpat = () => import('@/layouts/LeaveExpat/COOLeaveExpat.vue')
 
+
 /* ─────────────────────────────────────────────
  * Views
  * ───────────────────────────────────────────── */
@@ -65,7 +66,7 @@ const ManagerLeaveInbox = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminLeaveProfileEdit = () => import('@/views/expat/admin/profiles/AdminLeaveProfileEdit.vue')
 const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeaveReport.vue')
-
+const CentralData = () => import('@/views/expat/admin/data/CentralData.vue')
 
 // COO views
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
@@ -504,6 +505,12 @@ const router = createRouter({
           name: 'admin-forget-scan-report',
           component: () => import('@/views/expat/admin/forgetScan/AdminForgetScanReport.vue'),
           meta: { title: 'Forget scan Report for Admin'}
+        },
+        {
+          path: 'data/central',
+          name: 'leave-admin-central-data',
+          component: CentralData,
+          meta: { title: 'Central Data' }
         }
       ],
     },

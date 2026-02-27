@@ -206,7 +206,7 @@ function loadEmployees() {
     "department": "Management Office",
     "position": "CoE Manager",
     "contactNumber": "081284523",
-    "telegramChatId": "",
+    "telegramChatId": "1248659132",
     "isActive": true
   },
     {
@@ -920,7 +920,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "010655592",
-    "telegramChatId": "",
+    "telegramChatId": "1129950070",
     "isActive": true
   },
   {

@@ -42,8 +42,8 @@ const groups = [
       // { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-coo-inbox' } },
       // { label: 'Leave Types', icon: 'fa-solid fa-gear', to: { name: 'leave-admin-types' } },
       { label: 'Expat Profiles', icon: 'fa-solid fa-user-group', to: { name: 'leave-admin-profiles' } },
-      { label: 'Report Summary', icon: 'fa-solid fa-chart-column', to: { name: 'leave-admin-report' } },
-      { label: 'Add Signature', icon: 'fa-solid fa-add', to: { name: 'leave-add-signature' } },
+      // { label: 'Report Summary', icon: 'fa-solid fa-chart-column', to: { name: 'leave-admin-report' } },
+      // { label: 'Add Signature', icon: 'fa-solid fa-add', to: { name: 'leave-add-signature' } },
     ],
   },
   {
@@ -66,6 +66,18 @@ const groups = [
       // { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-forget-scan-gm-inbox' } },
       // { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-forget-scan-coo-inbox' } },
       { label: 'Forget Scan Report', icon: 'fa-solid fa-file-export', to: { name: 'admin-forget-scan-report'}},
+    ],
+  },
+  {
+    key: 'central-data',
+    header: 'Central Report',
+    icon: 'fa-solid fa-database',
+    children: [
+      {
+        label: 'Central Data',
+        icon: 'fa-solid fa-table',
+        to: { name: 'leave-admin-central-data' }, // ✅ must match router name
+      },
     ],
   },
 ]

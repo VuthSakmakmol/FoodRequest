@@ -168,6 +168,8 @@ app.use('/api/leave', require('./routes/leave/swapWorkingDay.routes'))
 
 app.use('/api/leave', require('./routes/forgetScan/forgetScan.routes'))
 
+app.use('/api/leave', require('./routes/leave/centralReport.routes'))
+
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
 
