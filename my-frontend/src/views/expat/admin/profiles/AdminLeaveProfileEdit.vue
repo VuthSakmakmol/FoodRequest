@@ -107,6 +107,7 @@ const APPROVAL_MODES = [
   { value: 'GM_AND_COO', label: 'GM + COO', hint: 'GM approves first, then COO.' },
   { value: 'MANAGER_ONLY', label: 'Manager only', hint: 'Manager approves and finishes.' }, // ✅ NEW
   { value: 'GM_ONLY', label: 'GM only', hint: 'GM approves and finishes.' }, // ✅ NEW
+    { value: 'COO_ONLY', label: 'COO only', hint: 'COO approves and finishes.' }, // ✅ ADD
 ]
 
 function normApprovalMode(v) {
@@ -116,6 +117,7 @@ function normApprovalMode(v) {
   if (s1 === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (s1 === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
   if (s1 === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
+  if (s1 === 'COO_ONLY') return 'COO_ONLY' // ✅ ADD
 
   // backward aliases
   if (s1 === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
@@ -132,9 +134,10 @@ function modeInvolvesGm(mode) {
   const m = normApprovalMode(mode)
   return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
 }
+
 function modeInvolvesCoo(mode) {
   const m = normApprovalMode(mode)
-  return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO'
+  return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'COO_ONLY' // ✅ ADD
 }
 
 const needManager = computed(() => modeInvolvesManager(form.approvalMode))

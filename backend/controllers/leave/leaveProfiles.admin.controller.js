@@ -8,6 +8,7 @@
 //    - GM_AND_COO
 //    - MANAGER_ONLY      ✅ NEW
 //    - GM_ONLY           ✅ NEW
+//    - COO_ONLY          ✅ NEW
 //
 // ✅ Concept (your requirement):
 //    - Create profile creates ONLY employee account (User) + employee leave profile
@@ -60,6 +61,7 @@ const APPROVAL_MODES = Object.freeze([
   'GM_AND_COO',
   'MANAGER_ONLY', // ✅ NEW
   'GM_ONLY', // ✅ NEW
+  'COO_ONLY', // ✅ NEW
 ])
 
 function normalizeApprovalMode(v) {
@@ -71,8 +73,9 @@ function normalizeApprovalMode(v) {
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
-  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
-  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY'
+  if (raw === 'GM_ONLY') return 'GM_ONLY'
+  if (raw === 'COO_ONLY') return 'COO_ONLY'
   return 'MANAGER_AND_GM'
 }
 
@@ -83,7 +86,7 @@ function modeInvolvesGm(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
 }
 function modeInvolvesCoo(mode) {
-  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY' // ✅ NEW
 }
 
 /**
@@ -94,12 +97,18 @@ function modeInvolvesCoo(mode) {
 function validateModeApprovers(mode, { gmLoginId, cooLoginId }) {
   const m = normalizeApprovalMode(mode)
 
-  // MANAGER_ONLY: manager is OPTIONAL by concept (can be empty). No gm/coo required.
+  // MANAGER_ONLY: manager optional, no gm/coo required
   if (m === 'MANAGER_ONLY') return
 
-  // GM_ONLY: gm is REQUIRED. No coo.
+  // GM_ONLY: gm required, coo not required
   if (m === 'GM_ONLY') {
     if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for GM_ONLY')
+    return
+  }
+
+  // COO_ONLY: coo required, gm not required
+  if (m === 'COO_ONLY') {
+    if (!s(cooLoginId)) throw createError(400, 'cooLoginId is required for COO_ONLY')
     return
   }
 
@@ -195,9 +204,10 @@ async function ensureUserHasRoles(loginId, addRoles = []) {
 
   const merged = [...new Set([...current.map(up), ...rolesToAdd])].filter(Boolean)
 
-  // keep "role" as primary (for legacy code). Prefer LEAVE_ADMIN/ADMIN/GM/COO/MANAGER over USER.
+  // keep "role" as primary (for legacy code). Prefer higher roles over USER.
   const priority = ['ADMIN', 'LEAVE_ADMIN', 'LEAVE_COO', 'LEAVE_GM', 'LEAVE_MANAGER', 'LEAVE_USER']
-  const primary = merged.slice().sort((a, b) => priority.indexOf(a) - priority.indexOf(b))[0] || 'LEAVE_USER'
+  const primary =
+    merged.slice().sort((a, b) => priority.indexOf(a) - priority.indexOf(b))[0] || 'LEAVE_USER'
 
   user.roles = merged
   user.role = primary
@@ -215,6 +225,9 @@ async function inferRolesFromProfiles(loginId) {
   const isManager = await LeaveProfile.exists({ managerLoginId: id })
   if (isManager) roles.push('LEAVE_MANAGER')
 
+  // If referenced as GM/COO approver you may choose to infer too (optional).
+  // Keep minimal as your original concept.
+
   return roles
 }
 
@@ -230,7 +243,7 @@ async function ensureManagerRole(managerLoginId) {
  * - If missing -> password required (strong) and create account
  *
  * NOTE: Your EmployeeDirectory schema has NO loginId, only employeeId.
- * We will use EmployeeDirectory.findOne({ employeeId: loginId }) to fetch name.
+ * We will use EmployeeDirectory.findOne({ employeeId }) to fetch name.
  */
 async function ensureUserAccount({ loginId, employeeId, password }) {
   const login = s(loginId)
@@ -252,8 +265,11 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
 
   let name = ''
   try {
-    const emp = await EmployeeDirectory.findOne({ employeeId: s(employeeId || login) }, { name: 1 }).lean()
-    name = s(emp?.name)
+    const emp = await EmployeeDirectory.findOne(
+      { employeeId: s(employeeId || login) },
+      { name: 1, fullName: 1 }
+    ).lean()
+    name = s(emp?.name || emp?.fullName)
   } catch {}
   if (!name) name = login
 
@@ -268,7 +284,7 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
     isActive: true,
   })
 
-  // ✅ NEW: after creating user, auto-upgrade roles from existing profiles
+  // ✅ after creating user, auto-upgrade roles from existing profiles
   const inferred = await inferRolesFromProfiles(login)
   if (inferred.length) await ensureUserHasRoles(login, inferred)
 
@@ -281,12 +297,12 @@ async function attachEmployeeDirectory(profilePlain) {
 
   const emp = await EmployeeDirectory.findOne(
     { employeeId },
-    { employeeId: 1, name: 1, department: 1 }
+    { employeeId: 1, name: 1, fullName: 1, department: 1 }
   ).lean()
 
   return {
     ...profilePlain,
-    name: profilePlain?.name || s(emp?.name || ''),
+    name: profilePlain?.name || s(emp?.name || emp?.fullName || ''),
     department: profilePlain?.department || s(emp?.department || ''),
   }
 }
@@ -342,17 +358,28 @@ exports.getApprovers = async (req, res) => {
   const gmUsers = await User.find(
     { roles: { $in: ['LEAVE_GM'] } },
     { loginId: 1, name: 1, username: 1 }
-  ).sort({ loginId: 1 }).lean()
+  )
+    .sort({ loginId: 1 })
+    .lean()
 
   const cooUsers = await User.find(
     { roles: { $in: ['LEAVE_COO'] } },
     { loginId: 1, name: 1, username: 1 }
-  ).sort({ loginId: 1 }).lean()
+  )
+    .sort({ loginId: 1 })
+    .lean()
 
   return res.json({
     gm: (gmUsers || []).map((u) => ({ loginId: s(u.loginId), label: s(u.name || u.username || u.loginId) })),
     coo: (cooUsers || []).map((u) => ({ loginId: s(u.loginId), label: s(u.name || u.username || u.loginId) })),
   })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   GET /admin/leave/profiles/modes
+───────────────────────────────────────────────────────────── */
+exports.getApprovalModes = async (req, res) => {
+  return res.json({ ok: true, modes: APPROVAL_MODES })
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -385,14 +412,14 @@ exports.getProfilesGrouped = async (req, res) => {
     // We can only lookup by employeeId in your directory schema.
     const emp = await EmployeeDirectory.findOne(
       { employeeId: key },
-      { employeeId: 1, name: 1, department: 1 }
+      { employeeId: 1, name: 1, fullName: 1, department: 1 }
     ).lean()
 
     if (!emp) return { loginId: key, employeeId: key, name: key, department: '' }
     return {
       loginId: key,
       employeeId: s(emp.employeeId),
-      name: s(emp.name),
+      name: s(emp.name || emp.fullName || ''),
       department: s(emp.department),
     }
   }
@@ -447,7 +474,7 @@ exports.createProfileSingle = async (req, res) => {
   const managerLoginId = s(body.managerLoginId) // ✅ optional
   if (managerLoginId) await ensureManagerRole(managerLoginId)
 
-  // ✅ BIG: only keep approvers needed by mode
+  // ✅ only keep approvers needed by mode
   const gmLoginId = modeInvolvesGm(approvalMode) ? s(body.gmLoginId) : ''
   const cooLoginId = modeInvolvesCoo(approvalMode) ? s(body.cooLoginId) : ''
 
@@ -456,6 +483,7 @@ exports.createProfileSingle = async (req, res) => {
   // ✅ Create ONLY employee account (manager not touched)
   await ensureUserAccount({
     loginId: employeeLoginId,
+    employeeId,
     password: body.password,
   })
 
@@ -491,7 +519,7 @@ exports.createProfileSingle = async (req, res) => {
   const doc = await LeaveProfile.create({
     employeeId,
     employeeLoginId,
-    managerLoginId, // ✅ optional (model will auto-clear if mode doesn't involve manager)
+    managerLoginId, // ✅ optional (model may auto-clear if mode doesn't involve manager)
     gmLoginId,
     cooLoginId,
     approvalMode,
@@ -523,7 +551,7 @@ exports.createManagerWithEmployees = async (req, res) => {
   const managerLoginId = s(body.managerLoginId) // ✅ optional
   if (managerLoginId) await ensureManagerRole(managerLoginId)
 
-  // ✅ BIG: only keep approvers needed by mode
+  // ✅ only keep approvers needed by mode
   const gmLoginId = modeInvolvesGm(approvalMode) ? s(body.gmLoginId) : ''
   const cooLoginId = modeInvolvesCoo(approvalMode) ? s(body.cooLoginId) : ''
 
@@ -547,6 +575,7 @@ exports.createManagerWithEmployees = async (req, res) => {
     // ✅ Create ONLY employee account
     await ensureUserAccount({
       loginId: employeeLoginId,
+      employeeId,
       password: e.password,
     })
 
@@ -614,14 +643,14 @@ exports.updateProfile = async (req, res) => {
 
   const nextApprovalMode = normalizeApprovalMode(body.approvalMode ?? doc.approvalMode)
 
-  // ✅ BIG: allow manager in MANAGER_ONLY too
+  // ✅ allow manager in MANAGER_ONLY too
   const managerAllowed = modeInvolvesManager(nextApprovalMode)
 
   // ✅ If mode doesn't involve manager -> force remove managerLoginId
   const nextManager = managerAllowed ? s(body.managerLoginId ?? doc.managerLoginId) : ''
   if (nextManager) await ensureManagerRole(nextManager)
 
-  // ✅ BIG: clear approvers that don't apply
+  // ✅ clear approvers that don't apply
   const nextGm = modeInvolvesGm(nextApprovalMode) ? s(body.gmLoginId ?? doc.gmLoginId) : ''
   const nextCoo = modeInvolvesCoo(nextApprovalMode) ? s(body.cooLoginId ?? doc.cooLoginId) : ''
 
@@ -822,7 +851,6 @@ exports.recalculateBalances = async (req, res) => {
    body: { password }
    - Admin sets new password directly (no old password)
 ───────────────────────────────────────────────────────────── */
-// backend/controllers/leave/leaveProfiles.admin.controller.js
 exports.resetUserPassword = async (req, res) => {
   const employeeId = s(req.params.employeeId)
   const { password } = req.body || {}

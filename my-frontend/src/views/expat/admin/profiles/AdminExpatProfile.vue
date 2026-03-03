@@ -84,12 +84,11 @@ function modeChipClasses(mode) {
   const m = up(mode)
 
   // COO involved -> indigo
-  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO') return 'ui-badge ui-badge-indigo'
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
 
-  // single approver -> emerald/sky (you can choose)
+  // single approver -> emerald/sky
   if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
 
-  // default -> info
   return 'ui-badge ui-badge-info'
 }
 
@@ -97,6 +96,7 @@ function modeLabel(mode) {
   const m = up(mode)
   if (m === 'GM_AND_COO') return 'GM + COO'
   if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
   if (m === 'MANAGER_ONLY') return 'Manager only'
   if (m === 'GM_ONLY') return 'GM only'
   return 'Manager + GM'
@@ -362,7 +362,10 @@ function validateStrongPassword(pwd) {
   const hasNum = /\d/.test(p)
   const hasSym = /[^A-Za-z0-9]/.test(p)
   const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
-  if (score < 3) return { ok: false, message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.' }
+  if (score < 3) return {
+    ok: false,
+    message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.',
+  }
   return { ok: true }
 }
 
@@ -509,15 +512,22 @@ function ensureRowSearchModels() {
   ensurePwdToggles()
 }
 
-/* ✅ FIX (only what you need): approver required rules must support GM_ONLY + MANAGER_ONLY */
+/* ✅ approver required rules must support GM_ONLY + MANAGER_ONLY + COO_ONLY */
 const needsGm = computed(() => {
   const m = up(form.value.approvalMode)
   return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
 })
 const needsCoo = computed(() => {
   const m = up(form.value.approvalMode)
-  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO'
+  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY'
 })
+
+/* ✅ THIS is the one your template uses to HIDE/SHOW direct manager */
+const needsManager = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
+})
+
 const approverReady = computed(() => {
   const gmOk = !!String(defaultGm.value?.loginId || '').trim()
   const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
@@ -595,15 +605,13 @@ async function submitCreate() {
   try {
     saving.value = true
 
-    /* ✅ FIX (only what you need): include MANAGER_ONLY + GM_ONLY */
     const mode = up(form.value.approvalMode || '')
-    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO', 'MANAGER_ONLY', 'GM_ONLY'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO', 'MANAGER_ONLY', 'GM_ONLY', 'COO_ONLY'].includes(mode)) {
       throw new Error('Invalid approval mode.')
     }
 
-    /* ✅ FIX: require only approvers that apply */
     const needGm = mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
-    const needCoo = mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO'
+    const needCoo = mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO' || mode === 'COO_ONLY'
 
     const gmLoginId = needGm ? String(defaultGm.value?.loginId || '').trim() : ''
     const cooLoginId = needCoo ? String(defaultCoo.value?.loginId || '').trim() : ''
@@ -611,9 +619,8 @@ async function submitCreate() {
     if (needGm && !gmLoginId) throw new Error('GM approver is missing (seed or /admin/leave/approvers).')
     if (needCoo && !cooLoginId) throw new Error('COO approver is missing.')
 
-    /* ✅ FIX: MANAGER_ONLY also involves manager (still optional) */
-    const needsManager = mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
-    const managerLoginId = needsManager
+    const needMgr = mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+    const managerLoginId = needMgr
       ? String(pickLoginId(createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected) || '').trim()
       : ''
 
@@ -652,7 +659,6 @@ async function submitCreate() {
         }
       })
 
-      /* ✅ FIX: send only needed approvers (gmLoginId/cooLoginId already '' if not needed) */
       const payload = {
         approvalMode: mode,
         managerLoginId: managerLoginId || '', // optional
@@ -661,7 +667,6 @@ async function submitCreate() {
         employees,
       }
 
-      // ✅ correct endpoint for controller
       const res = await api.post('/admin/leave/profiles/manager', payload)
 
       showToast({
@@ -694,7 +699,6 @@ async function submitCreate() {
 
     const carry = normalizeCarry(form.value.singleCarry)
 
-    /* ✅ FIX: send only needed approvers (gmLoginId/cooLoginId already '' if not needed) */
     const payload = {
       approvalMode: mode,
       employeeId,
@@ -760,7 +764,6 @@ function buildRow(e, managerName = '') {
     JoinDate: fmt(e.joinDate),
     ContractDate: fmt(e.contractDate),
     ContractEnd: fmt(e.contractEndDate),
-    // Mode: modeLabel(e.approvalMode),
     Status: e.isActive ? 'Active' : 'Inactive',
 
     // ✅ Ent -> Quota
@@ -772,7 +775,6 @@ function buildRow(e, managerName = '') {
     SP_Quota: SP.ent,
     SP_Remain: SP.remain,
 
-    // keep the rest as-is
     MC_Used: MC.used,
     MA_Used: MA.used,
     UL_Used: UL.used,
@@ -800,12 +802,12 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
   }))
   const wsAuthorize = XLSX.utils.json_to_sheet(authorizeRows)
   wsAuthorize['!cols'] = [
-    { wch: 12 }, // GroupLabel
-    { wch: 28 }, // AuthorizeName
-    { wch: 18 }, // AuthorizeEmployeeId
-    { wch: 20 }, // AuthorizeLoginId
-    { wch: 24 }, // AuthorizeDepartment
-    { wch: 10 }, // Employees
+    { wch: 12 },
+    { wch: 28 },
+    { wch: 18 },
+    { wch: 20 },
+    { wch: 24 },
+    { wch: 10 },
   ]
   XLSX.utils.book_append_sheet(wb, wsAuthorize, 'Authorize')
 
@@ -819,22 +821,21 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
 
   const wsAll = XLSX.utils.json_to_sheet(allEmployeesRows)
   wsAll['!cols'] = [
-    { wch: 22 }, // Manager
-    { wch: 12 }, // EmployeeID
-    { wch: 22 }, // Name
-    { wch: 20 }, // Department
-    { wch: 12 }, // JoinDate
-    { wch: 12 }, // ContractDate
-    { wch: 12 }, // ContractEnd
-    // { wch: 12 }, // Mode
-    { wch: 10 }, // Status
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 22 },
+    { wch: 20 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 10 },
 
-    { wch: 10 }, { wch: 10 }, { wch: 10 }, // AL Used/Quota/Remain
-    { wch: 10 }, { wch: 10 }, { wch: 10 }, // SP Used/Quota/Remain
-    { wch: 10 }, // MC_Used
-    { wch: 10 }, // MA_Used
-    { wch: 10 }, // UL_Used
-    { wch: 10 }, // BL_Used
+    { wch: 10 }, { wch: 10 }, { wch: 10 },
+    { wch: 10 }, { wch: 10 }, { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
+    { wch: 10 },
   ]
   XLSX.utils.book_append_sheet(wb, wsAll, 'AllEmployees')
 
@@ -852,6 +853,17 @@ watch(createOpen, (open) => {
   if (typeof document === 'undefined') return
   document.body.classList.toggle('overflow-hidden', !!open)
 })
+
+/* ✅ IMPORTANT: when mode switches to non-manager mode, clear manager pickers */
+watch(
+  () => form.value.approvalMode,
+  () => {
+    if (!needsManager.value) {
+      clearSelected(mgrSearch.value)
+      clearSelected(singleMgrSearch.value)
+    }
+  }
+)
 
 /* ─────────────────────────────────────────────────────────────
    Lifecycle
@@ -1326,14 +1338,17 @@ onBeforeUnmount(() => {
                   <option value="MANAGER_AND_GM">Manager + GM</option>
                   <option value="MANAGER_AND_COO">Manager + COO</option>
                   <option value="GM_AND_COO">GM + COO</option>
+                  <option value="COO_ONLY">COO only</option>
                   <option value="MANAGER_ONLY">Manager only</option>
                   <option value="GM_ONLY">GM only</option>
                 </select>
               </div>
 
-              <!-- Manager picker (OPTIONAL now) -->
-              <div>
+              <!-- ✅ Direct manager picker (HIDDEN if mode does NOT involve manager) -->
+              <div v-if="needsManager">
                 <div class="ui-label">Direct manager</div>
+
+                <!-- Bulk manager search -->
                 <div v-if="createTab === 'bulk'" class="relative" @click.stop>
                   <div class="relative">
                     <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>
@@ -1377,6 +1392,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
+                <!-- Single manager search -->
                 <div v-else class="relative" @click.stop>
                   <div class="relative">
                     <i class="fa-solid fa-user-tie absolute left-3 top-1/2 -translate-y-1/2 text-[11px] text-ui-muted"></i>

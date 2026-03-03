@@ -49,8 +49,9 @@ const APPROVAL_MODE = Object.freeze([
   'MANAGER_AND_GM',
   'MANAGER_AND_COO',
   'GM_AND_COO',
-  'MANAGER_ONLY', // ✅ NEW
-  'GM_ONLY', // ✅ NEW
+  'MANAGER_ONLY',
+  'GM_ONLY',
+  'COO_ONLY', // ✅ NEW
 ])
 
 function normalizeApprovalMode(v) {
@@ -58,8 +59,9 @@ function normalizeApprovalMode(v) {
   if (raw === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
   if (raw === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (raw === 'GM_AND_COO') return 'GM_AND_COO'
-  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
-  if (raw === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
+  if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY'
+  if (raw === 'GM_ONLY') return 'GM_ONLY'
+  if (raw === 'COO_ONLY') return 'COO_ONLY'
   // safest default
   return 'MANAGER_AND_GM'
 }
@@ -71,7 +73,7 @@ function modeInvolvesGm(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
 }
 function modeInvolvesCoo(mode) {
-  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY'
 }
 
 function normalizeCarryObj(c) {

@@ -10,6 +10,7 @@
 //    - GM_AND_COO
 //    - MANAGER_ONLY      ✅ NEW
 //    - GM_ONLY           ✅ NEW
+//    - COO_ONLY          ✅ NEW (supported end-to-end)
 //
 // ✅ Flow by mode:
 //    MANAGER_AND_GM   : PENDING_MANAGER -> PENDING_GM  -> APPROVED
@@ -17,6 +18,7 @@
 //    GM_AND_COO       : PENDING_GM      -> PENDING_COO -> APPROVED   (manager skipped)
 //    MANAGER_ONLY     : PENDING_MANAGER -> APPROVED
 //    GM_ONLY          : PENDING_GM      -> APPROVED
+//    COO_ONLY         : PENDING_COO     -> APPROVED
 //
 // ✅ Status values:
 //    PENDING_MANAGER, PENDING_GM, PENDING_COO, APPROVED, REJECTED, CANCELLED
@@ -49,6 +51,16 @@ try {
 
 /* ───────────────── helpers ───────────────── */
 
+function s(v) {
+  return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
+}
+function uniqUpper(arr) {
+  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
+}
+
 function allowedStatusesForInboxLevel(level) {
   const lvl = up(level)
   if (lvl === 'MANAGER') {
@@ -64,16 +76,6 @@ function allowedStatusesForInboxLevel(level) {
     return ['PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
   }
   return ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED']
-}
-
-function s(v) {
-  return String(v ?? '').trim()
-}
-function up(v) {
-  return s(v).toUpperCase()
-}
-function uniqUpper(arr) {
-  return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
 function getRoles(req) {
@@ -133,6 +135,16 @@ function emitReq(req, docOrPlain, event = 'leave:req:updated') {
   }
 }
 
+function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastLeaveProfile(io, docOrPlain, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitProfile(${event}) failed:`, e?.message)
+  }
+}
+
 function requiresAttachmentForDoc(doc) {
   const t = up(doc?.leaveTypeCode)
   const days = Number(doc?.totalDays || 0)
@@ -156,16 +168,6 @@ function assertAttachmentIfRequired(doc) {
   if (!requiresAttachmentForDoc(doc)) return
   const count = Array.isArray(doc.attachments) ? doc.attachments.length : 0
   if (count <= 0) throw createError(400, 'Attachment is required for this leave request.')
-}
-
-function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
-  try {
-    const io = getIo(req)
-    if (!io) return
-    broadcastLeaveProfile(io, docOrPlain, event)
-  } catch (e) {
-    console.warn(`⚠️ realtime emitProfile(${event}) failed:`, e?.message)
-  }
 }
 
 async function safeNotify(fn, ...args) {
@@ -265,8 +267,9 @@ function normalizeMode(v) {
 
 function initialStatusForMode(mode) {
   const m = normalizeMode(mode)
+  if (m === 'COO_ONLY') return 'PENDING_COO'
   if (m === 'GM_AND_COO') return 'PENDING_GM'
-  if (m === 'GM_ONLY') return 'PENDING_GM' // ✅ NEW
+  if (m === 'GM_ONLY') return 'PENDING_GM'
   // MANAGER_AND_GM / MANAGER_AND_COO / MANAGER_ONLY
   return 'PENDING_MANAGER'
 }
@@ -280,6 +283,10 @@ function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
     return id
   }
 
+  if (m === 'COO_ONLY') {
+    return [{ level: 'COO', loginId: need('COO', cooLoginId), status: 'PENDING', actedAt: null, note: '' }]
+  }
+
   if (m === 'MANAGER_ONLY') {
     return [
       { level: 'MANAGER', loginId: need('Manager', managerLoginId), status: 'PENDING', actedAt: null, note: '' },
@@ -287,9 +294,7 @@ function buildApprovals(mode, { managerLoginId, gmLoginId, cooLoginId }) {
   }
 
   if (m === 'GM_ONLY') {
-    return [
-      { level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' },
-    ]
+    return [{ level: 'GM', loginId: need('GM', gmLoginId), status: 'PENDING', actedAt: null, note: '' }]
   }
 
   if (m === 'MANAGER_AND_GM') {
@@ -334,14 +339,14 @@ function markApproval(approvals, level, status, note = '') {
 
 function nextStatusAfterManagerApprove(mode) {
   const m = normalizeMode(mode)
-  if (m === 'MANAGER_ONLY') return 'APPROVED' // ✅ NEW
+  if (m === 'MANAGER_ONLY') return 'APPROVED'
   if (m === 'MANAGER_AND_COO') return 'PENDING_COO'
   return 'PENDING_GM'
 }
 
 function nextStatusAfterGmApprove(mode) {
   const m = normalizeMode(mode)
-  if (m === 'GM_ONLY') return 'APPROVED' // ✅ NEW
+  if (m === 'GM_ONLY') return 'APPROVED'
   if (m === 'GM_AND_COO') return 'PENDING_COO'
   return 'APPROVED'
 }
@@ -351,7 +356,7 @@ function nextStatusAfterCooApprove() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   ✅ NEW: STRICT no-duplicate date+half guard
+   ✅ STRICT no-duplicate date+half guard
 ───────────────────────────────────────────────────────────── */
 
 function isValidYMD(v) {
@@ -560,7 +565,7 @@ exports.createMyRequest = async (req, res, next) => {
 
     const normalized = vr.normalized
 
-    // ✅ NEW: block duplicate same date+half (allow AM if only PM exists, etc.)
+    // ✅ block duplicate same date+half (allow AM if only PM exists, etc.)
     await assertNoDuplicateDateHalf({ employeeId, normalized })
 
     const doc = await LeaveRequest.create({
@@ -611,10 +616,7 @@ exports.listMyRequests = async (req, res, next) => {
     const meLoginId = actorLoginId(req)
     if (!meLoginId) throw createError(400, 'Missing user identity')
 
-    const rows = await LeaveRequest.find({ requesterLoginId: meLoginId })
-      .sort({ createdAt: -1 })
-      .lean()
-
+    const rows = await LeaveRequest.find({ requesterLoginId: meLoginId }).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
   } catch (e) {
     next(e)
@@ -674,17 +676,12 @@ exports.listManagerInbox = async (req, res, next) => {
     if (!canViewManagerInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '') // 'ALL' or ''
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] } // ✅ NEW
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] }
 
-    // ✅ Admin viewers can view all managers; normal manager sees only own rows
-    const base = isAdminViewer(req)
-      ? { approvalMode: modeFilter }
-      : { approvalMode: modeFilter, managerLoginId: me }
+    // Admin viewers can view all managers; normal manager sees only own rows
+    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, managerLoginId: me }
 
-    const query =
-      scope === 'ALL'
-        ? { ...base } // all statuses
-        : { ...base, status: 'PENDING_MANAGER' } // inbox pending only
+    const query = scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_MANAGER' }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -721,7 +718,7 @@ exports.managerDecision = async (req, res, next) => {
 
     const act = up(action)
 
-    // ✅ ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
+    // ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
     if (act === 'APPROVE') assertAttachmentIfRequired(existing)
 
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
@@ -779,18 +776,18 @@ exports.listGmInbox = async (req, res, next) => {
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '')
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] } // ✅ NEW
+    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] }
 
-    const base = isAdminViewer(req)
-      ? { approvalMode: modeFilter }
-      : { approvalMode: modeFilter, gmLoginId: me }
+    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, gmLoginId: me }
 
-    // ✅ IMPORTANT: non-admin "scope=ALL" still must respect flow
+    // IMPORTANT: non-admin "scope=ALL" still must respect flow
     const query = isAdminViewer(req)
-      ? (scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_GM' })
-      : (scope === 'ALL'
-          ? { ...base, status: { $in: allowedStatusesForInboxLevel('GM') } }
-          : { ...base, status: 'PENDING_GM' })
+      ? scope === 'ALL'
+        ? { ...base }
+        : { ...base, status: 'PENDING_GM' }
+      : scope === 'ALL'
+        ? { ...base, status: { $in: allowedStatusesForInboxLevel('GM') } }
+        : { ...base, status: 'PENDING_GM' }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -827,7 +824,7 @@ exports.gmDecision = async (req, res, next) => {
 
     const act = up(action)
 
-    // ✅ ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
+    // ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
     if (act === 'APPROVE') assertAttachmentIfRequired(existing)
 
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
@@ -884,18 +881,18 @@ exports.listCooInbox = async (req, res, next) => {
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '')
-    const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO'] } // (no COO in new modes)
+    const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY'] }
 
-    const base = isAdminViewer(req)
-      ? { approvalMode: modeFilter }
-      : { approvalMode: modeFilter, cooLoginId: me }
+    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, cooLoginId: me }
 
-    // ✅ IMPORTANT: non-admin "scope=ALL" still must respect flow
+    // IMPORTANT: non-admin "scope=ALL" still must respect flow
     const query = isAdminViewer(req)
-      ? (scope === 'ALL' ? { ...base } : { ...base, status: 'PENDING_COO' })
-      : (scope === 'ALL'
-          ? { ...base, status: { $in: allowedStatusesForInboxLevel('COO') } }
-          : { ...base, status: 'PENDING_COO' })
+      ? scope === 'ALL'
+        ? { ...base }
+        : { ...base, status: 'PENDING_COO' }
+      : scope === 'ALL'
+        ? { ...base, status: { $in: allowedStatusesForInboxLevel('COO') } }
+        : { ...base, status: 'PENDING_COO' }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -920,7 +917,7 @@ exports.cooDecision = async (req, res, next) => {
     if (!existing) throw createError(404, 'Request not found')
 
     const mode = normalizeMode(existing.approvalMode)
-    if (!['MANAGER_AND_COO', 'GM_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY'].includes(mode)) {
       throw createError(400, 'This request does not require COO approval.')
     }
 
@@ -932,13 +929,13 @@ exports.cooDecision = async (req, res, next) => {
 
     const act = up(action)
 
-    // ✅ ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
+    // ENFORCE REQUIRED ATTACHMENT (MA / BL / Sick >= 3)
     if (act === 'APPROVE') assertAttachmentIfRequired(existing)
 
     if (act === 'REJECT' && !s(comment)) throw createError(400, 'Reject requires a reason.')
 
     let newStatus = ''
-    if (act === 'APPROVE') newStatus = nextStatusAfterCooApprove(mode)
+    if (act === 'APPROVE') newStatus = nextStatusAfterCooApprove()
     else if (act === 'REJECT') newStatus = 'REJECTED'
     else throw createError(400, 'Invalid action')
 
@@ -986,28 +983,22 @@ exports.updateMyRequest = async (req, res, next) => {
     const existing = await LeaveRequest.findById(id)
     if (!existing) throw createError(404, 'Request not found')
 
-    // ✅ only owner can edit (admins can extend later if you want)
+    // only owner can edit
     if (s(existing.requesterLoginId) !== meLoginId) {
       throw createError(403, 'Not your request')
     }
 
-    // ✅ must still be pending somewhere
+    // must still be pending somewhere
     const st = up(existing.status)
     if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) {
       throw createError(400, `Request is ${existing.status}. Cannot edit.`)
     }
 
-    // ✅ "edit only when not yet got any approved"
-    const approvals = Array.isArray(existing.approvals) ? existing.approvals : []
-    const anyApproved = approvals.some((a) => up(a.status) === 'APPROVED')
-    const anyRejected = approvals.some((a) => up(a.status) === 'REJECTED')
-    const anyActed = approvals.some((a) => !!a.actedAt)
-
-    if (anyApproved || anyRejected || anyActed) {
+    // edit only when no approval activity
+    if (hasAnyApprovalActivity(existing)) {
       throw createError(400, 'This request has already been processed. Cannot edit.')
     }
 
-    // ✅ validate new dates/type/half using the same rules
     const vr = validateAndNormalizeRequest({
       leaveTypeCode: req.body?.leaveTypeCode ?? existing.leaveTypeCode,
       startDate: req.body?.startDate ?? existing.startDate,
@@ -1024,14 +1015,12 @@ exports.updateMyRequest = async (req, res, next) => {
 
     const normalized = vr.normalized
 
-    // ✅ NEW: block duplicate same date+half, excluding this request itself
     await assertNoDuplicateDateHalf({
       employeeId: existing.employeeId,
       normalized,
       excludeId: existing._id,
     })
 
-    // ✅ update allowed fields
     existing.leaveTypeCode = normalized.leaveTypeCode
     existing.startDate = normalized.startDate
     existing.endDate = normalized.endDate
@@ -1045,7 +1034,6 @@ exports.updateMyRequest = async (req, res, next) => {
     existing.totalDays = Number(normalized.totalDays)
     existing.reason = s(req.body?.reason ?? existing.reason)
 
-    // keep status/mode/approvers same
     await existing.save()
 
     const payload = await attachEmployeeInfoToOne(existing)
