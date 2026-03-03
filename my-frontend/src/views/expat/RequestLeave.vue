@@ -898,25 +898,8 @@ onBeforeUnmount(() => {
 
           <div class="p-3">
             <form class="space-y-2.5" @submit.prevent="submitRequest">
-              <!-- Leave type -->
               <div class="ui-card p-3">
-                <div class="ui-label">Leave Type</div>
-                <select v-model="form.leaveTypeCode" :disabled="loadingTypes || !leaveTypes.length" class="ui-select">
-                  <option value="" disabled>{{ loadingTypes ? 'Loading…' : 'Select leave type' }}</option>
-                  <option v-for="t in leaveTypes" :key="t.code" :value="t.code">{{ t.name }}</option>
-                </select>
-
-                <div
-                  v-if="typesError"
-                  class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800
-                         dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
-                >
-                  {{ typesError }}
-                </div>
-              </div>
-
-              <!-- Dates + Chips -->
-              <div class="ui-card p-3">
+                <!-- Dates + Chips -->
                 <div class="grid gap-2">
                   <!-- Start row -->
                   <div class="date-row">
@@ -1001,6 +984,25 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
+
+
+              <!-- Leave type -->
+              <div class="ui-card p-3">
+                <div class="ui-label">Leave Type</div>
+                <select v-model="form.leaveTypeCode" :disabled="loadingTypes || !leaveTypes.length" class="ui-select">
+                  <option value="" disabled>{{ loadingTypes ? 'Loading…' : 'Select leave type' }}</option>
+                  <option v-for="t in leaveTypes" :key="t.code" :value="t.code">{{ t.name }}</option>
+                </select>
+
+                <div
+                  v-if="typesError"
+                  class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800
+                         dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+                >
+                  {{ typesError }}
+                </div>
+              </div>
+              
 
               <!-- Evidence (only when type selected) -->
               <div v-if="form.leaveTypeCode" class="ui-card p-3">

@@ -509,6 +509,11 @@ function ensureRowSearchModels() {
   ensurePwdToggles()
 }
 
+/* ✅ FIX (only what you need): approver required rules must support GM_ONLY + MANAGER_ONLY */
+const needsGm = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
+})
 const needsCoo = computed(() => {
   const m = up(form.value.approvalMode)
   return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO'
@@ -516,7 +521,9 @@ const needsCoo = computed(() => {
 const approverReady = computed(() => {
   const gmOk = !!String(defaultGm.value?.loginId || '').trim()
   const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
-  return needsCoo.value ? gmOk && cooOk : gmOk
+  if (needsGm.value && !gmOk) return false
+  if (needsCoo.value && !cooOk) return false
+  return true
 })
 
 function openCreate() {
@@ -588,24 +595,27 @@ async function submitCreate() {
   try {
     saving.value = true
 
+    /* ✅ FIX (only what you need): include MANAGER_ONLY + GM_ONLY */
     const mode = up(form.value.approvalMode || '')
-    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO'].includes(mode)) {
+    if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO', 'MANAGER_ONLY', 'GM_ONLY'].includes(mode)) {
       throw new Error('Invalid approval mode.')
     }
 
-    const gmLoginId = String(defaultGm.value?.loginId || '').trim()
-    const cooLoginId = String(defaultCoo.value?.loginId || '').trim()
+    /* ✅ FIX: require only approvers that apply */
+    const needGm = mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+    const needCoo = mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO'
 
-    if (!gmLoginId) throw new Error('GM approver is missing (seed or /admin/leave/approvers).')
-    if ((mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') && !cooLoginId) {
-      throw new Error('COO approver is missing.')
-    }
+    const gmLoginId = needGm ? String(defaultGm.value?.loginId || '').trim() : ''
+    const cooLoginId = needCoo ? String(defaultCoo.value?.loginId || '').trim() : ''
 
-    // ✅ Manager is OPTIONAL now:
-    const managerLoginId =
-      (mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO')
-        ? String(pickLoginId(createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected) || '').trim()
-        : ''
+    if (needGm && !gmLoginId) throw new Error('GM approver is missing (seed or /admin/leave/approvers).')
+    if (needCoo && !cooLoginId) throw new Error('COO approver is missing.')
+
+    /* ✅ FIX: MANAGER_ONLY also involves manager (still optional) */
+    const needsManager = mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+    const managerLoginId = needsManager
+      ? String(pickLoginId(createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected) || '').trim()
+      : ''
 
     // ─────────────────────────────
     // BULK
@@ -642,11 +652,12 @@ async function submitCreate() {
         }
       })
 
+      /* ✅ FIX: send only needed approvers (gmLoginId/cooLoginId already '' if not needed) */
       const payload = {
         approvalMode: mode,
-        managerLoginId: managerLoginId || '', // ✅ optional
+        managerLoginId: managerLoginId || '', // optional
         gmLoginId,
-        cooLoginId: (mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') ? cooLoginId : '',
+        cooLoginId,
         employees,
       }
 
@@ -683,6 +694,7 @@ async function submitCreate() {
 
     const carry = normalizeCarry(form.value.singleCarry)
 
+    /* ✅ FIX: send only needed approvers (gmLoginId/cooLoginId already '' if not needed) */
     const payload = {
       approvalMode: mode,
       employeeId,
@@ -691,9 +703,9 @@ async function submitCreate() {
       contractDate,
       carry,
       isActive: form.value.singleActive !== false,
-      managerLoginId: managerLoginId || '', // ✅ optional
+      managerLoginId: managerLoginId || '', // optional
       gmLoginId,
-      cooLoginId: (mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO') ? cooLoginId : '',
+      cooLoginId,
       password: String(form.value.singlePassword || '').trim() || undefined, // optional
     }
 
@@ -1314,6 +1326,8 @@ onBeforeUnmount(() => {
                   <option value="MANAGER_AND_GM">Manager + GM</option>
                   <option value="MANAGER_AND_COO">Manager + COO</option>
                   <option value="GM_AND_COO">GM + COO</option>
+                  <option value="MANAGER_ONLY">Manager only</option>
+                  <option value="GM_ONLY">GM only</option>
                 </select>
               </div>
 

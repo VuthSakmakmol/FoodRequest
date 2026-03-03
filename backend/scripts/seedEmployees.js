@@ -902,7 +902,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "078677686",
-    "telegramChatId": "",
+    "telegramChatId": "1456777843",
     "isActive": true
   },
   {
@@ -938,7 +938,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "070707460",
-    "telegramChatId": "7163451169",
+    "telegramChatId": "661186113",
     "isActive": true
   },
   {
@@ -1064,7 +1064,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "0968337875",
-    "telegramChatId": "",
+    "telegramChatId": "1120056572",
     "isActive": true
   },
   {
@@ -1118,7 +1118,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "087788197",
-    "telegramChatId": "",
+    "telegramChatId": "730730673",
     "isActive": true
   },
   {
@@ -1382,6 +1382,15 @@ function loadEmployees() {
     "position": "",
     "contactNumber": "016551873",
     "telegramChatId": "1334734870",
+    "isActive": true
+  },
+    {
+    "employeeId": "52620158",
+    "name": "Kourt Seila",
+    "department": "Merchandise",
+    "position": "",
+    "contactNumber": "",
+    "telegramChatId": "",
     "isActive": true
   },
   {
@@ -2228,7 +2237,7 @@ function loadEmployees() {
     "department": "Shipping",
     "contactNumber": "00000000000",
     "position": "",
-    "telegramChatId": "1084330819",
+    "telegramChatId": "1821447041",
     "isActive": true
   },
   {

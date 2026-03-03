@@ -211,35 +211,79 @@ exports.me = async (req, res, next) => {
   }
 }
 
+// backend/controllers/auth.controller.js
+
+function validatePasswordPolicy(pw) {
+  const s = String(pw || '')
+
+  const rules = {
+    minLen: s.length >= 13,
+    upper: /[A-Z]/.test(s),
+    lower: /[a-z]/.test(s),
+    number: /[0-9]/.test(s),
+    symbol: /[^A-Za-z0-9]/.test(s),
+    noSpace: !/\s/.test(s),
+  }
+
+  const ok = Object.values(rules).every(Boolean)
+
+  const missing = []
+  if (!rules.minLen) missing.push('at least 13 characters')
+  if (!rules.upper) missing.push('1 uppercase letter')
+  if (!rules.lower) missing.push('1 lowercase letter')
+  if (!rules.number) missing.push('1 number')
+  if (!rules.symbol) missing.push('1 symbol')
+  if (!rules.noSpace) missing.push('no spaces')
+
+  return { ok, rules, message: ok ? '' : `Password must include ${missing.join(', ')}.` }
+}
+
 exports.changePassword = async (req, res, next) => {
+  console.log('\n[AUTH] HIT changePassword', req.method, req.originalUrl, 'user=', req.user?.loginId)
+
   try {
     const userId = req.user?.sub
     const oldPassword = String(req.body?.oldPassword || '')
     const newPassword = String(req.body?.newPassword || '')
 
+    console.log('[AUTH] changePassword payload:', {
+      hasOld: !!oldPassword,
+      hasNew: !!newPassword,
+      newLen: newPassword.length,
+    })
+
     if (!oldPassword || !newPassword) {
       return res.status(400).json({ message: 'oldPassword and newPassword required' })
     }
-    if (newPassword.length < 8) {
-      return res.status(400).json({ message: 'New password must be at least 8 characters' })
-    }
+
     if (newPassword === oldPassword) {
       return res.status(400).json({ message: 'New password must be different from old password' })
     }
 
+    // ✅ STRICT POLICY
+    const pol = validatePasswordPolicy(newPassword)
+    console.log('[AUTH] policy ok?', pol.ok, pol.rules)
+    if (!pol.ok) {
+      // Use 422 so frontend can show “policy not met”
+      return res.status(422).json({ message: pol.message, policy: pol.rules })
+    }
+
     const user = await User.findById(userId)
+    console.log('[AUTH] user found?', !!user)
     if (!user) return res.status(404).json({ message: 'Not found' })
     if (user.isActive === false) return res.status(403).json({ message: 'Account disabled' })
 
     const ok = await user.verifyPassword(oldPassword)
+    console.log('[AUTH] old password ok?', ok)
     if (!ok) return res.status(400).json({ message: 'Old password is incorrect' })
 
-    // ✅ bump version -> revoke sessions
     await user.setPassword(newPassword)
     await user.save()
 
+    console.log('[AUTH] ✅ password updated')
     return res.json({ ok: true, message: 'Password updated. Please login again.' })
   } catch (e) {
+    console.log('[AUTH] ERROR in changePassword:', e?.message)
     next(e)
   }
 }

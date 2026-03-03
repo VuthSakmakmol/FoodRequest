@@ -112,18 +112,23 @@ async function submit() {
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center bg-slate-950 text-slate-50 px-3"
+    class="min-h-screen flex items-center justify-center
+           bg-slate-50 text-slate-900
+           dark:bg-slate-950 dark:text-slate-50
+           px-3"
   >
     <!-- 🔔 Toast stack -->
     <div class="fixed top-3 right-3 z-50 flex flex-col gap-2 max-w-xs text-xs">
       <div
         v-for="t in toasts"
         :key="t.id"
-        class="rounded-xl border px-3 py-2 shadow-lg bg-slate-900/95 flex gap-2"
+        class="rounded-xl border px-3 py-2 shadow-lg flex gap-2
+               bg-white/95 border-slate-200 text-slate-800
+               dark:bg-slate-900/95 dark:border-slate-800 dark:text-slate-100"
         :class="{
-          'border-emerald-400/70 text-emerald-100': t.type === 'success',
-          'border-red-400/70 text-red-100': t.type === 'error',
-          'border-amber-400/70 text-amber-100': t.type === 'warning',
+          'border-emerald-400/70 text-emerald-700 dark:text-emerald-100': t.type === 'success',
+          'border-red-400/70 text-red-700 dark:text-red-100': t.type === 'error',
+          'border-amber-400/70 text-amber-700 dark:text-amber-100': t.type === 'warning',
         }"
       >
         <div class="flex-1">
@@ -146,14 +151,16 @@ async function submit() {
 
     <!-- Card -->
     <div
-      class="w-full max-w-sm bg-slate-900/90 border border-slate-800 rounded-2xl shadow-xl backdrop-blur-md p-6 sm:p-7"
+      class="w-full max-w-sm rounded-2xl shadow-xl backdrop-blur-md p-6 sm:p-7
+             bg-white/90 border border-slate-200
+             dark:bg-slate-900/90 dark:border-slate-800"
     >
       <!-- Header -->
       <div class="flex flex-col items-center mb-4">
         <div
           class="h-12 w-12 rounded-2xl bg-[oklch(60%_0.118_184.704)] flex items-center justify-center shadow-md mb-2"
         >
-          <font-awesome-icon icon="user" class="text-slate-950 text-xl" />
+          <i class="fa-solid fa-user text-slate-950 text-xl"></i>
         </div>
         <h1 class="text-lg sm:text-xl font-bold tracking-wide">
           Sign In
@@ -164,23 +171,21 @@ async function submit() {
       <form @submit.prevent="submit" class="space-y-3">
         <!-- Login ID -->
         <div class="space-y-1">
-          <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Login ID
           </label>
           <div class="relative">
-            <span
-              class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-xs"
-            >
-              <font-awesome-icon icon="user" />
+            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-500 text-xs">
+              <i class="fa-solid fa-user"></i>
             </span>
             <input
               v-model="loginId"
               type="text"
               autocomplete="username"
-              class="block w-full bg-slate-900/60 border border-slate-700 rounded-xl py-2 pl-8 pr-3
-                     text-[16px] leading-tight
-                     outline-none text-slate-100 placeholder-slate-500
-                     focus:ring-2 focus:ring-[oklch(60%_0.118_184.704)]/80 focus:border-[oklch(60%_0.118_184.704)] transition"
+              class="block w-full rounded-xl py-2 pl-8 pr-3 text-[16px] leading-tight outline-none
+                     bg-white/70 border border-slate-300 text-slate-900 placeholder-slate-500
+                     focus:ring-2 focus:ring-[oklch(60%_0.118_184.704)]/80 focus:border-[oklch(60%_0.118_184.704)] transition
+                     dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
               placeholder="Enter your login ID"
             />
           </div>
@@ -188,7 +193,7 @@ async function submit() {
 
         <!-- Password -->
         <div class="space-y-1">
-          <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <label class="block text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             Password
           </label>
           <div class="relative">
@@ -196,17 +201,19 @@ async function submit() {
               v-model="password"
               :type="showPwd ? 'text' : 'password'"
               autocomplete="current-password"
-              class="block w-full bg-slate-900/60 border border-slate-700 rounded-xl py-2 px-3 pr-18
-                     text-[16px] leading-tight
-                     outline-none text-slate-100 placeholder-slate-500
-                     focus:ring-2 focus:ring-[oklch(60%_0.118_184.704)]/80 focus:border-[oklch(60%_0.118_184.704)] transition"
+              class="block w-full rounded-xl py-2 px-3 pr-18 text-[16px] leading-tight outline-none
+                     bg-white/70 border border-slate-300 text-slate-900 placeholder-slate-500
+                     focus:ring-2 focus:ring-[oklch(60%_0.118_184.704)]/80 focus:border-[oklch(60%_0.118_184.704)] transition
+                     dark:bg-slate-900/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
               placeholder="••••••••"
               @keydown="onCapsCheck"
               @keyup="onCapsCheck"
             />
             <button
               type="button"
-              class="absolute inset-y-0 right-0 px-3 text-[11px] font-semibold text-[oklch(80%_0.118_184.704)] hover:text-white uppercase tracking-wide"
+              class="absolute inset-y-0 right-0 px-3 text-[11px] font-semibold uppercase tracking-wide
+                     text-[oklch(60%_0.118_184.704)] hover:text-slate-900
+                     dark:text-[oklch(80%_0.118_184.704)] dark:hover:text-white"
               @click="showPwd = !showPwd"
             >
               {{ showPwd ? 'Hide' : 'Show' }}
@@ -214,9 +221,9 @@ async function submit() {
           </div>
           <p
             v-if="capsOn"
-            class="text-[11px] text-amber-300 mt-0.5 flex items-center gap-1"
+            class="text-[11px] mt-0.5 flex items-center gap-1 text-amber-600 dark:text-amber-300"
           >
-            <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-300" />
+            <span class="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 dark:bg-amber-300" />
             Caps Lock is ON
           </p>
         </div>
@@ -233,7 +240,7 @@ async function submit() {
                  transition-transform duration-150 active:scale-[0.98]"
         >
           <span class="inline-flex items-center gap-2">
-            <font-awesome-icon icon="right-to-bracket" class="text-sm" />
+            <i class="fa-solid fa-right-to-bracket text-sm"></i>
             <span>{{ loading ? 'Logging in...' : 'Login' }}</span>
             <span
               v-if="loading"
@@ -244,7 +251,7 @@ async function submit() {
       </form>
 
       <!-- Footer -->
-      <p class="mt-4 text-[10px] text-center text-slate-500">
+      <p class="mt-4 text-[10px] text-center text-slate-500 dark:text-slate-500">
         Trax Apparel Cambodia
       </p>
     </div>
