@@ -775,19 +775,42 @@ exports.listGmInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
-    const modeFilter = { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] }
+    const scope = up(req.query?.scope || '') // 'ALL' or ''
+    const actionableModes = ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY']
+    const viewerMode = 'MANAGER_ONLY'
 
-    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, gmLoginId: me }
-
-    // IMPORTANT: non-admin "scope=ALL" still must respect flow
     const query = isAdminViewer(req)
       ? scope === 'ALL'
-        ? { ...base }
-        : { ...base, status: 'PENDING_GM' }
+        ? {
+            approvalMode: { $in: [...actionableModes, viewerMode] },
+          }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, status: 'PENDING_GM' },
+              { approvalMode: viewerMode, status: 'PENDING_MANAGER' }, // ✅ viewer pending
+            ],
+          }
       : scope === 'ALL'
-        ? { ...base, status: { $in: allowedStatusesForInboxLevel('GM') } }
-        : { ...base, status: 'PENDING_GM' }
+        ? {
+            $or: [
+              {
+                approvalMode: { $in: actionableModes },
+                gmLoginId: me,
+                status: { $in: allowedStatusesForInboxLevel('GM') },
+              },
+              {
+                approvalMode: viewerMode,
+                // ✅ gmLoginId is empty in MANAGER_ONLY (your model clears it), so do NOT filter by gmLoginId
+                status: { $in: allowedStatusesForInboxLevel('MANAGER') }, // ✅ include PENDING_MANAGER + history
+              },
+            ],
+          }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, gmLoginId: me, status: 'PENDING_GM' },
+              { approvalMode: viewerMode, status: 'PENDING_MANAGER' }, // ✅ viewer pending
+            ],
+          }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -881,18 +904,41 @@ exports.listCooInbox = async (req, res, next) => {
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '')
-    const modeFilter = { $in: ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY'] }
+    const actionableModes = ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY']
+    const viewerMode = 'GM_ONLY'
 
-    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, cooLoginId: me }
-
-    // IMPORTANT: non-admin "scope=ALL" still must respect flow
     const query = isAdminViewer(req)
       ? scope === 'ALL'
-        ? { ...base }
-        : { ...base, status: 'PENDING_COO' }
+        ? {
+            approvalMode: { $in: [...actionableModes, viewerMode] },
+          }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, status: 'PENDING_COO' },
+              { approvalMode: viewerMode, status: 'PENDING_GM' }, // ✅ viewer pending
+            ],
+          }
       : scope === 'ALL'
-        ? { ...base, status: { $in: allowedStatusesForInboxLevel('COO') } }
-        : { ...base, status: 'PENDING_COO' }
+        ? {
+            $or: [
+              {
+                approvalMode: { $in: actionableModes },
+                cooLoginId: me,
+                status: { $in: allowedStatusesForInboxLevel('COO') },
+              },
+              {
+                approvalMode: viewerMode,
+                // ✅ cooLoginId is empty in GM_ONLY (your model clears it), so do NOT filter by cooLoginId
+                status: { $in: allowedStatusesForInboxLevel('GM') }, // ✅ include PENDING_GM + history
+              },
+            ],
+          }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, cooLoginId: me, status: 'PENDING_COO' },
+              { approvalMode: viewerMode, status: 'PENDING_GM' }, // ✅ viewer pending
+            ],
+          }
 
     const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))

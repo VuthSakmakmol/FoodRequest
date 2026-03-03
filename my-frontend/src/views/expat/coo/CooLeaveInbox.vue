@@ -3,13 +3,18 @@
   ✅ Edge-to-edge (no wasted edges)
   ✅ Responsive: mobile cards + desktop fixed table (scroll inside table wrap, not page overflow)
   ✅ Filters: search + requested date range + expat id
-  ✅ Export XLSX (ONE button, exports ALL rows)
+  ✅ Export XLSX (ONE button, exports ALL rows from backend)
   ✅ Approve/Reject with confirm modal (auto close on success)
   ✅ Attachments: READ-ONLY (preview/download like GM inbox)
   ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included via api instance)
   ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
--->
+  ✅ REALTIME: listens to leave:req:created + leave:req:updated and refreshes inbox (debounced)
 
+  Notes (matches your backend):
+  - COO can VIEW inbox if LEAVE_COO or admin viewer roles
+  - COO can DECIDE only if user has LEAVE_COO AND row.status === PENDING_COO
+  - Inbox may include "viewer rows" (GM_ONLY mode) with status PENDING_GM for visibility, but NOT actionable by COO
+-->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -30,9 +35,9 @@ const roles = computed(() => {
   const base = auth.user?.role ? [auth.user.role] : []
   return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
-const canCooDecide = computed(() =>
-  roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER')
-)
+
+/* ✅ only actual COO can decide (no admin bypass) */
+const canCooDecide = computed(() => roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER'))
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -46,8 +51,8 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const fromDate = ref('') // Requested at (createdAt)
-const toDate = ref('') // Requested at (createdAt)
+const fromDate = ref('') // filter by createdAt (requested at)
+const toDate = ref('') // filter by createdAt (requested at)
 const employeeFilter = ref('')
 
 /* Pagination */
@@ -63,7 +68,7 @@ function up(v) {
   return s(v).toUpperCase()
 }
 
-/* ✅ Display leave date range in DD-MM-YYYY (not a filter) */
+/* ✅ Display leave date range (not a filter) */
 function formatRange(row) {
   const a = row?.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
   const b = row?.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
@@ -134,12 +139,14 @@ function clearFilters() {
   toDate.value = ''
 }
 
-/* ✅ COO inbox endpoint */
+/* ✅ COO inbox endpoint (scope=ALL) */
 async function fetchInbox(silent = false) {
   try {
-    loading.value = true
+    if (!silent) loading.value = true
     const res = await api.get('/leave/requests/coo/inbox?scope=ALL')
-    rows.value = (Array.isArray(res.data) ? res.data : []).map((r) => ({
+
+    const list = Array.isArray(res.data) ? res.data : []
+    rows.value = list.map((r) => ({
       ...r,
       attachments: Array.isArray(r.attachments) ? r.attachments : [],
     }))
@@ -153,7 +160,7 @@ async function fetchInbox(silent = false) {
       })
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -260,7 +267,7 @@ function buildExportRows(list) {
 
 function exportExcel() {
   try {
-    // ✅ ONE export: export ALL rows from backend (not filtered)
+    // ✅ ONE export: export ALL rows returned by backend (scope=ALL)
     const list = rows.value
     if (!list.length) {
       showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
@@ -306,6 +313,7 @@ const rejectNote = ref('')
 
 const decisionOpen = computed(() => !!decideAction.value)
 
+/* ✅ actionable only when COO role + row is PENDING_COO */
 const canDecideRow = (row) => canCooDecide.value && up(row?.status) === 'PENDING_COO'
 
 function openApprove(row) {
@@ -353,7 +361,7 @@ async function confirmDecision() {
       message: 'COO decision saved.',
     })
 
-    // ✅ auto close on success
+    // ✅ auto close on success + refresh
     closeDecisionModal(true)
     await fetchInbox(true)
   } catch (e) {
@@ -402,7 +410,6 @@ function canPreviewInline(m) {
   return t.startsWith('image/') || t.includes('pdf')
 }
 
-/* ✅ build safe content URL (works with your api baseURL) */
 function buildAttContentUrl(requestId, attId) {
   const rid = s(requestId)
   const aid = s(attId)
@@ -488,7 +495,6 @@ async function openAttachments(row) {
     const res = await api.get(`/leave/requests/${row._id}/attachments`)
     const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
 
-    // ✅ normalize + ensure url exists
     attItems.value = (items || [])
       .map((x) => {
         const attId = s(x?.attId)
@@ -521,7 +527,7 @@ function closeAttachments() {
   attError.value = ''
 }
 
-/* ───────── Realtime ───────── */
+/* ───────── ✅ Realtime (matches your backend emits) ───────── */
 const offHandlers = []
 let refreshTimer = null
 
@@ -538,12 +544,10 @@ function setupRealtime() {
     company: auth.user?.companyCode,
   })
 
+  // Backend emits: emitReq(..., 'leave:req:created') and emitReq(..., 'leave:req:updated')
   offHandlers.push(
     onSocket('leave:req:created', () => triggerRealtimeRefresh()),
-    onSocket('leave:req:updated', () => triggerRealtimeRefresh()),
-    onSocket('leave:req:manager-decision', () => triggerRealtimeRefresh()),
-    onSocket('leave:req:gm-decision', () => triggerRealtimeRefresh()),
-    onSocket('leave:req:coo-decision', () => triggerRealtimeRefresh())
+    onSocket('leave:req:updated', () => triggerRealtimeRefresh())
   )
 }
 
@@ -1135,7 +1139,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   line-height: 1.35;
 }
-
 .ui-icon-btn {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;

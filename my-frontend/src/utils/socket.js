@@ -6,41 +6,26 @@ let isConnected = false
 let authToken = ''
 
 /* -------------------- Subscription state (persist across reconnect) -------------------- */
-const subscribedRoles  = new Set()
-const joinedBookings   = new Set()
-const joinedEmployees  = new Set()
-const joinedCompanies  = new Set()
-const joinedUsers      = new Set()
+const subscribedRoles = new Set()
+const joinedBookings = new Set()
+const joinedEmployees = new Set()
+const joinedCompanies = new Set()
+const joinedUsers = new Set()
 
 let heartbeatId = null
 
 /* -------------------- internal helpers -------------------- */
 function wsOrigin() {
   // ✅ default: same origin (works behind Nginx reverse proxy)
-  return (
-    import.meta.env.VITE_WS_ORIGIN ||
-    import.meta.env.VITE_API_BASE ||
-    location.origin
-  )
+  return import.meta.env.VITE_WS_ORIGIN || import.meta.env.VITE_API_BASE || location.origin
 }
 
 function normRole(r) {
   return String(r || '').toUpperCase().trim()
 }
 
-function startHeartbeat(sock) {
-  if (heartbeatId) return
-  heartbeatId = setInterval(() => {
-    try {
-      sock.emit('ping:client', Date.now())
-    } catch {}
-  }, 15000)
-}
-
-function stopHeartbeat() {
-  if (!heartbeatId) return
-  clearInterval(heartbeatId)
-  heartbeatId = null
+function normId(v) {
+  return String(v || '').trim()
 }
 
 /* ✅ emit with ACK so we know subscribe succeeded */
@@ -54,17 +39,40 @@ function emitAck(sock, event, payload) {
   })
 }
 
-function replaySubscriptions(sock) {
+function startHeartbeat(sock) {
+  if (heartbeatId) return
+  heartbeatId = setInterval(() => {
+    try {
+      if (sock?.connected) sock.emit('ping:client', Date.now())
+    } catch {}
+  }, 15000)
+}
+
+function stopHeartbeat() {
+  if (!heartbeatId) return
+  clearInterval(heartbeatId)
+  heartbeatId = null
+}
+
+/* ✅ replay subscriptions AFTER connect */
+async function replaySubscriptions(sock) {
+  const tasks = []
+
   // Roles
   for (const role of subscribedRoles) {
-    emitAck(sock, 'subscribe', { role })
+    tasks.push(emitAck(sock, 'subscribe', { role }))
   }
 
   // Rooms
-  for (const id of joinedBookings)  emitAck(sock, 'subscribe', { bookingId: id })
-  for (const id of joinedEmployees) emitAck(sock, 'subscribe', { employeeId: id })
-  for (const id of joinedCompanies) emitAck(sock, 'subscribe', { companyId: id })
-  for (const id of joinedUsers)     emitAck(sock, 'subscribe', { loginId: id })
+  for (const id of joinedBookings) tasks.push(emitAck(sock, 'subscribe', { bookingId: id }))
+  for (const id of joinedEmployees) tasks.push(emitAck(sock, 'subscribe', { employeeId: id }))
+  for (const id of joinedCompanies) tasks.push(emitAck(sock, 'subscribe', { companyId: id }))
+  for (const id of joinedUsers) tasks.push(emitAck(sock, 'subscribe', { loginId: id }))
+
+  // We don't want a single failure to break the rest
+  try {
+    await Promise.all(tasks)
+  } catch {}
 }
 
 function createSocket() {
@@ -76,16 +84,22 @@ function createSocket() {
     reconnectionDelayMax: 8000,
   })
 
-  s.on('connect', () => {
+  s.on('connect', async () => {
     isConnected = true
-    replaySubscriptions(s)
+    startHeartbeat(s)
+    await replaySubscriptions(s)
   })
 
   s.on('disconnect', () => {
     isConnected = false
+    stopHeartbeat()
   })
 
-  startHeartbeat(s)
+  s.on('connect_error', (err) => {
+    // ✅ super useful in production debugging
+    console.warn('[socket] connect_error:', err?.message || err)
+  })
+
   return s
 }
 
@@ -98,6 +112,7 @@ export default getSocket()
 
 async function waitConnected() {
   const s = getSocket()
+
   return new Promise((resolve) => {
     if (isConnected && s.connected) return resolve()
 
@@ -131,9 +146,17 @@ export function setSocketAuthToken(token) {
   authToken = token || ''
   const s = getSocket()
 
+  // Update auth payload used by Socket.IO
   s.auth = authToken ? { ...(s.auth || {}), token: authToken } : {}
 
   try {
+    if (!authToken) {
+      // ✅ logout: disconnect and do NOT reconnect
+      if (s.connected) s.disconnect()
+      return
+    }
+
+    // ✅ login/restore: reconnect with new token
     if (s.connected) s.disconnect()
     s.connect()
   } catch {}
@@ -168,9 +191,9 @@ export async function unsubscribeRole(role) {
 }
 
 export async function subscribeRoles(roles = []) {
-  const uniq = Array.from(
-    new Set((Array.isArray(roles) ? roles : [roles]).map(normRole))
-  ).filter(Boolean)
+  const uniq = Array.from(new Set((Array.isArray(roles) ? roles : [roles]).map(normRole))).filter(
+    Boolean
+  )
 
   for (const r of uniq) {
     // eslint-disable-next-line no-await-in-loop
@@ -179,9 +202,9 @@ export async function subscribeRoles(roles = []) {
 }
 
 export async function unsubscribeRoles(roles = []) {
-  const uniq = Array.from(
-    new Set((Array.isArray(roles) ? roles : [roles]).map(normRole))
-  ).filter(Boolean)
+  const uniq = Array.from(new Set((Array.isArray(roles) ? roles : [roles]).map(normRole))).filter(
+    Boolean
+  )
 
   for (const r of uniq) {
     // eslint-disable-next-line no-await-in-loop
@@ -214,7 +237,7 @@ export async function subscribeBookingRooms(ids = []) {
   await waitConnected()
   const s = getSocket()
 
-  const uniq = Array.from(new Set(ids.map(v => String(v || '').trim()).filter(Boolean)))
+  const uniq = Array.from(new Set(ids.map(normId).filter(Boolean)))
 
   for (const id of uniq) {
     if (joinedBookings.has(id)) continue
@@ -235,7 +258,7 @@ export async function subscribeBookingRooms(ids = []) {
 
 /* -------------------- EMPLOYEE + COMPANY + USER rooms -------------------- */
 export async function subscribeEmployeeIfNeeded(employeeId) {
-  const id = String(employeeId || '').trim()
+  const id = normId(employeeId)
   if (!id || joinedEmployees.has(id)) return
 
   await waitConnected()
@@ -247,7 +270,7 @@ export async function subscribeEmployeeIfNeeded(employeeId) {
 }
 
 export async function subscribeCompanyIfNeeded(companyId) {
-  const id = String(companyId || '').trim()
+  const id = normId(companyId)
   if (!id || joinedCompanies.has(id)) return
 
   await waitConnected()
@@ -259,7 +282,7 @@ export async function subscribeCompanyIfNeeded(companyId) {
 }
 
 export async function subscribeUserIfNeeded(loginId) {
-  const id = String(loginId || '').trim()
+  const id = normId(loginId)
   if (!id || joinedUsers.has(id)) return
 
   await waitConnected()
