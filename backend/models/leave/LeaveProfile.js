@@ -1,4 +1,3 @@
-// backend/models/leave/LeaveProfile.js
 const mongoose = require('mongoose')
 
 /* ───────────────── helpers ───────────────── */
@@ -70,10 +69,12 @@ function modeInvolvesManager(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesGm(mode) {
-  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+  // ✅ Modified to keep GM in DB for MANAGER_ONLY so they can view
+  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesCoo(mode) {
-  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY'
+  // ✅ Modified to keep COO in DB for GM_ONLY so they can view
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY' || mode === 'GM_ONLY'
 }
 
 function normalizeCarryObj(c) {

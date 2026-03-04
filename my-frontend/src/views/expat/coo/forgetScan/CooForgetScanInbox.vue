@@ -2,21 +2,19 @@
   ✅ SAME STYLE as your ManagerSwapDayInbox / ManagerForgetScanInbox
   ✅ Default filter = PENDING_COO
   ✅ Fetch scope=ALL then filter locally
-  ✅ Approve/Reject only when status=PENDING_COO
+  ✅ Approve/Reject only when status=PENDING_COO AND user has COO role AND row assigned to this COO
   ✅ Export Excel (xlsx)
   ✅ No SweetAlert2 / no window alert
   ✅ Uses /leave/forget-scan/coo/inbox?scope=ALL
      and /leave/forget-scan/:id/coo-decision
-  ✅ Realtime hooks: forgetscan:req:created / forgetscan:req:updated
+  ✅ Realtime hooks: forgetscan:req:created / forgetscan:req:updated (debounced refresh)
 
   ✅ UPDATED for NEW ForgetScan schema:
      - forgotTypes: ['FORGET_IN','FORGET_OUT'] (array)
      - forgotKey: FORGET_IN / FORGET_OUT / FORGET_IN_OUT
 
-  ✅ FIXED: Type badge duplication
-     - Show ONE badge:
-       - if BOTH => "FORGET_IN_OUT"
-       - else => single type
+  ✅ FIXED: Type badge duplication (show ONE badge only)
+  ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -26,14 +24,31 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
-
-// Excel export
 import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'CooForgetScanInbox' })
 
 const { showToast } = useToast()
 const auth = useAuth()
+
+/* ✅ roles helper (supports user.role + user.roles[]) */
+const roles = computed(() => {
+  const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
+  const base = auth.user?.role ? [auth.user.role] : []
+  return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
+})
+
+/* ✅ only actual COO can decide (no admin bypass) */
+const canCooDecide = computed(() =>
+  roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER')
+)
+
+/* ✅ mismatch-safe actor IDs: loginId + employeeId */
+function myActorIds() {
+  const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
+  const employeeId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
+  return [...new Set([loginId, employeeId].filter(Boolean))]
+}
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -48,7 +63,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL') // ✅ default filter
+const statusFilter = ref('PENDING_COO')
 
 /* pagination */
 const page = ref(1)
@@ -68,6 +83,9 @@ const decisionNote = ref('')
 
 /* export */
 const exporting = ref(false)
+
+/* modal flags for UX */
+const decisionOpen = computed(() => confirmOpen.value)
 
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
@@ -167,9 +185,17 @@ function getTypeBadges(row) {
   return [{ key: t, label: TYPE_LABEL[t] || t, cls: typeBadgeUiClass(t) }]
 }
 
-/** COO can decide only when pending at COO */
+/** ✅ COO can decide ONLY when:
+ *  - has COO role
+ *  - pending at COO
+ *  - row assigned to this COO (cooLoginId matches myActorIds)
+ */
 function canDecide(row) {
-  return up(row?.status) === 'PENDING_COO'
+  if (!canCooDecide.value) return false
+  if (up(row?.status) !== 'PENDING_COO') return false
+  const assigned = String(row?.cooLoginId || '').trim()
+  if (!assigned) return false
+  return myActorIds().includes(assigned)
 }
 
 /* brief reason helpers */
@@ -208,15 +234,21 @@ function getRejectedReason(row) {
 }
 
 /* ───────────────── FETCH ───────────────── */
-async function fetchInbox() {
+async function fetchInbox(silent = false) {
   try {
-    loading.value = true
+    if (!silent) loading.value = true
     const res = await api.get('/leave/forget-scan/coo/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load COO forget scan inbox' })
+    console.error('fetchInbox error', e)
+    if (!silent) {
+      showToast({
+        type: 'error',
+        message: e?.response?.data?.message || 'Failed to load COO forget scan inbox',
+      })
+    }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -311,8 +343,7 @@ watch(
     if (!viewOpen.value || !viewItem.value?._id) return
     const found = (list || []).find((x) => String(x._id) === String(viewItem.value._id))
     if (found) viewItem.value = found
-  },
-  { deep: true }
+  }
 )
 
 /* ───────────────── DECISION ───────────────── */
@@ -356,9 +387,7 @@ async function confirmDecision() {
   try {
     await api.post(`/leave/forget-scan/${row._id}/coo-decision`, {
       action,
-      comment: note,
-      note,
-      reason: note,
+      note, // send always (approve can be empty)
     })
 
     showToast({
@@ -369,8 +398,9 @@ async function confirmDecision() {
     closeConfirm(true)
     closeView()
 
-    await fetchInbox()
+    await fetchInbox(true)
   } catch (e) {
+    console.error('confirmDecision error', e)
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
   } finally {
     confirmBusy.value = false
@@ -407,6 +437,7 @@ async function exportExcel() {
   try {
     exporting.value = true
 
+    // ✅ Export CURRENT FILTERS
     const data = buildExcelRows(filteredRows.value)
     if (!data.length) {
       showToast({ type: 'warning', message: 'No data to export.' })
@@ -422,41 +453,58 @@ async function exportExcel() {
 
     showToast({ type: 'success', message: 'Excel exported.' })
   } catch (e) {
+    console.error('exportExcel error', e)
     showToast({ type: 'error', message: e?.message || 'Export failed.' })
   } finally {
     exporting.value = false
   }
 }
 
-/* ───────────────── REALTIME ───────────────── */
-function upsertRow(doc) {
-  if (!doc?._id) return
-  const id = String(doc._id)
-
-  const idx = rows.value.findIndex((x) => String(x._id) === id)
-  if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
-  else rows.value.unshift(doc)
-
-  if (viewItem.value?._id && String(viewItem.value._id) === id) {
-    viewItem.value = { ...viewItem.value, ...doc }
-  }
+/* ───────────────── REALTIME (debounced refresh) ───────────────── */
+let refreshTimer = null
+function triggerRealtimeRefresh() {
+  if (refreshTimer) clearTimeout(refreshTimer)
+  refreshTimer = setTimeout(() => fetchInbox(true), 180)
 }
 
-function onReqCreated(doc) {
-  upsertRow(doc)
+/* ───────────────── modal UX: body scroll lock + ESC ───────────────── */
+function lockBodyScroll(on) {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('overflow-hidden', !!on)
 }
-function onReqUpdated(doc) {
-  upsertRow(doc)
+
+watch([viewOpen, decisionOpen], ([v, d]) => {
+  lockBodyScroll(!!(v || d))
+})
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (confirmOpen.value) return closeConfirm()
+  if (viewOpen.value) return closeView()
 }
 
 /* lifecycle */
+function onReqCreated() {
+  triggerRealtimeRefresh()
+}
+function onReqUpdated() {
+  triggerRealtimeRefresh()
+}
+
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
 
   try {
+    // role room
     subscribeRoleIfNeeded({ role: 'LEAVE_COO' })
+    // optional extra role room, safe if your backend uses it
+    subscribeRoleIfNeeded({ role: 'LEAVE_COO_APPROVER' })
 
+    // personal rooms (mismatch-safe)
     const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
     const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
 
@@ -464,17 +512,24 @@ onMounted(async () => {
     if (loginId) await subscribeUserIfNeeded(loginId)
   } catch {}
 
-  await fetchInbox()
+  await fetchInbox(true)
 
   socket.on('forgetscan:req:created', onReqCreated)
   socket.on('forgetscan:req:updated', onReqUpdated)
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
+
+  if (refreshTimer) clearTimeout(refreshTimer)
 
   socket.off('forgetscan:req:created', onReqCreated)
   socket.off('forgetscan:req:updated', onReqUpdated)
+
+  lockBodyScroll(false)
 })
 </script>
 
@@ -521,7 +576,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox" title="Refresh">
+                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox()" title="Refresh">
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                 </button>
 
@@ -580,7 +635,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center justify-end gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox">
+                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox()">
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                   Refresh
                 </button>
@@ -630,11 +685,7 @@ onBeforeUnmount(() => {
                     Forgot:
                     <span class="font-extrabold">{{ row.forgotDate || '—' }}</span>
                     •
-                    <span
-                      v-for="b in getTypeBadges(row)"
-                      :key="row._id + '-mb-' + b.key"
-                      :class="b.cls"
-                    >
+                    <span v-for="b in getTypeBadges(row)" :key="row._id + '-mb-' + b.key" :class="b.cls">
                       {{ b.label }}
                     </span>
                   </div>
@@ -702,7 +753,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Forgot Date</th>
-                  <th class="ui-th">Type</th>
+                  <th class="ui-th text-center">Type</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -736,11 +787,7 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td text-center">
                     <div class="flex flex-wrap items-center justify-center gap-1">
-                      <span
-                        v-for="b in getTypeBadges(row)"
-                        :key="row._id + '-tb-' + b.key"
-                        :class="b.cls"
-                      >
+                      <span v-for="b in getTypeBadges(row)" :key="row._id + '-tb-' + b.key" :class="b.cls">
                         {{ b.label }}
                       </span>
                       <span v-if="!getTypeBadges(row).length" class="text-[11px] text-slate-400">—</span>
@@ -809,7 +856,9 @@ onBeforeUnmount(() => {
             <div class="flex items-center justify-end gap-1">
               <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
               <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
-              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
+              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">
+                Next
+              </button>
               <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
             </div>
           </div>
@@ -870,11 +919,7 @@ onBeforeUnmount(() => {
             <div class="ui-card p-3">
               <div class="ui-section-title">Type</div>
               <div class="mt-2 flex flex-wrap items-center gap-1">
-                <span
-                  v-for="b in getTypeBadges(viewItem)"
-                  :key="String(viewItem?._id || 'x') + '-db-' + b.key"
-                  :class="b.cls"
-                >
+                <span v-for="b in getTypeBadges(viewItem)" :key="String(viewItem?._id || 'x') + '-db-' + b.key" :class="b.cls">
                   {{ b.label }}
                 </span>
                 <span v-if="!getTypeBadges(viewItem).length" class="text-[11px] text-slate-400">—</span>

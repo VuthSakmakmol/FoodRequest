@@ -15,13 +15,14 @@ function uniqUpper(arr) {
 }
 
 /* ───────────────── enums ───────────────── */
-// ✅ UPDATED: include new modes
+// ✅ UPDATED: include COO_ONLY + keep cooLoginId for viewer restriction
 const APPROVAL_MODES = Object.freeze([
   'MANAGER_AND_GM',
   'MANAGER_AND_COO',
   'GM_AND_COO',
-  'MANAGER_ONLY', // ✅ NEW
-  'GM_ONLY',      // ✅ NEW
+  'MANAGER_ONLY',
+  'GM_ONLY',
+  'COO_ONLY',
 ])
 
 const STATUSES = Object.freeze([
@@ -36,7 +37,6 @@ const STATUSES = Object.freeze([
 const FORGOT_TYPES = Object.freeze(['FORGET_IN', 'FORGET_OUT'])
 const FORGOT_KEYS = Object.freeze(['FORGET_IN', 'FORGET_OUT', 'FORGET_IN_OUT'])
 
-// approval levels still the same set
 const APPROVAL_LEVELS = Object.freeze(['MANAGER', 'GM', 'COO'])
 const APPROVAL_ITEM_STATUSES = Object.freeze(['PENDING', 'APPROVED', 'REJECTED'])
 
@@ -63,14 +63,18 @@ function buildForgotKey(forgotTypes = []) {
   return '' // invalid
 }
 
-// ✅ recommended: same pattern as LeaveRequest/SwapRequest
 function normalizeMode(v) {
   const raw = up(v)
   if (APPROVAL_MODES.includes(raw)) return raw
   return 'MANAGER_AND_GM'
 }
 
-// ✅ used by LeaveProfile too (keep DB clean)
+/**
+ * ✅ Auto-clear unused approvers:
+ * - We KEEP cooLoginId for MANAGER_ONLY + GM_ONLY because you require:
+ *   "COO inbox viewerModes restricted to same cooLoginId".
+ *   That means those requests MUST still store cooLoginId.
+ */
 function modeInvolvesManager(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
 }
@@ -78,7 +82,13 @@ function modeInvolvesGm(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
 }
 function modeInvolvesCoo(mode) {
-  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
+  return (
+    mode === 'MANAGER_AND_COO' ||
+    mode === 'GM_AND_COO' ||
+    mode === 'COO_ONLY' ||
+    mode === 'GM_ONLY' || // keep for viewer restriction
+    mode === 'MANAGER_ONLY' // keep for viewer restriction
+  )
 }
 
 /* ───────────────── main schema ───────────────── */
@@ -91,7 +101,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
     forgotDate: { type: String, required: true, index: true },
 
     /**
-     * ✅ store multiple types in ONE request
+     * ✅ store multiple types in ONE request:
      * - [FORGET_IN]
      * - [FORGET_OUT]
      * - [FORGET_IN, FORGET_OUT]
@@ -118,7 +128,6 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
 
     reason: { type: String, default: '' },
 
-    // ✅ UPDATED enum supports MANAGER_ONLY / GM_ONLY
     approvalMode: { type: String, enum: APPROVAL_MODES, required: true },
 
     managerLoginId: { type: String, default: '' },
@@ -137,8 +146,16 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
     cooComment: { type: String, default: '' },
     cooDecisionAt: { type: Date, default: null },
 
+    rejectedReason: { type: String, default: '' },
+    rejectedAt: { type: Date, default: null },
+    rejectedBy: { type: String, default: '' },
+    rejectedLevel: { type: String, default: '' },
+
     cancelledAt: { type: Date, default: null },
     cancelledBy: { type: String, default: '' },
+
+    // NOTE: attachments handled by GridFS endpoints, keep as empty array if you want
+    attachments: { type: Array, default: [] },
   },
   { timestamps: true }
 )
@@ -160,7 +177,7 @@ ExpatForgetScanRequestSchema.pre('validate', function (next) {
     if (!key) return next(new Error('forgotTypes must include FORGET_IN and/or FORGET_OUT.'))
     this.forgotKey = key
 
-    // ✅ normalize mode
+    // normalize mode
     this.approvalMode = normalizeMode(this.approvalMode)
 
     // normalize approver ids
@@ -168,14 +185,16 @@ ExpatForgetScanRequestSchema.pre('validate', function (next) {
     this.gmLoginId = s(this.gmLoginId)
     this.cooLoginId = s(this.cooLoginId)
 
-    // ✅ auto-clear unused approvers (same as LeaveProfile)
+    // auto-clear unused approvers (keep DB clean)
     const mode = this.approvalMode
     if (!modeInvolvesManager(mode)) this.managerLoginId = ''
     if (!modeInvolvesGm(mode)) this.gmLoginId = ''
     if (!modeInvolvesCoo(mode)) this.cooLoginId = ''
 
+    // normalize status
     this.status = up(this.status)
 
+    // normalize approvals items
     if (!Array.isArray(this.approvals)) this.approvals = []
     this.approvals = this.approvals.map((a) => ({
       level: up(a?.level),
@@ -184,6 +203,13 @@ ExpatForgetScanRequestSchema.pre('validate', function (next) {
       actedAt: a?.actedAt || null,
       note: s(a?.note || ''),
     }))
+
+    // normalize reject fields
+    this.rejectedReason = s(this.rejectedReason)
+    this.rejectedBy = s(this.rejectedBy)
+    this.rejectedLevel = up(this.rejectedLevel)
+
+    this.cancelledBy = s(this.cancelledBy)
 
     next()
   } catch (e) {
@@ -211,7 +237,7 @@ ExpatForgetScanRequestSchema.index({ managerLoginId: 1, status: 1, createdAt: -1
 ExpatForgetScanRequestSchema.index({ gmLoginId: 1, status: 1, createdAt: -1 })
 ExpatForgetScanRequestSchema.index({ cooLoginId: 1, status: 1, createdAt: -1 })
 
-/* ───────────────── statics (optional but useful) ───────────────── */
+/* ───────────────── statics ───────────────── */
 ExpatForgetScanRequestSchema.statics.APPROVAL_MODES = APPROVAL_MODES
 ExpatForgetScanRequestSchema.statics.normalizeMode = normalizeMode
 

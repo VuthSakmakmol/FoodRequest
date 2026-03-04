@@ -1,9 +1,14 @@
 <!-- src/views/expat/user/forgetScan/UserForgetScan.vue
-  ✅ Backend supports ONLY forgotType (single)
-  ✅ UI uses tick chips (can choose one or both)
-  ✅ If choose both -> frontend submits TWO requests (FORGET_IN + FORGET_OUT)
-  ✅ Edit = single request only (one forgotType)
-  ✅ No crash from ref unwrapping
+  ✅ Standardized to NEW ForgetScan schema:
+     - forgotTypes: ['FORGET_IN','FORGET_OUT'] (array)
+     - forgotKey optional (computed if missing)
+  ✅ Create: one request can contain one OR both types
+  ✅ Edit: still single request (choose one type) → saved as forgotTypes:[one]
+  ✅ Fixed: double PATCH bug
+  ✅ Fixed: editForm mismatch bug
+  ✅ Fixed: reason validation logic
+  ✅ Fixed: detail modal type display consistency
+  ✅ Safer date-to-date filter (normalizes to YYYY-MM-DD)
   ✅ Realtime: forgetscan:req:created / forgetscan:req:updated
 -->
 
@@ -29,9 +34,9 @@ const rows = ref([])
 const search = ref('')
 const statusFilter = ref('ALL')
 
-/* ✅ NEW: date-to-date filter (Forgot Date) */
-const dateFrom = ref('') // YYYY-MM-DD
-const dateTo = ref('') // YYYY-MM-DD
+/* date-to-date filter (Forgot Date) */
+const dateFrom = ref('')
+const dateTo = ref('')
 
 /* responsive */
 const isMobile = ref(false)
@@ -45,7 +50,7 @@ const createOpen = ref(false)
 const createBusy = ref(false)
 const form = ref({
   forgotDate: '',
-  forgotTypes: [], // ✅ UI only: ['FORGET_IN','FORGET_OUT']
+  forgotTypes: [], // ['FORGET_IN','FORGET_OUT']
   reason: '',
 })
 
@@ -56,7 +61,7 @@ const editError = ref('')
 const editItem = ref(null)
 const editForm = ref({
   forgotDate: '',
-  forgotType: [], // ✅ backend field
+  forgotType: 'FORGET_IN', // ✅ string (single select)
   reason: '',
 })
 
@@ -85,6 +90,12 @@ const TYPE_OPTIONS = [
   { value: 'FORGET_OUT', label: 'Forget OUT' },
 ]
 
+const TYPE_LABEL = {
+  FORGET_IN: 'Forget IN',
+  FORGET_OUT: 'Forget OUT',
+  FORGET_IN_OUT: 'Forget IN & OUT',
+}
+
 /* ───────────────── HELPERS ───────────────── */
 function up(v) {
   return String(v ?? '').trim().toUpperCase()
@@ -111,18 +122,38 @@ function statusBadgeUiClass(s) {
   if (st.includes('PENDING')) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
-
 function typeBadgeUiClass(t) {
   const tt = up(t)
   if (tt === 'FORGET_OUT') return 'ui-badge ui-badge-indigo'
   return 'ui-badge ui-badge-info'
 }
 
-function typeLabel(v) {
-  const t = up(v)
-  if (t === 'FORGET_IN') return 'Forget IN'
-  if (t === 'FORGET_OUT') return 'Forget OUT'
-  return v || '—'
+/* normalize types from row (new schema + backward compat) */
+function getTypesArray(row) {
+  const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
+  if (arr.length) return arr.map((x) => up(x)).filter(Boolean)
+  const legacy = up(row?.forgotType)
+  return legacy ? [legacy] : []
+}
+
+function getTypeKey(row) {
+  const key = up(row?.forgotKey)
+  if (key) return key
+  const arr = getTypesArray(row)
+  const hasIn = arr.includes('FORGET_IN')
+  const hasOut = arr.includes('FORGET_OUT')
+  if (hasIn && hasOut) return 'FORGET_IN_OUT'
+  if (hasIn) return 'FORGET_IN'
+  if (hasOut) return 'FORGET_OUT'
+  return ''
+}
+
+function typesToTextFromRow(row) {
+  const key = getTypeKey(row)
+  if (key === 'FORGET_IN_OUT') return TYPE_LABEL.FORGET_IN_OUT
+  const arr = getTypesArray(row)
+  if (!arr.length) return '—'
+  return arr.map((t) => TYPE_LABEL[t] || t).join(' + ')
 }
 
 /* ✅ safe for template ref unwrapping */
@@ -147,14 +178,7 @@ function toggleTypeInForm(maybeRefOrObj, typeValue) {
   if (idx >= 0) arr.splice(idx, 1)
   else arr.push(v)
 
-  // stable order
   obj.forgotTypes = ['FORGET_IN', 'FORGET_OUT'].filter((x) => arr.includes(x))
-}
-
-function typesToText(arr) {
-  const a = Array.isArray(arr) ? arr : []
-  if (!a.length) return '—'
-  return a.map(typeLabel).join(' + ')
 }
 
 function isPending(item) {
@@ -183,9 +207,20 @@ function canEdit(item) {
   return !(anyApproved || anyRejected || anyActed)
 }
 
-/* ✅ NEW: date-to-date filter helper (Forgot Date) */
+/* normalize forgotDate to YYYY-MM-DD for filter compare */
+function toYmdSafe(v) {
+  if (!v) return ''
+  // if already YYYY-MM-DD
+  const s = String(v).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  // try dayjs parse
+  const d = dayjs(s)
+  return d.isValid() ? d.format('YYYY-MM-DD') : ''
+}
+
+/* date-to-date filter (Forgot Date) */
 function passDateFilter(forgotDate, from, to) {
-  const d = String(forgotDate || '').trim()
+  const d = toYmdSafe(forgotDate)
   const f1 = String(from || '').trim()
   const f2 = String(to || '').trim()
 
@@ -223,6 +258,8 @@ function closeCreate() {
   createOpen.value = false
 }
 
+/* ✅ Decide: reason required or optional?
+   - Here: REQUIRED (better for audit). If you want optional, tell me and I’ll change it. */
 function validateCreate(v) {
   const d = String(v?.forgotDate || '').trim()
   const types = Array.isArray(v?.forgotTypes) ? v.forgotTypes.map(up).filter(Boolean) : []
@@ -231,7 +268,7 @@ function validateCreate(v) {
   if (!d) return 'Forgot date is required.'
   if (!types.length) return 'Please tick Forget IN and/or Forget OUT.'
   if (!types.every((t) => ['FORGET_IN', 'FORGET_OUT'].includes(t))) return 'Invalid type selection.'
-  if (!r || r.length < 3) return ''
+  if (!r || r.length < 3) return 'Reason is required (min 3 characters).'
   return ''
 }
 
@@ -250,15 +287,27 @@ async function submitCreate() {
       reason: compactText(form.value.reason),
     }
 
+    // ✅ NEW schema: submit ONE request even if both selected
     const res = await api.post('/leave/forget-scan', payload)
     if (res?.data?._id) upsertRow(res.data)
 
     showToast({
       type: 'success',
-      message: payload.forgotTypes.length === 2 ? 'Forget IN + OUT submitted (one request).' : 'Forget scan submitted.',
+      message: payload.forgotTypes.length === 2 ? 'Forget IN & OUT submitted.' : 'Forget scan submitted.',
     })
 
     createOpen.value = false
+
+    /* If you truly want "both = TWO requests" (old backend single-type),
+       replace the single POST above with this:
+
+       const types = payload.forgotTypes
+       for (const t of types) {
+         const one = { forgotDate: payload.forgotDate, forgotType: t, reason: payload.reason }
+         const r = await api.post('/leave/forget-scan', one)
+         if (r?.data?._id) upsertRow(r.data)
+       }
+    */
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Submit failed.' })
   } finally {
@@ -275,9 +324,11 @@ function openEdit(item) {
   }
   editItem.value = item
   editError.value = ''
+
+  const types = getTypesArray(item)
   editForm.value = {
-    forgotDate: String(item.forgotDate || '').trim(),
-    forgotTypes: Array.isArray(item.forgotTypes) ? item.forgotTypes.map(up) : [],
+    forgotDate: String(toYmdSafe(item.forgotDate) || '').trim(),
+    forgotType: types[0] || 'FORGET_IN',
     reason: String(item.reason || ''),
   }
   editOpen.value = true
@@ -292,13 +343,12 @@ function closeEdit(force = false) {
 
 function validateEdit(v) {
   const d = String(v?.forgotDate || '').trim()
-  const types = Array.isArray(v?.forgotTypes) ? v.forgotTypes.map(up).filter(Boolean) : []
+  const t = up(v?.forgotType || '')
   const r = compactText(v?.reason)
 
   if (!d) return 'Forgot date is required.'
-  if (!types.length) return 'Please tick Forget IN and/or Forget OUT.'
-  if (!types.every((t) => ['FORGET_IN', 'FORGET_OUT'].includes(t))) return 'Invalid type selection.'
-  if (!r || r.length < 3) return ''
+  if (!['FORGET_IN', 'FORGET_OUT'].includes(t)) return 'Invalid type selection.'
+  if (!r || r.length < 3) return 'Reason is required (min 3 characters).'
   return ''
 }
 
@@ -323,11 +373,11 @@ async function submitEdit() {
   try {
     const payload = {
       forgotDate: String(editForm.value.forgotDate || '').trim(),
-      forgotTypes: [...new Set((editForm.value.forgotTypes || []).map(up).filter(Boolean))],
+      forgotTypes: [up(editForm.value.forgotType)], // ✅ store as array (new schema)
       reason: compactText(editForm.value.reason),
     }
-    await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
 
+    // ✅ FIXED: only ONE PATCH
     const res = await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
 
     const doc = res?.data
@@ -369,10 +419,7 @@ watch(
 /* ───────────────── CANCEL ───────────────── */
 function askCancel(item) {
   if (!canCancel(item)) {
-    showToast({
-      type: 'warning',
-      message: 'This request cannot be cancelled after any approval.',
-    })
+    showToast({ type: 'warning', message: 'This request cannot be cancelled after any approval.' })
     return
   }
   cancelTarget.value = item
@@ -405,13 +452,18 @@ const filteredRows = computed(() => {
     result = result.filter((r) => up(r.status) === up(statusFilter.value))
   }
 
-  /* ✅ NEW: apply date-to-date filter by forgotDate */
   result = result.filter((r) => passDateFilter(r?.forgotDate, dateFrom.value, dateTo.value))
 
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
     result = result.filter((r) => {
-      const hay = [r.forgotDate, (r.forgotTypes || []).join(','), r.forgotKey, r.status, r.reason]
+      const hay = [
+        toYmdSafe(r.forgotDate),
+        getTypeKey(r),
+        getTypesArray(r).join(','),
+        r.status,
+        r.reason,
+      ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
       return hay.includes(q)
@@ -438,9 +490,10 @@ function upsertRow(doc) {
   if (editItem.value?._id && String(editItem.value._id) === id) {
     editItem.value = { ...editItem.value, ...doc }
     if (editOpen.value) {
+      const types = getTypesArray(editItem.value)
       editForm.value = {
-        forgotDate: String(editItem.value.forgotDate || '').trim(),
-        forgotType: up(editItem.value.forgotType || 'FORGET_IN'),
+        forgotDate: String(toYmdSafe(editItem.value.forgotDate) || '').trim(),
+        forgotType: types[0] || 'FORGET_IN',
         reason: String(editItem.value.reason || ''),
       }
     }
@@ -490,7 +543,6 @@ onBeforeUnmount(() => {
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div class="text-sm font-extrabold">Forget Scan</div>
 
-            <!-- ✅ ONLY CHANGE: add Date From / Date To in the filter bar -->
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_170px_170px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
@@ -551,7 +603,7 @@ onBeforeUnmount(() => {
             No forget scan requests found.
           </div>
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-else-if="isMobile" class="space-y-2">
             <article v-for="item in filteredRows" :key="item._id" class="ui-card p-3">
               <div class="flex items-start justify-between gap-3">
@@ -568,7 +620,7 @@ onBeforeUnmount(() => {
 
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
                     Type:
-                    <span class="font-extrabold">{{ typesToText(item.forgotTypes) }}</span>
+                    <span class="font-extrabold">{{ typesToTextFromRow(item) }}</span>
                   </div>
                 </div>
 
@@ -612,7 +664,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table">
               <thead>
@@ -629,11 +681,8 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr v-for="item in filteredRows" :key="item._id" class="ui-tr-hover">
                   <td class="ui-td">{{ fmtDateTime(item.createdAt) }}</td>
-                  <td class="ui-td">{{ item.forgotDate || '—' }}</td>
-
-                  <td class="ui-td">
-                    {{ typesToText(item.forgotTypes) }}
-                  </td>
+                  <td class="ui-td">{{ fmtYmd(item.forgotDate) }}</td>
+                  <td class="ui-td">{{ typesToTextFromRow(item) }}</td>
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(item.status)">
@@ -678,14 +727,14 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <!-- ✅ CREATE MODAL -->
+  <!-- CREATE MODAL -->
   <div v-if="createOpen" class="ui-modal-backdrop">
     <div class="ui-modal p-0 overflow-hidden max-w-xl">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">New Forget Scan</div>
           <div class="text-[11px] text-slate-500 dark:text-slate-400">
-            Choose date, type(s), and reason. (Selecting both will create 2 requests.)
+            Choose date, type(s), and reason.
           </div>
         </div>
         <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" :disabled="createBusy" @click="closeCreate">
@@ -723,7 +772,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                You can tick one or both.
+                You can tick one or both (IN & OUT can be in one request).
               </div>
             </div>
           </div>
@@ -754,13 +803,13 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <!-- ✅ EDIT MODAL (single request only) -->
+  <!-- EDIT MODAL -->
   <div v-if="editOpen" class="ui-modal-backdrop">
     <div class="ui-modal p-0 overflow-hidden max-w-xl">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit Forget Scan</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">Edit is single request (one type).</div>
+          <div class="text-[11px] text-slate-500 dark:text-slate-400">Edit is single request (choose one type).</div>
         </div>
         <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" :disabled="editBusy" @click="closeEdit">
           <i class="fa-solid fa-xmark text-[11px]" />
@@ -783,7 +832,7 @@ onBeforeUnmount(() => {
                 <option value="FORGET_OUT">Forget OUT</option>
               </select>
               <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                To create both IN+OUT, use “New Request”.
+                To create both IN & OUT, use “New Request”.
               </div>
             </div>
           </div>
@@ -818,7 +867,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <!-- ✅ DETAIL MODAL -->
+  <!-- DETAIL MODAL -->
   <div v-if="viewOpen" class="ui-modal-backdrop">
     <div class="ui-modal p-0 overflow-hidden max-w-3xl">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
@@ -847,13 +896,15 @@ onBeforeUnmount(() => {
 
             <div>
               <div class="ui-label">Type</div>
-              <span :class="typeBadgeUiClass(viewItem?.forgotType)">{{ typeLabel(viewItem?.forgotType) }}</span>
+              <span :class="typeBadgeUiClass(getTypeKey(viewItem))">
+                {{ TYPE_LABEL[getTypeKey(viewItem)] || getTypeKey(viewItem) || '—' }}
+              </span>
             </div>
 
             <div class="md:text-right">
               <div class="ui-label">Forgot Date</div>
               <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                {{ viewItem?.forgotDate || '—' }}
+                {{ fmtYmd(viewItem?.forgotDate) }}
               </div>
             </div>
           </div>

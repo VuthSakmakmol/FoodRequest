@@ -26,39 +26,46 @@ function broadcastForgetScanRequest(io, payload, event = 'forgetscan:req:updated
   const mode = up(payload.approvalMode)
   const st = up(payload.status)
 
-  // ✅ always
+  // ✅ always notify admins + requester
   io.to('admins').emit(event, payload)
   if (empId) io.to(`employee:${empId}`).emit(event, payload)
+
   emitUser(io, requester, event, payload)
-  if (empId) emitUser(io, empId, event, payload) // optional fallback
+  // optional fallback (if requesterLoginId sometimes equals employeeId)
+  if (empId) emitUser(io, empId, event, payload)
 
-  // helpers: which approvers exist in this mode?
-  const hasManager = mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO'
-  const hasGm = mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO'
-  const hasCoo = mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO'
+  // which approvers exist in mode?
+  const hasManager = mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
+  const hasGm = mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+  const hasCoo =
+    mode === 'MANAGER_AND_COO' ||
+    mode === 'GM_AND_COO' ||
+    mode === 'COO_ONLY' ||
+    mode === 'GM_ONLY' ||
+    mode === 'MANAGER_ONLY' // keep coo viewer restriction
 
-  // ✅ queue + history notifications
+  // ✅ pending routing (notify current approver + previous approvers for visibility)
   if (st === 'PENDING_MANAGER') {
     if (hasManager) emitUser(io, manager, event, payload)
+    if (hasCoo) emitUser(io, coo, event, payload) // viewer restriction
     return
   }
 
   if (st === 'PENDING_GM') {
-    // manager already approved (if manager exists) -> keep manager seeing updates
     if (hasManager) emitUser(io, manager, event, payload)
     if (hasGm) emitUser(io, gm, event, payload)
+    if (hasCoo) emitUser(io, coo, event, payload) // viewer restriction
     return
   }
 
   if (st === 'PENDING_COO') {
-    // ✅ key: previous approver(s) still see while waiting COO
     if (hasManager) emitUser(io, manager, event, payload)
     if (hasGm) emitUser(io, gm, event, payload)
     if (hasCoo) emitUser(io, coo, event, payload)
     return
   }
 
-  // final states: everyone sees result
+  // ✅ final states: everyone involved sees result
   if (hasManager) emitUser(io, manager, event, payload)
   if (hasGm) emitUser(io, gm, event, payload)
   if (hasCoo) emitUser(io, coo, event, payload)

@@ -1,16 +1,20 @@
-<!-- src/views/coo/GmSwapDayInbox.vue
-  ✅ FULL CODE (NO ATTACHMENTS VERSION)
-  ✅ Supports new approval modes:
-     - GM_ONLY          ✅ included in GM inbox, approve -> APPROVED
-     - GM_AND_COO       ✅ included
-     - MANAGER_AND_GM   ✅ included (after manager approve)
-     - MANAGER_ONLY     ❌ not shown in GM inbox (GM not involved)
-     - MANAGER_AND_COO  ❌ not shown in GM inbox (GM not involved)
-  ✅ Admin viewers can VIEW but CANNOT decide
-  ✅ Realtime swap:req:created / swap:req:updated
+<!-- src/views/expat/gm/GmSwapWorkingDay.vue
+  ✅ GM Inbox · Swap Working Day (NO ATTACHMENTS)
+  ✅ Modes shown in GM inbox:
+     - GM_ONLY
+     - GM_AND_COO
+     - MANAGER_AND_GM (after manager approves)
+  ❌ Modes NOT shown (GM not involved):
+     - MANAGER_ONLY
+     - MANAGER_AND_COO
+     - COO_ONLY
+  ✅ Admin viewers can VIEW (scope=ALL) but CANNOT decide
+  ✅ Realtime: swap:req:created / swap:req:updated
   ✅ Bulk approve/reject
   ✅ Excel export
+  ✅ Responsive: mobile cards + desktop table (horizontal scroll)
 -->
+
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -18,18 +22,18 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
-// ✅ realtime
+// realtime
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
-// ✅ Excel export
+// Excel export
 import * as XLSX from 'xlsx'
 
-defineOptions({ name: 'GmSwapDayInbox' })
+defineOptions({ name: 'GmSwapWorkingDay' })
 
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ───────── responsive flag ───────── */
+/* ───────── responsive ───────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
@@ -73,7 +77,7 @@ const exporting = ref(false)
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const one = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...one].map((r) => String(r || '').trim().toUpperCase()))]
+  return [...new Set([...raw, ...one].map((r) => String(r || '').trim().toUpperCase()).filter(Boolean))]
 })
 
 const isAdminViewer = computed(() =>
@@ -90,7 +94,7 @@ const COL_WIDTH = {
   swapDate: '200px',
   status: '140px',
   actions: '92px',
-  reason: '260px',
+  reason: '320px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -129,10 +133,9 @@ function statusBadgeUiClass(x) {
   return 'ui-badge'
 }
 
-
 /**
  * ✅ GM can decide ONLY when status=PENDING_GM
- * Admin viewers cannot decide.
+ * ✅ Admin viewers cannot decide.
  */
 function canDecide(row) {
   if (isAdminViewer.value) return false
@@ -174,11 +177,28 @@ function getRejectedReason(row) {
   return '—'
 }
 
+/* ───────────────── BODY SCROLL LOCK + ESC ───────────────── */
+function setBodyLock(lock) {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = lock ? 'hidden' : ''
+}
+function closeTopmostModal() {
+  if (bulkConfirmOpen.value) return closeBulkConfirm()
+  if (confirmOpen.value) return closeConfirm()
+  if (viewOpen.value) return closeView()
+}
+function onKeydown(e) {
+  if (e.key === 'Escape') closeTopmostModal()
+}
+watch(
+  () => [viewOpen.value, confirmOpen.value, bulkConfirmOpen.value],
+  ([v, c, b]) => setBodyLock(!!(v || c || b))
+)
+
 /* ───────────────── FETCH ───────────────── */
 async function fetchInbox() {
   try {
     loading.value = true
-    // Backend should include GM_ONLY in GM inbox scope.
     const res = await api.get('/leave/swap-working-day/gm/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
@@ -204,6 +224,7 @@ const filteredRows = computed(() => {
         r.employeeName,
         r.name,
         r.department,
+        r.departmentName,
         r.reason,
         r.status,
         r.requestStartDate,
@@ -264,7 +285,6 @@ function openApprove(row) {
   decisionNote.value = ''
   confirmOpen.value = true
 }
-
 function openReject(row) {
   if (!canDecide(row)) return
   confirmType.value = 'REJECT'
@@ -272,7 +292,6 @@ function openReject(row) {
   decisionNote.value = ''
   confirmOpen.value = true
 }
-
 function closeConfirm(force = false) {
   if (confirmBusy.value && !force) return
   confirmOpen.value = false
@@ -306,7 +325,7 @@ async function confirmDecision() {
 
     showToast({
       type: 'success',
-      message: action === 'APPROVE' ? 'Approved and sent to next step.' : 'Rejected.',
+      message: action === 'APPROVE' ? 'Approved.' : 'Rejected.',
     })
 
     closeConfirm(true)
@@ -463,7 +482,6 @@ function upsertRow(doc) {
     selectedIds.value = next
   }
 }
-
 function onSwapCreated(doc) {
   upsertRow(doc)
 }
@@ -488,7 +506,7 @@ function exportExcel() {
       CreatedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
       EmployeeID: r.employeeId || '',
       EmployeeName: r.employeeName || r.name || '',
-      Department: r.department || '',
+      Department: r.department || r.departmentName || '',
       WorkDateFrom: r.requestStartDate || '',
       WorkDateTo: r.requestEndDate || '',
       SwapDateFrom: r.offStartDate || '',
@@ -497,6 +515,7 @@ function exportExcel() {
       OffDays: r.offTotalDays ?? '',
       Status: r.status || '',
       Reason: r.reason || '',
+      ApprovalMode: r.approvalMode || '',
     }))
 
     if (!list.length) {
@@ -522,7 +541,10 @@ function exportExcel() {
 /* lifecycle */
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
 
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_GM' })
@@ -541,9 +563,13 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
   socket.off('swap:req:created', onSwapCreated)
   socket.off('swap:req:updated', onSwapUpdated)
+  setBodyLock(false)
 })
 </script>
 
@@ -603,17 +629,34 @@ onBeforeUnmount(() => {
                     <span class="ml-1">{{ selectedCount }}</span>
                   </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-emerald" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkApprove">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-emerald"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkApprove"
+                  >
                     <i class="fa-solid fa-circle-check text-[11px]" />
                     Approve ({{ selectedCount }})
                   </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-rose"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkReject"
+                  >
                     <i class="fa-solid fa-circle-xmark text-[11px]" />
                     Reject ({{ selectedCount }})
                   </button>
 
-                  <button v-if="selectedCount" class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading || deciding" @click="clearSelection" title="Clear selection">
+                  <button
+                    v-if="selectedCount"
+                    class="ui-btn ui-btn-sm ui-btn-ghost"
+                    type="button"
+                    :disabled="loading || deciding"
+                    @click="clearSelection"
+                    title="Clear selection"
+                  >
                     <i class="fa-solid fa-xmark text-[11px]" />
                   </button>
                 </template>
@@ -622,7 +665,13 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel" title="Export to Excel">
+                <button
+                  class="ui-btn ui-btn-sm ui-btn-soft"
+                  type="button"
+                  :disabled="loading || exporting"
+                  @click="exportExcel"
+                  title="Export to Excel"
+                >
                   <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
                 </button>
@@ -673,16 +722,31 @@ onBeforeUnmount(() => {
 
               <div class="flex flex-wrap items-center justify-end gap-2">
                 <template v-if="isRealGm && !isAdminViewer">
-                  <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || deciding || !selectableRows.length" @click="toggleSelectAll">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-soft"
+                    type="button"
+                    :disabled="loading || deciding || !selectableRows.length"
+                    @click="toggleSelectAll"
+                  >
                     <i class="fa-solid fa-check-double text-[11px]" />
                     Select ({{ selectedCount }})
                   </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-emerald" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkApprove">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-emerald"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkApprove"
+                  >
                     Approve ({{ selectedCount }})
                   </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-rose"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkReject"
+                  >
                     Reject ({{ selectedCount }})
                   </button>
                 </template>
@@ -713,7 +777,10 @@ onBeforeUnmount(() => {
 
           <!-- ✅ MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
+            <div
+              v-if="!pagedRows.length && !loading"
+              class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400"
+            >
               No items found.
             </div>
 
@@ -730,7 +797,6 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">ID: {{ row.employeeId || '—' }}</div>
-
                 </div>
 
                 <div class="shrink-0 text-right space-y-1 flex items-start gap-2">
@@ -767,11 +833,23 @@ onBeforeUnmount(() => {
 
               <div class="mt-3 flex items-center justify-end gap-2" @click.stop>
                 <template v-if="canDecide(row)">
-                  <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
+                    :disabled="loading || deciding"
+                    @click="openApprove(row)"
+                    title="Approve"
+                  >
                     <i class="fa-solid fa-circle-check text-[12px]" />
                   </button>
 
-                  <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
+                    :disabled="loading || deciding"
+                    @click="openReject(row)"
+                    title="Reject"
+                  >
                     <i class="fa-solid fa-circle-xmark text-[12px]" />
                   </button>
                 </template>
@@ -781,9 +859,9 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- ✅ DESKTOP TABLE (horizontal scroll via ui-table-wrap + min-w) -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1180px]">
+            <table class="ui-table table-fixed w-full min-w-[1240px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
@@ -819,24 +897,44 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
                 </tr>
 
-                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
+                <tr
+                  v-for="row in pagedRows"
+                  :key="row._id"
+                  class="ui-tr-hover cursor-pointer"
+                  @click="openView(row)"
+                >
                   <td class="ui-td text-center" @click.stop>
-                    <input v-if="canDecide(row)" type="checkbox" :checked="isSelected(row)" @change="toggleSelectRow(row)" aria-label="Select row" />
+                    <input
+                      v-if="canDecide(row)"
+                      type="checkbox"
+                      :checked="isSelected(row)"
+                      @change="toggleSelectRow(row)"
+                      aria-label="Select row"
+                    />
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
-                  <td class="ui-td"><div class="truncate">{{ fmtDateTime(row.createdAt) }}</div></td>
+                  <td class="ui-td">
+                    <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
+                  </td>
 
                   <td class="ui-td">
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">{{ row.employeeName || row.name || row.employeeId || '—' }}</div>
+                    <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                      {{ row.employeeName || row.name || row.employeeId || '—' }}
+                    </div>
                     <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">ID: {{ row.employeeId || '—' }}</div>
                   </td>
 
-                  <td class="ui-td"><div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div></td>
-                  <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
+                  <td class="ui-td">
+                    <div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div>
+                  </td>
+
+                  <td class="ui-td">
+                    <div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div>
+                  </td>
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
@@ -845,11 +943,23 @@ onBeforeUnmount(() => {
                   <td class="ui-td text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">
                       <template v-if="canDecide(row)">
-                        <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
+                        <button
+                          type="button"
+                          class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
+                          :disabled="loading || deciding"
+                          @click="openApprove(row)"
+                          title="Approve"
+                        >
                           <i class="fa-solid fa-circle-check text-[12px]" />
                         </button>
 
-                        <button type="button" class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
+                        <button
+                          type="button"
+                          class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
+                          :disabled="loading || deciding"
+                          @click="openReject(row)"
+                          title="Reject"
+                        >
                           <i class="fa-solid fa-circle-xmark text-[12px]" />
                         </button>
                       </template>
@@ -859,7 +969,9 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <p class="reason-cell" :title="compactText(row.reason)">{{ row.reason ? compactText(row.reason) : '—' }}</p>
+                    <p class="reason-cell" :title="compactText(row.reason)">
+                      {{ row.reason ? compactText(row.reason) : '—' }}
+                    </p>
                   </td>
                 </tr>
               </tbody>
@@ -867,7 +979,9 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Pagination -->
-          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div class="flex items-center gap-2">
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
@@ -887,7 +1001,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- DETAILS MODAL -->
-    <div v-if="viewOpen" class="ui-modal-backdrop">
+    <div v-if="viewOpen" class="ui-modal-backdrop" @click.self="closeView">
       <div class="ui-modal p-0 overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
           <div class="min-w-0">
@@ -983,7 +1097,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- SINGLE CONFIRM MODAL -->
-    <div v-if="confirmOpen" class="ui-modal-backdrop">
+    <div v-if="confirmOpen" class="ui-modal-backdrop" @click.self="closeConfirm()">
       <div class="ui-modal p-4">
         <div class="flex items-start gap-3">
           <div
@@ -1034,7 +1148,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- BULK CONFIRM MODAL -->
-    <div v-if="bulkConfirmOpen" class="ui-modal-backdrop">
+    <div v-if="bulkConfirmOpen" class="ui-modal-backdrop" @click.self="closeBulkConfirm()">
       <div class="ui-modal p-4">
         <div class="flex items-start gap-3">
           <div

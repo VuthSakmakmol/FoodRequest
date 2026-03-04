@@ -11,11 +11,14 @@
 //  PATCH  /api/leave/forget-scan/:id
 //  GET    /api/leave/forget-scan/manager/inbox?scope=ALL
 //  POST   /api/leave/forget-scan/:id/manager-decision
+//  POST   /api/leave/forget-scan/manager/bulk-decision      ✅ OPTIONAL (if you use bulk)
 //  GET    /api/leave/forget-scan/gm/inbox?scope=ALL
 //  POST   /api/leave/forget-scan/:id/gm-decision
+//  POST   /api/leave/forget-scan/gm/bulk-decision           ✅ OPTIONAL (if you use bulk)
 //  GET    /api/leave/forget-scan/coo/inbox?scope=ALL
-//  POST   /api/leave/forget-scan/:id/coo-decision        ✅ ADD
-//  GET    /api/leave/forget-scan/admin?employeeId=&status=&from=&to=&limit=&skip=
+//  POST   /api/leave/forget-scan/:id/coo-decision            ✅ REQUIRED
+//  POST   /api/leave/forget-scan/coo/bulk-decision           ✅ OPTIONAL (if you use bulk)
+//  GET    /api/leave/forget-scan/admin?employeeId=&status=&from=&to=&limit=
 //  GET    /api/leave/forget-scan/:id
 
 const router = require('express').Router()
@@ -49,7 +52,7 @@ router.post(
   ctrl.cancelMyForgetScan
 )
 
-// edit my request (owner only; controller enforces)
+// edit my request (controller enforces owner + pending + lock rule)
 router.patch(
   '/forget-scan/:id',
   requireRole('LEAVE_USER', 'LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
@@ -68,6 +71,13 @@ router.get(
 // manager decision (NO admin bypass)
 router.post('/forget-scan/:id/manager-decision', requireRole('LEAVE_MANAGER'), ctrl.managerDecision)
 
+// ✅ OPTIONAL: manager bulk decision
+router.post(
+  '/forget-scan/manager/bulk-decision',
+  requireRole('LEAVE_MANAGER'),
+  ctrl.managerBulkDecision
+)
+
 // gm inbox (gm + admin viewer)
 router.get(
   '/forget-scan/gm/inbox',
@@ -78,6 +88,9 @@ router.get(
 // gm decision (NO admin bypass)
 router.post('/forget-scan/:id/gm-decision', requireRole('LEAVE_GM'), ctrl.gmDecision)
 
+// ✅ OPTIONAL: gm bulk decision
+router.post('/forget-scan/gm/bulk-decision', requireRole('LEAVE_GM'), ctrl.gmBulkDecision)
+
 // coo inbox (coo + admin viewer)
 router.get(
   '/forget-scan/coo/inbox',
@@ -87,6 +100,9 @@ router.get(
 
 // ✅ coo decision (NO admin bypass)  <-- REQUIRED for GM_AND_COO / MANAGER_AND_COO final step
 router.post('/forget-scan/:id/coo-decision', requireRole('LEAVE_COO'), ctrl.cooDecision)
+
+// ✅ OPTIONAL: coo bulk decision
+router.post('/forget-scan/coo/bulk-decision', requireRole('LEAVE_COO'), ctrl.cooBulkDecision)
 
 /* ───────────────── Admin viewer ───────────────── */
 
