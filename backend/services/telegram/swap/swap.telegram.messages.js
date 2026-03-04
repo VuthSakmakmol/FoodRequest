@@ -15,6 +15,10 @@ const LINKS = {
   cooInbox: `${FRONTEND_URL}/leave/swap-day/coo/inbox`,
 }
 
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+
 function ymd(v) {
   if (!v) return '?'
   const s = String(v)
@@ -61,10 +65,21 @@ function actionLinkLine(url, label) {
   return `🔗 ${esc(label)}: ${esc(url)}`
 }
 
-function statusLine(doc) {
-  const st = String(doc?.status || '').trim()
-  return st ? `📌 Status: <b>${esc(st)}</b>` : ''
+/** ✅ Friendly status for employee (no internal codes) */
+function friendlyEmployeeStatus(doc) {
+  const st = up(doc?.status)
+  const mode = up(doc?.approvalMode)
+
+  if (st === 'PENDING_MANAGER') return 'Waiting for Manager approval'
+  if (st === 'PENDING_GM') return mode === 'GM_ONLY' ? 'Waiting for GM approval (final)' : 'Waiting for GM approval'
+  if (st === 'PENDING_COO') return 'Waiting for COO approval (final)'
+  if (st === 'APPROVED') return 'Approved (final approval completed)'
+  if (st === 'REJECTED') return 'Rejected'
+  if (st === 'CANCELLED' || st === 'CANCELED') return 'Cancelled'
+  return 'In progress'
 }
+
+/* ───────────────── Approver inbox messages ───────────────── */
 
 function managerNewSwap(doc, employeeName) {
   return [
@@ -82,12 +97,17 @@ function managerNewSwap(doc, employeeName) {
 }
 
 function gmNewSwap(doc, employeeName) {
+  const mode = up(doc?.approvalMode)
+  const isFYI = mode === 'MANAGER_ONLY'
+
   return [
-    '🔁 <b>New Swap Working Day request (GM)</b>',
+    isFYI
+      ? 'ℹ️ <b>FYI (read-only)</b>: New Swap request submitted (Manager is final approver)'
+      : '🔁 <b>New Swap Working Day request (GM)</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     swapSummary(doc),
-    '📌 Status: Waiting for GM approval',
+    isFYI ? '📌 Status: Waiting for Manager approval' : '📌 Status: Waiting for GM approval',
     commentLine('Manager', doc?.managerComment),
     reasonLine(doc),
     '',
@@ -98,12 +118,17 @@ function gmNewSwap(doc, employeeName) {
 }
 
 function cooNewSwap(doc, employeeName) {
+  const mode = up(doc?.approvalMode)
+  const isFYI = mode === 'GM_ONLY'
+
   return [
-    '🔁 <b>New Swap Working Day request (COO)</b>',
+    isFYI
+      ? 'ℹ️ <b>FYI (read-only)</b>: New Swap request submitted (GM is final approver)'
+      : '🔁 <b>New Swap Working Day request (COO)</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
     employeeLabel(doc, employeeName),
     swapSummary(doc),
-    '📌 Status: Waiting for COO approval',
+    isFYI ? '📌 Status: Waiting for GM approval' : '📌 Status: Waiting for COO approval',
     commentLine('Manager', doc?.managerComment),
     commentLine('GM', doc?.gmComment),
     reasonLine(doc),
@@ -114,13 +139,14 @@ function cooNewSwap(doc, employeeName) {
     .join('\n')
 }
 
+/* ───────────────── Employee messages ───────────────── */
+
 function employeeSubmitted(doc) {
-  // ✅ show real status (PENDING_MANAGER / PENDING_GM etc.)
   return [
     '✅ <b>Swap Working Day request submitted</b>',
     '━━━━━━━━━━━━━━━━━━━━━━',
     swapSummary(doc),
-    statusLine(doc),
+    `📌 Status: <b>${esc(friendlyEmployeeStatus(doc))}</b>`,
     reasonLine(doc),
   ]
     .filter(Boolean)
@@ -128,7 +154,7 @@ function employeeSubmitted(doc) {
 }
 
 function employeeDecision(doc, roleLabel) {
-  const status = String(doc?.status || '').toUpperCase()
+  const status = up(doc?.status)
   const emoji = status === 'APPROVED' ? '✅' : status === 'REJECTED' ? '❌' : status === 'CANCELLED' ? '🚫' : 'ℹ️'
 
   let extra = ''
@@ -136,11 +162,16 @@ function employeeDecision(doc, roleLabel) {
   if (roleLabel === 'GM') extra = commentLine('GM', doc?.gmComment)
   if (roleLabel === 'COO') extra = commentLine('COO', doc?.cooComment)
 
+  // ✅ also friendly for employee
+  const friendly = friendlyEmployeeStatus(doc)
+
   return [
-    `${emoji} <b>Swap request ${esc(status || 'UPDATED')} by ${esc(roleLabel)}</b>`,
+    `${emoji} <b>Swap request updated</b>`,
     '━━━━━━━━━━━━━━━━━━━━━━',
     swapSummary(doc),
+    `📌 Status: <b>${esc(friendly)}</b>`,
     extra,
+    doc?.rejectedReason ? `📝 Reason: ${esc(doc.rejectedReason)}` : '',
   ]
     .filter(Boolean)
     .join('\n')

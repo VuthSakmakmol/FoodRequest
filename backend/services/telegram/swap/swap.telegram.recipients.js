@@ -26,7 +26,7 @@ function logOk(label, key, chatId, requestId) {
 /**
  * Resolve chatId from:
  * 1) EmployeeDirectory if key is digits (employeeId)
- * 2) User if key is non-digits (loginId like leave_admin, leave_gm, leave_coo)
+ * 2) User if key is non-digits (loginId like leave_gm, leave_coo, manager loginId)
  */
 async function resolveChatId(key, requestId, label) {
   const rid = s(requestId)
@@ -60,11 +60,8 @@ async function resolveChatId(key, requestId, label) {
       return chatId
     }
 
-    // loginId path (leave_admin / leave_gm / leave_coo etc.)
-    const user = await User.findOne(
-      { loginId: k },
-      { loginId: 1, telegramChatId: 1, name: 1 }
-    ).lean()
+    // loginId path
+    const user = await User.findOne({ loginId: k }, { loginId: 1, telegramChatId: 1, name: 1 }).lean()
 
     if (!user) {
       console.warn(`[Swap DM lookup] ${label} User not found`, { loginId: k, requestId: rid })
@@ -99,36 +96,10 @@ async function resolveCooChatId(doc) {
   return resolveChatId(doc?.cooLoginId, doc?._id, 'coo')
 }
 
-/**
- * Admin chat IDs:
- * all users with roles LEAVE_ADMIN / ADMIN / ROOT_ADMIN and telegramChatId.
- * (This supports your CORE.leaveAdmin, plus any future admins)
- */
-async function resolveAdminChatIds(requestId) {
-  const rid = s(requestId)
-  try {
-    const rows = await User.find(
-      { role: { $in: ['LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'] }, telegramChatId: { $exists: true, $ne: '' } },
-      { loginId: 1, telegramChatId: 1, role: 1 }
-    ).lean()
-
-    const ids = [...new Set((rows || []).map((u) => s(u.telegramChatId)).filter(Boolean))]
-
-    if (DEBUG) {
-      console.log('[Swap DM lookup ✓ admins]', { count: ids.length, requestId: rid, admins: (rows || []).map((u) => u.loginId) })
-    }
-    return ids
-  } catch (e) {
-    console.error('[Swap DM lookup ✗ admins] failed', { requestId: rid, error: e.message })
-    return []
-  }
-}
-
 module.exports = {
   resolveChatId,
   resolveEmployeeChatId,
   resolveManagerChatId,
   resolveGmChatId,
   resolveCooChatId,
-  resolveAdminChatIds,
 }

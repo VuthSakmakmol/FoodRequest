@@ -508,9 +508,8 @@ exports.createMySwapRequest = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitSwap(req, payload, 'swap:req:created')
 
-    await safeNotify(notify?.notifyAdminsOnCreate, payload)
     await safeNotify(notify?.notifySwapRequestCreated, payload) // employee confirmation
-    await safeNotify(notify?.notifyCurrentApprover, payload) // manager/gm/coo depending on status
+    await safeNotify(notify?.notifyCurrentApprover, payload)    // current approver + FYI (if MANAGER_ONLY / GM_ONLY)
 
     return res.status(201).json(payload)
   } catch (e) {
@@ -628,7 +627,6 @@ exports.updateMySwapRequest = async (req, res, next) => {
 
     const payload = await attachEmployeeInfoToOne(doc)
     emitSwap(req, payload, 'swap:req:updated')
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -662,7 +660,6 @@ exports.cancelMySwapRequest = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(existing)
     emitSwap(req, payload, 'swap:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifySwapCancelledToEmployee, payload)
 
     return res.json(payload)
@@ -768,7 +765,6 @@ exports.managerDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitSwap(req, payload, 'swap:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
     await safeNotify(notify?.notifyCurrentApprover, payload) // next approver (if any)
 
@@ -894,7 +890,6 @@ exports.gmDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitSwap(req, payload, 'swap:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
     await safeNotify(notify?.notifyCurrentApprover, payload) // next approver (if any)
 
@@ -1038,7 +1033,6 @@ exports.cooDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitSwap(req, payload, 'swap:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyCooDecisionToEmployee, payload)
 
     return res.json(payload)
@@ -1148,7 +1142,6 @@ exports.managerBulkDecision = async (req, res, next) => {
 
     for (const p of enriched) {
       emitSwap(req, p, 'swap:req:updated')
-      await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyManagerDecisionToEmployee, p)
       if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p)
     }
@@ -1235,7 +1228,6 @@ exports.gmBulkDecision = async (req, res, next) => {
 
     for (const p of enriched) {
       emitSwap(req, p, 'swap:req:updated')
-      await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyGmDecisionToEmployee, p)
       if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p)
     }
@@ -1322,7 +1314,6 @@ exports.cooBulkDecision = async (req, res, next) => {
 
     for (const p of enriched) {
       emitSwap(req, p, 'swap:req:updated')
-      await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyCooDecisionToEmployee, p)
     }
 

@@ -18,6 +18,11 @@ function logOk(label, key, chatId, requestId) {
   console.log(`[ForgetScan DM lookup ✓ ${label}]`, { key, chatId, requestId: s(requestId) })
 }
 
+/**
+ * Resolve chatId from:
+ * 1) EmployeeDirectory if key is digits (employeeId)
+ * 2) User if key is non-digits (loginId like leave_gm / leave_coo / manager loginId)
+ */
 async function resolveChatId(key, requestId, label) {
   const rid = s(requestId)
   const k = s(key)
@@ -50,7 +55,7 @@ async function resolveChatId(key, requestId, label) {
       return chatId
     }
 
-    // loginId path (manager/gm/coo user accounts)
+    // loginId path
     const user = await User.findOne({ loginId: k }, { loginId: 1, telegramChatId: 1, role: 1 }).lean()
     if (!user) {
       console.warn(`[ForgetScan DM lookup] ${label} User not found`, { loginId: k, requestId: rid })
@@ -66,11 +71,7 @@ async function resolveChatId(key, requestId, label) {
     logOk(label, `user:${k}`, chatId, rid)
     return chatId
   } catch (e) {
-    console.error(`[ForgetScan DM lookup ✗] ${label} resolve failed`, {
-      key: k,
-      requestId: rid,
-      error: e.message,
-    })
+    console.error(`[ForgetScan DM lookup ✗] ${label} resolve failed`, { key: k, requestId: rid, error: e.message })
     return ''
   }
 }

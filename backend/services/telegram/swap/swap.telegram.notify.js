@@ -25,20 +25,6 @@ async function getEmployeeName(employeeId) {
   return emp?.name || emp?.fullName || ''
 }
 
-/* send to many admin chatIds */
-async function dmAdmins(doc, text) {
-  const chatIds = await rec.resolveAdminChatIds(doc?._id)
-  if (!chatIds.length) return log('skip admins (no chatIds)')
-
-  for (const cid of chatIds) {
-    try {
-      await sendSwapDM(cid, text)
-    } catch (e) {
-      console.warn('[swap.notify] admin DM failed', e?.message)
-    }
-  }
-}
-
 /* ─────────────────────────────
  * Employee submit confirmation
  * ───────────────────────────── */
@@ -50,41 +36,6 @@ async function notifySwapRequestCreated(doc) {
     await sendSwapDM(chatId, msg.employeeSubmitted(doc))
   } catch (err) {
     console.error('[swap.notify] notifySwapRequestCreated error:', err.message)
-  }
-}
-
-/* ─────────────────────────────
- * Admin alert (create/update)
- * ───────────────────────────── */
-async function notifyAdminsOnCreate(doc) {
-  try {
-    if (!doc) return
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    const text = [
-      '📣 <b>Swap request created</b>',
-      `👤 Employee: <b>${s(employeeName) || '-'}</b>`,
-      `📌 Status: <b>${s(doc.status) || '-'}</b>`,
-    ].join('\n')
-
-    await dmAdmins(doc, text)
-  } catch (err) {
-    console.error('[swap.notify] notifyAdminsOnCreate error:', err.message)
-  }
-}
-
-async function notifyAdminsOnUpdate(doc) {
-  try {
-    if (!doc) return
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    const text = [
-      '📣 <b>Swap request updated</b>',
-      `👤 Employee: <b>${s(employeeName) || '-'}</b>`,
-      `📌 Status: <b>${s(doc.status) || '-'}</b>`,
-    ].join('\n')
-
-    await dmAdmins(doc, text)
-  } catch (err) {
-    console.error('[swap.notify] notifyAdminsOnUpdate error:', err.message)
   }
 }
 
@@ -133,26 +84,41 @@ async function notifySwapToCoo(doc) {
 /**
  * Notify current approver based on STATUS (queue-style)
  *
- * ✅ Works automatically with new modes:
- * - MANAGER_ONLY -> status PENDING_MANAGER only
- * - GM_ONLY      -> status PENDING_GM only
- *
- * So this function needs only status to route.
+ * ✅ AND add FYI read-only logic:
+ * - PENDING_MANAGER + MANAGER_ONLY => send GM FYI
+ * - PENDING_GM + GM_ONLY          => send COO FYI
  */
 async function notifyCurrentApprover(doc) {
   try {
     if (!doc) return
     const st = up(doc.status)
+    const mode = up(doc.approvalMode)
 
     // ✅ explicit final guards (clean + safe)
     if (st === 'APPROVED' || st === 'REJECTED' || st === 'CANCELLED') return
 
-    if (st === 'PENDING_MANAGER') return await notifySwapToManager(doc)
-    if (st === 'PENDING_GM') return await notifySwapToGm(doc)
-    if (st === 'PENDING_COO') return await notifySwapToCoo(doc)
+    // 1) Normal action DM to current approver
+    if (st === 'PENDING_MANAGER') {
+      await notifySwapToManager(doc)
+    } else if (st === 'PENDING_GM') {
+      await notifySwapToGm(doc)
+    } else if (st === 'PENDING_COO') {
+      await notifySwapToCoo(doc)
+    } else {
+      if (DEBUG) log('skip notifyCurrentApprover (unknown status)', st, doc?._id)
+      return
+    }
 
-    // unknown status => do nothing
-    if (DEBUG) log('skip notifyCurrentApprover (unknown status)', st, doc?._id)
+    // 2) FYI (read-only) mirror from Leave
+    // MANAGER_ONLY -> GM gets FYI while manager is final approver
+    if (st === 'PENDING_MANAGER' && mode === 'MANAGER_ONLY') {
+      await notifySwapToGm(doc) // gmNewSwap() will render FYI wording
+    }
+
+    // GM_ONLY -> COO gets FYI while GM is final approver
+    if (st === 'PENDING_GM' && mode === 'GM_ONLY') {
+      await notifySwapToCoo(doc) // cooNewSwap() will render FYI wording
+    }
   } catch (err) {
     console.error('[swap.notify] notifyCurrentApprover error:', err.message)
   }
@@ -211,10 +177,6 @@ module.exports = {
   // create
   notifySwapRequestCreated,
   notifyCurrentApprover,
-
-  // admin alerts
-  notifyAdminsOnCreate,
-  notifyAdminsOnUpdate,
 
   // approver inbox DMs
   notifySwapToManager,

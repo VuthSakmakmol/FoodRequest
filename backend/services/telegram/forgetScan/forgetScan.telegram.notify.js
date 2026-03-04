@@ -18,6 +18,9 @@ function up(v) {
   return s(v).toUpperCase()
 }
 
+const FIXED_GM = 'leave_gm'
+const FIXED_COO = 'leave_coo'
+
 async function getEmployeeName(employeeId) {
   const empId = s(employeeId)
   if (!empId) return ''
@@ -25,13 +28,31 @@ async function getEmployeeName(employeeId) {
   return emp?.name || emp?.fullName || ''
 }
 
+/* ✅ normalize doc to ensure gmLoginId/cooLoginId always exist when needed */
+function normalizeApproversForNotify(doc) {
+  const raw = doc || {}
+  const mode = up(raw.approvalMode)
+
+  const needsGM = ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY', 'MANAGER_ONLY'].includes(mode) // MANAGER_ONLY needs GM FYI
+  const needsCOO = ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY', 'GM_ONLY'].includes(mode) // GM_ONLY needs COO FYI
+
+  return {
+    ...raw,
+    gmLoginId: needsGM ? (s(raw.gmLoginId) || FIXED_GM) : s(raw.gmLoginId),
+    cooLoginId: needsCOO ? (s(raw.cooLoginId) || FIXED_COO) : s(raw.cooLoginId),
+  }
+}
+
 /* ───────── Employee submit confirmation ───────── */
 async function notifyForgetCreatedToEmployee(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveEmployeeChatId(doc)
-    if (!chatId) return log('skip employee submitted (no chatId)', doc.employeeId)
-    await sendForgetScanDM(chatId, msg.employeeSubmitted(doc))
+    const d = normalizeApproversForNotify(doc)
+
+    const chatId = await rec.resolveEmployeeChatId(d)
+    if (!chatId) return log('skip employee submitted (no chatId)', d.employeeId)
+
+    await sendForgetScanDM(chatId, msg.employeeSubmitted(d))
   } catch (err) {
     console.error('[forgetscan.notify] notifyForgetCreatedToEmployee error:', err.message)
   }
@@ -41,11 +62,13 @@ async function notifyForgetCreatedToEmployee(doc) {
 async function notifyToManager(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveManagerChatId(doc)
-    if (!chatId) return log('skip manager (no chatId)', doc.managerLoginId)
+    const d = normalizeApproversForNotify(doc)
 
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendForgetScanDM(chatId, msg.approverNew(doc, employeeName, 'Manager'))
+    const chatId = await rec.resolveManagerChatId(d)
+    if (!chatId) return log('skip manager (no chatId)', d.managerLoginId)
+
+    const employeeName = (await getEmployeeName(d.employeeId)) || d.employeeName || d.employeeId
+    await sendForgetScanDM(chatId, msg.approverNew(d, employeeName, 'Manager'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyToManager error:', err.message)
   }
@@ -54,11 +77,13 @@ async function notifyToManager(doc) {
 async function notifyToGm(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveGmChatId(doc)
-    if (!chatId) return log('skip gm (no chatId)', doc.gmLoginId)
+    const d = normalizeApproversForNotify(doc)
 
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendForgetScanDM(chatId, msg.approverNew(doc, employeeName, 'GM'))
+    const chatId = await rec.resolveGmChatId(d)
+    if (!chatId) return log('skip gm (no chatId)', d.gmLoginId)
+
+    const employeeName = (await getEmployeeName(d.employeeId)) || d.employeeName || d.employeeId
+    await sendForgetScanDM(chatId, msg.approverNew(d, employeeName, 'GM'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyToGm error:', err.message)
   }
@@ -67,11 +92,13 @@ async function notifyToGm(doc) {
 async function notifyToCoo(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveCooChatId(doc)
-    if (!chatId) return log('skip coo (no chatId)', doc.cooLoginId)
+    const d = normalizeApproversForNotify(doc)
 
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendForgetScanDM(chatId, msg.approverNew(doc, employeeName, 'COO'))
+    const chatId = await rec.resolveCooChatId(d)
+    if (!chatId) return log('skip coo (no chatId)', d.cooLoginId)
+
+    const employeeName = (await getEmployeeName(d.employeeId)) || d.employeeName || d.employeeId
+    await sendForgetScanDM(chatId, msg.approverNew(d, employeeName, 'COO'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyToCoo error:', err.message)
   }
@@ -81,11 +108,13 @@ async function notifyToCoo(doc) {
 async function notifyGmFYI(doc, waitingForLabel) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveGmChatId(doc)
-    if (!chatId) return log('skip gm FYI (no chatId)', doc.gmLoginId)
+    const d = normalizeApproversForNotify(doc)
 
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendForgetScanDM(chatId, msg.fyiNew(doc, employeeName, 'GM', waitingForLabel))
+    const chatId = await rec.resolveGmChatId(d)
+    if (!chatId) return log('skip gm FYI (no chatId)', d.gmLoginId)
+
+    const employeeName = (await getEmployeeName(d.employeeId)) || d.employeeName || d.employeeId
+    await sendForgetScanDM(chatId, msg.fyiNew(d, employeeName, 'GM', waitingForLabel))
   } catch (err) {
     console.error('[forgetscan.notify] notifyGmFYI error:', err.message)
   }
@@ -94,11 +123,13 @@ async function notifyGmFYI(doc, waitingForLabel) {
 async function notifyCooFYI(doc, waitingForLabel) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveCooChatId(doc)
-    if (!chatId) return log('skip coo FYI (no chatId)', doc.cooLoginId)
+    const d = normalizeApproversForNotify(doc)
 
-    const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendForgetScanDM(chatId, msg.fyiNew(doc, employeeName, 'COO', waitingForLabel))
+    const chatId = await rec.resolveCooChatId(d)
+    if (!chatId) return log('skip coo FYI (no chatId)', d.cooLoginId)
+
+    const employeeName = (await getEmployeeName(d.employeeId)) || d.employeeName || d.employeeId
+    await sendForgetScanDM(chatId, msg.fyiNew(d, employeeName, 'COO', waitingForLabel))
   } catch (err) {
     console.error('[forgetscan.notify] notifyCooFYI error:', err.message)
   }
@@ -106,11 +137,6 @@ async function notifyCooFYI(doc, waitingForLabel) {
 
 /**
  * ✅ Current approver (based on doc.status) + FYI rules
- *
- * Your rule:
- * - even if MANAGER_ONLY, GM is still "involved" as read-only, so GM must receive FYI alert
- *
- * Rules implemented:
  * - MANAGER_ONLY: action → manager, FYI → GM
  * - GM_ONLY     : action → GM, FYI → COO
  * - others      : notify only current approver (no FYI)
@@ -118,28 +144,32 @@ async function notifyCooFYI(doc, waitingForLabel) {
 async function notifyCurrentApprover(doc) {
   try {
     if (!doc) return
+    const d = normalizeApproversForNotify(doc)
 
-    const st = up(doc.status)
-    const mode = up(doc.approvalMode)
+    const st = up(d.status)
+    const mode = up(d.approvalMode)
+
+    // ✅ guard final statuses
+    if (st === 'APPROVED' || st === 'REJECTED' || st === 'CANCELLED') return
 
     // ✅ MANAGER_ONLY: manager action + GM FYI
     if (mode === 'MANAGER_ONLY' && st === 'PENDING_MANAGER') {
-      await notifyToManager(doc)
-      await notifyGmFYI(doc, 'Manager')
+      await notifyToManager(d)
+      await notifyGmFYI(d, 'Manager')
       return
     }
 
     // ✅ GM_ONLY: GM action + COO FYI
     if (mode === 'GM_ONLY' && st === 'PENDING_GM') {
-      await notifyToGm(doc)
-      await notifyCooFYI(doc, 'GM')
+      await notifyToGm(d)
+      await notifyCooFYI(d, 'GM')
       return
     }
 
     // default action required (no FYI)
-    if (st === 'PENDING_MANAGER') return await notifyToManager(doc)
-    if (st === 'PENDING_GM') return await notifyToGm(doc)
-    if (st === 'PENDING_COO') return await notifyToCoo(doc)
+    if (st === 'PENDING_MANAGER') return await notifyToManager(d)
+    if (st === 'PENDING_GM') return await notifyToGm(d)
+    if (st === 'PENDING_COO') return await notifyToCoo(d)
   } catch (err) {
     console.error('[forgetscan.notify] notifyCurrentApprover error:', err.message)
   }
@@ -149,9 +179,11 @@ async function notifyCurrentApprover(doc) {
 async function notifyManagerDecisionToEmployee(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveEmployeeChatId(doc)
+    const d = normalizeApproversForNotify(doc)
+
+    const chatId = await rec.resolveEmployeeChatId(d)
     if (!chatId) return
-    await sendForgetScanDM(chatId, msg.employeeDecision(doc, 'Manager'))
+    await sendForgetScanDM(chatId, msg.employeeDecision(d, 'Manager'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyManagerDecisionToEmployee error:', err.message)
   }
@@ -160,19 +192,20 @@ async function notifyManagerDecisionToEmployee(doc) {
 async function notifyGmDecisionToEmployee(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveEmployeeChatId(doc)
+    const d = normalizeApproversForNotify(doc)
+
+    const chatId = await rec.resolveEmployeeChatId(d)
     if (!chatId) return
 
-    const st = up(doc.status)
+    const st = up(d.status)
 
     // ✅ GM approved but still needs COO (final) approval
     if (st === 'PENDING_COO') {
-      await sendForgetScanDM(chatId, msg.employeeWaitingNextApprover(doc, 'GM', 'COO'))
+      await sendForgetScanDM(chatId, msg.employeeWaitingNextApprover(d, 'GM', 'COO'))
       return
     }
 
-    // ✅ Final result (APPROVED / REJECTED / CANCELLED)
-    await sendForgetScanDM(chatId, msg.employeeDecision(doc, 'GM'))
+    await sendForgetScanDM(chatId, msg.employeeDecision(d, 'GM'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyGmDecisionToEmployee error:', err.message)
   }
@@ -181,9 +214,11 @@ async function notifyGmDecisionToEmployee(doc) {
 async function notifyCooDecisionToEmployee(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveEmployeeChatId(doc)
+    const d = normalizeApproversForNotify(doc)
+
+    const chatId = await rec.resolveEmployeeChatId(d)
     if (!chatId) return
-    await sendForgetScanDM(chatId, msg.employeeDecision(doc, 'COO'))
+    await sendForgetScanDM(chatId, msg.employeeDecision(d, 'COO'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyCooDecisionToEmployee error:', err.message)
   }
@@ -193,9 +228,11 @@ async function notifyCooDecisionToEmployee(doc) {
 async function notifyCancelledToEmployee(doc) {
   try {
     if (!doc) return
-    const chatId = await rec.resolveEmployeeChatId(doc)
+    const d = normalizeApproversForNotify(doc)
+
+    const chatId = await rec.resolveEmployeeChatId(d)
     if (!chatId) return
-    const pseudo = { ...doc, status: 'CANCELLED' }
+    const pseudo = { ...d, status: 'CANCELLED' }
     await sendForgetScanDM(chatId, msg.employeeDecision(pseudo, 'System'))
   } catch (err) {
     console.error('[forgetscan.notify] notifyCancelledToEmployee error:', err.message)
@@ -203,15 +240,12 @@ async function notifyCancelledToEmployee(doc) {
 }
 
 module.exports = {
-  // create flow
   notifyForgetCreatedToEmployee,
   notifyCurrentApprover,
 
-  // decision flow
   notifyManagerDecisionToEmployee,
   notifyGmDecisionToEmployee,
   notifyCooDecisionToEmployee,
 
-  // optional cancel
   notifyCancelledToEmployee,
 }
