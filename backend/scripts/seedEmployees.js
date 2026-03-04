@@ -1046,7 +1046,8 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "015915284",
-    "telegramChatId": "1673844206",
+    // "telegramChatId": "1673844206",
+    "telegramChatId": "7163451169",
     "isActive": true
   },
   {
@@ -1064,7 +1065,8 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "0968337875",
-    "telegramChatId": "1120056572",
+    // "telegramChatId": "1120056572",
+    "telegramChatId": "7163451169",
     "isActive": true
   },
   {

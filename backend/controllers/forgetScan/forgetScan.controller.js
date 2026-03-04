@@ -6,8 +6,8 @@
 //    - MANAGER_AND_GM   : PENDING_MANAGER -> PENDING_GM  -> APPROVED
 //    - MANAGER_AND_COO  : PENDING_MANAGER -> PENDING_COO -> APPROVED
 //    - GM_AND_COO       : PENDING_GM      -> PENDING_COO -> APPROVED
-//    - MANAGER_ONLY     : PENDING_MANAGER -> APPROVED
-//    - GM_ONLY          : PENDING_GM      -> APPROVED
+//    - MANAGER_ONLY     : PENDING_MANAGER -> APPROVED      (GM FYI read-only)
+//    - GM_ONLY          : PENDING_GM      -> APPROVED      (COO FYI read-only)
 //    - COO_ONLY         : PENDING_COO     -> APPROVED
 //
 // ✅ Viewers: LEAVE_ADMIN/ADMIN/ROOT_ADMIN can VIEW inbox via scope=ALL (but cannot decide)
@@ -17,6 +17,11 @@
 // ✅ Duplicate protection handled by Mongo partial unique index (model)
 // ✅ COO inbox: viewerModes are restricted to same cooLoginId (not global)
 //
+// ✅ Telegram: Employee + Current Approver ONLY (NO ADMIN NOTIFY)
+//    - MANAGER_ONLY: Manager gets action DM + GM gets FYI DM (implemented in notifyCurrentApprover)
+//    - GM_ONLY: GM gets action DM + COO gets FYI DM (implemented in notifyCurrentApprover)
+// ✅ Realtime: forgetscan:req:created / forgetscan:req:updated via broadcastForgetScanRequest()
+//
 // NOTE: Attachments are not handled here. Keep GridFS evidence endpoints separate.
 
 const createError = require('http-errors')
@@ -25,7 +30,14 @@ const ExpatForgetScanRequest = require('../../models/forgetScan/ExpatForgetScanR
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
-/* ───────────────── notify (Telegram) ───────────────── */
+/* ───────────────── notify (Telegram) ─────────────────
+   ✅ IMPORTANT: this controller NEVER notifies admins
+   - Only notifies:
+     - Employee submit confirmation
+     - Current approver (manager/gm/coo) when waiting their action
+       - includes FYI rules for MANAGER_ONLY / GM_ONLY
+     - Employee on decision/cancel
+────────────────────────────────────────────────────── */
 let notify = null
 try {
   notify = require('../../services/telegram/forgetScan')
@@ -93,7 +105,15 @@ function getActor(req) {
 }
 
 function actorLoginId(req) {
-  return s(req.user?.loginId || req.user?.sub || req.user?.id || req.user?.username || req.user?.employeeId || req.user?.empId || '')
+  return s(
+    req.user?.loginId ||
+      req.user?.sub ||
+      req.user?.id ||
+      req.user?.username ||
+      req.user?.employeeId ||
+      req.user?.empId ||
+      ''
+  )
 }
 function actorIds(req) {
   const a = getActor(req)
@@ -213,7 +233,6 @@ function normalizeMode(v) {
   if (raw === 'MANAGER_ONLY') return 'MANAGER_ONLY'
   if (raw === 'GM_ONLY') return 'GM_ONLY'
   if (raw === 'COO_ONLY') return 'COO_ONLY'
-  // fallback
   return 'MANAGER_AND_GM'
 }
 
@@ -375,14 +394,19 @@ exports.createMyForgetScan = async (req, res, next) => {
         attachments: [],
       })
     } catch (e) {
-      if (e?.code === 11000) throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      if (e?.code === 11000) {
+        throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      }
       throw e
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+
+    // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:created')
 
-    await safeNotify(notify?.notifyAdminsOnCreate, payload)
+    // ✅ telegram (NO admin notify)
+    // FYI behavior is inside notifyCurrentApprover()
     await safeNotify(notify?.notifyForgetCreatedToEmployee, payload)
     await safeNotify(notify?.notifyCurrentApprover, payload)
 
@@ -401,7 +425,10 @@ exports.listMyForgetScans = async (req, res, next) => {
     const actor = getActor(req)
     if (!actor.loginId) throw createError(400, 'Missing user identity')
 
-    const rows = await ExpatForgetScanRequest.find({ requesterLoginId: actor.loginId }).sort({ createdAt: -1 }).lean()
+    const rows = await ExpatForgetScanRequest.find({ requesterLoginId: actor.loginId })
+      .sort({ createdAt: -1 })
+      .lean()
+
     return res.json(await attachEmployeeInfo(rows || []))
   } catch (e) {
     next(e)
@@ -453,7 +480,9 @@ exports.updateMyForgetScan = async (req, res, next) => {
     ensureOwner(doc, actor.loginId)
 
     const st = up(doc.status)
-    if (!st.startsWith('PENDING')) throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+    if (!st.startsWith('PENDING')) {
+      throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+    }
 
     ensureRequesterCanEditOrCancel(doc)
 
@@ -470,14 +499,21 @@ exports.updateMyForgetScan = async (req, res, next) => {
     try {
       await doc.save()
     } catch (e) {
-      if (e?.code === 11000) throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      if (e?.code === 11000) {
+        throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      }
       throw e
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+
+    // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    // ✅ telegram: optional (silent by default to avoid spam)
+    // If you want FYI/approver refresh on edit, uncomment:
+    // await safeNotify(notify?.notifyCurrentApprover, payload)
+
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -510,9 +546,11 @@ exports.cancelMyForgetScan = async (req, res, next) => {
     await doc.save()
 
     const payload = await attachEmployeeInfoToOne(doc)
+
+    // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    // ✅ telegram (NO admin notify)
     await safeNotify(notify?.notifyCancelledToEmployee, payload)
 
     return res.json(payload)
@@ -534,7 +572,9 @@ exports.listManagerInbox = async (req, res, next) => {
     const scope = up(req.query?.scope || '')
     const modeFilter = { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] }
 
-    const base = isAdminViewer(req) ? { approvalMode: modeFilter } : { approvalMode: modeFilter, managerLoginId: actor.loginId }
+    const base = isAdminViewer(req)
+      ? { approvalMode: modeFilter }
+      : { approvalMode: modeFilter, managerLoginId: actor.loginId }
 
     const query = isAdminViewer(req)
       ? scope === 'ALL'
@@ -606,7 +646,12 @@ exports.managerDecision = async (req, res, next) => {
       {
         $set: {
           ...setPayload,
-          approvals: markApproval(existing.approvals, 'MANAGER', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+          approvals: markApproval(
+            existing.approvals,
+            'MANAGER',
+            action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+            s(note || '')
+          ),
         },
       },
       { new: true }
@@ -618,9 +663,11 @@ exports.managerDecision = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+
+    // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    // ✅ telegram (NO admin notify)
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
     if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, payload)
 
@@ -748,9 +795,11 @@ exports.gmDecision = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+
+    // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    // ✅ telegram (NO admin notify)
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
     if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, payload)
 
@@ -776,10 +825,6 @@ exports.listCooInbox = async (req, res, next) => {
     const actionableModes = ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY']
     const viewerModes = ['GM_ONLY', 'MANAGER_ONLY']
 
-    // ✅ IMPORTANT:
-    // You requested viewerModes restricted to same cooLoginId.
-    // That means: in GM_ONLY / MANAGER_ONLY, the LeaveProfile must still store cooLoginId,
-    // and the request must store cooLoginId as well.
     const query = isAdminViewer(req)
       ? scope === 'ALL'
         ? { approvalMode: { $in: [...actionableModes, ...viewerModes] } }
@@ -831,7 +876,6 @@ exports.cooDecision = async (req, res, next) => {
     if (!canCooDecide(req)) throw createError(403, 'Forbidden')
 
     const myIds = actor.ids
-
     const { id } = req.params
     const { action, note } = parseDecisionBody(req)
 
@@ -889,9 +933,11 @@ exports.cooDecision = async (req, res, next) => {
     }
 
     const payload = await attachEmployeeInfoToOne(doc)
+
+    // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
+    // ✅ telegram (NO admin notify)
     await safeNotify(notify?.notifyCooDecisionToEmployee, payload)
 
     return res.json(payload)
@@ -1001,7 +1047,6 @@ exports.managerBulkDecision = async (req, res, next) => {
 
     for (const p of enriched) {
       emitForget(req, p, 'forgetscan:req:updated')
-      await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyManagerDecisionToEmployee, p)
       if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p)
     }
@@ -1084,7 +1129,6 @@ exports.gmBulkDecision = async (req, res, next) => {
 
     for (const p of enriched) {
       emitForget(req, p, 'forgetscan:req:updated')
-      await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyGmDecisionToEmployee, p)
       if (action === 'APPROVE') await safeNotify(notify?.notifyCurrentApprover, p)
     }
@@ -1168,7 +1212,6 @@ exports.cooBulkDecision = async (req, res, next) => {
 
     for (const p of enriched) {
       emitForget(req, p, 'forgetscan:req:updated')
-      await safeNotify(notify?.notifyAdminsOnUpdate, p)
       await safeNotify(notify?.notifyCooDecisionToEmployee, p)
     }
 

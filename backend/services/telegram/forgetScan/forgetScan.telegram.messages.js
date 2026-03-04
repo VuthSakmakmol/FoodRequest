@@ -11,6 +11,7 @@ const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://178.128.48.101:4
 const LINKS = {
   managerInbox: `${FRONTEND_URL}/leave/forget-scan/manager/inbox`,
   gmInbox: `${FRONTEND_URL}/leave/forget-scan/gm/inbox`,
+  cooInbox: `${FRONTEND_URL}/leave/forget-scan/coo/inbox`,
 }
 
 function ymd(v) {
@@ -27,7 +28,6 @@ function uniqUpper(arr) {
   return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
-/** ✅ supports multiple types (forgotTypes[]) with fallback to old forgotType */
 function typesText(doc) {
   const arr = Array.isArray(doc?.forgotTypes) ? doc.forgotTypes : []
   let types = uniqUpper(arr)
@@ -42,14 +42,9 @@ function typesText(doc) {
   return '-'
 }
 
-function employeeLabel(doc, employeeName) {
-  const label = employeeName || doc.employeeName || doc.employeeId || doc.requesterLoginId || '—'
+function employeeLine(doc, employeeName) {
+  const label = employeeName || doc.employeeName || doc.employeeId || doc.requesterLoginId || 'Employee'
   return `👤 Employee: <b>${esc(label)}</b>`
-}
-
-function actionLinkLine(url, label) {
-  if (!url) return ''
-  return `🔗 ${esc(label)}: ${esc(url)}`
 }
 
 function summary(doc) {
@@ -62,74 +57,106 @@ function summary(doc) {
     .join('\n')
 }
 
+function waitingRole(doc) {
+  const st = up(doc?.status)
+  if (st === 'PENDING_MANAGER') return 'Manager'
+  if (st === 'PENDING_GM') return 'GM'
+  if (st === 'PENDING_COO') return 'COO'
+  return ''
+}
+
+function inboxLinkForStatus(doc) {
+  const st = up(doc?.status)
+  if (st === 'PENDING_MANAGER') return LINKS.managerInbox
+  if (st === 'PENDING_GM') return LINKS.gmInbox
+  if (st === 'PENDING_COO') return LINKS.cooInbox
+  return ''
+}
+
+/* ───────── Employee submit confirmation ───────── */
 function employeeSubmitted(doc) {
-  const st = up(doc?.status || '')
-  const waiting = st === 'PENDING_GM' ? 'GM' : 'Manager'
+  const role = waitingRole(doc)
   return [
     '✅ <b>Forget Scan request submitted</b>',
-    '━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━',
     summary(doc),
-    `📌 Status: Waiting for <b>${waiting}</b> approval`,
+    role ? `📌 Waiting for <b>${esc(role)}</b> approval` : '',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-/**
- * ✅ SPECIAL FLOW: first approver only
- * Approve = FINAL (APPROVED), no next approver
- */
-function managerNew(doc, employeeName) {
+/* ───────── NEW: Employee step approved but still waiting next approver ───────── */
+function employeeWaitingNextApprover(doc, actedByLabel, nextApproverLabel) {
   return [
-    '🕘 <b>Forget Scan request</b>',
-    '━━━━━━━━━━━━━━━━━━━━',
-    employeeLabel(doc, employeeName),
+    '✅ <b>Forget Scan update</b>',
+    '━━━━━━━━━━━━━━━━━━',
     summary(doc),
-    '📌 Action: <b> Waiting for Approval',
-    '',
-    actionLinkLine(LINKS.managerInbox, 'Click the link to Approve or Reject'),
+    actedByLabel ? `👤 Approved by: <b>${esc(actedByLabel)}</b>` : '',
+    nextApproverLabel ? `⏳ Waiting for <b>${esc(nextApproverLabel)}</b> final approval.` : '',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-function gmNew(doc, employeeName) {
+/* ───────── Approver message (action required) ───────── */
+function approverNew(doc, employeeName, roleLabel) {
+  const link = inboxLinkForStatus(doc)
   return [
-    '🕘 <b>Forget Scan request pending (GM)</b>',
-    '━━━━━━━━━━━━━━━━━━━━',
-    employeeLabel(doc, employeeName),
+    '🕘 <b>Forget Scan approval needed</b>',
+    '━━━━━━━━━━━━━━━━━━',
+    employeeLine(doc, employeeName),
     summary(doc),
-    '📌 Action: <b> Waiting for Approval',
     '',
-    actionLinkLine(LINKS.gmInbox, 'Click the link to Approve or Reject'),
+    `📌 Action required: <b>Approve or Reject</b>`,
+    roleLabel ? `👤 Your Role: <b>${esc(roleLabel)}</b>` : '',
+    '',
+    link ? `🔗 Open inbox:\n${esc(link)}` : '',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
+/* ───────── FYI / Read-only message (NO ACTION) ───────── */
+function fyiNew(doc, employeeName, toRoleLabel, waitingForLabel) {
+  return [
+    `ℹ️ <b>FYI: Forget Scan request</b>`,
+    '━━━━━━━━━━━━━━━━━━',
+    employeeLine(doc, employeeName),
+    summary(doc),
+    '',
+    waitingForLabel ? `📌 Status: Waiting for <b>${esc(waitingForLabel)}</b> approval` : '',
+    `✅ Note: No action required for <b>${esc(toRoleLabel)}</b> (read-only).`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/* ───────── Employee update after final decision/cancel ───────── */
 function employeeDecision(doc, roleLabel) {
-  const status = up(doc?.status || '')
-  const emoji = status === 'APPROVED' ? '✅' : status === 'REJECTED' ? '❌' : status === 'CANCELLED' ? '🚫' : 'ℹ️'
+  const status = up(doc?.status)
+  let emoji = 'ℹ️'
+  if (status === 'APPROVED') emoji = '✅'
+  if (status === 'REJECTED') emoji = '❌'
+  if (status === 'CANCELLED') emoji = '🚫'
 
-  let extra = ''
-  if (roleLabel === 'Manager' && doc?.managerComment) extra = `💬 Manager note: ${esc(doc.managerComment)}`
-  if (roleLabel === 'GM' && doc?.gmComment) extra = `💬 GM note: ${esc(doc.gmComment)}`
-  if (roleLabel === 'System' && doc?.cancelledBy) extra = `👤 Cancelled by: ${esc(doc.cancelledBy)}`
+  let result = ''
+  if (status === 'APPROVED') result = 'Approved'
+  if (status === 'REJECTED') result = 'Rejected'
+  if (status === 'CANCELLED') result = 'Cancelled'
 
-  const finalLine =
-    status === 'APPROVED'
-      ? '🎉 Result: <b>Approved</b>'
-      : status === 'REJECTED'
-      ? '⚠️ Result: <b>Rejected</b>'
-      : status === 'CANCELLED'
-      ? '🚫 Result: <b>Cancelled</b>'
-      : `📌 Status: <b>${esc(status || 'UPDATED')}</b>`
+  const extra =
+    status === 'REJECTED'
+      ? doc?.rejectedReason
+        ? `📝 Reason: ${esc(doc.rejectedReason)}`
+        : ''
+      : ''
 
   return [
     `${emoji} <b>Forget Scan update</b>`,
-    '━━━━━━━━━━━━━━━━━━━━',
+    '━━━━━━━━━━━━━━━━━━',
     summary(doc),
-    finalLine,
+    result ? `📌 Result: <b>${esc(result)}</b>` : '',
     roleLabel ? `👤 By: <b>${esc(roleLabel)}</b>` : '',
     extra,
   ]
@@ -139,7 +166,8 @@ function employeeDecision(doc, roleLabel) {
 
 module.exports = {
   employeeSubmitted,
-  managerNew,
-  gmNew,
+  employeeWaitingNextApprover, // ✅ export
+  approverNew,
+  fyiNew,
   employeeDecision,
 }

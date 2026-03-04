@@ -50,7 +50,7 @@ async function resolveChatId(key, requestId, label) {
       return chatId
     }
 
-    // loginId path (manager/gm user accounts)
+    // loginId path (manager/gm/coo user accounts)
     const user = await User.findOne({ loginId: k }, { loginId: 1, telegramChatId: 1, role: 1 }).lean()
     if (!user) {
       console.warn(`[ForgetScan DM lookup] ${label} User not found`, { loginId: k, requestId: rid })
@@ -66,7 +66,11 @@ async function resolveChatId(key, requestId, label) {
     logOk(label, `user:${k}`, chatId, rid)
     return chatId
   } catch (e) {
-    console.error(`[ForgetScan DM lookup ✗] ${label} resolve failed`, { key: k, requestId: rid, error: e.message })
+    console.error(`[ForgetScan DM lookup ✗] ${label} resolve failed`, {
+      key: k,
+      requestId: rid,
+      error: e.message,
+    })
     return ''
   }
 }
@@ -80,10 +84,14 @@ async function resolveManagerChatId(doc) {
 async function resolveGmChatId(doc) {
   return resolveChatId(doc?.gmLoginId, doc?._id, 'gm')
 }
+async function resolveCooChatId(doc) {
+  return resolveChatId(doc?.cooLoginId, doc?._id, 'coo')
+}
 
 module.exports = {
   resolveChatId,
   resolveEmployeeChatId,
   resolveManagerChatId,
   resolveGmChatId,
+  resolveCooChatId,
 }
