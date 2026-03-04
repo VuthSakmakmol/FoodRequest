@@ -1,28 +1,29 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveProfiles.admin.controller.js
 //
-// ✅ Admin leave profile management (CLEAN VERSION)
+// ✅ Admin leave profile management (FIXED VERSION)
 // ✅ Approval modes:
 //    - MANAGER_AND_GM
 //    - MANAGER_AND_COO
 //    - GM_AND_COO
-//    - MANAGER_ONLY      ✅ NEW
-//    - GM_ONLY           ✅ NEW
-//    - COO_ONLY          ✅ NEW
+//    - MANAGER_ONLY
+//    - GM_ONLY
+//    - COO_ONLY
 //
-// ✅ Concept (your requirement):
-//    - Create profile creates ONLY employee account (User) + employee leave profile
-//    - managerLoginId is OPTIONAL (manager may be created later)
-//    - You can assign manager later in edit/update
+// ✅ Fixed approvers concept:
+//    - GM  = leave_gm
+//    - COO = leave_coo
+//    => Admin DOES NOT need to type GM/COO IDs
+//    => Still stored in profile so Telegram FYI / approver routing works.
 //
-// ✅ Password policy:
-//    - If employee user exists -> OK (password optional)
-//    - If employee user does NOT exist -> password REQUIRED, strong 13+
+// ✅ Manager requirement:
+//    - For modes involving manager: managerLoginId IS REQUIRED
 //
-// ✅ Contracts-only carry:
-//    - Carry stored ONLY in contracts[].carry
-//    - Renew contract creates closeSnapshot + new contract + openSnapshot
-//    - Default renew behavior: clear positive AL carry, keep negative AL carry
+// ✅ FYI rules:
+//    - MANAGER_ONLY: GM stored = leave_gm (FYI read-only)
+//    - GM_ONLY: COO stored = leave_coo (FYI read-only)
+//
+// ✅ Contracts-only carry (contracts[].carry only)
 
 const bcrypt = require('bcryptjs')
 const createError = require('http-errors')
@@ -55,17 +56,22 @@ function ymdToUTCDate(ymd) {
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1))
 }
 
+const FIXED = Object.freeze({
+  GM_LOGIN_ID: 'leave_gm',
+  COO_LOGIN_ID: 'leave_coo',
+})
+
 const APPROVAL_MODES = Object.freeze([
   'MANAGER_AND_GM',
   'MANAGER_AND_COO',
   'GM_AND_COO',
-  'MANAGER_ONLY', // ✅ NEW
-  'GM_ONLY', // ✅ NEW
-  'COO_ONLY', // ✅ NEW
+  'MANAGER_ONLY',
+  'GM_ONLY',
+  'COO_ONLY',
 ])
 
 function normalizeApprovalMode(v) {
-  // ✅ Use model's normalize if available (updated in LeaveProfile model)
+  // ✅ Use model's normalize if available
   if (typeof LeaveProfile?.normalizeApprovalMode === 'function') {
     return LeaveProfile.normalizeApprovalMode(v)
   }
@@ -83,46 +89,63 @@ function modeInvolvesManager(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesGm(mode) {
-  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+  // ✅ include MANAGER_ONLY for GM FYI
+  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesCoo(mode) {
-  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY' // ✅ NEW
+  // ✅ include GM_ONLY for COO FYI
+  return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY' || mode === 'GM_ONLY'
 }
 
 /**
- * ✅ IMPORTANT (your concept):
- * managerLoginId is OPTIONAL (manager may not exist yet).
- * Only validate the approvers required by the selected approvalMode.
+ * ✅ REQUIRED:
+ * - Manager required for manager modes
+ * - GM required when mode includes GM (approver OR FYI)
+ * - COO required when mode includes COO (approver OR FYI)
  */
-function validateModeApprovers(mode, { gmLoginId, cooLoginId }) {
+function validateModeApprovers(mode, { managerLoginId, gmLoginId, cooLoginId }) {
   const m = normalizeApprovalMode(mode)
 
-  // MANAGER_ONLY: manager optional, no gm/coo required
-  if (m === 'MANAGER_ONLY') return
+  const manager = s(managerLoginId)
+  const gm = s(gmLoginId)
+  const coo = s(cooLoginId)
 
-  // GM_ONLY: gm required, coo not required
+  // manager required for manager flows
+  if (m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY') {
+    if (!manager) throw createError(400, 'managerLoginId is required for this approval mode')
+  }
+
+  // MANAGER_ONLY => GM required for FYI
+  if (m === 'MANAGER_ONLY') {
+    if (!gm) throw createError(400, 'gmLoginId is required for MANAGER_ONLY (FYI)')
+    return
+  }
+
+  // GM_ONLY => GM approver required + COO FYI required
   if (m === 'GM_ONLY') {
-    if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for GM_ONLY')
+    if (!gm) throw createError(400, 'gmLoginId is required for GM_ONLY')
+    if (!coo) throw createError(400, 'cooLoginId is required for GM_ONLY (FYI)')
     return
   }
 
-  // COO_ONLY: coo required, gm not required
+  // COO_ONLY => COO required
   if (m === 'COO_ONLY') {
-    if (!s(cooLoginId)) throw createError(400, 'cooLoginId is required for COO_ONLY')
+    if (!coo) throw createError(400, 'cooLoginId is required for COO_ONLY')
     return
   }
 
+  // Standard modes
   if (m === 'MANAGER_AND_GM') {
-    if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for MANAGER_AND_GM')
+    if (!gm) throw createError(400, 'gmLoginId is required for MANAGER_AND_GM')
     return
   }
   if (m === 'MANAGER_AND_COO') {
-    if (!s(cooLoginId)) throw createError(400, 'cooLoginId is required for MANAGER_AND_COO')
+    if (!coo) throw createError(400, 'cooLoginId is required for MANAGER_AND_COO')
     return
   }
   if (m === 'GM_AND_COO') {
-    if (!s(gmLoginId)) throw createError(400, 'gmLoginId is required for GM_AND_COO')
-    if (!s(cooLoginId)) throw createError(400, 'cooLoginId is required for GM_AND_COO')
+    if (!gm) throw createError(400, 'gmLoginId is required for GM_AND_COO')
+    if (!coo) throw createError(400, 'cooLoginId is required for GM_AND_COO')
     return
   }
 
@@ -143,7 +166,6 @@ function contractEndFromStart(startYMD) {
 
 function normalizeCarryObj(c) {
   const src = c && typeof c === 'object' ? c : {}
-
   const out = {
     AL: num(src.AL),
     SP: num(src.SP),
@@ -162,7 +184,6 @@ function normalizeCarryObj(c) {
 function getIo(req) {
   return req.io || req.app?.get('io') || null
 }
-
 function emitProfile(req, docOrPlain, event = 'leave:profile:updated') {
   try {
     const io = getIo(req)
@@ -204,7 +225,6 @@ async function ensureUserHasRoles(loginId, addRoles = []) {
 
   const merged = [...new Set([...current.map(up), ...rolesToAdd])].filter(Boolean)
 
-  // keep "role" as primary (for legacy code). Prefer higher roles over USER.
   const priority = ['ADMIN', 'LEAVE_ADMIN', 'LEAVE_COO', 'LEAVE_GM', 'LEAVE_MANAGER', 'LEAVE_USER']
   const primary =
     merged.slice().sort((a, b) => priority.indexOf(a) - priority.indexOf(b))[0] || 'LEAVE_USER'
@@ -215,47 +235,18 @@ async function ensureUserHasRoles(loginId, addRoles = []) {
   return user
 }
 
-async function inferRolesFromProfiles(loginId) {
-  const id = s(loginId)
-  if (!id) return []
-
-  const roles = []
-
-  // If anyone references this loginId as manager => manager role
-  const isManager = await LeaveProfile.exists({ managerLoginId: id })
-  if (isManager) roles.push('LEAVE_MANAGER')
-
-  // If referenced as GM/COO approver you may choose to infer too (optional).
-  // Keep minimal as your original concept.
-
-  return roles
-}
-
 async function ensureManagerRole(managerLoginId) {
   const id = s(managerLoginId)
   if (!id) return
   await ensureUserHasRoles(id, ['LEAVE_MANAGER'])
 }
 
-/**
- * ✅ Creates ONLY the employee account (User) when needed.
- * - If user exists -> return it (password not required)
- * - If missing -> password required (strong) and create account
- *
- * NOTE: Your EmployeeDirectory schema has NO loginId, only employeeId.
- * We will use EmployeeDirectory.findOne({ employeeId }) to fetch name.
- */
 async function ensureUserAccount({ loginId, employeeId, password }) {
   const login = s(loginId)
   if (!login) throw createError(400, 'loginId is required')
 
-  // ✅ If user exists, still auto-upgrade roles from profiles
   const existing = await User.findOne({ loginId: login })
-  if (existing) {
-    const inferred = await inferRolesFromProfiles(login)
-    if (inferred.length) await ensureUserHasRoles(login, inferred)
-    return existing
-  }
+  if (existing) return existing
 
   const pwd = s(password)
   if (!pwd) throw createError(400, 'Password is required to create a new user account.')
@@ -283,10 +274,6 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
     roles: ['LEAVE_USER'],
     isActive: true,
   })
-
-  // ✅ after creating user, auto-upgrade roles from existing profiles
-  const inferred = await inferRolesFromProfiles(login)
-  if (inferred.length) await ensureUserHasRoles(login, inferred)
 
   return user
 }
@@ -321,14 +308,9 @@ function setPointersToLatest(profileDoc) {
   const latest = latestContract(profileDoc.contracts || [])
   if (!latest || !isValidYMD(latest.startDate)) return
   profileDoc.contractDate = s(latest.startDate)
-  profileDoc.contractEndDate = isValidYMD(latest.endDate)
-    ? s(latest.endDate)
-    : contractEndFromStart(latest.startDate)
+  profileDoc.contractEndDate = isValidYMD(latest.endDate) ? s(latest.endDate) : contractEndFromStart(latest.startDate)
 }
 
-/**
- * Recompute balances from rules.js and save into profileDoc
- */
 async function recomputeAndSaveBalances(profileDoc) {
   const employeeId = s(profileDoc.employeeId)
 
@@ -351,31 +333,6 @@ async function recomputeAndSaveBalances(profileDoc) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   GET /admin/leave/approvers
-   Returns: { gm:[{loginId,label}], coo:[{loginId,label}] }
-───────────────────────────────────────────────────────────── */
-exports.getApprovers = async (req, res) => {
-  const gmUsers = await User.find(
-    { roles: { $in: ['LEAVE_GM'] } },
-    { loginId: 1, name: 1, username: 1 }
-  )
-    .sort({ loginId: 1 })
-    .lean()
-
-  const cooUsers = await User.find(
-    { roles: { $in: ['LEAVE_COO'] } },
-    { loginId: 1, name: 1, username: 1 }
-  )
-    .sort({ loginId: 1 })
-    .lean()
-
-  return res.json({
-    gm: (gmUsers || []).map((u) => ({ loginId: s(u.loginId), label: s(u.name || u.username || u.loginId) })),
-    coo: (cooUsers || []).map((u) => ({ loginId: s(u.loginId), label: s(u.name || u.username || u.loginId) })),
-  })
-}
-
-/* ─────────────────────────────────────────────────────────────
    GET /admin/leave/profiles/modes
 ───────────────────────────────────────────────────────────── */
 exports.getApprovalModes = async (req, res) => {
@@ -384,7 +341,6 @@ exports.getApprovalModes = async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    GET /admin/leave/profiles/grouped?includeInactive=true|false
-   Group by managerLoginId (can be empty)
 ───────────────────────────────────────────────────────────── */
 exports.getProfilesGrouped = async (req, res) => {
   const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true'
@@ -409,7 +365,6 @@ exports.getProfilesGrouped = async (req, res) => {
     const key = s(loginId)
     if (!key || key === 'NO_MANAGER') return null
 
-    // We can only lookup by employeeId in your directory schema.
     const emp = await EmployeeDirectory.findOne(
       { employeeId: key },
       { employeeId: 1, name: 1, fullName: 1, department: 1 }
@@ -449,7 +404,6 @@ exports.getProfileOne = async (req, res) => {
 
   const plain = await attachEmployeeDirectory(doc.toObject())
   plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
-
   return res.json(plain)
 }
 
@@ -466,21 +420,25 @@ exports.createProfileSingle = async (req, res) => {
   const existing = await LeaveProfile.findOne({ employeeId })
   if (existing) throw createError(409, 'Leave profile already exists')
 
-  // In your system: employeeLoginId = loginId for User
   const employeeLoginId = s(body.employeeLoginId || body.loginId || body.employeeId)
   if (!employeeLoginId) throw createError(400, 'employeeLoginId/loginId is required')
 
   const approvalMode = normalizeApprovalMode(body.approvalMode)
-  const managerLoginId = s(body.managerLoginId) // ✅ optional
+
+  // ✅ Manager REQUIRED for manager modes
+  const managerLoginId = modeInvolvesManager(approvalMode) ? s(body.managerLoginId) : ''
   if (managerLoginId) await ensureManagerRole(managerLoginId)
 
-  // ✅ only keep approvers needed by mode
-  const gmLoginId = modeInvolvesGm(approvalMode) ? s(body.gmLoginId) : ''
-  const cooLoginId = modeInvolvesCoo(approvalMode) ? s(body.cooLoginId) : ''
+  // ✅ GM fixed whenever mode includes GM (approver OR FYI)
+  const gmLoginId = modeInvolvesGm(approvalMode) ? FIXED.GM_LOGIN_ID : ''
 
-  validateModeApprovers(approvalMode, { gmLoginId, cooLoginId })
+  // ✅ COO fixed whenever mode includes COO (approver OR FYI)
+  const cooLoginId = modeInvolvesCoo(approvalMode) ? FIXED.COO_LOGIN_ID : ''
 
-  // ✅ Create ONLY employee account (manager not touched)
+  // ✅ IMPORTANT: pass ALL three
+  validateModeApprovers(approvalMode, { managerLoginId, gmLoginId, cooLoginId })
+
+  // ✅ Create ONLY employee account
   await ensureUserAccount({
     loginId: employeeLoginId,
     employeeId,
@@ -519,7 +477,7 @@ exports.createProfileSingle = async (req, res) => {
   const doc = await LeaveProfile.create({
     employeeId,
     employeeLoginId,
-    managerLoginId, // ✅ optional (model may auto-clear if mode doesn't involve manager)
+    managerLoginId,
     gmLoginId,
     cooLoginId,
     approvalMode,
@@ -535,27 +493,26 @@ exports.createProfileSingle = async (req, res) => {
 
   const plain = await attachEmployeeDirectory(saved.toObject())
   plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
-
   return res.status(201).json(plain)
 }
 
 /* ─────────────────────────────────────────────────────────────
    POST /admin/leave/profiles/manager
-   Bulk create employees (NO manager creation; managerLoginId optional string)
-   body: { approvalMode, managerLoginId?, gmLoginId, cooLoginId?, employees:[...] }
+   Bulk create employees (managerLoginId is applied to all)
 ───────────────────────────────────────────────────────────── */
 exports.createManagerWithEmployees = async (req, res) => {
   const body = req.body || {}
   const approvalMode = normalizeApprovalMode(body.approvalMode)
 
-  const managerLoginId = s(body.managerLoginId) // ✅ optional
+  // ✅ Manager REQUIRED for manager modes
+  const managerLoginId = modeInvolvesManager(approvalMode) ? s(body.managerLoginId) : ''
   if (managerLoginId) await ensureManagerRole(managerLoginId)
 
-  // ✅ only keep approvers needed by mode
-  const gmLoginId = modeInvolvesGm(approvalMode) ? s(body.gmLoginId) : ''
-  const cooLoginId = modeInvolvesCoo(approvalMode) ? s(body.cooLoginId) : ''
+  const gmLoginId = modeInvolvesGm(approvalMode) ? FIXED.GM_LOGIN_ID : ''
+  const cooLoginId = modeInvolvesCoo(approvalMode) ? FIXED.COO_LOGIN_ID : ''
 
-  validateModeApprovers(approvalMode, { gmLoginId, cooLoginId })
+  // ✅ IMPORTANT: pass ALL three
+  validateModeApprovers(approvalMode, { managerLoginId, gmLoginId, cooLoginId })
 
   const employees = Array.isArray(body.employees) ? body.employees : []
   if (!employees.length) throw createError(400, 'employees[] is required')
@@ -563,35 +520,34 @@ exports.createManagerWithEmployees = async (req, res) => {
   const created = []
 
   for (const e of employees) {
-    const employeeId = s(e.employeeId)
-    if (!employeeId) continue
+    const empId = s(e.employeeId)
+    if (!empId) continue
 
-    const exists = await LeaveProfile.findOne({ employeeId })
+    const exists = await LeaveProfile.findOne({ employeeId: empId })
     if (exists) continue
 
-    const employeeLoginId = s(e.employeeLoginId || e.loginId || employeeId)
-    if (!employeeLoginId) throw createError(400, `employeeLoginId missing for employeeId=${employeeId}`)
+    const empLoginId = s(e.employeeLoginId || e.loginId || empId)
+    if (!empLoginId) throw createError(400, `employeeLoginId missing for employeeId=${empId}`)
 
-    // ✅ Create ONLY employee account
     await ensureUserAccount({
-      loginId: employeeLoginId,
-      employeeId,
+      loginId: empLoginId,
+      employeeId: empId,
       password: e.password,
     })
 
     const joinDate = s(e.joinDate)
-    if (!isValidYMD(joinDate)) throw createError(400, `joinDate must be YYYY-MM-DD for employeeId=${employeeId}`)
+    if (!isValidYMD(joinDate)) throw createError(400, `joinDate must be YYYY-MM-DD for employeeId=${empId}`)
 
     const contractDate = s(e.contractDate || joinDate)
-    if (!isValidYMD(contractDate)) throw createError(400, `contractDate must be YYYY-MM-DD for employeeId=${employeeId}`)
+    if (!isValidYMD(contractDate)) throw createError(400, `contractDate must be YYYY-MM-DD for employeeId=${empId}`)
 
     const endDate = contractEndFromStart(contractDate)
     const initialCarry = normalizeCarryObj(e.carry)
 
     const doc = await LeaveProfile.create({
-      employeeId,
-      employeeLoginId,
-      managerLoginId, // ✅ optional
+      employeeId: empId,
+      employeeLoginId: empLoginId,
+      managerLoginId,
       gmLoginId,
       cooLoginId,
       approvalMode,
@@ -622,7 +578,6 @@ exports.createManagerWithEmployees = async (req, res) => {
 
     const saved = await recomputeAndSaveBalances(doc)
     emitProfile(req, saved, 'leave:profile:created')
-
     created.push(await attachEmployeeDirectory(saved.toObject()))
   }
 
@@ -631,8 +586,6 @@ exports.createManagerWithEmployees = async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    PATCH /admin/leave/profiles/:employeeId
-   Update profile settings (mode + approvers + joinDate + active)
-   ✅ managerLoginId optional (can be set later when manager exists)
 ───────────────────────────────────────────────────────────── */
 exports.updateProfile = async (req, res) => {
   const employeeId = s(req.params.employeeId)
@@ -643,18 +596,21 @@ exports.updateProfile = async (req, res) => {
 
   const nextApprovalMode = normalizeApprovalMode(body.approvalMode ?? doc.approvalMode)
 
-  // ✅ allow manager in MANAGER_ONLY too
+  // ✅ Manager REQUIRED for manager modes
   const managerAllowed = modeInvolvesManager(nextApprovalMode)
-
-  // ✅ If mode doesn't involve manager -> force remove managerLoginId
   const nextManager = managerAllowed ? s(body.managerLoginId ?? doc.managerLoginId) : ''
   if (nextManager) await ensureManagerRole(nextManager)
 
-  // ✅ clear approvers that don't apply
-  const nextGm = modeInvolvesGm(nextApprovalMode) ? s(body.gmLoginId ?? doc.gmLoginId) : ''
-  const nextCoo = modeInvolvesCoo(nextApprovalMode) ? s(body.cooLoginId ?? doc.cooLoginId) : ''
+  // ✅ GM/COO fixed based on mode
+  const nextGm = modeInvolvesGm(nextApprovalMode) ? FIXED.GM_LOGIN_ID : ''
+  const nextCoo = modeInvolvesCoo(nextApprovalMode) ? FIXED.COO_LOGIN_ID : ''
 
-  validateModeApprovers(nextApprovalMode, { gmLoginId: nextGm, cooLoginId: nextCoo })
+  // ✅ IMPORTANT: pass ALL three
+  validateModeApprovers(nextApprovalMode, {
+    managerLoginId: nextManager,
+    gmLoginId: nextGm,
+    cooLoginId: nextCoo,
+  })
 
   doc.approvalMode = nextApprovalMode
   doc.managerLoginId = nextManager
@@ -679,13 +635,11 @@ exports.updateProfile = async (req, res) => {
 
   const plain = await attachEmployeeDirectory(saved.toObject())
   plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
-
   return res.json(plain)
 }
 
 /* ─────────────────────────────────────────────────────────────
-   DELETE /admin/leave/profiles/:employeeId
-   Deactivate (soft)
+   DELETE /admin/leave/profiles/:employeeId  (soft deactivate)
 ───────────────────────────────────────────────────────────── */
 exports.deactivateProfile = async (req, res) => {
   const employeeId = s(req.params.employeeId)
@@ -849,7 +803,6 @@ exports.recalculateBalances = async (req, res) => {
 /* ─────────────────────────────────────────────────────────────
    PATCH /admin/leave/profiles/:employeeId/password
    body: { password }
-   - Admin sets new password directly (no old password)
 ───────────────────────────────────────────────────────────── */
 exports.resetUserPassword = async (req, res) => {
   const employeeId = s(req.params.employeeId)
@@ -871,12 +824,11 @@ exports.resetUserPassword = async (req, res) => {
   if (typeof user.setPassword === 'function') {
     await user.setPassword(password)
   } else {
-    // fallback safety (if method not deployed yet)
     user.passwordHash = await bcrypt.hash(s(password), 10)
     user.passwordChangedAt = new Date()
     user.passwordVersion = Number(user.passwordVersion || 0) + 1
+    await user.save()
   }
 
-  await user.save()
   return res.json({ ok: true, loginId })
 }

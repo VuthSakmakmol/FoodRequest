@@ -10,11 +10,13 @@
      - computeBalances() already applies carry into balances.used + balances.remaining
      - Frontend must NOT apply carry again
 
-  ✅ UPDATED:
-     - Added MANAGER_ONLY, GM_ONLY to dropdown
-     - Mode-based show/hide for Manager / GM / COO inputs
-     - Clears unused approvers on mode switch
-     - Validation matches backend rules (manager optional concept)
+  ✅ UPDATED (Fixed approvers):
+     - GM and COO are FIXED accounts:
+         GM  = leave_gm
+         COO = leave_coo
+       => Admin does NOT type GM/COO IDs anymore (read-only display)
+     - MANAGER_ONLY: GM is FYI (read-only) but still stored to send Telegram FYI
+     - GM_ONLY: COO is FYI (read-only) but still stored to send Telegram FYI
 -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -35,6 +37,12 @@ defineOptions({ name: 'AdminLeaveProfileEdit' })
 const route = useRoute()
 const router = useRouter()
 const { showToast } = useToast()
+
+/* ───────────────── fixed approvers ───────────────── */
+const FIXED = {
+  GM_LOGIN_ID: 'leave_gm',
+  COO_LOGIN_ID: 'leave_coo',
+}
 
 /* ───────────────── responsive ───────────────── */
 const isMobile = ref(false)
@@ -100,14 +108,30 @@ function up(v) {
   return String(v || '').trim().toUpperCase()
 }
 
+/* ───────────────── profile form ───────────────── */
+const form = reactive({
+  joinDate: '',
+  approvalMode: 'MANAGER_AND_GM',
+
+  // backend expects managerLoginId; you still call it managerEmployeeId in UI
+  managerEmployeeId: '',
+
+  // fixed, read-only (autofill)
+  gmLoginId: '',
+  cooLoginId: '',
+
+  isActive: true,
+})
+const formError = ref('')
+
 /* ───────────────── approval mode ───────────────── */
 const APPROVAL_MODES = [
   { value: 'MANAGER_AND_GM', label: 'Manager + GM', hint: 'Manager approves first, then GM.' },
   { value: 'MANAGER_AND_COO', label: 'Manager + COO', hint: 'Manager approves first, then COO.' },
   { value: 'GM_AND_COO', label: 'GM + COO', hint: 'GM approves first, then COO.' },
-  { value: 'MANAGER_ONLY', label: 'Manager only', hint: 'Manager approves and finishes.' }, // ✅ NEW
-  { value: 'GM_ONLY', label: 'GM only', hint: 'GM approves and finishes.' }, // ✅ NEW
-    { value: 'COO_ONLY', label: 'COO only', hint: 'COO approves and finishes.' }, // ✅ ADD
+  { value: 'MANAGER_ONLY', label: 'Manager only', hint: 'Manager approves and finishes. (GM = FYI)' },
+  { value: 'GM_ONLY', label: 'GM only', hint: 'GM approves and finishes. (COO = FYI)' },
+  { value: 'COO_ONLY', label: 'COO only', hint: 'COO approves and finishes.' },
 ]
 
 function normApprovalMode(v) {
@@ -115,9 +139,9 @@ function normApprovalMode(v) {
   if (s1 === 'GM_AND_COO') return 'GM_AND_COO'
   if (s1 === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
   if (s1 === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
-  if (s1 === 'MANAGER_ONLY') return 'MANAGER_ONLY' // ✅ NEW
-  if (s1 === 'GM_ONLY') return 'GM_ONLY' // ✅ NEW
-  if (s1 === 'COO_ONLY') return 'COO_ONLY' // ✅ ADD
+  if (s1 === 'MANAGER_ONLY') return 'MANAGER_ONLY'
+  if (s1 === 'GM_ONLY') return 'GM_ONLY'
+  if (s1 === 'COO_ONLY') return 'COO_ONLY'
 
   // backward aliases
   if (s1 === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
@@ -132,27 +156,31 @@ function modeInvolvesManager(mode) {
 }
 function modeInvolvesGm(mode) {
   const m = normApprovalMode(mode)
-  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
+  // ✅ GM involved as approver OR FYI
+  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY' || m === 'MANAGER_ONLY'
 }
-
 function modeInvolvesCoo(mode) {
   const m = normApprovalMode(mode)
-  return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'COO_ONLY' // ✅ ADD
+  // ✅ COO involved as approver OR FYI
+  return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'COO_ONLY' || m === 'GM_ONLY'
 }
 
 const needManager = computed(() => modeInvolvesManager(form.approvalMode))
 const needGm = computed(() => modeInvolvesGm(form.approvalMode))
 const needCoo = computed(() => modeInvolvesCoo(form.approvalMode))
 
-// Your backend concept: manager may be empty even in manager modes.
-// So only show "required" badge in UI if you want strict (you said optional) -> keep optional always.
-const managerIsRequired = computed(() => false)
+const isManagerFyiMode = computed(() => normApprovalMode(form.approvalMode) === 'MANAGER_ONLY')
+const isCooFyiMode = computed(() => normApprovalMode(form.approvalMode) === 'GM_ONLY')
 
-// GM required only when GM is involved
-const gmIsRequired = computed(() => needGm.value)
+/* Manager optional by your policy */
+const managerIsRequired = computed(() => {
+  const m = normApprovalMode(form.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
+})
 
-// COO required only when COO is involved
-const cooIsRequired = computed(() => needCoo.value)
+/* GM/COO fixed -> no need required UI, still set values automatically */
+const gmIsRequired = computed(() => false)
+const cooIsRequired = computed(() => false)
 
 /* ───────────────── balances normalize (NO carry math here) ───────────────── */
 function normalizeBalances(rawBalances = []) {
@@ -244,6 +272,21 @@ function setSelectedContractDefault() {
 }
 watch(selectedContractNo, () => fillContractCarryFormFromSelected())
 
+/* ───────────────── fixed approver autofill ───────────────── */
+function applyFixedApprovers() {
+  const mode = normApprovalMode(form.approvalMode)
+
+  // manager stays optional and only used when needed
+  if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
+
+  // ✅ GM fixed
+  form.gmLoginId = modeInvolvesGm(mode) ? FIXED.GM_LOGIN_ID : ''
+
+  // ✅ COO fixed
+  form.cooLoginId = modeInvolvesCoo(mode) ? FIXED.COO_LOGIN_ID : ''
+}
+
+/* ───────────────── fetch profile/contracts ───────────────── */
 async function fetchProfile() {
   if (!employeeId.value) return
   loading.value = true
@@ -283,41 +326,6 @@ async function fetchContracts() {
   }
 }
 
-async function saveContractCarry() {
-  if (!employeeId.value) return
-  const no = Number(selectedContractNo.value)
-  if (!no) return showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
-
-  saving.value = true
-  try {
-    const carry = normalizeCarry(contractCarryForm.carry)
-    await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${no}`, { carry })
-    showToast({ type: 'success', title: 'Saved', message: `Carry updated for contract #${no}.` })
-    await fetchProfile()
-    await fetchContracts()
-  } catch (e) {
-    console.error(e)
-    const msg = e?.response?.data?.message || 'Failed to save contract carry.'
-    showToast({ type: 'error', title: 'Save failed', message: msg })
-  } finally {
-    saving.value = false
-  }
-}
-
-/* ───────────────── profile form ───────────────── */
-const form = reactive({
-  joinDate: '',
-  approvalMode: 'MANAGER_AND_GM',
-
-  // IMPORTANT: backend uses managerLoginId; we keep UI name managerEmployeeId but will map -> managerLoginId.
-  managerEmployeeId: '',
-
-  gmLoginId: '',
-  cooLoginId: '',
-  isActive: true,
-})
-const formError = ref('')
-
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
   form.approvalMode = normApprovalMode(p?.approvalMode)
@@ -325,28 +333,21 @@ function fillFormFromProfile(p) {
   // accept either key from backend
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
 
-  form.gmLoginId = String(p?.gmLoginId || '')
-  form.cooLoginId = String(p?.cooLoginId || '')
-  form.isActive = p?.isActive === false ? false : true
+  // GM/COO are fixed in your system — always overwrite with fixed values when needed
   originalJoinDate.value = toInputDate(p?.joinDate)
+  form.isActive = p?.isActive === false ? false : true
 
-  // ✅ ensure unused fields are cleared on load too
+  applyFixedApprovers()
+
+  // if backend has a stored managerLoginId but this mode doesn't involve manager, clean it visually
   const mode = normApprovalMode(form.approvalMode)
   if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
-  if (!modeInvolvesGm(mode)) form.gmLoginId = ''
-  if (!modeInvolvesCoo(mode)) form.cooLoginId = ''
 }
 
-/* ✅ On mode switch, clear fields that don't apply */
+/* ✅ On mode switch, auto-fill fixed accounts */
 watch(
   () => form.approvalMode,
-  () => {
-    const mode = normApprovalMode(form.approvalMode)
-
-    if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
-    if (!modeInvolvesGm(mode)) form.gmLoginId = ''
-    if (!modeInvolvesCoo(mode)) form.cooLoginId = ''
-  }
+  () => applyFixedApprovers()
 )
 
 const joinDateChanged = computed(() => String(originalJoinDate.value || '') !== String(form.joinDate || ''))
@@ -359,6 +360,7 @@ const isDirty = computed(() => {
     joinDate: toInputDate(p.joinDate),
     approvalMode: normApprovalMode(p.approvalMode),
     managerEmployeeId: String(p.managerEmployeeId || p.managerLoginId || ''),
+    // fixed values are not stored per profile compare (still compare)
     gmLoginId: String(p.gmLoginId || ''),
     cooLoginId: String(p.cooLoginId || ''),
     isActive: p.isActive === false ? false : true,
@@ -417,17 +419,14 @@ async function forceRecalcBalances() {
 }
 
 function validateApprovers() {
-  const mode = normApprovalMode(form.approvalMode)
+  const m = normApprovalMode(form.approvalMode)
 
-  // ✅ GM required only when mode involves GM
-  if (modeInvolvesGm(mode) && !String(form.gmLoginId || '').trim()) return 'GM Login ID is required.'
+  // ✅ require manager for manager-involved modes
+  if ((m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY') && !String(form.managerEmployeeId || '').trim()) {
+    return 'Manager employee ID is required for this approval mode.'
+  }
 
-  // ✅ COO required only when mode involves COO
-  if (modeInvolvesCoo(mode) && !String(form.cooLoginId || '').trim()) return 'COO Login ID is required.'
-
-  // ✅ Manager is OPTIONAL by your backend concept (no hard requirement)
-  // If you want to enforce for some modes, change here.
-
+  // GM/COO are fixed (auto), so no need validate
   return ''
 }
 
@@ -455,11 +454,9 @@ async function saveProfile() {
         // backend expects managerLoginId (optional)
         managerLoginId: needManager.value ? String(form.managerEmployeeId || '').trim() || null : null,
 
-        // backend: GM required for GM modes, else null
-        gmLoginId: needGm.value ? String(form.gmLoginId || '').trim() || null : null,
-
-        // backend: COO required for COO modes, else null
-        cooLoginId: needCoo.value ? String(form.cooLoginId || '').trim() || null : null,
+        // ✅ fixed accounts (approver OR FYI)
+        gmLoginId: needGm.value ? FIXED.GM_LOGIN_ID : null,
+        cooLoginId: needCoo.value ? FIXED.COO_LOGIN_ID : null,
 
         isActive: form.isActive !== false,
       },
@@ -483,6 +480,28 @@ async function saveProfile() {
     console.error(e)
     const msg = e?.response?.data?.message || 'Failed to save.'
     formError.value = msg
+    showToast({ type: 'error', title: 'Save failed', message: msg })
+  } finally {
+    saving.value = false
+  }
+}
+
+/* ───────────────── contract carry save ───────────────── */
+async function saveContractCarry() {
+  if (!employeeId.value) return
+  const no = Number(selectedContractNo.value)
+  if (!no) return showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
+
+  saving.value = true
+  try {
+    const carry = normalizeCarry(contractCarryForm.carry)
+    await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${no}`, { carry })
+    showToast({ type: 'success', title: 'Saved', message: `Carry updated for contract #${no}.` })
+    await fetchProfile()
+    await fetchContracts()
+  } catch (e) {
+    console.error(e)
+    const msg = e?.response?.data?.message || 'Failed to save contract carry.'
     showToast({ type: 'error', title: 'Save failed', message: msg })
   } finally {
     saving.value = false
@@ -642,7 +661,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
+  if (typeof document === 'undefined') return
+  document.body.classList.remove('overflow-hidden')
 })
 </script>
 
@@ -721,7 +741,10 @@ onBeforeUnmount(() => {
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
                   <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Controls AL accrual and service-year rules">
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        title="Controls AL accrual and service-year rules"
+                      >
                         Join date
                       </div>
                       <div class="mt-1">
@@ -765,39 +788,57 @@ onBeforeUnmount(() => {
                           </div>
                         </div>
                       </div>
+
+                      <div class="mt-2 text-[11px] text-ui-muted">
+                        <span class="font-semibold">Hint:</span>
+                        {{ APPROVAL_MODES.find((m) => m.value === normApprovalMode(form.approvalMode))?.hint || '' }}
+                      </div>
                     </div>
 
                     <!-- ✅ show only if mode involves manager -->
                     <div v-if="needManager" class="ui-card !rounded-2xl px-3 py-2">
                       <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Manager loginId/employeeId (optional by policy)">
                         Manager employee ID
-                        <span class="ml-2 ui-badge">optional</span>
                       </div>
                       <div class="mt-1">
                         <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
                       </div>
+                      <div class="mt-1 text-[10px] text-ui-muted">
+                        Current: <span class="font-mono">{{ profile.managerLoginId || '—' }}</span>
+                      </div>
                     </div>
 
-                    <!-- ✅ show only if mode involves GM -->
+                    <!-- ✅ GM is FIXED (read-only) -->
                     <div v-if="needGm" class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Approver loginId with role LEAVE_GM">
-                        GM login ID <span v-if="gmIsRequired" class="ml-1 text-rose-600 font-extrabold">*</span>
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        :title="isManagerFyiMode ? 'GM will receive FYI (read-only) notification' : 'GM is an approver'"
+                      >
+                        GM
+                        <span class="ml-2 ui-badge">{{ isManagerFyiMode ? 'FYI' : 'APPROVER' }}</span>
                       </div>
-                      <div class="mt-1">
-                        <input v-model="form.gmLoginId" type="text" placeholder="Example: leave_gm" class="ui-input w-full" />
+                      <div class="mt-1 text-[12px] font-extrabold text-ui-fg font-mono">
+                        {{ FIXED.GM_LOGIN_ID }}
+                      </div>
+                      <div class="mt-1 text-[10px] text-ui-muted">
+                        Stored: <span class="font-mono">{{ profile.gmLoginId || '—' }}</span>
                       </div>
                     </div>
 
-                    <!-- ✅ show COO when needed -->
+                    <!-- ✅ COO is FIXED (read-only) -->
                     <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Required when approval mode includes COO">
-                        COO login ID <span v-if="cooIsRequired" class="ml-1 text-rose-600 font-extrabold">*</span>
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        :title="isCooFyiMode ? 'COO will receive FYI (read-only) notification' : 'COO is an approver'"
+                      >
+                        COO
+                        <span class="ml-2 ui-badge">{{ isCooFyiMode ? 'FYI' : 'APPROVER' }}</span>
                       </div>
-                      <div class="mt-1">
-                        <input v-model="form.cooLoginId" type="text" placeholder="Example: leave_coo" class="ui-input w-full" />
-                        <div class="mt-1 text-[11px] text-ui-muted">
-                          Current: <span class="font-mono">{{ profile.cooLoginId || '—' }}</span>
-                        </div>
+                      <div class="mt-1 text-[12px] font-extrabold text-ui-fg font-mono">
+                        {{ FIXED.COO_LOGIN_ID }}
+                      </div>
+                      <div class="mt-1 text-[10px] text-ui-muted">
+                        Stored: <span class="font-mono">{{ profile.cooLoginId || '—' }}</span>
                       </div>
                     </div>
                   </div>
@@ -919,7 +960,14 @@ onBeforeUnmount(() => {
                     <div class="mt-2 grid grid-cols-1 gap-2">
                       <div>
                         <div class="ui-label">AL</div>
-                        <input v-model.number="contractCarryForm.carry.AL" type="number" step="0.5" class="ui-input w-full" placeholder="0" :disabled="!selectedContract" />
+                        <input
+                          v-model.number="contractCarryForm.carry.AL"
+                          type="number"
+                          step="0.5"
+                          class="ui-input w-full"
+                          placeholder="0"
+                          :disabled="!selectedContract"
+                        />
                       </div>
 
                       <div class="grid grid-cols-2 gap-2">

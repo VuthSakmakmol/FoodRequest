@@ -1,5 +1,12 @@
 /* eslint-disable no-console */
 // backend/services/telegram/leave/leave.telegram.notify.js
+//
+// ✅ NO admin DMs anymore (leave_admin/admin/root_admin receive NOTHING)
+// ✅ Employee gets submit + decision + cancel DMs
+// ✅ Current approver gets DM
+// ✅ FYI read-only:
+//    - MANAGER_ONLY: GM gets FYI even though not involved
+//    - GM_ONLY: COO gets FYI even though not involved
 
 const EmployeeDirectory = require('../../../models/EmployeeDirectory')
 const rec = require('./leave.telegram.recipients')
@@ -24,18 +31,6 @@ async function getEmployeeName(employeeId) {
   return emp?.name || emp?.fullName || ''
 }
 
-async function dmAdmins(doc, text) {
-  const chatIds = await rec.resolveAdminChatIds(doc?._id)
-  if (!chatIds.length) return log('skip admins (no chatIds)')
-  for (const cid of chatIds) {
-    try {
-      await sendLeaveDM(cid, text)
-    } catch (e) {
-      console.warn('[leave.notify] admin DM failed', e?.message)
-    }
-  }
-}
-
 /* Create: employee confirm */
 async function notifyCreatedToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
@@ -43,39 +38,89 @@ async function notifyCreatedToEmployee(doc) {
   await sendLeaveDM(chatId, msg.employeeSubmitted(doc))
 }
 
-/* Admin: create/update */
-async function notifyAdminsOnCreate(doc) {
-  const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-  await dmAdmins(doc, msg.adminCreated(doc, employeeName))
-}
-async function notifyAdminsOnUpdate(doc) {
-  const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-  await dmAdmins(doc, msg.adminUpdated(doc, employeeName))
-}
-
-/* Current approver: based on status */
+/* Current approver: based on status + mode (includes FYI rules) */
 async function notifyCurrentApprover(doc) {
   const st = up(doc?.status)
+  const mode = up(doc?.approvalMode)
   const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
 
+  if (DEBUG) {
+    console.log('[leave.notify] notifyCurrentApprover (enter)', {
+      requestId: String(doc?._id || ''),
+      status: st,
+      mode,
+      managerLoginId: String(doc?.managerLoginId || ''),
+      gmLoginId: String(doc?.gmLoginId || ''),
+      cooLoginId: String(doc?.cooLoginId || ''),
+    })
+  }
+
+  // PENDING_MANAGER → Manager (action) + GM FYI if MANAGER_ONLY
   if (st === 'PENDING_MANAGER') {
-    const chatId = await rec.resolveManagerChatId(doc)
-    if (!chatId) return
-    return sendLeaveDM(chatId, msg.managerNew(doc, employeeName))
+    const managerChatId = await rec.resolveManagerChatId(doc)
+    if (managerChatId) {
+      await sendLeaveDM(managerChatId, msg.managerNew(doc, employeeName))
+      log('sent manager DM', { requestId: String(doc?._id || ''), managerChatId })
+    } else {
+      log('skip manager DM (no chatId)', { requestId: String(doc?._id || ''), managerLoginId: String(doc?.managerLoginId || '') })
+    }
+
+    // ✅ GM FYI read-only
+    if (mode === 'MANAGER_ONLY') {
+      // (optional safety) fallback to fixed loginId if doc.gmLoginId empty
+      const gmChatId = await rec.resolveGmChatId({ ...doc, gmLoginId: doc?.gmLoginId || 'leave_gm' })
+      if (gmChatId) {
+        await sendLeaveDM(gmChatId, msg.gmNew(doc, employeeName)) // gmNew() will show FYI
+        log('sent GM FYI DM', { requestId: String(doc?._id || ''), gmChatId })
+      } else {
+        log('skip GM FYI DM (no chatId)', { requestId: String(doc?._id || ''), gmLoginId: String(doc?.gmLoginId || '') })
+      }
+    }
+
+    return
   }
+
+  // PENDING_GM → GM (action) + COO FYI if GM_ONLY
   if (st === 'PENDING_GM') {
-    const chatId = await rec.resolveGmChatId(doc)
-    if (!chatId) return
-    return sendLeaveDM(chatId, msg.gmNew(doc, employeeName))
+    const gmChatId = await rec.resolveGmChatId(doc)
+    if (gmChatId) {
+      await sendLeaveDM(gmChatId, msg.gmNew(doc, employeeName))
+      log('sent GM DM', { requestId: String(doc?._id || ''), gmChatId })
+    } else {
+      log('skip GM DM (no chatId)', { requestId: String(doc?._id || ''), gmLoginId: String(doc?.gmLoginId || '') })
+    }
+
+    // ✅ COO FYI read-only
+    if (mode === 'GM_ONLY') {
+      // (optional safety) fallback to fixed loginId if doc.cooLoginId empty
+      const cooChatId = await rec.resolveCooChatId({ ...doc, cooLoginId: doc?.cooLoginId || 'leave_coo' })
+      if (cooChatId) {
+        await sendLeaveDM(cooChatId, msg.cooNew(doc, employeeName)) // cooNew() will show FYI
+        log('sent COO FYI DM', { requestId: String(doc?._id || ''), cooChatId })
+      } else {
+        log('skip COO FYI DM (no chatId)', { requestId: String(doc?._id || ''), cooLoginId: String(doc?.cooLoginId || '') })
+      }
+    }
+
+    return
   }
+
+  // PENDING_COO → COO (action)
   if (st === 'PENDING_COO') {
-    const chatId = await rec.resolveCooChatId(doc)
-    if (!chatId) return
-    return sendLeaveDM(chatId, msg.cooNew(doc, employeeName))
+    const cooChatId = await rec.resolveCooChatId(doc)
+    if (!cooChatId) {
+      return log('skip COO DM (no chatId)', { requestId: String(doc?._id || ''), cooLoginId: String(doc?.cooLoginId || '') })
+    }
+    await sendLeaveDM(cooChatId, msg.cooNew(doc, employeeName))
+    log('sent COO DM', { requestId: String(doc?._id || ''), cooChatId })
+    return
   }
+
+  // For other statuses, do nothing
+  log('notifyCurrentApprover: no action for status', { requestId: String(doc?._id || ''), status: st, mode })
 }
 
-/* Decisions: employee + admins + next approver handled by controller calling notifyCurrentApprover */
+/* Decisions: employee only (NO admin DMs) */
 async function notifyManagerDecisionToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
   if (!chatId) return
@@ -102,8 +147,6 @@ async function notifyCancelledToEmployee(doc) {
 
 module.exports = {
   notifyCreatedToEmployee,
-  notifyAdminsOnCreate,
-  notifyAdminsOnUpdate,
   notifyCurrentApprover,
 
   notifyManagerDecisionToEmployee,

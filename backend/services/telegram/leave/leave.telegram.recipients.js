@@ -1,5 +1,11 @@
 /* eslint-disable no-console */
 // backend/services/telegram/leave/leave.telegram.recipients.js
+//
+// ✅ Supports resolving chatId from either:
+//    - numeric employeeId  -> EmployeeDirectory.telegramChatId
+//    - loginId string      -> User.telegramChatId
+//
+// ❌ Removed admin recipients completely (leave_admin/admin/root_admin get NOTHING)
 
 const EmployeeDirectory = require('../../../models/EmployeeDirectory')
 const User = require('../../../models/User')
@@ -23,17 +29,20 @@ async function resolveChatId(key, requestId, label) {
   if (!k) return ''
 
   try {
+    // numeric => EmployeeDirectory.employeeId
     if (isDigits(k)) {
       const emp = await EmployeeDirectory.findOne(
         { employeeId: k },
         { employeeId: 1, telegramChatId: 1 }
       ).lean()
+
       const chatId = s(emp?.telegramChatId)
       if (!chatId) return ''
       logOk(label, `emp:${k}`, chatId, rid)
       return chatId
     }
 
+    // string => User.loginId
     const user = await User.findOne({ loginId: k }, { loginId: 1, telegramChatId: 1 }).lean()
     const chatId = s(user?.telegramChatId)
     if (!chatId) return ''
@@ -58,29 +67,10 @@ async function resolveCooChatId(doc) {
   return resolveChatId(doc?.cooLoginId, doc?._id, 'coo')
 }
 
-async function resolveAdminChatIds(requestId) {
-  const rid = s(requestId)
-  try {
-    const rows = await User.find(
-      { role: { $in: ['LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'] }, telegramChatId: { $exists: true, $ne: '' } },
-      { loginId: 1, telegramChatId: 1 }
-    ).lean()
-
-    const ids = [...new Set((rows || []).map((u) => s(u.telegramChatId)).filter(Boolean))]
-
-    if (DEBUG) console.log('[Leave DM lookup ✓ admins]', { count: ids.length, requestId: rid })
-    return ids
-  } catch (e) {
-    console.error('[Leave DM lookup ✗ admins] failed', { requestId: rid, error: e.message })
-    return []
-  }
-}
-
 module.exports = {
   resolveChatId,
   resolveEmployeeChatId,
   resolveManagerChatId,
   resolveGmChatId,
   resolveCooChatId,
-  resolveAdminChatIds,
 }

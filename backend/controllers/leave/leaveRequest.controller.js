@@ -545,9 +545,23 @@ exports.createMyRequest = async (req, res, next) => {
 
     const mode = normalizeMode(prof.approvalMode)
 
+    const FIXED = {
+      GM_LOGIN_ID: 'leave_gm',
+      COO_LOGIN_ID: 'leave_coo',
+    }
+
     const managerLoginId = s(prof.managerLoginId)
-    const gmLoginId = s(prof.gmLoginId)
-    const cooLoginId = s(prof.cooLoginId)
+
+    // ✅ force fixed IDs for FYI support (and for approver support too)
+    const gmLoginId =
+      mode === 'MANAGER_ONLY' || mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+        ? (s(prof.gmLoginId) || FIXED.GM_LOGIN_ID)
+        : ''
+
+    const cooLoginId =
+      mode === 'GM_ONLY' || mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY'
+        ? (s(prof.cooLoginId) || FIXED.COO_LOGIN_ID)
+        : ''
 
     const vr = validateAndNormalizeRequest({
       leaveTypeCode: req.body?.leaveTypeCode,
@@ -598,7 +612,6 @@ exports.createMyRequest = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:created')
 
-    await safeNotify(notify?.notifyAdminsOnCreate, payload)
     await safeNotify(notify?.notifyCreatedToEmployee, payload)
     await safeNotify(notify?.notifyCurrentApprover, payload)
 
@@ -655,7 +668,6 @@ exports.cancelMyRequest = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(existing)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyCancelledToEmployee, payload)
 
     await recalcAndEmitProfile(req, existing.employeeId)
@@ -749,14 +761,11 @@ exports.managerDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload)
 
-    if (act === 'APPROVE') {
-      if (newStatus === 'PENDING_GM') await safeNotify(notify?.notifyManagerApprovedToGm, doc)
-      if (newStatus === 'PENDING_COO') await safeNotify(notify?.notifyManagerApprovedToCoo, doc)
-    }
+    await safeNotify(notify?.notifyGmFyiOnManagerOnlyDecision, payload)
+
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     await recalcAndEmitProfile(req, doc.employeeId)
 
@@ -878,13 +887,13 @@ exports.gmDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload)
 
-    if (act === 'APPROVE' && newStatus === 'PENDING_COO') {
-      await safeNotify(notify?.notifyGmApprovedToCoo, doc)
-    }
+    // ✅ NEW: COO FYI when GM_ONLY final decision
+    await safeNotify(notify?.notifyCooFyiOnGmOnlyDecision, payload)
+
+    // keep existing:
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     await recalcAndEmitProfile(req, doc.employeeId)
 
@@ -1006,7 +1015,6 @@ exports.cooDecision = async (req, res, next) => {
     const payload = await attachEmployeeInfoToOne(doc)
     emitReq(req, payload, 'leave:req:updated')
 
-    await safeNotify(notify?.notifyAdminsOnUpdate, payload)
     await safeNotify(notify?.notifyCooDecisionToEmployee, payload)
 
     await recalcAndEmitProfile(req, doc.employeeId)
