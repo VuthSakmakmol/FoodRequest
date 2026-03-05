@@ -63,7 +63,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('PENDING_COO')
+const statusFilter = ref('ALL')
 
 /* pagination */
 const page = ref(1)
@@ -321,7 +321,7 @@ watch(
 /* clear filters */
 function clearFilters() {
   search.value = ''
-  statusFilter.value = 'PENDING_COO'
+  statusFilter.value = 'ALL'
   perPage.value = 20
   page.value = 1
 }

@@ -25,6 +25,9 @@ const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const { isWorkingDay } = require('../../utils/leave.rules')
 
+// ✅ realtime broadcaster (must include FYI logic in backend/utils/swap.realtime.js)
+const { broadcastSwapRequest } = require('../../utils/swap.realtime')
+
 /* ───────────────── notify (Telegram) ───────────────── */
 let notify = null
 try {
@@ -217,7 +220,10 @@ async function assertNoSwapOverlap({ employeeId, reqStart, reqEnd, offStart, off
       dateRangesOverlap(offStart, offEnd, rOffS, rOffE)
 
     if (hit) {
-      throw createError(409, 'You already have a Swap Working Day request that overlaps these dates. Please select other dates.')
+      throw createError(
+        409,
+        'You already have a Swap Working Day request that overlaps these dates. Please select other dates.'
+      )
     }
   }
 }
@@ -385,39 +391,7 @@ function emitSwap(req, payload, event = 'swap:req:updated') {
   try {
     const io = getIo(req)
     if (!io) return
-
-    const empId = s(payload?.employeeId)
-    const requester = s(payload?.requesterLoginId)
-
-    const manager = s(payload?.managerLoginId)
-    const gm = s(payload?.gmLoginId)
-    const coo = s(payload?.cooLoginId)
-
-    const st = up(payload?.status)
-
-    io.to('admins').emit(event, payload)
-    if (empId) io.to(`employee:${empId}`).emit(event, payload)
-    if (requester) io.to(`user:${requester}`).emit(event, payload)
-    if (empId) io.to(`user:${empId}`).emit(event, payload) // optional fallback
-
-    // current approver first (inbox realtime)
-    if (st === 'PENDING_MANAGER' && manager) {
-      io.to(`user:${manager}`).emit(event, payload)
-      return
-    }
-    if (st === 'PENDING_GM' && gm) {
-      io.to(`user:${gm}`).emit(event, payload)
-      return
-    }
-    if (st === 'PENDING_COO' && coo) {
-      io.to(`user:${coo}`).emit(event, payload)
-      return
-    }
-
-    // otherwise broadcast to all approvers (history views)
-    if (manager) io.to(`user:${manager}`).emit(event, payload)
-    if (gm) io.to(`user:${gm}`).emit(event, payload)
-    if (coo) io.to(`user:${coo}`).emit(event, payload)
+    broadcastSwapRequest(io, payload, event)
   } catch (e) {
     console.warn('⚠️ emitSwap failed:', e?.message)
   }
@@ -454,7 +428,7 @@ exports.createMySwapRequest = async (req, res, next) => {
       throw createError(400, 'request dates and off dates cannot overlap.')
     }
 
-    // ✅ request = NON-working day(s), off = WORKING day(s) (as per your existing logic)
+    // request = NON-working days, off = WORKING days
     assertAllNonWorking(requestStartDate, requestEndDate, 'request dates')
     assertAllWorking(offStartDate, offEndDate, 'off dates')
 
@@ -501,15 +475,14 @@ exports.createMySwapRequest = async (req, res, next) => {
 
       approvals,
 
-      // attachments not handled in this controller
       attachments: [],
     })
 
     const payload = await attachEmployeeInfoToOne(doc)
     emitSwap(req, payload, 'swap:req:created')
 
-    await safeNotify(notify?.notifySwapRequestCreated, payload) // employee confirmation
-    await safeNotify(notify?.notifyCurrentApprover, payload)    // current approver + FYI (if MANAGER_ONLY / GM_ONLY)
+    await safeNotify(notify?.notifySwapRequestCreated, payload)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     return res.status(201).json(payload)
   } catch (e) {
@@ -577,7 +550,9 @@ exports.updateMySwapRequest = async (req, res, next) => {
     ensureOwner(doc, loginId)
 
     const st = up(doc.status)
-    if (!st.startsWith('PENDING')) throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+    if (!st.startsWith('PENDING')) {
+      throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+    }
 
     ensureRequesterCanEditOrCancel(doc)
 
@@ -766,7 +741,7 @@ exports.managerDecision = async (req, res, next) => {
     emitSwap(req, payload, 'swap:req:updated')
 
     await safeNotify(notify?.notifyManagerDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver (if any)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     return res.json(payload)
   } catch (e) {
@@ -774,6 +749,9 @@ exports.managerDecision = async (req, res, next) => {
   }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   GM INBOX ✅ includes MANAGER_ONLY as viewer-mode
+───────────────────────────────────────────────────────────── */
 exports.listGmInbox = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
@@ -891,7 +869,7 @@ exports.gmDecision = async (req, res, next) => {
     emitSwap(req, payload, 'swap:req:updated')
 
     await safeNotify(notify?.notifyGmDecisionToEmployee, payload)
-    await safeNotify(notify?.notifyCurrentApprover, payload) // next approver (if any)
+    await safeNotify(notify?.notifyCurrentApprover, payload)
 
     return res.json(payload)
   } catch (e) {
@@ -912,22 +890,17 @@ exports.listCooInbox = async (req, res, next) => {
 
     const scope = up(req.query?.scope || '') // 'ALL' or ''
 
-    // ✅ COO actionable modes (COO is approver)
     const actionableModes = ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY']
-
-    // ✅ COO viewer-only modes (COO is NOT approver, but can view)
     const viewerModes = ['GM_ONLY', 'MANAGER_ONLY']
 
     const query = isAdminViewer(req)
       ? scope === 'ALL'
-        ? {
-            approvalMode: { $in: [...actionableModes, ...viewerModes] },
-          }
+        ? { approvalMode: { $in: [...actionableModes, ...viewerModes] } }
         : {
             $or: [
               { approvalMode: { $in: actionableModes }, status: 'PENDING_COO' },
-              { approvalMode: 'GM_ONLY', status: 'PENDING_GM' }, // viewer pending
-              { approvalMode: 'MANAGER_ONLY', status: 'PENDING_MANAGER' }, // viewer pending
+              { approvalMode: 'GM_ONLY', status: 'PENDING_GM' },
+              { approvalMode: 'MANAGER_ONLY', status: 'PENDING_MANAGER' },
             ],
           }
       : scope === 'ALL'
@@ -938,23 +911,15 @@ exports.listCooInbox = async (req, res, next) => {
                 cooLoginId: me,
                 status: { $in: allowedStatusesForInboxLevel('COO') },
               },
-              {
-                approvalMode: 'GM_ONLY',
-                // cooLoginId is empty in GM_ONLY, so don't filter by cooLoginId
-                status: { $in: allowedStatusesForInboxLevel('GM') }, // include PENDING_GM + history
-              },
-              {
-                approvalMode: 'MANAGER_ONLY',
-                // cooLoginId is empty in MANAGER_ONLY, so don't filter by cooLoginId
-                status: { $in: allowedStatusesForInboxLevel('MANAGER') }, // include PENDING_MANAGER + history
-              },
+              { approvalMode: 'GM_ONLY', status: { $in: allowedStatusesForInboxLevel('GM') } },
+              { approvalMode: 'MANAGER_ONLY', status: { $in: allowedStatusesForInboxLevel('MANAGER') } },
             ],
           }
         : {
             $or: [
               { approvalMode: { $in: actionableModes }, cooLoginId: me, status: 'PENDING_COO' },
-              { approvalMode: 'GM_ONLY', status: 'PENDING_GM' }, // viewer pending
-              { approvalMode: 'MANAGER_ONLY', status: 'PENDING_MANAGER' }, // viewer pending
+              { approvalMode: 'GM_ONLY', status: 'PENDING_GM' },
+              { approvalMode: 'MANAGER_ONLY', status: 'PENDING_MANAGER' },
             ],
           }
 
@@ -1183,6 +1148,7 @@ exports.gmBulkDecision = async (req, res, next) => {
     if (!docs.length) {
       return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
     }
+
     const ops = docs.map((d) => {
       const mode = normalizeMode(d.approvalMode)
       const newStatus = action === 'APPROVE' ? nextStatusAfterGmApprove(mode) : 'REJECTED'

@@ -1,7 +1,9 @@
 <!-- src/views/expat/gm/forgetScan/GmForgetScanInbox.vue
   ✅ SAME STYLE as your ManagerSwapDayInbox / ManagerForgetScanInbox
-  ✅ SPECIAL FLOW: GM inbox shows ONLY requests where GM is involved (approvalMode = GM_AND_COO)
-  ✅ Default filter = PENDING_GM
+  ✅ GM inbox shows:
+     - Actionable modes: MANAGER_AND_GM, GM_AND_COO, GM_ONLY  (GM can decide when PENDING_GM)
+     - FYI viewer mode: MANAGER_ONLY (GM read-only; usually PENDING_MANAGER or history)
+  ✅ Default filter = ALL (so MANAGER_ONLY can appear)
   ✅ Fetch scope=ALL then filter locally
   ✅ Approve/Reject only when status=PENDING_GM
   ✅ Export Excel (xlsx)
@@ -43,7 +45,7 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('PENDING_GM')
+const statusFilter = ref('ALL') // ✅ IMPORTANT: allow MANAGER_ONLY to appear
 
 /* pagination */
 const page = ref(1)
@@ -70,15 +72,18 @@ const COL_WIDTH = {
   employee: '260px',
   forgotDate: '140px',
   forgotType: '180px',
+  mode: '160px',
   status: '150px',
   actions: '92px',
-  reason: '200px',
+  reason: '240px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
 const STATUS_LABEL = {
   ALL: 'All',
+  PENDING_MANAGER: 'Pending (Manager)',
   PENDING_GM: 'Pending (GM)',
+  PENDING_COO: 'Pending (COO)',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
@@ -88,6 +93,18 @@ const TYPE_LABEL = {
   FORGET_IN: 'Forget IN',
   FORGET_OUT: 'Forget OUT',
 }
+
+const MODE_LABEL = {
+  MANAGER_AND_GM: 'MANAGER_AND_GM',
+  MANAGER_AND_COO: 'MANAGER_AND_COO',
+  GM_AND_COO: 'GM_AND_COO',
+  MANAGER_ONLY: 'MANAGER_ONLY (FYI)',
+  GM_ONLY: 'GM_ONLY',
+  COO_ONLY: 'COO_ONLY',
+}
+
+/* ✅ modes shown on GM page */
+const GM_VISIBLE_MODES = ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY', 'MANAGER_ONLY']
 
 /* ───────────────── HELPERS ───────────────── */
 function s(v) {
@@ -146,6 +163,10 @@ function canDecide(row) {
   return up(row?.status) === 'PENDING_GM'
 }
 
+function isFyiRow(row) {
+  return up(row?.approvalMode) === 'MANAGER_ONLY'
+}
+
 /* brief reason helpers */
 function compactText(v) {
   return String(v || '').replace(/\s+/g, ' ').trim()
@@ -188,6 +209,7 @@ async function fetchInbox() {
     const res = await api.get('/leave/forget-scan/gm/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
+    console.error('fetchInbox error', e)
     showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load GM forget scan inbox' })
   } finally {
     loading.value = false
@@ -198,13 +220,15 @@ async function fetchInbox() {
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
-  // ✅ hide modes where GM is not involved in special flow
-  list = list.filter((r) => up(r?.approvalMode) === 'GM_AND_COO')
+  // ✅ IMPORTANT: keep GM-visible modes (action + FYI)
+  list = list.filter((r) => GM_VISIBLE_MODES.includes(up(r?.approvalMode)))
 
+  // status filter
   if (statusFilter.value !== 'ALL') {
     list = list.filter((r) => up(r.status) === up(statusFilter.value))
   }
 
+  // search
   const q = search.value.trim().toLowerCase()
   if (q) {
     list = list.filter((r) => {
@@ -218,6 +242,9 @@ const filteredRows = computed(() => {
         r.forgotDate,
         (Array.isArray(r.forgotTypes) ? r.forgotTypes.join(' ') : r.forgotType),
         r.approvalMode,
+        r.gmLoginId,
+        r.managerLoginId,
+        r.cooLoginId,
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -225,6 +252,7 @@ const filteredRows = computed(() => {
     })
   }
 
+  // newest first
   list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   return list
 })
@@ -261,7 +289,7 @@ watch(
 /* clear filters */
 function clearFilters() {
   search.value = ''
-  statusFilter.value = 'PENDING_GM'
+  statusFilter.value = 'ALL'
   perPage.value = 20
   page.value = 1
 }
@@ -333,14 +361,14 @@ async function confirmDecision() {
 
     showToast({
       type: 'success',
-      message: action === 'APPROVE' ? 'Approved (Final).' : 'Rejected.',
+      message: action === 'APPROVE' ? 'Approved.' : 'Rejected.',
     })
 
     closeConfirm(true)
     closeView()
-
     await fetchInbox()
   } catch (e) {
+    console.error('confirmDecision error', e)
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
   } finally {
     confirmBusy.value = false
@@ -358,10 +386,12 @@ function buildExcelRows(list) {
     Department: r.department || '',
     ForgotDate: r.forgotDate || '',
     ForgotType: typesToText(r),
+    ApprovalMode: r.approvalMode || '',
     Status: r.status || '',
     Reason: compactText(r.reason),
+    Manager: r.managerLoginId || '',
     GM: r.gmLoginId || '',
-    ApprovalMode: r.approvalMode || '',
+    COO: r.cooLoginId || '',
     RejectedReason: up(r.status) === 'REJECTED' ? getRejectedReason(r) : '',
   }))
 }
@@ -385,6 +415,7 @@ async function exportExcel() {
 
     showToast({ type: 'success', message: 'Excel exported.' })
   } catch (e) {
+    console.error('exportExcel error', e)
     showToast({ type: 'error', message: e?.message || 'Export failed.' })
   } finally {
     exporting.value = false
@@ -394,8 +425,9 @@ async function exportExcel() {
 /* ───────────────── REALTIME ───────────────── */
 function upsertRow(doc) {
   if (!doc?._id) return
-  // only keep rows where GM is involved
-  if (up(doc?.approvalMode) !== 'GM_AND_COO') return
+
+  // ✅ only keep GM-visible modes (action + FYI)
+  if (!GM_VISIBLE_MODES.includes(up(doc?.approvalMode))) return
 
   const id = String(doc._id)
   const idx = rows.value.findIndex((x) => String(x._id) === id)
@@ -453,6 +485,9 @@ onBeforeUnmount(() => {
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="min-w-[240px]">
               <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
+              <div class="mt-1 text-[11px] text-white/80">
+                Modes: GM_AND_COO, GM_ONLY, MANAGER_AND_GM, MANAGER_ONLY (FYI)
+              </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -473,7 +508,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="min-w-[180px]">
+              <div class="min-w-[200px]">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
                 <select
                   v-model="statusFilter"
@@ -513,7 +548,7 @@ onBeforeUnmount(() => {
             <div>
               <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
               <div class="mt-1 text-[11px] text-white/80">
-                Only GM_AND_COO mode.
+                Modes: GM_AND_COO, GM_ONLY, MANAGER_AND_GM, MANAGER_ONLY (FYI)
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
@@ -602,12 +637,19 @@ onBeforeUnmount(() => {
                       {{ typesToText(row) }}
                     </span>
                   </div>
+
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    Mode: <span class="font-extrabold">{{ MODE_LABEL[up(row.approvalMode)] || row.approvalMode }}</span>
+                  </div>
                 </div>
 
                 <div class="shrink-0 text-right space-y-1">
                   <span :class="statusBadgeUiClass(row.status)">
-                    {{ STATUS_LABEL[row.status] || row.status }}
+                    {{ STATUS_LABEL[up(row.status)] || row.status }}
                   </span>
+                  <div v-if="isFyiRow(row)" class="mt-1">
+                    <span class="ui-badge ui-badge-info">FYI</span>
+                  </div>
                 </div>
               </div>
 
@@ -650,12 +692,13 @@ onBeforeUnmount(() => {
 
           <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1050px]">
+            <table class="ui-table table-fixed w-full min-w-[1180px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.forgotDate }" />
                 <col :style="{ width: COL_WIDTH.forgotType }" />
+                <col :style="{ width: COL_WIDTH.mode }" />
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
@@ -667,6 +710,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Forgot Date</th>
                   <th class="ui-th">Type</th>
+                  <th class="ui-th">Mode</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -675,7 +719,7 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No items found.
                   </td>
                 </tr>
@@ -705,8 +749,14 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
+                    <span class="ui-badge" :class="isFyiRow(row) ? 'ui-badge-info' : ''">
+                      {{ MODE_LABEL[up(row.approvalMode)] || row.approvalMode }}
+                    </span>
+                  </td>
+
+                  <td class="ui-td">
                     <span :class="statusBadgeUiClass(row.status)">
-                      {{ STATUS_LABEL[row.status] || row.status }}
+                      {{ STATUS_LABEL[up(row.status)] || row.status }}
                     </span>
                   </td>
 
@@ -810,8 +860,13 @@ onBeforeUnmount(() => {
               <div class="text-right md:text-left">
                 <div class="ui-label">Status</div>
                 <span :class="statusBadgeUiClass(viewItem?.status)">
-                  {{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}
+                  {{ STATUS_LABEL[up(viewItem?.status)] || viewItem?.status }}
                 </span>
+                <div class="mt-1">
+                  <span class="ui-badge" :class="isFyiRow(viewItem) ? 'ui-badge-info' : ''">
+                    {{ MODE_LABEL[up(viewItem?.approvalMode)] || viewItem?.approvalMode }}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

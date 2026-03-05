@@ -15,11 +15,11 @@
 // ✅ Lock rule: once ANY approval activity happened (actedAt / APPROVED / REJECTED),
 //               requester cannot edit/cancel.
 // ✅ Duplicate protection handled by Mongo partial unique index (model)
-// ✅ COO inbox: viewerModes are restricted to same cooLoginId (not global)
+// ✅ COO inbox: viewerModes restricted to same cooLoginId (NOT global) — mismatch-safe ($in actorIds)
 //
 // ✅ Telegram: Employee + Current Approver ONLY (NO ADMIN NOTIFY)
-//    - MANAGER_ONLY: Manager gets action DM + GM gets FYI DM (implemented in notifyCurrentApprover)
-//    - GM_ONLY: GM gets action DM + COO gets FYI DM (implemented in notifyCurrentApprover)
+//    - MANAGER_ONLY: Manager gets action DM + GM gets FYI DM (notifyCurrentApprover handles FYI)
+//    - GM_ONLY: GM gets action DM + COO gets FYI DM (notifyCurrentApprover handles FYI)
 // ✅ Realtime: forgetscan:req:created / forgetscan:req:updated via broadcastForgetScanRequest()
 //
 // NOTE: Attachments are not handled here. Keep GridFS evidence endpoints separate.
@@ -93,8 +93,8 @@ function getRoles(req) {
 }
 
 /**
- * ✅ Robust identity
- * We return ids[] for matching approver loginId fields safely.
+ * ✅ Robust identity (same idea as Swap)
+ * ids[] helps match approver loginId fields safely.
  */
 function getActor(req) {
   const loginId = s(req.user?.loginId || req.user?.sub || req.user?.id || req.user?.username || '')
@@ -344,7 +344,7 @@ exports.createMyForgetScan = async (req, res, next) => {
     // resolve employeeId
     let empId = s(actor.employeeId)
     if (!empId) {
-      // optional: if your EmployeeDirectory has loginId field
+      // optional: if EmployeeDirectory has loginId field
       const emp = await EmployeeDirectory.findOne({ loginId: s(actor.loginId) }, { employeeId: 1 }).lean()
       empId = s(emp?.employeeId)
       if (!empId) {
@@ -367,7 +367,7 @@ exports.createMyForgetScan = async (req, res, next) => {
 
     const mode = normalizeMode(prof.approvalMode)
 
-    // ✅ FIXED approvers (same standard as Leave/Swap)
+    // ✅ FIXED approvers (same standard as Leave/Swap in your project)
     const FIXED_GM = 'leave_gm'
     const FIXED_COO = 'leave_coo'
 
@@ -387,23 +387,21 @@ exports.createMyForgetScan = async (req, res, next) => {
       doc = await ExpatForgetScanRequest.create({
         employeeId: empId,
         requesterLoginId: actor.loginId,
-
         forgotDate,
         forgotTypes,
         reason,
-
         approvalMode: mode,
         status,
-
         managerLoginId,
         gmLoginId,
         cooLoginId,
-
         approvals,
         attachments: [],
       })
     } catch (e) {
-      if (e?.code === 11000) throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      if (e?.code === 11000) {
+        throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      }
       throw e
     }
 
@@ -483,7 +481,9 @@ exports.updateMyForgetScan = async (req, res, next) => {
     ensureOwner(doc, actor.loginId)
 
     const st = up(doc.status)
-    if (!st.startsWith('PENDING')) throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+    if (!st.startsWith('PENDING')) {
+      throw createError(400, `Only pending requests can be edited. Current status: ${doc.status}`)
+    }
 
     ensureRequesterCanEditOrCancel(doc)
 
@@ -500,7 +500,9 @@ exports.updateMyForgetScan = async (req, res, next) => {
     try {
       await doc.save()
     } catch (e) {
-      if (e?.code === 11000) throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      if (e?.code === 11000) {
+        throw createError(409, 'You already submitted this forget scan request (same date and type set).')
+      }
       throw e
     }
 
@@ -509,7 +511,7 @@ exports.updateMyForgetScan = async (req, res, next) => {
     // ✅ realtime
     emitForget(req, payload, 'forgetscan:req:updated')
 
-    // ✅ telegram: keep silent by default
+    // ✅ telegram: silent on edit
     return res.json(payload)
   } catch (e) {
     next(e)
@@ -642,7 +644,12 @@ exports.managerDecision = async (req, res, next) => {
       {
         $set: {
           ...setPayload,
-          approvals: markApproval(existing.approvals, 'MANAGER', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+          approvals: markApproval(
+            existing.approvals,
+            'MANAGER',
+            action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+            s(note || '')
+          ),
         },
       },
       { new: true }
@@ -670,10 +677,13 @@ exports.managerDecision = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────────────────────
    GM INBOX ✅ includes GM_ONLY + viewer MANAGER_ONLY
+   ✅ IMPORTANT: viewerMode in default inbox stays limited to PENDING_MANAGER
+   (same behavior as Swap working day; FYI history appears in scope=ALL)
 ───────────────────────────────────────────────────────────── */
 exports.listGmInbox = async (req, res, next) => {
   try {
     const actor = getActor(req)
+    const myIds = actor.ids // ✅ mismatch-safe like COO
     if (!actor.loginId && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
@@ -684,15 +694,33 @@ exports.listGmInbox = async (req, res, next) => {
     const query = isAdminViewer(req)
       ? scope === 'ALL'
         ? { approvalMode: { $in: [...actionableModes, viewerMode] } }
-        : { $or: [{ approvalMode: { $in: actionableModes }, status: 'PENDING_GM' }, { approvalMode: viewerMode, status: 'PENDING_MANAGER' }] }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, status: 'PENDING_GM' },
+              { approvalMode: viewerMode, status: 'PENDING_MANAGER' },
+            ],
+          }
       : scope === 'ALL'
         ? {
             $or: [
-              { approvalMode: { $in: actionableModes }, gmLoginId: actor.loginId, status: { $in: allowedStatusesForInboxLevel('GM') } },
-              { approvalMode: viewerMode, status: { $in: allowedStatusesForInboxLevel('MANAGER') } },
+              {
+                approvalMode: { $in: actionableModes },
+                gmLoginId: { $in: myIds },
+                status: { $in: allowedStatusesForInboxLevel('GM') },
+              },
+              {
+                approvalMode: viewerMode,
+                gmLoginId: { $in: myIds }, // ✅ IMPORTANT: restrict FYI to same GM
+                status: { $in: allowedStatusesForInboxLevel('MANAGER') },
+              },
             ],
           }
-        : { $or: [{ approvalMode: { $in: actionableModes }, gmLoginId: actor.loginId, status: 'PENDING_GM' }, { approvalMode: viewerMode, status: 'PENDING_MANAGER' }] }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, gmLoginId: { $in: myIds }, status: 'PENDING_GM' },
+              { approvalMode: viewerMode, gmLoginId: { $in: myIds }, status: 'PENDING_MANAGER' }, // ✅ restrict + default only pending_manager
+            ],
+          }
 
     const rows = await ExpatForgetScanRequest.find(query).sort({ createdAt: -1 }).lean()
     return res.json(await attachEmployeeInfo(rows || []))
@@ -752,7 +780,12 @@ exports.gmDecision = async (req, res, next) => {
 
     const doc = await ExpatForgetScanRequest.findOneAndUpdate(
       { _id: id, status: 'PENDING_GM', gmLoginId: actor.loginId },
-      { $set: { ...setPayload, approvals: markApproval(existing.approvals, 'GM', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')) } },
+      {
+        $set: {
+          ...setPayload,
+          approvals: markApproval(existing.approvals, 'GM', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+        },
+      },
       { new: true }
     )
 
@@ -775,12 +808,13 @@ exports.gmDecision = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   COO INBOX (viewerModes restricted to same cooLoginId)
+   COO INBOX ✅ mismatch-safe + viewerModes restricted to SAME COO
+   (same style as Swap: use actorIds($in) so coo can view even if token loginId differs)
 ───────────────────────────────────────────────────────────── */
 exports.listCooInbox = async (req, res, next) => {
   try {
-    const me = actorLoginId(req)
-    if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
+    const myIds = actorIds(req)
+    if (!myIds.length && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
     const scope = up(req.query?.scope || '')
@@ -791,19 +825,33 @@ exports.listCooInbox = async (req, res, next) => {
     const query = isAdminViewer(req)
       ? scope === 'ALL'
         ? { approvalMode: { $in: [...actionableModes, ...viewerModes] } }
-        : { $or: [{ approvalMode: { $in: actionableModes }, status: 'PENDING_COO' }, { approvalMode: 'GM_ONLY', status: 'PENDING_GM' }, { approvalMode: 'MANAGER_ONLY', status: 'PENDING_MANAGER' }] }
+        : {
+            $or: [
+              { approvalMode: { $in: actionableModes }, status: 'PENDING_COO' },
+              { approvalMode: 'GM_ONLY', status: 'PENDING_GM' },
+              { approvalMode: 'MANAGER_ONLY', status: 'PENDING_MANAGER' },
+            ],
+          }
       : scope === 'ALL'
         ? {
             $or: [
-              { approvalMode: { $in: actionableModes }, cooLoginId: me, status: { $in: allowedStatusesForInboxLevel('COO') } },
-              { approvalMode: { $in: viewerModes }, cooLoginId: me, status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'APPROVED', 'REJECTED', 'CANCELLED', 'PENDING_COO'] } },
+              {
+                approvalMode: { $in: actionableModes },
+                cooLoginId: { $in: myIds },
+                status: { $in: allowedStatusesForInboxLevel('COO') },
+              },
+              {
+                approvalMode: { $in: viewerModes },
+                cooLoginId: { $in: myIds },
+                status: { $in: ['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO', 'APPROVED', 'REJECTED', 'CANCELLED'] },
+              },
             ],
           }
         : {
             $or: [
-              { approvalMode: { $in: actionableModes }, cooLoginId: me, status: 'PENDING_COO' },
-              { approvalMode: 'GM_ONLY', cooLoginId: me, status: 'PENDING_GM' },
-              { approvalMode: 'MANAGER_ONLY', cooLoginId: me, status: 'PENDING_MANAGER' },
+              { approvalMode: { $in: actionableModes }, cooLoginId: { $in: myIds }, status: 'PENDING_COO' },
+              { approvalMode: 'GM_ONLY', cooLoginId: { $in: myIds }, status: 'PENDING_GM' },
+              { approvalMode: 'MANAGER_ONLY', cooLoginId: { $in: myIds }, status: 'PENDING_MANAGER' },
             ],
           }
 
@@ -866,7 +914,12 @@ exports.cooDecision = async (req, res, next) => {
 
     const doc = await ExpatForgetScanRequest.findOneAndUpdate(
       { _id: id, status: 'PENDING_COO', cooLoginId: { $in: myIds } },
-      { $set: { ...setPayload, approvals: markApproval(existing.approvals, 'COO', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')) } },
+      {
+        $set: {
+          ...setPayload,
+          approvals: markApproval(existing.approvals, 'COO', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+        },
+      },
       { new: true }
     )
 
@@ -920,7 +973,7 @@ exports.adminList = async (req, res, next) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   BULK DECISIONS
+   BULK DECISIONS (same pattern as Swap)
 ───────────────────────────────────────────────────────────── */
 exports.managerBulkDecision = async (req, res, next) => {
   try {
@@ -941,7 +994,9 @@ exports.managerBulkDecision = async (req, res, next) => {
       approvalMode: { $in: ['MANAGER_AND_GM', 'MANAGER_AND_COO', 'MANAGER_ONLY'] },
     })
 
-    if (!docs.length) return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    if (!docs.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
 
     const ops = docs.map((d) => {
       const mode = normalizeMode(d.approvalMode)
@@ -949,13 +1004,34 @@ exports.managerBulkDecision = async (req, res, next) => {
 
       const setPayload =
         action === 'APPROVE'
-          ? { status: newStatus, managerComment: s(note || ''), managerDecisionAt: now, rejectedReason: '', rejectedAt: null, rejectedBy: '', rejectedLevel: '' }
-          : { status: 'REJECTED', managerComment: '', managerDecisionAt: now, rejectedReason: s(note), rejectedAt: now, rejectedBy: me, rejectedLevel: 'MANAGER' }
+          ? {
+              status: newStatus,
+              managerComment: s(note || ''),
+              managerDecisionAt: now,
+              rejectedReason: '',
+              rejectedAt: null,
+              rejectedBy: '',
+              rejectedLevel: '',
+            }
+          : {
+              status: 'REJECTED',
+              managerComment: '',
+              managerDecisionAt: now,
+              rejectedReason: s(note),
+              rejectedAt: now,
+              rejectedBy: me,
+              rejectedLevel: 'MANAGER',
+            }
 
       return {
         updateOne: {
           filter: { _id: d._id, status: 'PENDING_MANAGER', managerLoginId: me },
-          update: { $set: { ...setPayload, approvals: markApproval(d.approvals, 'MANAGER', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')) } },
+          update: {
+            $set: {
+              ...setPayload,
+              approvals: markApproval(d.approvals, 'MANAGER', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+            },
+          },
         },
       }
     })
@@ -1002,7 +1078,9 @@ exports.gmBulkDecision = async (req, res, next) => {
       approvalMode: { $in: ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY'] },
     })
 
-    if (!docs.length) return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    if (!docs.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
 
     const ops = docs.map((d) => {
       const mode = normalizeMode(d.approvalMode)
@@ -1010,13 +1088,34 @@ exports.gmBulkDecision = async (req, res, next) => {
 
       const setPayload =
         action === 'APPROVE'
-          ? { status: newStatus, gmComment: s(note || ''), gmDecisionAt: now, rejectedReason: '', rejectedAt: null, rejectedBy: '', rejectedLevel: '' }
-          : { status: 'REJECTED', gmComment: '', gmDecisionAt: now, rejectedReason: s(note), rejectedAt: now, rejectedBy: me, rejectedLevel: 'GM' }
+          ? {
+              status: newStatus,
+              gmComment: s(note || ''),
+              gmDecisionAt: now,
+              rejectedReason: '',
+              rejectedAt: null,
+              rejectedBy: '',
+              rejectedLevel: '',
+            }
+          : {
+              status: 'REJECTED',
+              gmComment: '',
+              gmDecisionAt: now,
+              rejectedReason: s(note),
+              rejectedAt: now,
+              rejectedBy: me,
+              rejectedLevel: 'GM',
+            }
 
       return {
         updateOne: {
           filter: { _id: d._id, status: 'PENDING_GM', gmLoginId: me },
-          update: { $set: { ...setPayload, approvals: markApproval(d.approvals, 'GM', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')) } },
+          update: {
+            $set: {
+              ...setPayload,
+              approvals: markApproval(d.approvals, 'GM', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+            },
+          },
         },
       }
     })
@@ -1065,20 +1164,43 @@ exports.cooBulkDecision = async (req, res, next) => {
       approvalMode: { $in: ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY'] },
     })
 
-    if (!docs.length) return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    if (!docs.length) {
+      return res.json({ ok: true, total: ids.length, processed: 0, updated: [], skipped: ids })
+    }
 
     const ops = docs.map((d) => {
       const newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED'
 
       const setPayload =
         action === 'APPROVE'
-          ? { status: newStatus, cooComment: s(note || ''), cooDecisionAt: now, rejectedReason: '', rejectedAt: null, rejectedBy: '', rejectedLevel: '' }
-          : { status: 'REJECTED', cooComment: '', cooDecisionAt: now, rejectedReason: s(note), rejectedAt: now, rejectedBy: me, rejectedLevel: 'COO' }
+          ? {
+              status: newStatus,
+              cooComment: s(note || ''),
+              cooDecisionAt: now,
+              rejectedReason: '',
+              rejectedAt: null,
+              rejectedBy: '',
+              rejectedLevel: '',
+            }
+          : {
+              status: 'REJECTED',
+              cooComment: '',
+              cooDecisionAt: now,
+              rejectedReason: s(note),
+              rejectedAt: now,
+              rejectedBy: me,
+              rejectedLevel: 'COO',
+            }
 
       return {
         updateOne: {
           filter: { _id: d._id, status: 'PENDING_COO', cooLoginId: { $in: myIds } },
-          update: { $set: { ...setPayload, approvals: markApproval(d.approvals, 'COO', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')) } },
+          update: {
+            $set: {
+              ...setPayload,
+              approvals: markApproval(d.approvals, 'COO', action === 'APPROVE' ? 'APPROVED' : 'REJECTED', s(note || '')),
+            },
+          },
         },
       }
     })

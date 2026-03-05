@@ -15,7 +15,6 @@ function uniqUpper(arr) {
 }
 
 /* ───────────────── enums ───────────────── */
-// ✅ UPDATED: include COO_ONLY + keep cooLoginId for viewer restriction
 const APPROVAL_MODES = Object.freeze([
   'MANAGER_AND_GM',
   'MANAGER_AND_COO',
@@ -70,24 +69,29 @@ function normalizeMode(v) {
 }
 
 /**
- * ✅ Auto-clear unused approvers:
- * - We KEEP cooLoginId for MANAGER_ONLY + GM_ONLY because you require:
- *   "COO inbox viewerModes restricted to same cooLoginId".
- *   That means those requests MUST still store cooLoginId.
+ * ✅ Auto-clear unused approvers (but keep FYI):
+ * - MANAGER_ONLY: GM is FYI viewer → must KEEP gmLoginId
+ * - GM_ONLY: COO is FYI viewer → must KEEP cooLoginId
  */
 function modeInvolvesManager(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesGm(mode) {
-  return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
+  // ✅ FIX: include MANAGER_ONLY so gmLoginId is NOT cleared
+  return (
+    mode === 'MANAGER_AND_GM' ||
+    mode === 'GM_AND_COO' ||
+    mode === 'GM_ONLY' ||
+    mode === 'MANAGER_ONLY'
+  )
 }
 function modeInvolvesCoo(mode) {
+  // ✅ keep COO for GM_ONLY (FYI) + for COO-only flows
   return (
     mode === 'MANAGER_AND_COO' ||
     mode === 'GM_AND_COO' ||
     mode === 'COO_ONLY' ||
-    mode === 'GM_ONLY' || // keep for viewer restriction
-    mode === 'MANAGER_ONLY' // keep for viewer restriction
+    mode === 'GM_ONLY'
   )
 }
 
@@ -100,12 +104,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
     // YYYY-MM-DD
     forgotDate: { type: String, required: true, index: true },
 
-    /**
-     * ✅ store multiple types in ONE request:
-     * - [FORGET_IN]
-     * - [FORGET_OUT]
-     * - [FORGET_IN, FORGET_OUT]
-     */
+    // ✅ store multiple types in one request
     forgotTypes: {
       type: [String],
       enum: FORGOT_TYPES,
@@ -118,12 +117,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
       },
     },
 
-    /**
-     * ✅ derived key for indexing + duplicate protection
-     * - FORGET_IN
-     * - FORGET_OUT
-     * - FORGET_IN_OUT
-     */
+    // ✅ derived key for duplicate protection
     forgotKey: { type: String, enum: FORGOT_KEYS, required: true, index: true },
 
     reason: { type: String, default: '' },
@@ -154,7 +148,7 @@ const ExpatForgetScanRequestSchema = new mongoose.Schema(
     cancelledAt: { type: Date, default: null },
     cancelledBy: { type: String, default: '' },
 
-    // NOTE: attachments handled by GridFS endpoints, keep as empty array if you want
+    // NOTE: attachments handled by GridFS endpoints
     attachments: { type: Array, default: [] },
   },
   { timestamps: true }
@@ -185,7 +179,7 @@ ExpatForgetScanRequestSchema.pre('validate', function (next) {
     this.gmLoginId = s(this.gmLoginId)
     this.cooLoginId = s(this.cooLoginId)
 
-    // auto-clear unused approvers (keep DB clean)
+    // auto-clear unused approvers
     const mode = this.approvalMode
     if (!modeInvolvesManager(mode)) this.managerLoginId = ''
     if (!modeInvolvesGm(mode)) this.gmLoginId = ''

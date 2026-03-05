@@ -218,18 +218,29 @@ export async function unsubscribeRoles(roles = []) {
  * - subscribeRoleIfNeeded({ role:"ADMIN" })
  * - subscribeRoleIfNeeded({ roles:["LEAVE_USER","LEAVE_MANAGER"] })
  */
+
 export function subscribeRoleIfNeeded(payload = {}) {
+  // string form
   if (typeof payload === 'string') {
     const role = normRole(payload)
     if (role) subscribeRole(role)
     return
   }
 
+  // roles/role
   const role = normRole(payload.role)
   const roles = Array.isArray(payload.roles) ? payload.roles : []
-
   if (roles.length) subscribeRoles(roles)
   else if (role) subscribeRole(role)
+
+  // ✅ ALSO join rooms when provided
+  const employeeId = normId(payload.employeeId)
+  const loginId = normId(payload.loginId)
+  const companyId = normId(payload.companyId || payload.company)
+
+  if (employeeId) subscribeEmployeeIfNeeded(employeeId)
+  if (loginId) subscribeUserIfNeeded(loginId)
+  if (companyId) subscribeCompanyIfNeeded(companyId)
 }
 
 /* -------------------- BOOKING rooms -------------------- */
