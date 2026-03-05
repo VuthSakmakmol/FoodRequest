@@ -96,6 +96,19 @@ function hasRole(req, ...allow) {
   return roles.some((r) => a.includes(r))
 }
 
+function compactText(v) {
+  return String(v ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function requireReason(v, { min = 3 } = {}) {
+  const r = compactText(v)
+  if (!r) throw createError(400, 'Reason is required.')
+  if (r.length < min) throw createError(400, `Reason must be at least ${min} characters.`)
+  return r
+}
+
 // ✅ can VIEW inbox pages
 function canViewManagerInbox(req) {
   return hasRole(req, 'LEAVE_MANAGER', 'LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN')
@@ -450,6 +463,9 @@ exports.createMySwapRequest = async (req, res, next) => {
       offEnd: offEndDate,
     })
 
+    // ✅ ADD HERE: require + normalize reason
+    const reason = requireReason(req.body?.reason, { min: 3 })
+
     const approvals = buildApprovalsOrThrow(mode, { managerLoginId, gmLoginId, cooLoginId })
     const status = initialStatusForMode(mode)
 
@@ -464,7 +480,8 @@ exports.createMySwapRequest = async (req, res, next) => {
       requestTotalDays,
       offTotalDays,
 
-      reason: s(req.body?.reason || ''),
+      // ✅ use validated reason
+      reason,
 
       approvalMode: mode,
       status,

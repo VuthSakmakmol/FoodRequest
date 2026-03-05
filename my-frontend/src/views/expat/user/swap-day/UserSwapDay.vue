@@ -376,7 +376,7 @@ onBeforeUnmount(() => {
               <!-- Compensatory day off -->
               <div class="ui-card p-4 space-y-3">
                 <div class="flex items-center justify-between gap-2">
-                  <div class="ui-section-title">To (Working Day)</div>
+                  <div class="ui-section-title">To New Day off</div>
 
                   <span :class="isDurationValid ? 'ui-badge ui-badge-success' : 'ui-badge ui-badge-danger'">
                     {{ compDays }} day(s)
@@ -410,12 +410,14 @@ onBeforeUnmount(() => {
             <!-- Row 2: Reason -->
             <div class="grid gap-3 lg:grid-cols-2">
               <div class="ui-card p-4 space-y-2">
-                <div class="ui-section-title">Reason</div>
+                <div class="ui-section-title">
+                  Reason <span class="text-rose-600 dark:text-rose-400">*</span>
+                </div>
                 <textarea
                   v-model="form.reason"
                   rows="5"
                   class="ui-textarea"
-                  placeholder="Explain why you swap working day..."
+                  placeholder="Required: explain why you swap working day..."
                   :disabled="isEdit && !canEditNow"
                 />
               </div>
@@ -427,7 +429,7 @@ onBeforeUnmount(() => {
                   <div class="font-extrabold">Rules</div>
                   <ul class="mt-1 list-disc pl-4 space-y-1 text-slate-600 dark:text-slate-300">
                     <li>Swap dates must be non-working days (Sunday/Holiday).</li>
-                    <li>Working day dates must be working days.</li>
+                    <li>New day off must be normal working days.</li>
                     <li>Total days must match on both sides.</li>
                     <li v-if="isEdit">Editing is locked once approval starts.</li>
                   </ul>

@@ -778,7 +778,9 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="ui-field">
-            <label class="ui-label">Reason</label>
+            <label class="ui-label">
+              Reason <span class="text-rose-600 dark:text-rose-400">*</span>
+            </label>
             <textarea
               v-model="form.reason"
               rows="4"
@@ -836,9 +838,11 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-
+          
           <div class="ui-field">
-            <label class="ui-label">Reason</label>
+            <label class="ui-label">
+              Reason <span class="text-rose-600 dark:text-rose-400">*</span>
+            </label>
             <textarea
               v-model="editForm.reason"
               rows="4"
@@ -847,7 +851,6 @@ onBeforeUnmount(() => {
               :disabled="editBusy"
             />
           </div>
-
           <div v-if="editError" class="text-[11px] font-extrabold text-rose-600 dark:text-rose-400">
             {{ editError }}
           </div>
