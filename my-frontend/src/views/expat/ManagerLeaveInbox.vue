@@ -9,6 +9,8 @@
   ✅ Attachments: READ-ONLY + blob preview (fix 401) + safe URL built from attId
   ✅ Modal UX: ESC closes, backdrop closes, body scroll lock
   ✅ No SweetAlert / No window.alert (useToast + custom modals)
+  ✅ NEW: show approval mode
+  ✅ NEW: desktop Actions column before Files column
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -36,9 +38,9 @@ const loading = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const fromDate = ref('') // Requested at (createdAt)
-const toDate = ref('')   // Requested at (createdAt)
-const employeeFilter = ref('') // optional expat id filter
+const fromDate = ref('')
+const toDate = ref('')
+const employeeFilter = ref('')
 
 /* Pagination */
 const page = ref(1)
@@ -92,6 +94,30 @@ function statusChipClasses(status) {
   }
 }
 
+function modeChipClasses(mode) {
+  const m = up(mode)
+
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') {
+    return 'ui-badge ui-badge-indigo'
+  }
+
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') {
+    return 'ui-badge ui-badge-success'
+  }
+
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  return 'Manager + GM'
+}
+
 function statusWeight(st) {
   switch (up(st)) {
     case 'PENDING_MANAGER': return 0
@@ -124,11 +150,6 @@ const isAdminViewer = computed(() =>
 
 const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
 
-/**
- * Policy:
- * ✅ Only real manager can decide
- * ❌ Admin viewers cannot decide even if they can view
- */
 const canDecide = (row) =>
   isRealManager.value &&
   !isAdminViewer.value &&
@@ -171,6 +192,7 @@ const filteredRows = computed(() => {
         r.employeeName,
         r.department,
         r.leaveTypeCode,
+        r.approvalMode,
         r.reason,
         r.status,
       ]
@@ -234,6 +256,7 @@ function buildExportRows(list) {
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
     LeaveType: r.leaveTypeCode || '',
+    ApprovalMode: modeLabel(r.approvalMode),
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
     TotalDays: Number(r.totalDays || 0),
@@ -255,16 +278,17 @@ function exportExcel(scope = 'FILTERED') {
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(data)
     ws['!cols'] = [
-      { wch: 18 }, // RequestedAt
-      { wch: 12 }, // EmployeeId
-      { wch: 22 }, // EmployeeName
-      { wch: 20 }, // Department
-      { wch: 10 }, // LeaveType
-      { wch: 12 }, // LeaveStart
-      { wch: 12 }, // LeaveEnd
-      { wch: 10 }, // TotalDays
-      { wch: 16 }, // Status
-      { wch: 45 }, // Reason
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 45 },
     ]
     XLSX.utils.book_append_sheet(wb, ws, 'ManagerInbox')
 
@@ -286,7 +310,7 @@ function exportExcel(scope = 'FILTERED') {
 /* ───────── Approve / Reject ───────── */
 const deciding = ref(false)
 const decideId = ref('')
-const decideAction = ref('') // 'APPROVE' | 'REJECT'
+const decideAction = ref('')
 const rejectNote = ref('')
 
 function openApprove(row) {
@@ -379,7 +403,6 @@ function canPreviewInline(m) {
   return t.startsWith('image/') || t.includes('pdf')
 }
 
-/* Preview uses blob URLs to avoid 401 */
 const previewOpen = ref(false)
 const previewUrl = ref('')
 const previewType = ref('')
@@ -399,11 +422,6 @@ function closePreview() {
   previewName.value = ''
 }
 
-/**
- * ✅ SAFE: build URL from requestId + attId
- * backend should support:
- * GET /leave/requests/:id/attachments/:attId/content  (blob)
- */
 function buildAttContentUrl(requestId, attId) {
   const rid = s(requestId)
   const aid = s(attId)
@@ -473,7 +491,6 @@ async function openAttachments(row) {
     const res = await api.get(`/leave/requests/${row._id}/attachments`)
     const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
 
-    // ✅ normalize + build safe url
     attItems.value = (items || [])
       .map((x) => {
         const attId = s(x?.attId)
@@ -523,7 +540,6 @@ function setupRealtime() {
     company: auth.user?.companyCode,
   })
 
-  // ✅ your backend emits only created/updated
   offHandlers.push(
     onSocket('leave:req:created', () => triggerRealtimeRefresh()),
     onSocket('leave:req:updated', () => triggerRealtimeRefresh())
@@ -579,7 +595,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ui-page min-h-screen w-full">
-    <!-- ✅ FULL WIDTH FIX (no max-width container) -->
     <div class="w-full">
       <div class="ui-card rounded-none border-x-0 border-t-0">
         <div class="ui-hero-gradient">
@@ -594,7 +609,6 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <!-- Search -->
               <div class="min-w-[240px] max-w-xs">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Search</label>
@@ -603,14 +617,13 @@ onBeforeUnmount(() => {
                     <input
                       v-model="search"
                       type="text"
-                      placeholder="Employee / type / reason..."
+                      placeholder="Employee / type / mode / reason..."
                       class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                     />
                   </div>
                 </div>
               </div>
 
-              <!-- Employee id filter -->
               <div class="min-w-[180px] max-w-[220px]">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
@@ -626,7 +639,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Requested at range filter -->
               <div class="flex items-end gap-2">
                 <div class="ui-field w-[150px]">
                   <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
@@ -638,7 +650,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Actions -->
               <div class="flex items-center gap-2">
                 <button
                   type="button"
@@ -680,7 +691,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee / type / reason..."
+                    placeholder="Employee / type / mode / reason..."
                     class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -779,6 +790,11 @@ onBeforeUnmount(() => {
                 <div class="text-right space-y-1 text-[11px]">
                   <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
                   <div>
+                    <span :class="modeChipClasses(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
+                  </div>
+                  <div>
                     <span
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
                       :class="statusChipClasses(row.status)"
@@ -794,7 +810,6 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-3 flex items-center justify-between gap-2">
-                <!-- ✅ Files (SwapDay/MyRequests style): only show if exist -->
                 <button
                   v-if="row.attachments?.length"
                   type="button"
@@ -809,7 +824,6 @@ onBeforeUnmount(() => {
                 </button>
                 <span v-else class="text-[11px] text-slate-400">—</span>
 
-                <!-- ✅ ICON ONLY actions -->
                 <div v-if="canDecide(row)" class="flex items-center justify-end gap-2">
                   <button
                     type="button"
@@ -839,16 +853,17 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left w-full min-w-[1100px]">
+            <table class="ui-table text-left w-full min-w-[1280px]">
               <colgroup>
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
                 <col class="w-[92px]" />
                 <col class="w-[160px]" />
+                <col class="w-[130px]" />
                 <col class="w-[80px]" />
                 <col class="w-[170px]" />
-                <col class="w-[96px]" />
                 <col class="w-[92px]" />
+                <col class="w-[96px]" />
                 <col class="w-[200px]" />
               </colgroup>
 
@@ -858,17 +873,18 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Employee</th>
                   <th class="ui-th text-left">Type</th>
                   <th class="ui-th text-left">Leave Date</th>
+                  <th class="ui-th text-left">Mode</th>
                   <th class="ui-th text-right">Days</th>
                   <th class="ui-th">Status</th>
-                  <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-center">Action</th>
+                  <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-left">Reason</th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="10" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No leave requests in your manager queue.
                   </td>
                 </tr>
@@ -896,6 +912,12 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td text-left whitespace-nowrap align-top">{{ formatRange(row) }}</td>
 
+                  <td class="ui-td text-left align-top">
+                    <span :class="modeChipClasses(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
+                  </td>
+
                   <td class="ui-td text-right align-top tabular-nums">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
 
                   <td class="ui-td align-top">
@@ -907,24 +929,7 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <!-- Files -->
-                  <td class="ui-td align-top text-center">
-                    <button
-                      v-if="row.attachments?.length"
-                      type="button"
-                      class="ui-btn ui-btn-soft ui-btn-xs"
-                      @click="openAttachments(row)"
-                      :disabled="loading"
-                      title="Preview attachments"
-                    >
-                      <i class="fa-solid fa-paperclip text-[11px]" />
-                      <span class="ml-1">{{ row.attachments.length }}</span>
-                    </button>
-
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
-
-                  <!-- Actions (ICON ONLY) -->
+                  <!-- Actions first -->
                   <td class="ui-td align-top text-center">
                     <div v-if="canDecide(row)" class="flex items-center justify-center gap-1">
                       <button
@@ -949,6 +954,23 @@ onBeforeUnmount(() => {
                         <i class="fa-solid fa-circle-xmark text-[12px]" />
                       </button>
                     </div>
+                    <span v-else class="text-[11px] text-slate-400">—</span>
+                  </td>
+
+                  <!-- Files second -->
+                  <td class="ui-td align-top text-center">
+                    <button
+                      v-if="row.attachments?.length"
+                      type="button"
+                      class="ui-btn ui-btn-soft ui-btn-xs"
+                      @click="openAttachments(row)"
+                      :disabled="loading"
+                      title="Preview attachments"
+                    >
+                      <i class="fa-solid fa-paperclip text-[11px]" />
+                      <span class="ml-1">{{ row.attachments.length }}</span>
+                    </button>
+
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
@@ -980,7 +1002,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- ✅ Confirm modal (Approve / Reject) -->
+    <!-- Confirm modal -->
     <div v-if="decisionOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1043,7 +1065,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- ✅ Attachments modal (READ ONLY) -->
+    <!-- Attachments modal -->
     <div v-if="attOpen" class="fixed inset-0 z-[70]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeAttachments" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1130,7 +1152,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Inline preview (image/pdf) -->
+      <!-- Inline preview -->
       <div v-if="previewOpen" class="fixed inset-0 z-[80]">
         <div class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" @click="closePreview" />
         <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1173,13 +1195,11 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* ✅ icon-only buttons keep column narrow & consistent */
 .ui-icon-btn {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;
 }
 
-/* Reason clamp */
 .reason-cell {
   display: -webkit-box;
   -webkit-line-clamp: 3;

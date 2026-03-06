@@ -10,6 +10,7 @@
   ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included)
   ✅ AUTO close modal on success
   ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
+  ✅ NEW: show Approval Mode chip in mobile + desktop
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -78,6 +79,30 @@ function statusChipClasses(status) {
     default:
       return 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:border-slate-700/80'
   }
+}
+
+function modeChipClasses(mode) {
+  const m = up(mode)
+
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') {
+    return 'ui-badge ui-badge-indigo'
+  }
+
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') {
+    return 'ui-badge ui-badge-success'
+  }
+
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  return 'Manager + GM'
 }
 
 /* Sort: GM pending first */
@@ -153,6 +178,7 @@ const filteredRows = computed(() => {
         r.leaveTypeCode,
         r.reason,
         r.status,
+        r.approvalMode,
         r.gmComment,
         r.managerComment,
       ]
@@ -225,6 +251,7 @@ function buildExportRows(list) {
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
     LeaveType: r.leaveTypeCode || '',
+    ApprovalMode: modeLabel(r.approvalMode),
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
     TotalDays: Number(r.totalDays || 0),
@@ -237,7 +264,6 @@ function buildExportRows(list) {
 
 function exportExcel() {
   try {
-    // ✅ one export only: ALL rows (as requested)
     const list = rows.value
     if (!list.length) {
       showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
@@ -253,6 +279,7 @@ function exportExcel() {
       { wch: 24 }, // EmployeeName
       { wch: 18 }, // Department
       { wch: 10 }, // LeaveType
+      { wch: 16 }, // ApprovalMode
       { wch: 12 }, // LeaveStart
       { wch: 12 }, // LeaveEnd
       { wch: 10 }, // TotalDays
@@ -325,7 +352,6 @@ async function confirmDecision() {
       message: action === 'APPROVE' ? 'Approved successfully.' : 'Rejected successfully.',
     })
 
-    // ✅ auto close modal on success
     closeDecisionModal(true)
     await fetchInbox()
   } catch (e) {
@@ -374,7 +400,6 @@ function canPreviewInline(m) {
   return t.startsWith('image/') || t.includes('pdf')
 }
 
-/* ✅ build safe content URL */
 function buildAttContentUrl(requestId, attId) {
   const rid = s(requestId)
   const aid = s(attId)
@@ -460,7 +485,6 @@ async function openAttachments(row) {
     const res = await api.get(`/leave/requests/${row._id}/attachments`)
     const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
 
-    // ✅ normalize + ensure url exists
     attItems.value = (items || [])
       .map((x) => {
         const attId = s(x?.attId)
@@ -566,7 +590,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="ui-page min-h-screen w-full">
-    <!-- edge-to-edge -->
     <div class="w-full">
       <div class="ui-card rounded-none border-x-0 border-t-0">
         <div class="ui-hero-gradient">
@@ -581,7 +604,6 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <!-- Search -->
               <div class="min-w-[260px] max-w-sm">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Search</label>
@@ -590,14 +612,13 @@ onBeforeUnmount(() => {
                     <input
                       v-model="search"
                       type="text"
-                      placeholder="Employee / type / reason / reject note..."
+                      placeholder="Employee / type / mode / reason / reject note..."
                       class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                     />
                   </div>
                 </div>
               </div>
 
-              <!-- Employee filter -->
               <div class="min-w-[180px] max-w-[220px]">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
@@ -613,7 +634,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Requested at range -->
               <div class="flex items-end gap-2">
                 <div class="ui-field w-[150px]">
                   <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
@@ -625,7 +645,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Actions: ONE export only -->
               <div class="flex items-center gap-2">
                 <button
                   type="button"
@@ -663,7 +682,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee / type / reason..."
+                    placeholder="Employee / type / mode / reason..."
                     class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -745,6 +764,11 @@ onBeforeUnmount(() => {
                 <div class="text-right space-y-1 text-[11px]">
                   <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
                   <div>
+                    <span :class="modeChipClasses(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
+                  </div>
+                  <div>
                     <span
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
                       :class="statusChipClasses(row.status)"
@@ -796,16 +820,17 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left w-full min-w-[1320px]">
+            <table class="ui-table text-left w-full min-w-[1440px]">
               <colgroup>
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
                 <col class="w-[92px]" />
                 <col class="w-[160px]" />
+                <col class="w-[130px]" />
                 <col class="w-[80px]" />
                 <col class="w-[170px]" />
-                <col class="w-[96px]" />
                 <col class="w-[92px]" />
+                <col class="w-[96px]" />
                 <col />
               </colgroup>
 
@@ -815,17 +840,18 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Employee</th>
                   <th class="ui-th text-left">Type</th>
                   <th class="ui-th text-left">Leave Date</th>
+                  <th class="ui-th text-left">Mode</th>
                   <th class="ui-th text-right">Days</th>
                   <th class="ui-th">Status</th>
-                  <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-center">Actions</th>
+                  <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-left">Reason</th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No leave requests in your GM queue.</td>
+                  <td colspan="10" class="ui-td py-8 text-slate-500 dark:text-slate-400">No leave requests in your GM queue.</td>
                 </tr>
 
                 <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover">
@@ -844,6 +870,12 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td text-left whitespace-nowrap align-top">{{ formatRange(row) }}</td>
+
+                  <td class="ui-td text-left align-top">
+                    <span :class="modeChipClasses(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
+                  </td>
 
                   <td class="ui-td text-right align-top tabular-nums">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
 
@@ -885,17 +917,19 @@ onBeforeUnmount(() => {
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
-                  <td class="ui-td text-left align-top">
-                    <p class="reason-cell">{{ row.reason || '—' }}</p>
-
-                    <div
-                      v-if="up(row.status) === 'REJECTED' && getRejectReason(row)"
-                      class="mt-2 inline-flex max-w-[680px] items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                  <td class="ui-td align-top text-center">
+                    <button
+                      v-if="row.attachments?.length"
+                      type="button"
+                      class="ui-btn ui-btn-soft ui-btn-xs"
+                      @click="openAttachments(row)"
+                      :disabled="loading"
+                      title="Preview attachments"
                     >
-                      <span class="font-extrabold whitespace-nowrap">{{ rejectedByLabel(row) }}:</span>
-                      <span class="min-w-0 break-words">{{ getRejectReason(row) }}</span>
-                    </div>
+                      <i class="fa-solid fa-paperclip text-[11px]" />
+                      <span class="ml-1">{{ row.attachments.length }}</span>
+                    </button>
+                    <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
                 </tr>
               </tbody>

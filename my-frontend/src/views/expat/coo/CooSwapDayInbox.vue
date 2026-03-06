@@ -4,6 +4,7 @@
   ✅ Realtime swap:req:created / swap:req:updated
   ✅ NO attachments (Swap Working Day no longer uses evidence)
   ✅ Excel export (NO attachments column)
+  ✅ NEW: show Approval Mode in mobile + desktop + detail modal + export
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -80,11 +81,12 @@ const COL_WIDTH = {
   select: '56px',
   created: '140px',
   employee: '240px',
-  workDate: '200px',
-  swapDate: '200px',
+  workDate: '190px',
+  swapDate: '190px',
+  mode: '140px',
   status: '140px',
   actions: '92px',
-  reason: '240px',
+  reason: '220px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -121,6 +123,23 @@ function statusBadgeUiClass(x) {
   if (st === 'CANCELLED') return 'ui-badge'
   if (st.includes('PENDING')) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
+}
+
+function modeChipClasses(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  return 'Manager + GM'
 }
 
 /**
@@ -201,6 +220,7 @@ const filteredRows = computed(() => {
         r.department,
         r.reason,
         r.status,
+        r.approvalMode,
         r.requestStartDate,
         r.requestEndDate,
         r.offStartDate,
@@ -442,7 +462,6 @@ function upsertRow(doc) {
 
   if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
 
-  // If moved out of pending_coo, auto-unselect
   if (up(doc?.status) !== 'PENDING_COO') {
     const next = new Set(selectedIds.value)
     next.delete(id)
@@ -475,6 +494,7 @@ function exportExcel() {
       EmployeeID: r.employeeId || '',
       EmployeeName: r.employeeName || r.name || '',
       Department: r.department || '',
+      ApprovalMode: modeLabel(r.approvalMode),
       WorkDateFrom: r.requestStartDate || '',
       WorkDateTo: r.requestEndDate || '',
       SwapDateFrom: r.offStartDate || '',
@@ -509,7 +529,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // ✅ join COO rooms (critical)
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_COO' })
 
@@ -559,7 +578,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, mode, status..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -578,7 +597,6 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center gap-2">
-                <!-- Bulk controls -->
                 <template v-if="isRealCoo && !isAdminViewer">
                   <button
                     class="ui-btn ui-btn-sm ui-btn-soft"
@@ -641,7 +659,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, mode, status..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -699,7 +717,7 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
             <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
               No items found.
@@ -721,7 +739,10 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="shrink-0 text-right space-y-1 flex items-start gap-2">
-                  <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
+                  <div class="flex flex-col items-end gap-1">
+                    <span :class="modeChipClasses(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
+                    <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
+                  </div>
 
                   <input
                     v-if="canDecide(row)"
@@ -768,15 +789,16 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1040px]">
+            <table class="ui-table table-fixed w-full min-w-[1180px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
                 <col :style="{ width: COL_WIDTH.swapDate }" />
+                <col :style="{ width: COL_WIDTH.mode }" />
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
@@ -798,6 +820,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
+                  <th class="ui-th">Mode</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -806,11 +829,10 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
                 </tr>
 
                 <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
-                  <!-- Select -->
                   <td class="ui-td text-center" @click.stop>
                     <input v-if="canDecide(row)" type="checkbox" :checked="isSelected(row)" @change="toggleRow(row)" aria-label="Select row" />
                     <span v-else class="text-[11px] text-slate-400">—</span>
@@ -829,10 +851,13 @@ onBeforeUnmount(() => {
                   <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
 
                   <td class="ui-td">
+                    <span :class="modeChipClasses(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
+                  </td>
+
+                  <td class="ui-td">
                     <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
                   </td>
 
-                  <!-- Actions -->
                   <td class="ui-td text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">
                       <template v-if="canDecide(row)">
@@ -909,6 +934,9 @@ onBeforeUnmount(() => {
               <div class="text-right md:text-left">
                 <div class="ui-label">Status</div>
                 <span :class="statusBadgeUiClass(viewItem?.status)">{{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}</span>
+
+                <div class="ui-label mt-3">Approval Mode</div>
+                <span :class="modeChipClasses(viewItem?.approvalMode)">{{ modeLabel(viewItem?.approvalMode) }}</span>
               </div>
             </div>
           </div>

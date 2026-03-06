@@ -1,15 +1,19 @@
 <!-- src/views/coo/ManagerSwapDayInbox.vue
   ✅ FULL CODE (NO ATTACHMENTS VERSION)
   ✅ Works with new approval modes:
-     - MANAGER_ONLY  ✅ included in Manager inbox, approve -> APPROVED
-     - GM_ONLY       ❌ NOT shown in Manager inbox (manager not involved)
+     - MANAGER_ONLY   ✅ included in Manager inbox, approve -> APPROVED
      - MANAGER_AND_GM ✅ included
      - MANAGER_AND_COO ✅ included
+  ❌ Not shown here because manager not involved:
+     - GM_ONLY
+     - GM_AND_COO
+     - COO_ONLY
   ✅ Admin viewers can VIEW only (no decisions)
   ✅ Real manager can approve/reject only when status=PENDING_MANAGER
   ✅ Bulk approve/reject (manager only)
   ✅ Excel export (xlsx)
   ✅ Realtime: swap:req:created / swap:req:updated
+  ✅ NEW: Approval Mode shown in mobile / desktop / detail / export
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -18,10 +22,10 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
-// ✅ realtime
+// realtime
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
-// ✅ Excel export
+// Excel export
 import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'ManagerSwapDayInbox' })
@@ -75,7 +79,9 @@ const roles = computed(() => {
   const one = auth.user?.role ? [auth.user.role] : []
   return [...new Set([...raw, ...one].map((r) => String(r || '').trim().toUpperCase()))]
 })
-const isAdminViewer = computed(() => roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN'))
+const isAdminViewer = computed(() =>
+  roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
+)
 const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
 
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
@@ -85,10 +91,10 @@ const COL_WIDTH = {
   employee: '240px',
   workDate: '200px',
   swapDate: '200px',
-  mode: '160px',
+  mode: '150px',
   status: '140px',
   actions: '92px',
-  reason: '260px',
+  reason: '240px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -127,14 +133,21 @@ function statusBadgeUiClass(x) {
   return 'ui-badge'
 }
 
-function modeBadgeUiClass(m) {
-  const v = up(m)
-  if (v === 'MANAGER_ONLY') return 'ui-badge ui-badge-success'
-  if (v === 'MANAGER_AND_GM') return 'ui-badge ui-badge-info'
-  if (v === 'MANAGER_AND_COO') return 'ui-badge ui-badge-info'
-  if (v === 'GM_ONLY') return 'ui-badge'
-  if (v === 'GM_AND_COO') return 'ui-badge'
-  return 'ui-badge'
+function modeBadgeUiClass(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  return 'Manager + GM'
 }
 
 /**
@@ -182,8 +195,6 @@ function getRejectedReason(row) {
 async function fetchInbox() {
   try {
     loading.value = true
-    // Backend should include MANAGER_ONLY in manager inbox scope.
-    // GM_ONLY is NOT included here (manager not involved).
     const res = await api.get('/leave/swap-working-day/manager/inbox?scope=ALL')
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
@@ -214,6 +225,7 @@ const filteredRows = computed(() => {
         r.offStartDate,
         r.offEndDate,
         r.approvalMode,
+        modeLabel(r.approvalMode),
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -456,7 +468,6 @@ function upsertRow(doc) {
 
   if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
 
-  // if item moved out of pending manager, remove from selection automatically
   const updated = up(doc?.status)
   if (updated !== 'PENDING_MANAGER') {
     const next = new Set(selectedIds.value)
@@ -496,7 +507,7 @@ async function exportExcel() {
       SwapDateTo: r.offEndDate || '',
       RequestDays: r.requestTotalDays ?? '',
       OffDays: r.offTotalDays ?? '',
-      ApprovalMode: r.approvalMode || '',
+      ApprovalMode: modeLabel(r.approvalMode),
       Status: r.status || '',
       Reason: r.reason || '',
     }))
@@ -516,10 +527,31 @@ async function exportExcel() {
   }
 }
 
+/* body lock + esc */
+function setBodyLock(lock) {
+  if (typeof document === 'undefined') return
+  document.body.style.overflow = lock ? 'hidden' : ''
+}
+function closeTopmostModal() {
+  if (bulkConfirmOpen.value) return closeBulkConfirm()
+  if (confirmOpen.value) return closeConfirm()
+  if (viewOpen.value) return closeView()
+}
+function onKeydown(e) {
+  if (e.key === 'Escape') closeTopmostModal()
+}
+watch(
+  () => [viewOpen.value, confirmOpen.value, bulkConfirmOpen.value],
+  ([v, c, b]) => setBodyLock(!!(v || c || b))
+)
+
 /* lifecycle */
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
 
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_MANAGER' })
@@ -538,9 +570,13 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
   socket.off('swap:req:created', onSwapCreated)
   socket.off('swap:req:updated', onSwapUpdated)
+  setBodyLock(false)
 })
 </script>
 
@@ -727,7 +763,7 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
             <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
               No items found.
@@ -750,7 +786,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="mt-1">
-                    <span :class="modeBadgeUiClass(row.approvalMode)">{{ row.approvalMode || '—' }}</span>
+                    <span :class="modeBadgeUiClass(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
                   </div>
                 </div>
 
@@ -809,9 +845,9 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1180px]">
+            <table class="ui-table table-fixed w-full min-w-[1260px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
@@ -878,7 +914,7 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <span :class="modeBadgeUiClass(row.approvalMode)">{{ row.approvalMode || '—' }}</span>
+                    <span :class="modeBadgeUiClass(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
                   </td>
 
                   <td class="ui-td">
@@ -936,9 +972,6 @@ onBeforeUnmount(() => {
             <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
               {{ viewItem?.employeeName || viewItem?.name || '—' }} · {{ fmtDateTime(viewItem?.createdAt) }}
             </div>
-            <div v-if="viewItem?.approvalMode" class="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-              Mode: {{ viewItem.approvalMode }}
-            </div>
           </div>
 
           <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
@@ -963,6 +996,11 @@ onBeforeUnmount(() => {
                 <div class="ui-label">Status</div>
                 <span :class="statusBadgeUiClass(viewItem?.status)">
                   {{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}
+                </span>
+
+                <div class="ui-label mt-3">Approval Mode</div>
+                <span :class="modeBadgeUiClass(viewItem?.approvalMode)">
+                  {{ modeLabel(viewItem?.approvalMode) }}
                 </span>
               </div>
             </div>

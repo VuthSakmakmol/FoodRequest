@@ -13,6 +13,7 @@
   ✅ Realtime:
      - forgetscan:req:created
      - forgetscan:req:updated
+  ✅ NEW: Approver mode shown in mobile / desktop / detail / export
 -->
 
 <script setup>
@@ -66,13 +67,29 @@ const decisionNote = ref('')
 /* export */
 const exporting = ref(false)
 
+/* body scroll lock */
+function lockBodyScroll(on) {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('overflow-hidden', !!on)
+}
+
+watch([viewOpen, confirmOpen], ([v, c]) => {
+  lockBodyScroll(!!(v || c))
+})
+
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (confirmOpen.value) return closeConfirm()
+  if (viewOpen.value) return closeView()
+}
+
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
   created: '140px',
   employee: '260px',
   forgotDate: '140px',
   forgotType: '180px',
-  mode: '160px',
+  mode: '170px',
   status: '150px',
   actions: '92px',
   reason: '240px',
@@ -92,18 +109,9 @@ const STATUS_LABEL = {
 const TYPE_LABEL = {
   FORGET_IN: 'Forget IN',
   FORGET_OUT: 'Forget OUT',
+  FORGET_IN_OUT: 'Forget IN & OUT',
 }
 
-const MODE_LABEL = {
-  MANAGER_AND_GM: 'MANAGER_AND_GM',
-  MANAGER_AND_COO: 'MANAGER_AND_COO',
-  GM_AND_COO: 'GM_AND_COO',
-  MANAGER_ONLY: 'MANAGER_ONLY (FYI)',
-  GM_ONLY: 'GM_ONLY',
-  COO_ONLY: 'COO_ONLY',
-}
-
-/* ✅ modes shown on GM page */
 const GM_VISIBLE_MODES = ['MANAGER_AND_GM', 'GM_AND_COO', 'GM_ONLY', 'MANAGER_ONLY']
 
 /* ───────────────── HELPERS ───────────────── */
@@ -135,17 +143,49 @@ function statusBadgeUiClass(x) {
   return 'ui-badge'
 }
 
-/** ✅ multi-type display (forgotTypes[]) + fallback old forgotType */
+function modeBadgeUiClass(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_ONLY') return 'ui-badge ui-badge-info'
+  if (m === 'GM_ONLY') return 'ui-badge ui-badge-success'
+  if (m === 'MANAGER_AND_GM' || m === 'GM_AND_COO') return 'ui-badge ui-badge-indigo'
+  if (m === 'MANAGER_AND_COO' || m === 'COO_ONLY') return 'ui-badge'
+  return 'ui-badge'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_GM') return 'Manager + GM'
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'GM_ONLY') return 'GM only'
+  if (m === 'MANAGER_ONLY') return 'Manager only (FYI)'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  return m || '—'
+}
+
+/** ✅ multi-type display (forgotTypes[]) + fallback old forgotType/forgotKey */
 function getTypesArr(row) {
   const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
   let types = uniqUpper(arr)
-  if (!types.length && row?.forgotType) types = [up(row.forgotType)]
+
+  if (!types.length && row?.forgotKey) {
+    const key = up(row.forgotKey)
+    if (key === 'FORGET_IN_OUT') types = ['FORGET_IN', 'FORGET_OUT']
+    else if (key === 'FORGET_IN' || key === 'FORGET_OUT') types = [key]
+  }
+
+  if (!types.length && row?.forgotType) {
+    const legacy = up(row.forgotType)
+    if (legacy === 'FORGET_IN' || legacy === 'FORGET_OUT') types = [legacy]
+  }
+
   return types.filter((t) => t === 'FORGET_IN' || t === 'FORGET_OUT')
 }
 
 function typesToText(row) {
   const types = getTypesArr(row)
   if (!types.length) return '—'
+  if (types.includes('FORGET_IN') && types.includes('FORGET_OUT')) return TYPE_LABEL.FORGET_IN_OUT
   return types.map((t) => TYPE_LABEL[t] || t).join(' + ')
 }
 
@@ -240,8 +280,9 @@ const filteredRows = computed(() => {
         r.reason,
         r.status,
         r.forgotDate,
-        (Array.isArray(r.forgotTypes) ? r.forgotTypes.join(' ') : r.forgotType),
+        typesToText(r),
         r.approvalMode,
+        modeLabel(r.approvalMode),
         r.gmLoginId,
         r.managerLoginId,
         r.cooLoginId,
@@ -386,7 +427,7 @@ function buildExcelRows(list) {
     Department: r.department || '',
     ForgotDate: r.forgotDate || '',
     ForgotType: typesToText(r),
-    ApprovalMode: r.approvalMode || '',
+    ApprovalMode: modeLabel(r.approvalMode),
     Status: r.status || '',
     Reason: compactText(r.reason),
     Manager: r.managerLoginId || '',
@@ -426,7 +467,6 @@ async function exportExcel() {
 function upsertRow(doc) {
   if (!doc?._id) return
 
-  // ✅ only keep GM-visible modes (action + FYI)
   if (!GM_VISIBLE_MODES.includes(up(doc?.approvalMode))) return
 
   const id = String(doc._id)
@@ -449,7 +489,10 @@ function onReqUpdated(doc) {
 /* lifecycle */
 onMounted(async () => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile)
+    window.addEventListener('keydown', onKeydown)
+  }
 
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_GM' })
@@ -468,10 +511,15 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeydown)
+  }
 
   socket.off('forgetscan:req:created', onReqCreated)
   socket.off('forgetscan:req:updated', onReqUpdated)
+
+  lockBodyScroll(false)
 })
 </script>
 
@@ -502,7 +550,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -564,7 +612,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -638,8 +686,10 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
 
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                    Mode: <span class="font-extrabold">{{ MODE_LABEL[up(row.approvalMode)] || row.approvalMode }}</span>
+                  <div class="mt-1">
+                    <span :class="modeBadgeUiClass(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
                   </div>
                 </div>
 
@@ -692,7 +742,7 @@ onBeforeUnmount(() => {
 
           <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1180px]">
+            <table class="ui-table table-fixed w-full min-w-[1260px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
@@ -749,8 +799,8 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <span class="ui-badge" :class="isFyiRow(row) ? 'ui-badge-info' : ''">
-                      {{ MODE_LABEL[up(row.approvalMode)] || row.approvalMode }}
+                    <span :class="modeBadgeUiClass(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
                     </span>
                   </td>
 
@@ -862,9 +912,9 @@ onBeforeUnmount(() => {
                 <span :class="statusBadgeUiClass(viewItem?.status)">
                   {{ STATUS_LABEL[up(viewItem?.status)] || viewItem?.status }}
                 </span>
-                <div class="mt-1">
-                  <span class="ui-badge" :class="isFyiRow(viewItem) ? 'ui-badge-info' : ''">
-                    {{ MODE_LABEL[up(viewItem?.approvalMode)] || viewItem?.approvalMode }}
+                <div class="mt-2">
+                  <span :class="modeBadgeUiClass(viewItem?.approvalMode)">
+                    {{ modeLabel(viewItem?.approvalMode) }}
                   </span>
                 </div>
               </div>

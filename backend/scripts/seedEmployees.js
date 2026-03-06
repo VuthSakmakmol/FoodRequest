@@ -1093,7 +1093,8 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "Human Resource Share Services",
     "contactNumber": "0979866163",
-    "telegramChatId": "7163451169",
+    "telegramChatId": "",
+    // "telegramChatId": "7163451169",
     "isActive": true
   },
   {

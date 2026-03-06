@@ -15,6 +15,7 @@
 
   ✅ FIXED: Type badge duplication (show ONE badge only)
   ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
+  ✅ NEW: Approval Mode shown in mobile / desktop / detail / export
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -90,9 +91,10 @@ const decisionOpen = computed(() => confirmOpen.value)
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
   created: '140px',
-  employee: '260px',
+  employee: '250px',
   forgotDate: '140px',
-  forgotType: '220px',
+  forgotType: '200px',
+  mode: '150px',
   status: '150px',
   actions: '92px',
   reason: 'auto',
@@ -147,12 +149,29 @@ function typeBadgeUiClass(x) {
   return 'ui-badge ui-badge-info'
 }
 
+function modeBadgeUiClass(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  if (m === 'MANAGER_AND_GM') return 'Manager + GM'
+  return m || '—'
+}
+
 /* ───────────────── Type (no-duplicate) ───────────────── */
 /** New schema: forgotTypes[] (array). Keep safe display. */
 function getTypesArray(row) {
   const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
   if (arr.length) return arr.map((x) => up(x)).filter(Boolean)
-  // backward compat if old field exists
   const legacy = up(row?.forgotType)
   return legacy ? [legacy] : []
 }
@@ -174,12 +193,10 @@ function getTypeBadges(row) {
   const key = getTypeKey(row)
   const types = getTypesArray(row)
 
-  // both => one combined badge
   if (key === 'FORGET_IN_OUT') {
     return [{ key: 'FORGET_IN_OUT', label: TYPE_LABEL.FORGET_IN_OUT, cls: 'ui-badge ui-badge-info' }]
   }
 
-  // otherwise => one badge only
   const t = types[0] || key
   if (!t) return []
   return [{ key: t, label: TYPE_LABEL[t] || t, cls: typeBadgeUiClass(t) }]
@@ -275,6 +292,7 @@ const filteredRows = computed(() => {
         r.forgotKey,
         types,
         r.approvalMode,
+        modeLabel(r.approvalMode),
         r.managerLoginId,
         r.gmLoginId,
         r.cooLoginId,
@@ -387,7 +405,7 @@ async function confirmDecision() {
   try {
     await api.post(`/leave/forget-scan/${row._id}/coo-decision`, {
       action,
-      note, // send always (approve can be empty)
+      note,
     })
 
     showToast({
@@ -422,12 +440,12 @@ function buildExcelRows(list) {
       ForgotDate: r.forgotDate || '',
       ForgotKey: key || r.forgotKey || '',
       ForgotTypes: types.map((t) => TYPE_LABEL[t] || t).join(', '),
+      ApprovalMode: modeLabel(r.approvalMode),
       Status: r.status || '',
       Reason: compactText(r.reason),
       Manager: r.managerLoginId || '',
       GM: r.gmLoginId || '',
       COO: r.cooLoginId || '',
-      ApprovalMode: r.approvalMode || '',
       RejectedReason: up(r.status) === 'REJECTED' ? getRejectedReason(r) : '',
     }
   })
@@ -437,7 +455,6 @@ async function exportExcel() {
   try {
     exporting.value = true
 
-    // ✅ Export CURRENT FILTERS
     const data = buildExcelRows(filteredRows.value)
     if (!data.length) {
       showToast({ type: 'warning', message: 'No data to export.' })
@@ -499,12 +516,9 @@ onMounted(async () => {
   }
 
   try {
-    // role room
     subscribeRoleIfNeeded({ role: 'LEAVE_COO' })
-    // optional extra role room, safe if your backend uses it
     subscribeRoleIfNeeded({ role: 'LEAVE_COO_APPROVER' })
 
-    // personal rooms (mismatch-safe)
     const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
     const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
 
@@ -557,7 +571,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -616,7 +630,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status..."
+                    placeholder="Employee, reason, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -681,6 +695,10 @@ onBeforeUnmount(() => {
                     ID: {{ row.employeeId || '—' }}
                   </div>
 
+                  <div class="mt-1">
+                    <span :class="modeBadgeUiClass(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
+                  </div>
+
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
                     Forgot:
                     <span class="font-extrabold">{{ row.forgotDate || '—' }}</span>
@@ -737,12 +755,13 @@ onBeforeUnmount(() => {
 
           <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1100px]">
+            <table class="ui-table table-fixed w-full min-w-[1240px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.forgotDate }" />
                 <col :style="{ width: COL_WIDTH.forgotType }" />
+                <col :style="{ width: COL_WIDTH.mode }" />
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
@@ -754,6 +773,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Forgot Date</th>
                   <th class="ui-th text-center">Type</th>
+                  <th class="ui-th">Mode</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -762,7 +782,7 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No items found.
                   </td>
                 </tr>
@@ -792,6 +812,12 @@ onBeforeUnmount(() => {
                       </span>
                       <span v-if="!getTypeBadges(row).length" class="text-[11px] text-slate-400">—</span>
                     </div>
+                  </td>
+
+                  <td class="ui-td">
+                    <span :class="modeBadgeUiClass(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
                   </td>
 
                   <td class="ui-td">
@@ -904,6 +930,11 @@ onBeforeUnmount(() => {
                 <span :class="statusBadgeUiClass(viewItem?.status)">
                   {{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}
                 </span>
+
+                <div class="ui-label mt-3">Approval Mode</div>
+                <span :class="modeBadgeUiClass(viewItem?.approvalMode)">
+                  {{ modeLabel(viewItem?.approvalMode) }}
+                </span>
               </div>
             </div>
           </div>
@@ -934,7 +965,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Rejected Reason -->
           <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
             <div class="ui-section-title text-rose-600 dark:text-rose-400">Rejected Reason</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">

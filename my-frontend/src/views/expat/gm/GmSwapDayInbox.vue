@@ -13,6 +13,7 @@
   ✅ Bulk approve/reject
   ✅ Excel export
   ✅ Responsive: mobile cards + desktop table (horizontal scroll)
+  ✅ NEW: show approval mode in mobile / desktop / detail / export
 -->
 
 <script setup>
@@ -90,11 +91,12 @@ const COL_WIDTH = {
   select: '56px',
   created: '140px',
   employee: '240px',
-  workDate: '200px',
-  swapDate: '200px',
+  workDate: '190px',
+  swapDate: '190px',
+  mode: '140px',
   status: '140px',
   actions: '92px',
-  reason: '320px',
+  reason: '260px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -131,6 +133,23 @@ function statusBadgeUiClass(x) {
   if (st === 'CANCELLED') return 'ui-badge'
   if (st.includes('PENDING')) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
+}
+
+function modeChipClasses(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  return 'Manager + GM'
 }
 
 /**
@@ -472,10 +491,8 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  // keep modal synced
   if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
 
-  // if moved out of pending_gm, auto-unselect
   if (up(doc?.status) !== 'PENDING_GM') {
     const next = new Set(selectedIds.value)
     next.delete(id)
@@ -507,6 +524,7 @@ function exportExcel() {
       EmployeeID: r.employeeId || '',
       EmployeeName: r.employeeName || r.name || '',
       Department: r.department || r.departmentName || '',
+      ApprovalMode: modeLabel(r.approvalMode),
       WorkDateFrom: r.requestStartDate || '',
       WorkDateTo: r.requestEndDate || '',
       SwapDateFrom: r.offStartDate || '',
@@ -515,7 +533,6 @@ function exportExcel() {
       OffDays: r.offTotalDays ?? '',
       Status: r.status || '',
       Reason: r.reason || '',
-      ApprovalMode: r.approvalMode || '',
     }))
 
     if (!list.length) {
@@ -775,7 +792,7 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
             <div
               v-if="!pagedRows.length && !loading"
@@ -800,7 +817,10 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="shrink-0 text-right space-y-1 flex items-start gap-2">
-                  <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
+                  <div class="flex flex-col items-end gap-1">
+                    <span :class="modeChipClasses(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
+                    <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
+                  </div>
 
                   <input
                     v-if="canDecide(row)"
@@ -859,15 +879,16 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE (horizontal scroll via ui-table-wrap + min-w) -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1240px]">
+            <table class="ui-table table-fixed w-full min-w-[1360px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.select }" />
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
                 <col :style="{ width: COL_WIDTH.swapDate }" />
+                <col :style="{ width: COL_WIDTH.mode }" />
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.actions }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
@@ -889,6 +910,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
+                  <th class="ui-th">Mode</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th text-center">Action</th>
                   <th class="ui-th">Reason</th>
@@ -897,7 +919,7 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
                 </tr>
 
                 <tr
@@ -934,6 +956,10 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td">
                     <div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div>
+                  </td>
+
+                  <td class="ui-td">
+                    <span :class="modeChipClasses(row.approvalMode)">{{ modeLabel(row.approvalMode) }}</span>
                   </td>
 
                   <td class="ui-td">
@@ -1031,6 +1057,9 @@ onBeforeUnmount(() => {
               <div class="text-right md:text-left">
                 <div class="ui-label">Status</div>
                 <span :class="statusBadgeUiClass(viewItem?.status)">{{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}</span>
+
+                <div class="ui-label mt-3">Approval Mode</div>
+                <span :class="modeChipClasses(viewItem?.approvalMode)">{{ modeLabel(viewItem?.approvalMode) }}</span>
               </div>
             </div>
           </div>

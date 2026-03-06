@@ -9,6 +9,7 @@
   ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included via api instance)
   ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
   ✅ REALTIME: listens to leave:req:created + leave:req:updated and refreshes inbox (debounced)
+  ✅ NEW: show Approval Mode chip in mobile + desktop
 
   Notes (matches your backend):
   - COO can VIEW inbox if LEAVE_COO or admin viewer roles
@@ -93,6 +94,30 @@ function statusChipClasses(status) {
     default:
       return 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:border-slate-700/80'
   }
+}
+
+function modeChipClasses(mode) {
+  const m = up(mode)
+
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') {
+    return 'ui-badge ui-badge-indigo'
+  }
+
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') {
+    return 'ui-badge ui-badge-success'
+  }
+
+  return 'ui-badge ui-badge-info'
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'COO_ONLY') return 'COO only'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  return 'Manager + GM'
 }
 
 /* Sort: COO pending first, then GM/Manager pending, then finished */
@@ -180,6 +205,7 @@ const filteredRows = computed(() => {
         r.employeeName,
         r.department,
         r.leaveTypeCode,
+        r.approvalMode,
         r.reason,
         r.status,
         r.cooComment,
@@ -255,6 +281,7 @@ function buildExportRows(list) {
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
     LeaveType: r.leaveTypeCode || '',
+    ApprovalMode: modeLabel(r.approvalMode),
     LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
     LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
     TotalDays: Number(r.totalDays || 0),
@@ -267,7 +294,6 @@ function buildExportRows(list) {
 
 function exportExcel() {
   try {
-    // ✅ ONE export: export ALL rows returned by backend (scope=ALL)
     const list = rows.value
     if (!list.length) {
       showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
@@ -283,6 +309,7 @@ function exportExcel() {
       { wch: 24 }, // EmployeeName
       { wch: 18 }, // Department
       { wch: 10 }, // LeaveType
+      { wch: 16 }, // ApprovalMode
       { wch: 12 }, // LeaveStart
       { wch: 12 }, // LeaveEnd
       { wch: 10 }, // TotalDays
@@ -361,7 +388,6 @@ async function confirmDecision() {
       message: 'COO decision saved.',
     })
 
-    // ✅ auto close on success + refresh
     closeDecisionModal(true)
     await fetchInbox(true)
   } catch (e) {
@@ -544,7 +570,6 @@ function setupRealtime() {
     company: auth.user?.companyCode,
   })
 
-  // Backend emits: emitReq(..., 'leave:req:created') and emitReq(..., 'leave:req:updated')
   offHandlers.push(
     onSocket('leave:req:created', () => triggerRealtimeRefresh()),
     onSocket('leave:req:updated', () => triggerRealtimeRefresh())
@@ -621,7 +646,7 @@ onBeforeUnmount(() => {
                     <input
                       v-model="search"
                       type="text"
-                      placeholder="Employee / type / reason / status / note..."
+                      placeholder="Employee / type / mode / reason / status / note..."
                       class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                     />
                   </div>
@@ -694,7 +719,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee / type / reason / status..."
+                    placeholder="Employee / type / mode / reason / status..."
                     class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -777,6 +802,11 @@ onBeforeUnmount(() => {
                 <div class="text-right space-y-1 text-[11px]">
                   <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
                   <div>
+                    <span :class="modeChipClasses(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
+                  </div>
+                  <div>
                     <span
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
                       :class="statusChipClasses(row.status)"
@@ -830,16 +860,17 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table text-left w-full min-w-[1200px]">
+            <table class="ui-table text-left w-full min-w-[1340px]">
               <colgroup>
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
                 <col class="w-[92px]" />
                 <col class="w-[160px]" />
+                <col class="w-[130px]" />
                 <col class="w-[80px]" />
                 <col class="w-[170px]" />
-                <col class="w-[96px]" />
                 <col class="w-[110px]" />
+                <col class="w-[96px]" />
                 <col />
               </colgroup>
 
@@ -849,17 +880,18 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Employee</th>
                   <th class="ui-th text-left">Type</th>
                   <th class="ui-th text-left">Leave Date</th>
+                  <th class="ui-th text-left">Mode</th>
                   <th class="ui-th text-right">Days</th>
                   <th class="ui-th">Status</th>
-                  <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-center">Actions</th>
+                  <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-left">Reason</th>
                 </tr>
               </thead>
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="10" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No leave requests in your COO queue.
                   </td>
                 </tr>
@@ -881,6 +913,12 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td text-left whitespace-nowrap align-top">{{ formatRange(row) }}</td>
 
+                  <td class="ui-td text-left align-top">
+                    <span :class="modeChipClasses(row.approvalMode)">
+                      {{ modeLabel(row.approvalMode) }}
+                    </span>
+                  </td>
+
                   <td class="ui-td text-right align-top tabular-nums">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
 
                   <td class="ui-td align-top">
@@ -890,6 +928,18 @@ onBeforeUnmount(() => {
                     >
                       {{ row.status }}
                     </span>
+                  </td>
+
+                  <td class="ui-td align-top text-center">
+                    <div v-if="canDecideRow(row)" class="flex items-center justify-center gap-2">
+                      <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
+                        <i class="fa-solid fa-circle-check text-[11px]" />
+                      </button>
+                      <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
+                        <i class="fa-solid fa-circle-xmark text-[11px]" />
+                      </button>
+                    </div>
+                    <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
                   <td class="ui-td align-top text-center">
@@ -904,18 +954,6 @@ onBeforeUnmount(() => {
                       <i class="fa-solid fa-paperclip text-[11px]" />
                       <span class="ml-1">{{ row.attachments.length }}</span>
                     </button>
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
-
-                  <td class="ui-td align-top text-center">
-                    <div v-if="canDecideRow(row)" class="flex items-center justify-center gap-2">
-                      <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
-                        <i class="fa-solid fa-circle-check text-[11px]" />
-                      </button>
-                      <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
-                        <i class="fa-solid fa-circle-xmark text-[11px]" />
-                      </button>
-                    </div>
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
