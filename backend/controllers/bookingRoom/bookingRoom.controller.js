@@ -3,21 +3,15 @@ const createError = require('http-errors')
 const XLSX = require('xlsx')
 
 const BookingRoom = require('../../models/bookingRoom/BookingRoom')
+const BookingRoomResource = require('../../models/bookingRoom/BookingRoomResource')
+const BookingRoomMaterial = require('../../models/bookingRoom/BookingRoomMaterial')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
 let User = null
 try { User = require('../../models/User') } catch { User = null }
 
-const ROOM_NAMES = ['Dark Room', 'Apsara Room', 'Angkor Room']
-const MATERIAL_TYPES = ['PROJECTOR', 'TV']
-
-const ROOM_NON_BLOCKING_STATUSES = ['REJECTED', 'CANCELLED', 'NOT_REQUIRED']
-const MATERIAL_NON_BLOCKING_STATUSES = ['REJECTED', 'CANCELLED', 'NOT_REQUIRED']
 const OVERALL_NON_BLOCKING_STATUSES = ['REJECTED', 'CANCELLED']
 
-/* ─────────────────────────────────────────────
- * helpers
- * ───────────────────────────────────────────── */
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -47,12 +41,24 @@ function overlaps(startA, endA, startB, endB) {
   return startA < endB && startB < endA
 }
 
-function uniqUpperStrings(a = []) {
-  return [...new Set(arr(a).map((v) => up(v)).filter(Boolean))]
-}
-
 function nowPPDate() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' })
+}
+
+function safeObjectId(v) {
+  const raw = s(v)
+  return raw || null
+}
+
+function materialItemsToText(items = []) {
+  return arr(items)
+    .map((x) => {
+      const name = s(x?.materialName) || s(x?.materialCode)
+      const qty = Number(x?.qty || 0)
+      return name ? `${name}${qty > 0 ? ` x${qty}` : ''}` : ''
+    })
+    .filter(Boolean)
+    .join(', ')
 }
 
 function pickIdentityFrom(req) {
@@ -100,73 +106,6 @@ function canAdminView(req) {
   )
 }
 
-function normalizeRoomName(v) {
-  const raw = s(v)
-  const found = ROOM_NAMES.find((x) => up(x) === up(raw))
-  return found || raw
-}
-
-function normalizeMaterials(v) {
-  return uniqUpperStrings(v).filter((m) => MATERIAL_TYPES.includes(m))
-}
-
-function shapeCreated(doc) {
-  return {
-    bookingId: String(doc._id),
-    _id: String(doc._id),
-    employeeId: doc.employeeId,
-    employee: doc.employee || null,
-    bookingDate: doc.bookingDate,
-    timeStart: doc.timeStart,
-    timeEnd: doc.timeEnd,
-    meetingTitle: doc.meetingTitle || '',
-    purpose: doc.purpose || '',
-    participantEstimate: doc.participantEstimate || 1,
-    requirementNote: doc.requirementNote || '',
-    roomRequired: !!doc.roomRequired,
-    roomName: doc.roomName || '',
-    materialRequired: !!doc.materialRequired,
-    materials: doc.materials || [],
-    roomStatus: doc.roomStatus,
-    materialStatus: doc.materialStatus,
-    overallStatus: doc.overallStatus,
-    createdAt: doc.createdAt,
-    updatedAt: doc.updatedAt,
-  }
-}
-
-function shapeUpdated(doc) {
-  return {
-    bookingId: String(doc._id),
-    patch: {
-      bookingDate: doc.bookingDate,
-      timeStart: doc.timeStart,
-      timeEnd: doc.timeEnd,
-      meetingTitle: doc.meetingTitle || '',
-      purpose: doc.purpose || '',
-      participantEstimate: doc.participantEstimate || 1,
-      requirementNote: doc.requirementNote || '',
-      roomRequired: !!doc.roomRequired,
-      roomName: doc.roomName || '',
-      materialRequired: !!doc.materialRequired,
-      materials: doc.materials || [],
-      roomStatus: doc.roomStatus,
-      materialStatus: doc.materialStatus,
-      overallStatus: doc.overallStatus,
-      updatedAt: doc.updatedAt,
-    },
-  }
-}
-
-function shapeStatus(doc) {
-  return {
-    bookingId: String(doc._id),
-    roomStatus: doc.roomStatus,
-    materialStatus: doc.materialStatus,
-    overallStatus: doc.overallStatus,
-  }
-}
-
 function emitBookingRoom(req, event, payload) {
   try {
     const io = req.io
@@ -176,8 +115,6 @@ function emitBookingRoom(req, event, payload) {
 }
 
 async function notifySafe(_type, _payload) {
-  // Placeholder for future Telegram/email integration
-  // Intentionally quiet for now to avoid breaking runtime if service not ready.
   return
 }
 
@@ -223,150 +160,6 @@ function validateBasePayload(payload) {
   if (endMin <= startMin) throw createError(400, 'timeEnd must be after timeStart.')
 }
 
-function normalizeRequestPayload(payload) {
-  const roomRequired = !!payload.roomRequired
-  const materialRequired = !!payload.materialRequired
-
-  const roomName = roomRequired ? normalizeRoomName(payload.roomName) : ''
-  const materials = materialRequired ? normalizeMaterials(payload.materials) : []
-
-  if (!roomRequired && !materialRequired) {
-    throw createError(400, 'At least one of roomRequired or materialRequired must be true.')
-  }
-
-  if (roomRequired && !roomName) {
-    throw createError(400, 'roomName is required when roomRequired is true.')
-  }
-
-  if (materialRequired && !materials.length) {
-    throw createError(400, 'At least one material is required when materialRequired is true.')
-  }
-
-  return {
-    bookingDate: s(payload.bookingDate),
-    timeStart: s(payload.timeStart),
-    timeEnd: s(payload.timeEnd),
-
-    meetingTitle: s(payload.meetingTitle),
-    purpose: s(payload.purpose || ''),
-    participantEstimate: Number(payload.participantEstimate || 1),
-    requirementNote: s(payload.requirementNote),
-
-    roomRequired,
-    roomName,
-
-    materialRequired,
-    materials,
-  }
-}
-
-/* Approved room booking blocks same room + overlapping time */
-async function assertRoomApprovalConflict({ bookingDate, timeStart, timeEnd, roomName, excludeId = null }) {
-  if (!roomName) return
-
-  const startMin = toMinutes(timeStart)
-  const endMin = toMinutes(timeEnd)
-
-  const query = {
-    bookingDate,
-    roomRequired: true,
-    roomName,
-    roomStatus: 'APPROVED',
-    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-  }
-
-  if (excludeId) query._id = { $ne: excludeId }
-
-  const rows = await BookingRoom.find(query)
-    .select('timeStart timeEnd roomName roomStatus overallStatus')
-    .lean()
-
-  const conflicted = rows.some((row) =>
-    overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
-  )
-
-  if (conflicted) {
-    throw createError(409, `Room "${roomName}" is already approved for this time slot.`)
-  }
-}
-
-/* Approved material booking blocks same material + overlapping time */
-async function assertMaterialApprovalConflict({ bookingDate, timeStart, timeEnd, materials = [], excludeId = null }) {
-  const wants = normalizeMaterials(materials)
-  if (!wants.length) return
-
-  const startMin = toMinutes(timeStart)
-  const endMin = toMinutes(timeEnd)
-
-  const query = {
-    bookingDate,
-    materialRequired: true,
-    materials: { $in: wants },
-    materialStatus: 'APPROVED',
-    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-  }
-
-  if (excludeId) query._id = { $ne: excludeId }
-
-  const rows = await BookingRoom.find(query)
-    .select('timeStart timeEnd materials materialStatus overallStatus')
-    .lean()
-
-  for (const row of rows) {
-    const timeConflict = overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
-    if (!timeConflict) continue
-
-    const approvedMaterials = normalizeMaterials(row.materials)
-    const sameMaterial = approvedMaterials.some((m) => wants.includes(m))
-    if (sameMaterial) {
-      throw createError(409, `One or more requested materials are already approved for this time slot.`)
-    }
-  }
-}
-
-function buildAdminFilter({ date, dateFrom, dateTo, overallStatus, roomStatus, materialStatus, q }) {
-  const filter = {}
-
-  const single = s(date)
-  const from = s(dateFrom)
-  const to = s(dateTo)
-
-  if (from || to) {
-    if (from && !isValidDate(from)) throw createError(400, 'Invalid dateFrom (YYYY-MM-DD).')
-    if (to && !isValidDate(to)) throw createError(400, 'Invalid dateTo (YYYY-MM-DD).')
-
-    const f = from || to
-    const t = to || from
-    if (f > t) throw createError(400, 'dateFrom must be <= dateTo.')
-
-    filter.bookingDate = { $gte: f, $lte: t }
-  } else if (single) {
-    if (!isValidDate(single)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
-    filter.bookingDate = single
-  }
-
-  if (overallStatus && overallStatus !== 'ALL') filter.overallStatus = up(overallStatus)
-  if (roomStatus && roomStatus !== 'ALL') filter.roomStatus = up(roomStatus)
-  if (materialStatus && materialStatus !== 'ALL') filter.materialStatus = up(materialStatus)
-
-  const term = s(q)
-  if (term) {
-    filter.$or = [
-      { employeeId: new RegExp(term, 'i') },
-      { 'employee.name': new RegExp(term, 'i') },
-      { 'employee.department': new RegExp(term, 'i') },
-      { 'employee.position': new RegExp(term, 'i') },
-      { meetingTitle: new RegExp(term, 'i') },
-      { purpose: new RegExp(term, 'i') },
-      { requirementNote: new RegExp(term, 'i') },
-      { roomName: new RegExp(term, 'i') },
-      { materials: new RegExp(term, 'i') },
-    ]
-  }
-
-  return filter
-}
-
 function parseEmployeeId(req, payload = {}) {
   return s(
     payload.employeeId ||
@@ -391,9 +184,507 @@ async function buildEmployeeSnapshot(employeeId) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * public create
- * ───────────────────────────────────────────── */
+async function findActiveRoomMaster({ roomId, roomCode, roomName }) {
+  const conditions = []
+
+  if (safeObjectId(roomId)) conditions.push({ _id: safeObjectId(roomId) })
+  if (s(roomCode)) conditions.push({ code: up(roomCode) })
+  if (s(roomName)) conditions.push({ name: s(roomName) })
+
+  if (!conditions.length) return null
+
+  const doc = await BookingRoomResource.findOne({
+    isActive: true,
+    $or: conditions,
+  }).lean()
+
+  return doc || null
+}
+
+async function findActiveMaterialMastersByCodes(codes = []) {
+  const cleanCodes = [...new Set(arr(codes).map(up).filter(Boolean))]
+  if (!cleanCodes.length) return []
+
+  return BookingRoomMaterial.find({
+    isActive: true,
+    code: { $in: cleanCodes },
+  }).lean()
+}
+
+function normalizeRawMaterialPayload(v) {
+  const rawItems = arr(v)
+
+  const out = []
+  for (const item of rawItems) {
+    if (typeof item === 'string') {
+      const code = up(item)
+      if (!code) continue
+      out.push({
+        materialId: null,
+        materialCode: code,
+        materialName: '',
+        qty: 1,
+      })
+      continue
+    }
+
+    if (item && typeof item === 'object') {
+      const code = up(item.materialCode || item.code || item.name)
+      const qty = Number(item.qty || 0)
+
+      if (!code) continue
+      if (!Number.isFinite(qty) || qty <= 0) continue
+
+      out.push({
+        materialId: safeObjectId(item.materialId || item._id),
+        materialCode: code,
+        materialName: s(item.materialName || item.name),
+        qty,
+      })
+    }
+  }
+
+  const merged = new Map()
+  for (const item of out) {
+    const key = item.materialCode
+    if (!merged.has(key)) {
+      merged.set(key, { ...item })
+    } else {
+      const old = merged.get(key)
+      old.qty += item.qty
+      if (!old.materialId && item.materialId) old.materialId = item.materialId
+      if (!old.materialName && item.materialName) old.materialName = item.materialName
+    }
+  }
+
+  return [...merged.values()]
+}
+
+async function normalizeRequestPayload(payload) {
+  const roomRequired = !!payload.roomRequired
+  const materialRequired = !!payload.materialRequired
+
+  if (!roomRequired && !materialRequired) {
+    throw createError(400, 'At least one of roomRequired or materialRequired must be true.')
+  }
+
+  let room = {
+    roomId: null,
+    roomCode: '',
+    roomName: '',
+  }
+
+  if (roomRequired) {
+    const roomMaster = await findActiveRoomMaster({
+      roomId: payload.roomId,
+      roomCode: payload.roomCode,
+      roomName: payload.roomName,
+    })
+
+    if (!roomMaster) {
+      throw createError(400, 'Selected room does not exist or is inactive.')
+    }
+
+    room = {
+      roomId: roomMaster._id,
+      roomCode: up(roomMaster.code),
+      roomName: s(roomMaster.name),
+    }
+  }
+
+  let materials = []
+  if (materialRequired) {
+    const rawMaterials = normalizeRawMaterialPayload(payload.materials)
+
+    if (!rawMaterials.length) {
+      throw createError(400, 'At least one material is required when materialRequired is true.')
+    }
+
+    const codes = rawMaterials.map((x) => up(x.materialCode))
+    const masters = await findActiveMaterialMastersByCodes(codes)
+    const masterMap = new Map(masters.map((x) => [up(x.code), x]))
+
+    materials = rawMaterials.map((item) => {
+      const master = masterMap.get(up(item.materialCode))
+      if (!master) {
+        throw createError(400, `Material "${item.materialCode}" does not exist or is inactive.`)
+      }
+
+      const qty = Number(item.qty || 0)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw createError(400, `Material "${item.materialCode}" qty must be greater than 0.`)
+      }
+
+      if (qty > Number(master.totalQty || 0)) {
+        throw createError(
+          400,
+          `Material "${s(master.name) || up(master.code)}" cannot exceed stock ${Number(master.totalQty || 0)}.`
+        )
+      }
+
+      return {
+        materialId: master._id,
+        materialCode: up(master.code),
+        materialName: s(master.name),
+        qty,
+      }
+    })
+
+    if (!materials.length) {
+      throw createError(400, 'At least one material is required when materialRequired is true.')
+    }
+  }
+
+  return {
+    bookingDate: s(payload.bookingDate),
+    timeStart: s(payload.timeStart),
+    timeEnd: s(payload.timeEnd),
+
+    meetingTitle: s(payload.meetingTitle),
+    purpose: s(payload.purpose || ''),
+    participantEstimate: Math.max(1, Number(payload.participantEstimate || 1)),
+    requirementNote: s(payload.requirementNote),
+
+    roomRequired,
+    roomId: room.roomId,
+    roomCode: room.roomCode,
+    roomName: room.roomName,
+    room: room.roomId
+      ? {
+          roomId: room.roomId,
+          roomCode: room.roomCode,
+          roomName: room.roomName,
+        }
+      : null,
+
+    materialRequired,
+    materials,
+  }
+}
+
+async function assertRoomApprovalConflict({ bookingDate, timeStart, timeEnd, roomCode, excludeId = null }) {
+  if (!s(roomCode)) return
+
+  const startMin = toMinutes(timeStart)
+  const endMin = toMinutes(timeEnd)
+
+  const query = {
+    bookingDate,
+    roomRequired: true,
+    roomCode: up(roomCode),
+    roomStatus: 'APPROVED',
+    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
+  }
+
+  if (excludeId) query._id = { $ne: excludeId }
+
+  const rows = await BookingRoom.find(query)
+    .select('timeStart timeEnd roomCode roomName roomStatus overallStatus')
+    .lean()
+
+  const conflicted = rows.some((row) =>
+    overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
+  )
+
+  if (conflicted) {
+    const roomLabel = s(rows[0]?.roomName) || s(roomCode)
+    throw createError(409, `Room "${roomLabel}" is already approved for this time slot.`)
+  }
+}
+
+async function assertMaterialApprovalConflict({ bookingDate, timeStart, timeEnd, materials = [], excludeId = null }) {
+  const wants = arr(materials)
+    .map((x) => ({
+      materialCode: up(x?.materialCode),
+      qty: Number(x?.qty || 0),
+    }))
+    .filter((x) => x.materialCode && x.qty > 0)
+
+  if (!wants.length) return
+
+  const codes = wants.map((x) => x.materialCode)
+  const masters = await findActiveMaterialMastersByCodes(codes)
+  const masterMap = new Map(masters.map((x) => [up(x.code), x]))
+
+  for (const want of wants) {
+    if (!masterMap.has(want.materialCode)) {
+      throw createError(400, `Material "${want.materialCode}" does not exist or is inactive.`)
+    }
+
+    const master = masterMap.get(want.materialCode)
+    const stock = Number(master?.totalQty || 0)
+    if (want.qty > stock) {
+      throw createError(
+        400,
+        `Material "${s(master?.name) || want.materialCode}" cannot exceed stock ${stock}.`
+      )
+    }
+  }
+
+  const startMin = toMinutes(timeStart)
+  const endMin = toMinutes(timeEnd)
+
+  const query = {
+    bookingDate,
+    materialRequired: true,
+    materialStatus: 'APPROVED',
+    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
+    'materials.materialCode': { $in: codes },
+  }
+
+  if (excludeId) query._id = { $ne: excludeId }
+
+  const rows = await BookingRoom.find(query)
+    .select('timeStart timeEnd materials materialStatus overallStatus')
+    .lean()
+
+  const usedMap = {}
+
+  for (const row of rows) {
+    const timeConflict = overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
+    if (!timeConflict) continue
+
+    for (const item of arr(row.materials)) {
+      const code = up(item?.materialCode)
+      const qty = Number(item?.qty || 0)
+      if (!code || qty <= 0) continue
+      usedMap[code] = (usedMap[code] || 0) + qty
+    }
+  }
+
+  for (const want of wants) {
+    const master = masterMap.get(want.materialCode)
+    const totalQty = Number(master?.totalQty || 0)
+    const usedQty = Number(usedMap[want.materialCode] || 0)
+    const availableQty = Math.max(0, totalQty - usedQty)
+
+    if (want.qty > availableQty) {
+      throw createError(
+        409,
+        `Material "${s(master?.name) || want.materialCode}" only has ${availableQty} available for this time slot.`
+      )
+    }
+  }
+}
+
+function buildAdminFilter({ date, dateFrom, dateTo, overallStatus, roomStatus, materialStatus, q, roomCode, materialCode }) {
+  const filter = {}
+
+  const single = s(date)
+  const from = s(dateFrom)
+  const to = s(dateTo)
+
+  if (from || to) {
+    if (from && !isValidDate(from)) throw createError(400, 'Invalid dateFrom (YYYY-MM-DD).')
+    if (to && !isValidDate(to)) throw createError(400, 'Invalid dateTo (YYYY-MM-DD).')
+
+    const f = from || to
+    const t = to || from
+    if (f > t) throw createError(400, 'dateFrom must be <= dateTo.')
+
+    filter.bookingDate = { $gte: f, $lte: t }
+  } else if (single) {
+    if (!isValidDate(single)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
+    filter.bookingDate = single
+  }
+
+  if (overallStatus && overallStatus !== 'ALL') filter.overallStatus = up(overallStatus)
+  if (roomStatus && roomStatus !== 'ALL') filter.roomStatus = up(roomStatus)
+  if (materialStatus && materialStatus !== 'ALL') filter.materialStatus = up(materialStatus)
+  if (s(roomCode)) filter.roomCode = up(roomCode)
+  if (s(materialCode)) filter['materials.materialCode'] = up(materialCode)
+
+  const term = s(q)
+  if (term) {
+    filter.$or = [
+      { employeeId: new RegExp(term, 'i') },
+      { 'employee.name': new RegExp(term, 'i') },
+      { 'employee.department': new RegExp(term, 'i') },
+      { 'employee.position': new RegExp(term, 'i') },
+      { meetingTitle: new RegExp(term, 'i') },
+      { purpose: new RegExp(term, 'i') },
+      { requirementNote: new RegExp(term, 'i') },
+      { roomName: new RegExp(term, 'i') },
+      { roomCode: new RegExp(term, 'i') },
+      { 'materials.materialName': new RegExp(term, 'i') },
+      { 'materials.materialCode': new RegExp(term, 'i') },
+    ]
+  }
+
+  return filter
+}
+
+function shapeCreated(doc) {
+  return {
+    bookingId: String(doc._id),
+    _id: String(doc._id),
+    employeeId: doc.employeeId,
+    employee: doc.employee || null,
+    bookingDate: doc.bookingDate,
+    timeStart: doc.timeStart,
+    timeEnd: doc.timeEnd,
+    meetingTitle: doc.meetingTitle || '',
+    purpose: doc.purpose || '',
+    participantEstimate: doc.participantEstimate || 1,
+    requirementNote: doc.requirementNote || '',
+    roomRequired: !!doc.roomRequired,
+    roomId: doc.roomId || null,
+    roomCode: doc.roomCode || '',
+    roomName: doc.roomName || '',
+    room: doc.room || null,
+    materialRequired: !!doc.materialRequired,
+    materials: doc.materials || [],
+    roomStatus: doc.roomStatus,
+    materialStatus: doc.materialStatus,
+    overallStatus: doc.overallStatus,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+  }
+}
+
+function shapeUpdated(doc) {
+  return {
+    bookingId: String(doc._id),
+    patch: {
+      bookingDate: doc.bookingDate,
+      timeStart: doc.timeStart,
+      timeEnd: doc.timeEnd,
+      meetingTitle: doc.meetingTitle || '',
+      purpose: doc.purpose || '',
+      participantEstimate: doc.participantEstimate || 1,
+      requirementNote: doc.requirementNote || '',
+      roomRequired: !!doc.roomRequired,
+      roomId: doc.roomId || null,
+      roomCode: doc.roomCode || '',
+      roomName: doc.roomName || '',
+      room: doc.room || null,
+      materialRequired: !!doc.materialRequired,
+      materials: doc.materials || [],
+      roomStatus: doc.roomStatus,
+      materialStatus: doc.materialStatus,
+      overallStatus: doc.overallStatus,
+      updatedAt: doc.updatedAt,
+    },
+  }
+}
+
+function shapeStatus(doc) {
+  return {
+    bookingId: String(doc._id),
+    roomStatus: doc.roomStatus,
+    materialStatus: doc.materialStatus,
+    overallStatus: doc.overallStatus,
+  }
+}
+
+async function listActiveRooms(_req, res, next) {
+  try {
+    const rows = await BookingRoomResource.find({ isActive: true })
+      .sort({ name: 1 })
+      .lean()
+
+    return res.json(rows || [])
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function listActiveMaterials(_req, res, next) {
+  try {
+    const rows = await BookingRoomMaterial.find({ isActive: true })
+      .sort({ name: 1 })
+      .lean()
+
+    return res.json(rows || [])
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function getAvailability(req, res, next) {
+  try {
+    const { date, timeStart, timeEnd } = req.query || {}
+
+    if (!isValidDate(date)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
+    if (!isValidTime(timeStart) || !isValidTime(timeEnd)) {
+      throw createError(400, 'timeStart and timeEnd are required in HH:MM format.')
+    }
+    if (toMinutes(timeEnd) <= toMinutes(timeStart)) {
+      throw createError(400, 'timeEnd must be after timeStart.')
+    }
+
+    const startMin = toMinutes(timeStart)
+    const endMin = toMinutes(timeEnd)
+
+    const [rooms, materials, bookings] = await Promise.all([
+      BookingRoomResource.find({ isActive: true }).sort({ name: 1 }).lean(),
+      BookingRoomMaterial.find({ isActive: true }).sort({ name: 1 }).lean(),
+      BookingRoom.find({
+        bookingDate: s(date),
+        overallStatus: { $nin: ['CANCELLED', 'REJECTED'] },
+        $or: [
+          { roomStatus: 'APPROVED' },
+          { materialStatus: 'APPROVED' },
+        ],
+      })
+        .select('timeStart timeEnd roomRequired roomCode roomName roomStatus materialRequired materials materialStatus')
+        .lean(),
+    ])
+
+    const overlapRows = bookings.filter((row) =>
+      overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
+    )
+
+    const busyRoomCodes = new Set(
+      overlapRows
+        .filter((x) => x.roomRequired && up(x.roomStatus) === 'APPROVED' && s(x.roomCode))
+        .map((x) => up(x.roomCode))
+    )
+
+    const usedMaterialMap = {}
+    for (const row of overlapRows) {
+      if (!(row.materialRequired && up(row.materialStatus) === 'APPROVED')) continue
+      for (const item of arr(row.materials)) {
+        const code = up(item?.materialCode)
+        const qty = Number(item?.qty || 0)
+        if (!code || qty <= 0) continue
+        usedMaterialMap[code] = (usedMaterialMap[code] || 0) + qty
+      }
+    }
+
+    return res.json({
+      date: s(date),
+      timeStart: s(timeStart),
+      timeEnd: s(timeEnd),
+      rooms: rooms.map((r) => ({
+        _id: r._id,
+        code: s(r.code),
+        name: s(r.name),
+        isAvailable: !busyRoomCodes.has(up(r.code)),
+        status: busyRoomCodes.has(up(r.code)) ? 'BOOKED' : 'AVAILABLE',
+      })),
+      materials: materials.map((m) => {
+        const usedQty = Number(usedMaterialMap[up(m.code)] || 0)
+        const totalQty = Number(m.totalQty || 0)
+        const availableQty = Math.max(0, totalQty - usedQty)
+
+        return {
+          _id: m._id,
+          code: s(m.code),
+          name: s(m.name),
+          totalQty,
+          usedQty,
+          availableQty,
+          isAvailable: availableQty > 0,
+          status: availableQty > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
+        }
+      }),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function createBooking(req, res, next) {
   try {
     const payload = req.body || {}
@@ -401,18 +692,15 @@ async function createBooking(req, res, next) {
     if (!employeeId) throw createError(400, 'employeeId is required.')
 
     validateBasePayload(payload)
-    const normalized = normalizeRequestPayload(payload)
-
+    const normalized = await normalizeRequestPayload(payload)
     const employeeSnapshot = await buildEmployeeSnapshot(employeeId)
 
-    // At request creation, do not block by pending items.
-    // But if some resource is ALREADY APPROVED, new request cannot use that same slot.
     if (normalized.roomRequired) {
       await assertRoomApprovalConflict({
         bookingDate: normalized.bookingDate,
         timeStart: normalized.timeStart,
         timeEnd: normalized.timeEnd,
-        roomName: normalized.roomName,
+        roomCode: normalized.roomCode,
       })
     }
 
@@ -439,7 +727,10 @@ async function createBooking(req, res, next) {
       requirementNote: normalized.requirementNote,
 
       roomRequired: normalized.roomRequired,
+      roomId: normalized.roomId,
+      roomCode: normalized.roomCode,
       roomName: normalized.roomName,
+      room: normalized.room,
 
       materialRequired: normalized.materialRequired,
       materials: normalized.materials,
@@ -463,12 +754,9 @@ async function createBooking(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * public schedule
- * ───────────────────────────────────────────── */
 async function listSchedulePublic(req, res, next) {
   try {
-    const { date, roomName, material, showPending } = req.query || {}
+    const { date, roomCode, roomName, material, showPending } = req.query || {}
     const filter = {}
 
     if (date) {
@@ -476,12 +764,11 @@ async function listSchedulePublic(req, res, next) {
       filter.bookingDate = s(date)
     }
 
-    if (s(roomName)) filter.roomName = normalizeRoomName(roomName)
+    if (s(roomCode)) filter.roomCode = up(roomCode)
+    else if (s(roomName)) filter.roomName = s(roomName)
 
-    if (s(material)) filter.materials = up(material)
+    if (s(material)) filter['materials.materialCode'] = up(material)
 
-    // Public schedule should mainly show approved/partially-approved items.
-    // Optionally allow pending for internal testing with showPending=true.
     if (String(showPending || '').toLowerCase() === 'true') {
       filter.overallStatus = { $ne: 'CANCELLED' }
     } else {
@@ -502,9 +789,6 @@ async function listSchedulePublic(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * requester my list
- * ───────────────────────────────────────────── */
 async function listMyBookings(req, res, next) {
   try {
     const employeeId = parseEmployeeId(req)
@@ -520,9 +804,6 @@ async function listMyBookings(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * requester update before any approval
- * ───────────────────────────────────────────── */
 async function updateBooking(req, res, next) {
   try {
     const { id } = req.params
@@ -548,15 +829,14 @@ async function updateBooking(req, res, next) {
     }
 
     validateBasePayload(payload)
-    const normalized = normalizeRequestPayload(payload)
+    const normalized = await normalizeRequestPayload(payload)
 
-    // approved schedule/resources must still be protected
     if (normalized.roomRequired) {
       await assertRoomApprovalConflict({
         bookingDate: normalized.bookingDate,
         timeStart: normalized.timeStart,
         timeEnd: normalized.timeEnd,
-        roomName: normalized.roomName,
+        roomCode: normalized.roomCode,
         excludeId: doc._id,
       })
     }
@@ -580,7 +860,11 @@ async function updateBooking(req, res, next) {
     doc.requirementNote = normalized.requirementNote
 
     doc.roomRequired = normalized.roomRequired
+    doc.roomId = normalized.roomId
+    doc.roomCode = normalized.roomCode
     doc.roomName = normalized.roomName
+    doc.room = normalized.room
+
     doc.materialRequired = normalized.materialRequired
     doc.materials = normalized.materials
 
@@ -588,13 +872,8 @@ async function updateBooking(req, res, next) {
     doc.materialStatus = normalized.materialRequired ? 'PENDING' : 'NOT_REQUIRED'
     doc.overallStatus = deriveOverallStatus(doc)
 
-    doc.roomApproval = normalized.roomRequired
-      ? { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
-      : { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
-
-    doc.materialApproval = normalized.materialRequired
-      ? { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
-      : { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
+    doc.roomApproval = { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
+    doc.materialApproval = { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
 
     doc.updatedAt = new Date()
     await doc.save()
@@ -608,9 +887,6 @@ async function updateBooking(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * requester cancel before any approval
- * ───────────────────────────────────────────── */
 async function cancelBooking(req, res, next) {
   try {
     const { id } = req.params
@@ -659,9 +935,6 @@ async function cancelBooking(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * room admin list
- * ───────────────────────────────────────────── */
 async function listRoomInbox(req, res, next) {
   try {
     if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
@@ -688,9 +961,6 @@ async function listRoomInbox(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * material admin list
- * ───────────────────────────────────────────── */
 async function listMaterialInbox(req, res, next) {
   try {
     if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
@@ -717,9 +987,6 @@ async function listMaterialInbox(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * room decision
- * ───────────────────────────────────────────── */
 async function roomDecision(req, res, next) {
   try {
     if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
@@ -746,7 +1013,7 @@ async function roomDecision(req, res, next) {
         bookingDate: doc.bookingDate,
         timeStart: doc.timeStart,
         timeEnd: doc.timeEnd,
-        roomName: doc.roomName,
+        roomCode: doc.roomCode,
         excludeId: doc._id,
       })
     }
@@ -778,9 +1045,6 @@ async function roomDecision(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * material decision
- * ───────────────────────────────────────────── */
 async function materialDecision(req, res, next) {
   try {
     if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
@@ -839,9 +1103,6 @@ async function materialDecision(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * admin list
- * ───────────────────────────────────────────── */
 async function listAdmin(req, res, next) {
   try {
     if (!canAdminView(req)) throw createError(403, 'Forbidden')
@@ -858,9 +1119,6 @@ async function listAdmin(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * admin export
- * ───────────────────────────────────────────── */
 async function exportAdminExcel(req, res, next) {
   try {
     if (!canAdminView(req)) throw createError(403, 'Forbidden')
@@ -888,6 +1146,7 @@ async function exportAdminExcel(req, res, next) {
       RequirementNote: s(b.requirementNote),
 
       RoomRequired: b.roomRequired ? 'YES' : 'NO',
+      RoomCode: s(b.roomCode),
       RoomName: s(b.roomName),
       RoomStatus: s(b.roomStatus),
       RoomDecisionBy: s(b.roomApproval?.byName) || s(b.roomApproval?.byLoginId),
@@ -896,7 +1155,7 @@ async function exportAdminExcel(req, res, next) {
       RoomDecidedAt: b.roomApproval?.decidedAt ? new Date(b.roomApproval.decidedAt).toISOString() : '',
 
       MaterialRequired: b.materialRequired ? 'YES' : 'NO',
-      Materials: arr(b.materials).join(', '),
+      Materials: materialItemsToText(b.materials),
       MaterialStatus: s(b.materialStatus),
       MaterialDecisionBy: s(b.materialApproval?.byName) || s(b.materialApproval?.byLoginId),
       MaterialDecision: s(b.materialApproval?.decision),
@@ -913,41 +1172,6 @@ async function exportAdminExcel(req, res, next) {
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(data)
 
-    ws['!cols'] = [
-      { wch: 5 },  // No
-      { wch: 12 }, // BookingDate
-      { wch: 10 }, // TimeStart
-      { wch: 10 }, // TimeEnd
-      { wch: 14 }, // EmployeeId
-      { wch: 24 }, // EmployeeName
-      { wch: 18 }, // Department
-      { wch: 18 }, // Position
-      { wch: 16 }, // ContactNumber
-      { wch: 24 }, // MeetingTitle
-      { wch: 30 }, // Purpose
-      { wch: 12 }, // ParticipantEstimate
-      { wch: 30 }, // RequirementNote
-      { wch: 12 }, // RoomRequired
-      { wch: 20 }, // RoomName
-      { wch: 14 }, // RoomStatus
-      { wch: 20 }, // RoomDecisionBy
-      { wch: 14 }, // RoomDecision
-      { wch: 28 }, // RoomDecisionNote
-      { wch: 24 }, // RoomDecidedAt
-      { wch: 14 }, // MaterialRequired
-      { wch: 22 }, // Materials
-      { wch: 16 }, // MaterialStatus
-      { wch: 20 }, // MaterialDecisionBy
-      { wch: 16 }, // MaterialDecision
-      { wch: 28 }, // MaterialDecisionNote
-      { wch: 24 }, // MaterialDecidedAt
-      { wch: 18 }, // OverallStatus
-      { wch: 14 }, // SubmittedVia
-      { wch: 24 }, // CancelReason
-      { wch: 24 }, // CreatedAt
-      { wch: 24 }, // UpdatedAt
-    ]
-
     XLSX.utils.book_append_sheet(wb, ws, 'BookingRoom')
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
 
@@ -959,9 +1183,6 @@ async function exportAdminExcel(req, res, next) {
   }
 }
 
-/* ─────────────────────────────────────────────
- * admin helper lists
- * ───────────────────────────────────────────── */
 async function listRoomAdmins(_req, res, next) {
   try {
     if (!User) return res.json([])
@@ -998,6 +1219,244 @@ async function listMaterialAdmins(_req, res, next) {
   }
 }
 
+async function listRoomMasters(req, res, next) {
+  try {
+    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
+
+    const { active = 'ALL', q = '' } = req.query || {}
+    const filter = {}
+
+    if (up(active) === 'ACTIVE') filter.isActive = true
+    else if (up(active) === 'INACTIVE') filter.isActive = false
+
+    const term = s(q)
+    if (term) {
+      filter.$or = [
+        { code: new RegExp(term, 'i') },
+        { name: new RegExp(term, 'i') },
+      ]
+    }
+
+    const rows = await BookingRoomResource.find(filter)
+      .sort({ isActive: -1, name: 1 })
+      .lean()
+
+    return res.json(rows || [])
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function createRoomMaster(req, res, next) {
+  try {
+    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
+
+    const payload = req.body || {}
+
+    const code = up(payload.code).replace(/\s+/g, '_')
+    const name = s(payload.name)
+    const isActive = payload.isActive !== false
+
+    if (!code) throw createError(400, 'code is required.')
+    if (!name) throw createError(400, 'name is required.')
+
+    const dup = await BookingRoomResource.findOne({
+      $or: [{ code }, { name }],
+    }).lean()
+
+    if (dup) {
+      throw createError(409, 'Room code or room name already exists.')
+    }
+
+    const doc = await BookingRoomResource.create({
+      code,
+      name,
+      isActive,
+    })
+
+    return res.status(201).json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function updateRoomMaster(req, res, next) {
+  try {
+    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
+
+    const { id } = req.params
+    const payload = req.body || {}
+
+    const doc = await BookingRoomResource.findById(id)
+    if (!doc) throw createError(404, 'Room not found.')
+
+    const nextCode = payload.code != null ? up(payload.code).replace(/\s+/g, '_') : up(doc.code)
+    const nextName = payload.name != null ? s(payload.name) : s(doc.name)
+    const nextIsActive = payload.isActive != null ? !!payload.isActive : !!doc.isActive
+
+    if (!nextCode) throw createError(400, 'code is required.')
+    if (!nextName) throw createError(400, 'name is required.')
+
+    const dup = await BookingRoomResource.findOne({
+      _id: { $ne: doc._id },
+      $or: [{ code: nextCode }, { name: nextName }],
+    }).lean()
+
+    if (dup) {
+      throw createError(409, 'Room code or room name already exists.')
+    }
+
+    doc.code = nextCode
+    doc.name = nextName
+    doc.isActive = nextIsActive
+
+    await doc.save()
+    return res.json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function deleteRoomMaster(req, res, next) {
+  try {
+    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
+
+    const { id } = req.params
+
+    const doc = await BookingRoomResource.findById(id)
+    if (!doc) throw createError(404, 'Room not found.')
+
+    doc.isActive = false
+    await doc.save()
+
+    return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function listMaterialMasters(req, res, next) {
+  try {
+    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
+
+    const { active = 'ALL', q = '' } = req.query || {}
+    const filter = {}
+
+    if (up(active) === 'ACTIVE') filter.isActive = true
+    else if (up(active) === 'INACTIVE') filter.isActive = false
+
+    const term = s(q)
+    if (term) {
+      filter.$or = [
+        { code: new RegExp(term, 'i') },
+        { name: new RegExp(term, 'i') },
+      ]
+    }
+
+    const rows = await BookingRoomMaterial.find(filter)
+      .sort({ isActive: -1, name: 1 })
+      .lean()
+
+    return res.json(rows || [])
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function createMaterialMaster(req, res, next) {
+  try {
+    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
+
+    const payload = req.body || {}
+
+    const code = up(payload.code).replace(/\s+/g, '_')
+    const name = s(payload.name)
+    const totalQty = Math.max(0, Number(payload.totalQty || 0))
+    const isActive = payload.isActive !== false
+
+    if (!code) throw createError(400, 'code is required.')
+    if (!name) throw createError(400, 'name is required.')
+    if (!Number.isFinite(totalQty) || totalQty < 0) throw createError(400, 'totalQty must be >= 0.')
+
+    const dup = await BookingRoomMaterial.findOne({
+      $or: [{ code }, { name }],
+    }).lean()
+
+    if (dup) {
+      throw createError(409, 'Material code or material name already exists.')
+    }
+
+    const doc = await BookingRoomMaterial.create({
+      code,
+      name,
+      totalQty,
+      isActive,
+    })
+
+    return res.status(201).json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function updateMaterialMaster(req, res, next) {
+  try {
+    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
+
+    const { id } = req.params
+    const payload = req.body || {}
+
+    const doc = await BookingRoomMaterial.findById(id)
+    if (!doc) throw createError(404, 'Material not found.')
+
+    const nextCode = payload.code != null ? up(payload.code).replace(/\s+/g, '_') : up(doc.code)
+    const nextName = payload.name != null ? s(payload.name) : s(doc.name)
+    const nextTotalQty = payload.totalQty != null ? Math.max(0, Number(payload.totalQty || 0)) : Number(doc.totalQty || 0)
+    const nextIsActive = payload.isActive != null ? !!payload.isActive : !!doc.isActive
+
+    if (!nextCode) throw createError(400, 'code is required.')
+    if (!nextName) throw createError(400, 'name is required.')
+    if (!Number.isFinite(nextTotalQty) || nextTotalQty < 0) throw createError(400, 'totalQty must be >= 0.')
+
+    const dup = await BookingRoomMaterial.findOne({
+      _id: { $ne: doc._id },
+      $or: [{ code: nextCode }, { name: nextName }],
+    }).lean()
+
+    if (dup) {
+      throw createError(409, 'Material code or material name already exists.')
+    }
+
+    doc.code = nextCode
+    doc.name = nextName
+    doc.totalQty = nextTotalQty
+    doc.isActive = nextIsActive
+
+    await doc.save()
+    return res.json(doc)
+  } catch (err) {
+    next(err)
+  }
+}
+
+async function deleteMaterialMaster(req, res, next) {
+  try {
+    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
+
+    const { id } = req.params
+
+    const doc = await BookingRoomMaterial.findById(id)
+    if (!doc) throw createError(404, 'Material not found.')
+
+    doc.isActive = false
+    await doc.save()
+
+    return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
+  } catch (err) {
+    next(err)
+  }
+}
+
 module.exports = {
   createBooking,
   listSchedulePublic,
@@ -1015,4 +1474,18 @@ module.exports = {
 
   listRoomAdmins,
   listMaterialAdmins,
+
+  listActiveRooms,
+  listActiveMaterials,
+  getAvailability,
+
+  listRoomMasters,
+  createRoomMaster,
+  updateRoomMaster,
+  deleteRoomMaster,
+
+  listMaterialMasters,
+  createMaterialMaster,
+  updateMaterialMaster,
+  deleteMaterialMaster,
 }

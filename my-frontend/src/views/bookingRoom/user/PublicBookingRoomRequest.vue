@@ -1,17 +1,11 @@
-<!-- src/views/bookingRoom/user/PublicBookingRoomRequest.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import dayjs from 'dayjs'
 import { useRouter } from 'vue-router'
+import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 
-import {
-  BOOKING_ROOM_NAMES,
-  BOOKING_ROOM_MATERIALS,
-  searchBookingRoomEmployees,
-  createBookingRoom,
-  getBookingRoomSchedule,
-} from '@/utils/bookingRoom.api'
+import { searchBookingRoomEmployees } from '@/utils/bookingRoom.api'
 
 import BookingRoomRequesterSection from './sections/BookingRoomRequesterSection.vue'
 import BookingRoomDetailSection from './sections/BookingRoomDetailSection.vue'
@@ -24,10 +18,15 @@ const { showToast } = useToast()
 
 /* ───────────────── STATE ───────────────── */
 const loadingEmployees = ref(false)
+const loadingMasters = ref(false)
 const submitting = ref(false)
 
 const employees = ref([])
 const selectedEmployee = ref(null)
+
+const activeRooms = ref([])
+const activeMaterials = ref([])
+const scheduleRows = ref([])
 
 const form = ref({
   employeeId: '',
@@ -50,6 +49,8 @@ const form = ref({
   requirementNote: '',
 
   roomRequired: true,
+  roomId: '',
+  roomCode: '',
   roomName: '',
 
   materialRequired: false,
@@ -76,8 +77,27 @@ function toMinutes(hhmm) {
   return (h * 60) + m
 }
 
-function materialText(arr = []) {
-  return Array.isArray(arr) && arr.length ? arr.join(', ') : '—'
+function syncLegacyTimeParts() {
+  const start = s(form.value.timeStart)
+  const end = s(form.value.timeEnd)
+
+  if (start.includes(':')) {
+    const [h, m] = start.split(':')
+    form.value.timeStartHour = h || ''
+    form.value.timeStartMinute = m || '00'
+  } else {
+    form.value.timeStartHour = ''
+    form.value.timeStartMinute = '00'
+  }
+
+  if (end.includes(':')) {
+    const [h, m] = end.split(':')
+    form.value.timeEndHour = h || ''
+    form.value.timeEndMinute = m || '00'
+  } else {
+    form.value.timeEndHour = ''
+    form.value.timeEndMinute = '00'
+  }
 }
 
 function resetForm({ keepEmployee = true } = {}) {
@@ -104,12 +124,15 @@ function resetForm({ keepEmployee = true } = {}) {
     requirementNote: '',
 
     roomRequired: true,
+    roomId: '',
+    roomCode: '',
     roomName: '',
 
     materialRequired: false,
     materials: [],
   }
 
+  scheduleRows.value = []
   errors.value = []
 }
 
@@ -117,6 +140,7 @@ function resetForm({ keepEmployee = true } = {}) {
 async function loadEmployees(q = '') {
   try {
     loadingEmployees.value = true
+
     const rows = await searchBookingRoomEmployees({ q, activeOnly: true })
 
     employees.value = (Array.isArray(rows) ? rows : []).map((x) => ({
@@ -163,26 +187,87 @@ function selectEmployee(emp) {
   }
 }
 
-/* ───────────────── FORM CHIPS ───────────────── */
-function toggleMaterial(material) {
-  const key = up(material)
-  const arr = Array.isArray(form.value.materials) ? [...form.value.materials] : []
-  const idx = arr.findIndex((x) => up(x) === key)
+/* ───────────────── PUBLIC MASTER DATA ───────────────── */
+async function loadMasters() {
+  try {
+    loadingMasters.value = true
 
-  if (idx >= 0) arr.splice(idx, 1)
-  else arr.push(key)
+    const [roomRes, materialRes] = await Promise.all([
+      api.get('/public/booking-room/rooms/active'),
+      api.get('/public/booking-room/materials/active'),
+    ])
 
-  form.value.materials = ['PROJECTOR', 'TV'].filter((x) => arr.includes(x))
+    activeRooms.value = (Array.isArray(roomRes?.data) ? roomRes.data : []).map((x) => ({
+      _id: x?._id || '',
+      code: s(x?.code),
+      name: s(x?.name),
+      isActive: x?.isActive !== false,
+    }))
+
+    activeMaterials.value = (Array.isArray(materialRes?.data) ? materialRes.data : []).map((x) => ({
+      _id: x?._id || '',
+      code: up(x?.code),
+      name: s(x?.name),
+      totalQty: Math.max(0, Number(x?.totalQty || 0)),
+      isActive: x?.isActive !== false,
+    }))
+  } catch (e) {
+    activeRooms.value = []
+    activeMaterials.value = []
+
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Failed to load room/material list.',
+    })
+  } finally {
+    loadingMasters.value = false
+  }
 }
 
-function isMaterialOn(material) {
-  return (form.value.materials || []).some((x) => up(x) === up(material))
+/* ───────────────── SCHEDULE / AVAILABILITY ───────────────── */
+async function loadSchedule() {
+  try {
+    const date = s(form.value.bookingDate)
+    if (!date) {
+      scheduleRows.value = []
+      return
+    }
+
+    const res = await api.get('/public/booking-room/schedule', {
+      params: { date },
+    })
+
+    scheduleRows.value = Array.isArray(res?.data) ? res.data : []
+  } catch (e) {
+    scheduleRows.value = []
+  }
 }
 
 /* ───────────────── COMPUTED ───────────────── */
 const timeRangeLabel = computed(() => {
   if (!form.value.timeStart || !form.value.timeEnd) return '—'
   return `${form.value.timeStart} - ${form.value.timeEnd}`
+})
+
+const selectedMaterialsLabel = computed(() => {
+  const rows = Array.isArray(form.value.materials) ? form.value.materials : []
+  if (!rows.length) return '—'
+
+  return rows
+    .map((x) => {
+      const name = s(x?.materialName) || s(x?.materialCode)
+      const qty = Math.max(0, Number(x?.qty || 0))
+      return name ? `${name}${qty > 0 ? ` x${qty}` : ''}` : ''
+    })
+    .filter(Boolean)
+    .join(', ')
+})
+
+const requestTypeLabel = computed(() => {
+  if (form.value.roomRequired && form.value.materialRequired) return 'Room + Material'
+  if (form.value.roomRequired) return 'Room Only'
+  if (form.value.materialRequired) return 'Material Only'
+  return '—'
 })
 
 /* ───────────────── VALIDATION ───────────────── */
@@ -203,7 +288,7 @@ function validateForm() {
     e.push('Please choose at least room or material.')
   }
 
-  if (f.roomRequired && !s(f.roomName)) {
+  if (f.roomRequired && !s(f.roomId) && !s(f.roomCode) && !s(f.roomName)) {
     e.push('Please select a meeting room.')
   }
 
@@ -212,12 +297,19 @@ function validateForm() {
   }
 
   if (!compactText(f.meetingTitle)) e.push('Meeting title is required.')
+
+  if (Number(f.participantEstimate || 0) <= 0) {
+    e.push('Participant estimate must be greater than 0.')
+  }
+
   errors.value = e
   return e
 }
 
 /* ───────────────── SUBMIT ───────────────── */
 async function submit() {
+  syncLegacyTimeParts()
+
   const e = validateForm()
   if (e.length) {
     showToast({
@@ -237,15 +329,27 @@ async function submit() {
       timeStart: s(form.value.timeStart),
       timeEnd: s(form.value.timeEnd),
       meetingTitle: compactText(form.value.meetingTitle),
+      purpose: compactText(form.value.purpose),
       participantEstimate: Number(form.value.participantEstimate || 1),
       requirementNote: compactText(form.value.requirementNote),
+
       roomRequired: !!form.value.roomRequired,
+      roomId: form.value.roomRequired ? (form.value.roomId || null) : null,
+      roomCode: form.value.roomRequired ? s(form.value.roomCode) : '',
       roomName: form.value.roomRequired ? s(form.value.roomName) : '',
+
       materialRequired: !!form.value.materialRequired,
-      materials: form.value.materialRequired ? form.value.materials : [],
+      materials: form.value.materialRequired
+        ? (Array.isArray(form.value.materials) ? form.value.materials : []).map((x) => ({
+            materialId: x?.materialId || null,
+            materialCode: s(x?.materialCode),
+            materialName: s(x?.materialName),
+            qty: Math.max(1, Number(x?.qty || 1)),
+          }))
+        : [],
     }
 
-    await createBookingRoom(payload)
+    await api.post('/public/booking-room', payload)
 
     showToast({
       type: 'success',
@@ -271,13 +375,15 @@ async function submit() {
 
 /* ───────────────── INIT ───────────────── */
 onMounted(async () => {
-  await loadEmployees()
+  await Promise.all([loadEmployees(), loadMasters()])
 
   const savedId = localStorage.getItem('bookingRoomEmployeeId') || ''
   if (savedId) {
     const found = employees.value.find((x) => s(x.employeeId) === s(savedId))
     if (found) selectEmployee(found)
   }
+
+  await loadSchedule()
 })
 </script>
 
@@ -306,7 +412,7 @@ onMounted(async () => {
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"
-                :disabled="submitting"
+                :disabled="submitting || loadingMasters"
                 @click="submit"
               >
                 <i v-if="submitting" class="fa-solid fa-spinner animate-spin text-[11px]" />
@@ -343,6 +449,8 @@ onMounted(async () => {
             <div class="xl:col-span-8">
               <BookingRoomDetailSection
                 :form="form"
+                :schedule-rows="scheduleRows"
+                :time-range-label="timeRangeLabel"
                 @load-schedule="loadSchedule"
               />
             </div>
@@ -352,11 +460,8 @@ onMounted(async () => {
           <div>
             <BookingRoomRequestTypeSection
               :form="form"
-              :BOOKING_ROOM_NAMES="BOOKING_ROOM_NAMES"
-              :BOOKING_ROOM_MATERIALS="BOOKING_ROOM_MATERIALS"
-              :is-material-on="isMaterialOn"
-              :material-text="materialText"
-              @toggle-material="toggleMaterial"
+              :BOOKING_ROOM_NAMES="activeRooms"
+              :BOOKING_ROOM_MATERIALS="activeMaterials"
             />
           </div>
 
@@ -380,12 +485,45 @@ onMounted(async () => {
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"
-                :disabled="submitting"
+                :disabled="submitting || loadingMasters"
                 @click="submit"
               >
                 <i v-if="submitting" class="fa-solid fa-spinner animate-spin text-[11px]" />
                 Submit Request
               </button>
+            </div>
+          </div>
+
+          <!-- Optional compact review -->
+          <div
+            class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px]
+                   dark:border-slate-800 dark:bg-slate-900/60"
+          >
+            <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <div>
+                <span class="font-extrabold text-slate-700 dark:text-slate-200">Type:</span>
+                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ requestTypeLabel }}</span>
+              </div>
+
+              <div>
+                <span class="font-extrabold text-slate-700 dark:text-slate-200">Date:</span>
+                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ form.bookingDate || '—' }}</span>
+              </div>
+
+              <div>
+                <span class="font-extrabold text-slate-700 dark:text-slate-200">Time:</span>
+                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ timeRangeLabel }}</span>
+              </div>
+
+              <div>
+                <span class="font-extrabold text-slate-700 dark:text-slate-200">Room:</span>
+                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ form.roomName || '—' }}</span>
+              </div>
+
+              <div class="md:col-span-2 xl:col-span-4">
+                <span class="font-extrabold text-slate-700 dark:text-slate-200">Materials:</span>
+                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ selectedMaterialsLabel }}</span>
+              </div>
             </div>
           </div>
         </div>

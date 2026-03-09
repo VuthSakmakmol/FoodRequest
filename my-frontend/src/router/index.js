@@ -19,6 +19,9 @@ const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
 const GMLeaveExpat = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
 const COOLeaveExpat = () => import('@/layouts/LeaveExpat/COOLeaveExpat.vue')
 
+// Booking Room layouts
+const AdminRoomLayout = () => import('@/layouts/BookingRoom/AdminRoomLayout.vue')
+const AdminMaterialLayout = () => import('@/layouts/BookingRoom/AdminMaterialLayout.vue')
 
 /* ─────────────────────────────────────────────
  * Views
@@ -33,8 +36,6 @@ const EmployeeFoodCalendar = () => import('@/views/employee/foodBooking/Employee
 const EmployeeCarBooking = () => import('@/views/employee/carBooking/EmployeeCarBooking.vue')
 const EmployeeCarHistory = () => import('@/views/employee/carBooking/EmployeeCarHistory.vue')
 const CarBookingSchedule = () => import('@/views/employee/carBooking/EmployeeCarCalendar.vue')
-
-
 
 // Admin (Food)
 const AdminLogin = () => import('@/views/admin/AdminLogin.vue')
@@ -71,11 +72,15 @@ const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeave
 const CentralData = () => import('@/views/expat/admin/data/CentralData.vue')
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
 
-// Booking Room (Public requester)
+// Booking Room
 const PublicBookingRoomRequest = () => import('@/views/bookingRoom/user/PublicBookingRoomRequest.vue')
 const PublicBookingRoomHistory = () => import('@/views/bookingRoom/user/PublicBookingRoomHistory.vue')
+const AdminBookingRoomRooms = () => import('@/views/bookingRoom/admin/AdminBookingRoomRooms.vue')
+const AdminBookingRoomMaterials = () => import('@/views/bookingRoom/admin/AdminBookingRoomMaterials.vue')
 
-// Helper for direct
+/* ─────────────────────────────────────────────
+ * Helper for direct
+ * ───────────────────────────────────────────── */
 function startLeaveRoute(path, name, targetName) {
   return {
     path,
@@ -103,7 +108,6 @@ function normalizeRoles(user) {
 }
 
 function pickPrimaryRole(roles = []) {
-  // Highest priority wins
   const PRIORITY = [
     // Leave portal
     'LEAVE_ADMIN',
@@ -111,6 +115,10 @@ function pickPrimaryRole(roles = []) {
     'LEAVE_GM',
     'LEAVE_MANAGER',
     'LEAVE_USER',
+
+    // Booking Room portal
+    'ROOM_ADMIN',
+    'MATERIAL_ADMIN',
 
     // Other portals
     'ROOT_ADMIN',
@@ -136,6 +144,12 @@ function homeByRole(role) {
     case 'ROOT_ADMIN':
       return { name: 'admin-requests' }
 
+    case 'ROOM_ADMIN':
+      return { name: 'booking-room-room-inbox' }
+
+    case 'MATERIAL_ADMIN':
+      return { name: 'booking-room-material-inbox' }
+
     case 'CHEF':
       return { name: 'chef-requests' }
 
@@ -145,7 +159,6 @@ function homeByRole(role) {
     case 'MESSENGER':
       return { name: 'messenger-assignment' }
 
-    // Leave roles
     case 'LEAVE_USER':
       return { name: 'leave-user-request' }
 
@@ -172,7 +185,6 @@ const router = createRouter({
     /* ──────────────────────────────
      * Public landing
      * ────────────────────────────── */
-    // Leave feature "start" routes (public links from Greeting)
     startLeaveRoute('/leave/start/request', 'leave-start-request', 'leave-user-request'),
     startLeaveRoute('/leave/start/swap-day', 'leave-start-swap-day', 'leave-user-swap-day-new'),
     startLeaveRoute('/leave/start/forget-scan', 'leave-start-forget-scan', 'leave-user-forget-scan'),
@@ -189,7 +201,7 @@ const router = createRouter({
     },
 
     /* ──────────────────────────────
-     * Public login (food/transport portal)
+     * Public login
      * ────────────────────────────── */
     {
       name: 'admin-login',
@@ -197,10 +209,6 @@ const router = createRouter({
       component: AdminLogin,
       meta: { public: true, portal: 'admin' },
     },
-
-    /* ──────────────────────────────
-     * Public login (Expat Leave portal)
-     * ────────────────────────────── */
     {
       name: 'leave-login',
       path: '/leave/login',
@@ -288,7 +296,7 @@ const router = createRouter({
     },
 
     /* ──────────────────────────────
-     * Leave / Expat – User (✅ unified layout)
+     * Leave / Expat – User
      * ────────────────────────────── */
     {
       path: '/leave/user',
@@ -334,7 +342,7 @@ const router = createRouter({
     },
 
     /* ──────────────────────────────
-     * Leave / Expat – Manager (✅ unified layout)
+     * Leave / Expat – Manager
      * ────────────────────────────── */
     {
       path: '/leave/manager',
@@ -404,17 +412,17 @@ const router = createRouter({
           meta: { title: 'COO Swap Day Inbox' },
         },
         {
-          path : 'forget-scan-inbox',
+          path: 'forget-scan-inbox',
           name: 'leave-coo-forget-scan-inbox',
           component: () => import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue'),
-          meta: { title: 'COO Forget Scan Inbox' } 
+          meta: { title: 'COO Forget Scan Inbox' }
         }
       ],
     },
 
     /* ──────────────────────────────
-    * Leave / Expat – Admin
-    * ────────────────────────────── */
+     * Leave / Expat – Admin
+     * ────────────────────────────── */
     {
       path: '/leave/admin',
       component: AdminLeaveExpat,
@@ -425,11 +433,8 @@ const router = createRouter({
         { path: 'types', name: 'leave-admin-types', component: AdminLeaveTypes },
         { path: 'profiles', name: 'leave-admin-profiles', component: AdminExpatProfiles },
 
-        // ✅ Leave Approval (Admin stays in Admin layout)
         { path: 'manager-inbox', name: 'leave-admin-manager-inbox', component: ManagerLeaveInbox },
-        { path: 'gm-inbox',      name: 'leave-admin-gm-inbox',      component: GmLeaveInbox },
-
-        // ✅ ADD THIS: COO leave inbox inside ADMIN layout (so it won't go to COOLeaveExpat)
+        { path: 'gm-inbox', name: 'leave-admin-gm-inbox', component: GmLeaveInbox },
         {
           path: 'coo-inbox',
           name: 'leave-admin-coo-inbox',
@@ -441,7 +446,6 @@ const router = createRouter({
         { path: 'my-requests', name: 'leave-admin-my-requests', component: ExpatMyRequests },
         { path: 'add-signature', name: 'leave-add-signature', component: AdminAddSignature },
 
-        // ✅ SwapDay Approval (Admin stays in Admin layout)
         {
           path: 'swap-day/manager-inbox',
           name: 'leave-admin-swap-day-manager-inbox',
@@ -488,7 +492,6 @@ const router = createRouter({
           meta: { title: 'SwapDay Report' },
         },
 
-        // Forget scan
         {
           path: 'forget-scan/manager-inbox',
           name: 'leave-admin-forget-scan-manager-inbox',
@@ -511,7 +514,7 @@ const router = createRouter({
           path: 'forgetscan/report',
           name: 'admin-forget-scan-report',
           component: () => import('@/views/expat/admin/forgetScan/AdminForgetScanReport.vue'),
-          meta: { title: 'Forget scan Report for Admin'}
+          meta: { title: 'Forget scan Report for Admin' }
         },
         {
           path: 'data/central',
@@ -519,6 +522,66 @@ const router = createRouter({
           component: CentralData,
           meta: { title: 'Central Data' }
         }
+      ],
+    },
+
+    /* ──────────────────────────────
+     * Booking Room – Room Admin
+     * ────────────────────────────── */
+    {
+      path: '/booking-room/room-admin',
+      component: AdminRoomLayout,
+      meta: { requiresRole: ['ROOM_ADMIN', 'ADMIN', 'ROOT_ADMIN'] },
+      children: [
+        { path: '', redirect: { name: 'booking-room-room-inbox' } },
+        {
+          path: 'inbox',
+          name: 'booking-room-room-inbox',
+          component: () => import('@/views/bookingRoom/admin/AdminRoomInbox.vue'),
+          meta: { title: 'Room Inbox' },
+        },
+        {
+          path: 'rooms',
+          name: 'booking-room-admin-rooms',
+          component: AdminBookingRoomRooms,
+          meta: { title: 'Room Master' },
+        },
+        {
+          path: 'bookings',
+          name: 'booking-room-admin-list-room',
+          component: () => import('@/views/bookingRoom/admin/AdminBookingRoomList.vue'),
+          meta: { title: 'Booking List' },
+        },
+      ],
+    },
+
+    /* ──────────────────────────────
+     * Booking Room – Material Admin
+     * ────────────────────────────── */
+    {
+      path: '/booking-room/material-admin',
+      component: AdminMaterialLayout,
+      meta: { requiresRole: ['MATERIAL_ADMIN', 'ADMIN', 'ROOT_ADMIN'] },
+      children: [
+        { path: '', redirect: { name: 'booking-room-material-inbox' } },
+        {
+          path: 'inbox',
+          name: 'booking-room-material-inbox',
+          component: () => import('@/views/bookingRoom/admin/AdminMaterialInbox.vue'),
+          meta: { title: 'Material Inbox' },
+        },
+        {
+          path: 'materials',
+          name: 'booking-room-admin-materials',
+          component: AdminBookingRoomMaterials,
+          meta: { title: 'Material Master' },
+        },
+        {
+          path: 'bookings',
+          name: 'booking-room-admin-list-material',
+          component: () => import('@/views/bookingRoom/admin/AdminBookingRoomList.vue'),
+          meta: { title: 'Booking List' },
+        },
       ],
     },
 
@@ -548,7 +611,7 @@ router.beforeEach((to) => {
 
   const isEmployeeArea = to.path.startsWith('/employee')
 
-  // 1) Logged in & visiting greeting or any login → send to homeByRole(primaryRole)
+  // Logged in & visiting greeting/login pages -> send to role home
   if (
     roles.length &&
     (to.name === 'greeting' || to.name === 'admin-login' || to.name === 'leave-login')
@@ -558,30 +621,26 @@ router.beforeEach((to) => {
     return true
   }
 
-  // 2) Employee area special rules
+  // Employee area special rules
   if (isEmployeeArea) {
-    // Guests → allowed
     if (!auth.token || !roles.length) return true
-
-    // Real employees → allowed
     if (roles.includes('EMPLOYEE')) return true
 
-    // Other roles → back to their own home
     const target = homeByRole(primaryRole)
     if (target.name !== to.name) return target
     return true
   }
 
-  // 3) Public routes → always allowed
+  // Public routes
   if (isPublic) return true
 
-  // 4) Non-public routes require login
+  // Require login
   if (!auth.token || !roles.length) {
     if (to.name !== 'greeting') return { name: 'greeting' }
     return true
   }
 
-  // 5) Role-specific restrictions: user must have ANY of required roles
+  // Role restriction
   if (requiredUpper && !roles.some(r => requiredUpper.includes(String(r).toUpperCase()))) {
     const target = homeByRole(primaryRole)
     if (target.name !== to.name) return target
