@@ -614,8 +614,6 @@ onBeforeUnmount(() => {
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div class="text-sm font-extrabold">Meeting Room Request History</div>
-
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[240px_220px_160px_160px_160px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
@@ -679,15 +677,6 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex gap-2">
-                <button
-                  class="ui-btn ui-btn-soft border-white/25 bg-white/10 text-white"
-                  type="button"
-                  @click="fetchData"
-                >
-                  <i class="fa-solid fa-rotate-right text-[11px]" />
-                  Refresh
-                </button>
-
                 <button
                   class="ui-btn ui-btn-primary"
                   type="button"

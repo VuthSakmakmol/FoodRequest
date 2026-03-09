@@ -319,13 +319,13 @@ onBeforeUnmount(() => {
             <table class="ui-table min-w-[1000px] w-full text-left">
               <thead>
                 <tr>
-                  <th class="ui-th w-[130px] pl-4">Date & Time</th>
-                  <th class="ui-th w-[160px]">Employee</th>
-                  <th class="ui-th min-w-[150px]">Meeting Title</th>
-                  <th class="ui-th min-w-[150px]">Room & Materials</th>
+                  <th class="ui-th w-[130px] text-center">Date & Time</th>
+                  <th class="ui-th w-[160px] text-center">Employee</th>
+                  <th class="ui-th min-w-[150px] text-center">Meeting Title</th>
+                  <th class="ui-th min-w-[150px] text-center">Room & Materials</th>
                   <th class="ui-th text-center w-[110px]">Room Status</th>
                   <th class="ui-th text-center w-[110px]">Overall</th>
-                  <th class="ui-th text-right w-[200px] pr-4">Actions</th>
+                  <th class="ui-th text-center w-[200px]">Actions</th>
                 </tr>
               </thead>
 
@@ -337,16 +337,18 @@ onBeforeUnmount(() => {
                 </tr>
 
                 <tr v-for="row in filteredRows" :key="row._id" class="ui-tr-hover">
-                  <td class="ui-td whitespace-nowrap pl-4 text-left">
+                  <td class="ui-td whitespace-nowrap text-center">
                     <div class="font-bold text-slate-900 dark:text-slate-50">{{ fmtDate(row.bookingDate) }}</div>
                     <div class="text-[10px] text-slate-500 dark:text-slate-400">{{ fmtTime(row.timeStart) }} - {{ fmtTime(row.timeEnd) }}</div>
                   </td>
-                  <td class="ui-td text-left">
+                  <td class="ui-td text-center">
                     <div class="font-bold text-slate-900 dark:text-slate-50 truncate max-w-[150px]">{{ row.employee?.name || '—' }}</div>
                     <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[150px]">{{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}</div>
                   </td>
-                  <td class="ui-td font-bold text-slate-800 dark:text-slate-100 text-left">{{ row.meetingTitle || '—' }}</td>
-                  <td class="ui-td text-left">
+                  <td class="ui-td text-center font-bold text-slate-800 dark:text-slate-100">
+                    {{ row.meetingTitle || '—' }}
+                  </td>
+                  <td class="ui-td text-center">
                     <div class="font-bold text-slate-900 dark:text-slate-50">{{ row.roomName || '—' }}</div>
                     <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate max-w-[180px]" :title="materialItemsToText(row.materials)">
                       {{ materialItemsToText(row.materials) || 'No materials' }}

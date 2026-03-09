@@ -400,16 +400,6 @@ onMounted(async () => {
 
             <div class="flex gap-2">
               <button
-                class="ui-btn ui-btn-soft border-white/25 bg-white/10 text-white"
-                type="button"
-                :disabled="submitting"
-                @click="resetForm()"
-              >
-                <i class="fa-solid fa-rotate-left text-[11px]" />
-                Reset
-              </button>
-
-              <button
                 class="ui-btn ui-btn-primary"
                 type="button"
                 :disabled="submitting || loadingMasters"
@@ -470,18 +460,7 @@ onMounted(async () => {
             <div class="text-slate-500 dark:text-slate-400">
               Please review requester, booking detail, and request type before submitting.
             </div>
-
             <div class="flex gap-2">
-              <button
-                class="ui-btn ui-btn-soft"
-                type="button"
-                :disabled="submitting"
-                @click="resetForm()"
-              >
-                <i class="fa-solid fa-rotate-left text-[11px]" />
-                Reset
-              </button>
-
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"
@@ -491,39 +470,6 @@ onMounted(async () => {
                 <i v-if="submitting" class="fa-solid fa-spinner animate-spin text-[11px]" />
                 Submit Request
               </button>
-            </div>
-          </div>
-
-          <!-- Optional compact review -->
-          <div
-            class="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[11px]
-                   dark:border-slate-800 dark:bg-slate-900/60"
-          >
-            <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-              <div>
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">Type:</span>
-                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ requestTypeLabel }}</span>
-              </div>
-
-              <div>
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">Date:</span>
-                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ form.bookingDate || '—' }}</span>
-              </div>
-
-              <div>
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">Time:</span>
-                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ timeRangeLabel }}</span>
-              </div>
-
-              <div>
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">Room:</span>
-                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ form.roomName || '—' }}</span>
-              </div>
-
-              <div class="md:col-span-2 xl:col-span-4">
-                <span class="font-extrabold text-slate-700 dark:text-slate-200">Materials:</span>
-                <span class="ml-1 text-slate-600 dark:text-slate-300">{{ selectedMaterialsLabel }}</span>
-              </div>
             </div>
           </div>
         </div>
