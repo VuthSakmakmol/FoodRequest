@@ -9,11 +9,10 @@ const servicesRef = ref(null)
 const go = (name) => router.push({ name })
 
 const goFood = () => go('employee-request')
-const goCar  = () => go('employee-car-booking')
+const goCar = () => go('employee-car-booking')
 const goLogin = () => go('admin-login')
-
 const goLeaveRequest = () => go('leave-start-request')
-
+const goMeetingRoom = () => go('public-booking-room-request')
 
 const scrollToServices = () => {
   if (servicesRef.value) servicesRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -53,10 +52,7 @@ const scrollToServices = () => {
           </h1>
 
           <p class="text-sm sm:text-base text-sky-50/95 max-w-xl">
-           Connect all services through a digital system.
-            <!-- <span class="block mt-1 text-xs sm:text-sm text-sky-100 font-kh" lang="km">
-              សេវាកម្មស្នើសុំទាំងអស់ នៅក្នុងប្រព័ន្ធតែមួយ។
-            </span> -->
+            Connect all services through a digital system.
           </p>
 
           <div class="mt-5 flex flex-wrap items-center gap-3">
@@ -148,14 +144,11 @@ const scrollToServices = () => {
               Choose what you want to do today
             </h2>
             <p class="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-              Food booking, Vehicle Reservation, meeting rooms (soon), and expat leave.
+              Food booking, Vehicle Reservation, meeting rooms, and expat leave.
             </p>
           </div>
 
-          <!-- ✅ 1 col mobile / 2 col sm / 3 col lg -->
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <!-- Card template: icon + title + status -->
-
             <!-- Food Booking -->
             <button
               type="button"
@@ -240,26 +233,34 @@ const scrollToServices = () => {
               </div>
             </button>
 
-            
-            
-
-            <!-- Coming soon cards -->
-            <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
+            <!-- Meeting Room -->
+            <button
+              type="button"
+              @click="goMeetingRoom"
+              class="group text-left rounded-2xl border border-slate-200 bg-white/90
+                     hover:border-indigo-300 hover:shadow-lg hover:bg-white
+                     dark:bg-slate-900/80 dark:border-slate-700
+                     dark:hover:border-indigo-400/80 dark:hover:bg-slate-900
+                     transition overflow-hidden w-full h-[98px]"
+            >
               <div class="h-full px-5 py-4 flex items-center gap-4">
                 <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-400 to-emerald-400 text-slate-900 shadow-md">
                   <i class="fa-solid fa-people-roof text-[22px]"></i>
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center justify-between gap-2">
-                    <p class="text-base font-extrabold text-slate-700 dark:text-slate-100 truncate">Meeting Room</p>
-                    <span class="shrink-0 inline-flex items-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/60 dark:text-amber-200 px-2.5 py-1 text-[11px] font-semibold">
-                      In dev
+                    <p class="text-base font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                      Booking Meeting Room
+                    </p>
+                    <span class="shrink-0 inline-flex items-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-200 px-2.5 py-1 text-[11px] font-semibold">
+                      New
                     </span>
                   </div>
                 </div>
               </div>
-            </div>
+            </button>
 
+            <!-- Coming soon cards -->
             <div class="rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 dark:bg-slate-900/60 dark:border-slate-700/80 w-full h-[98px] opacity-80">
               <div class="h-full px-5 py-4 flex items-center gap-4">
                 <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 text-slate-900 shadow-md">

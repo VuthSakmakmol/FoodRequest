@@ -172,8 +172,8 @@ app.use('/api/leave', require('./routes/leave/centralReport.routes'))
 
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
-
 app.use('/api/public', require('./routes/food/food-public.routes'))
+app.use('/api/public', require('./routes/bookingRoom/bookingRoom.public.routes'))
 
 // ========================== Food ==========================
 app.use('/api/admin', require('./routes/food/food-admin.routes'))
@@ -183,7 +183,6 @@ app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'))
 app.use('/uploads', express.static(path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads')))
 
 // ========================== Transportation ==========================
-
 app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'))
 app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
 app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'))
@@ -191,6 +190,9 @@ app.use('/api/admin', require('./routes/admin-user.routes'))
 app.use('/api/driver', require('./routes/transportation/carBooking-driver.routes'))
 app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.routes'))
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
+
+// ========================== Booking Room ==========================
+app.use('/api', require('./routes/bookingRoom/bookingRoom.routes'))
 
 // ====================================== Holiday =================================
 app.use('/api/public', require('./routes/public-holidays.routes'))

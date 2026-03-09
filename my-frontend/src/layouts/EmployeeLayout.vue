@@ -11,7 +11,7 @@ const auth   = useAuth()
 /* ───────── Sidebar state ───────── */
 const sidebarOpen = ref(true)
 
-/* Sections (same logic, just FA icons) */
+/* Sections */
 const groups = [
   {
     key: 'home',
@@ -39,6 +39,15 @@ const groups = [
       { label: 'Book a Car',      icon: 'fa-solid fa-car-on',          to: { name: 'employee-car-booking' } },
       { label: 'My Car Bookings', icon: 'fa-solid fa-list',            to: { name: 'employee-car-history' } },
       { label: 'Calendar',        icon: 'fa-regular fa-clock',         to: { name: 'employee-car-schedule' } },
+    ]
+  },
+  {
+    key: 'meeting-room',
+    header: 'Meeting Room',
+    icon: 'fa-solid fa-building-user',
+    children: [
+      { label: 'Book Meeting Room', icon: 'fa-solid fa-calendar-plus', to: { name: 'public-booking-room-request' } },
+      { label: 'My Bookings',       icon: 'fa-solid fa-list-check',    to: { name: 'public-booking-room-history' } },
     ]
   }
 ]
@@ -330,7 +339,7 @@ function toggleAuth() {
         </div>
       </header>
 
-      <!-- Content (tight padding) -->
+      <!-- Content -->
       <main
         class="flex-1 overflow-auto bg-slate-50
                px-1 py-1 text-sm

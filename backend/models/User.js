@@ -17,6 +17,10 @@ const ROLES = Object.freeze([
   'DRIVER',
   'MESSENGER',
 
+  // meeting booking portal
+  'ROOM_ADMIN',
+  'MATERIAL_ADMIN',
+
   // leave portal
   'LEAVE_USER',
   'LEAVE_MANAGER',
@@ -42,7 +46,7 @@ const UserSchema = new mongoose.Schema(
     // ✅ legacy single role (keep for old code)
     role: { type: String, enum: ROLES, default: 'LEAVE_USER' },
 
-    // ✅ multi-role (NEW)
+    // ✅ multi-role
     roles: { type: [String], enum: ROLES, default: [] },
 
     isActive: { type: Boolean, default: true },
@@ -75,7 +79,7 @@ UserSchema.pre('validate', function (next) {
     const rolesArr = rolesArrRaw
       .map(normRole)
       .filter(Boolean)
-      .filter(r => ROLES.includes(r))
+      .filter((r) => ROLES.includes(r))
 
     // If role exists and valid, ensure it exists in roles[]
     if (role && ROLES.includes(role) && !rolesArr.includes(role)) {
@@ -90,12 +94,13 @@ UserSchema.pre('validate', function (next) {
     }
 
     // If roles[] ended empty -> enforce default from role or LEAVE_USER
-    const finalRole = normRole(this.role) && ROLES.includes(normRole(this.role))
-      ? normRole(this.role)
-      : 'LEAVE_USER'
+    const finalRole =
+      normRole(this.role) && ROLES.includes(normRole(this.role))
+        ? normRole(this.role)
+        : 'LEAVE_USER'
 
     const finalRoles = uniq(
-      (rolesArr.length ? rolesArr : [finalRole]).filter(r => ROLES.includes(r))
+      (rolesArr.length ? rolesArr : [finalRole]).filter((r) => ROLES.includes(r))
     )
 
     this.role = finalRole
@@ -107,10 +112,9 @@ UserSchema.pre('validate', function (next) {
   }
 })
 
-
 UserSchema.methods.setPassword = async function (plain) {
-  const next = String(plain || '')
-  this.passwordHash = await bcrypt.hash(next, 10)
+  const nextPw = String(plain || '')
+  this.passwordHash = await bcrypt.hash(nextPw, 10)
   this.passwordChangedAt = new Date()
   this.passwordVersion = Number(this.passwordVersion || 0) + 1
 }
@@ -118,8 +122,6 @@ UserSchema.methods.setPassword = async function (plain) {
 UserSchema.methods.verifyPassword = function (plain) {
   return bcrypt.compare(String(plain || ''), this.passwordHash)
 }
-
-
 
 UserSchema.statics.ROLES = ROLES
 

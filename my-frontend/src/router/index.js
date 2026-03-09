@@ -34,6 +34,8 @@ const EmployeeCarBooking = () => import('@/views/employee/carBooking/EmployeeCar
 const EmployeeCarHistory = () => import('@/views/employee/carBooking/EmployeeCarHistory.vue')
 const CarBookingSchedule = () => import('@/views/employee/carBooking/EmployeeCarCalendar.vue')
 
+
+
 // Admin (Food)
 const AdminLogin = () => import('@/views/admin/AdminLogin.vue')
 const AdminFoodRequests = () => import('@/views/admin/foodBooking/AdminFoodBooking.vue')
@@ -67,9 +69,11 @@ const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminLeaveProfileEdit = () => import('@/views/expat/admin/profiles/AdminLeaveProfileEdit.vue')
 const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeaveReport.vue')
 const CentralData = () => import('@/views/expat/admin/data/CentralData.vue')
-
-// COO views
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
+
+// Booking Room (Public requester)
+const PublicBookingRoomRequest = () => import('@/views/bookingRoom/user/PublicBookingRoomRequest.vue')
+const PublicBookingRoomHistory = () => import('@/views/bookingRoom/user/PublicBookingRoomHistory.vue')
 
 // Helper for direct
 function startLeaveRoute(path, name, targetName) {
@@ -218,6 +222,9 @@ const router = createRouter({
         { name: 'employee-car-booking', path: 'car-booking', component: EmployeeCarBooking },
         { name: 'employee-car-history', path: 'car-history', component: EmployeeCarHistory },
         { name: 'employee-car-schedule', path: 'car-schedule', component: CarBookingSchedule },
+
+        { name: 'public-booking-room-request', path: 'booking-room', component: PublicBookingRoomRequest },
+        { name: 'public-booking-room-history', path: 'booking-room-history', component: PublicBookingRoomHistory },
       ],
     },
 

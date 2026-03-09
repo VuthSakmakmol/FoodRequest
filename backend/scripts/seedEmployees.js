@@ -906,6 +906,15 @@ function loadEmployees() {
     "isActive": true
   },
   {
+    "employeeId": "52620120",
+    "name": "Mouey Kimhak",
+    "department": "HR and Payroll",
+    "position": "",
+    "contactNumber": "089851281",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
     "employeeId": "51220859",
     "name": "Sam Sambat",
     "department": "HR and Payroll",
@@ -1046,8 +1055,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "015915284",
-    // "telegramChatId": "1673844206",
-    "telegramChatId": "7163451169",
+    "telegramChatId": "1673844206",
     "isActive": true
   },
   {
@@ -1065,8 +1073,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "",
     "contactNumber": "0968337875",
-    // "telegramChatId": "1120056572",
-    "telegramChatId": "7163451169",
+    "telegramChatId": "1120056572",
     "isActive": true
   },
   {
@@ -1093,8 +1100,7 @@ function loadEmployees() {
     "department": "HR and Payroll",
     "position": "Human Resource Share Services",
     "contactNumber": "0979866163",
-    "telegramChatId": "",
-    // "telegramChatId": "7163451169",
+    "telegramChatId": "7163451169",
     "isActive": true
   },
   {
@@ -1555,6 +1561,15 @@ function loadEmployees() {
     "department": "Quality Assurance",
     "position": "",
     "contactNumber": "070463296",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52620147",
+    "name": "Chhoun Thavroth",
+    "department": "Quality Assurance",
+    "position": "",
+    "contactNumber": "",
     "telegramChatId": "",
     "isActive": true
   },
@@ -2127,6 +2142,15 @@ function loadEmployees() {
     "isActive": true
   },
     {
+    "employeeId": "52620157",
+    "name": "Chor Kan",
+    "department": "Merchandise",
+    "position": "",
+    "contactNumber": "00000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
     "employeeId": "52521251",
     "name": "Un Chhai roth",
     "department": "Merchandise",
@@ -2241,6 +2265,15 @@ function loadEmployees() {
     "contactNumber": "00000000000",
     "position": "",
     "telegramChatId": "1821447041",
+    "isActive": true
+  },
+    {
+    "employeeId": "52620164",
+    "name": "Hom Raksa",
+    "department": "Shipping",
+    "contactNumber": "00000000000",
+    "position": "",
+    "telegramChatId": "",
     "isActive": true
   },
   {
@@ -2365,6 +2398,15 @@ function loadEmployees() {
     "employeeId": "52520945",
     "name": "Kem Chanthea",
     "department": "Quality Assurance",
+    "position": "",
+    "contactNumber": "0000000000",
+    "telegramChatId": "",
+    "isActive": true
+  },
+  {
+    "employeeId": "52620191",
+    "name": "Sam Saret",
+    "department": "Accessory Warehouse",
     "position": "",
     "contactNumber": "0000000000",
     "telegramChatId": "",
