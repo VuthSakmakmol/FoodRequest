@@ -1,4 +1,3 @@
-<!-- src/views/bookingRoom/user/PublicBookingRoomHistory.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
@@ -7,6 +6,7 @@ import { useToast } from '@/composables/useToast'
 
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import socket, { subscribeEmployeeIfNeeded } from '@/utils/socket'
+import api from '@/utils/api'
 
 import {
   getMyBookingRooms,
@@ -16,8 +16,6 @@ import {
   canEditOrCancelBookingRoom,
   bookingRoomStatusLabel,
   bookingRoomTypeLabel,
-  BOOKING_ROOM_NAMES,
-  BOOKING_ROOM_MATERIALS,
 } from '@/utils/bookingRoom.api'
 
 defineOptions({ name: 'PublicBookingRoomHistory' })
@@ -32,6 +30,10 @@ const rows = ref([])
 const employeeId = ref(localStorage.getItem('bookingRoomEmployeeId') || '')
 const employees = ref([])
 const loadingEmployees = ref(false)
+
+const roomOptions = ref([])
+const materialOptions = ref([])
+const loadingMasters = ref(false)
 
 const search = ref('')
 const overallStatus = ref('ALL')
@@ -58,8 +60,12 @@ const editForm = ref({
   purpose: '',
   participantEstimate: 1,
   requirementNote: '',
+
   roomRequired: true,
+  roomId: '',
+  roomCode: '',
   roomName: '',
+
   materialRequired: false,
   materials: [],
 })
@@ -95,6 +101,10 @@ function up(v) {
 
 function compactText(v) {
   return String(v || '').replace(/\s+/g, ' ').trim()
+}
+
+function arr(v) {
+  return Array.isArray(v) ? v : []
 }
 
 function fmtDate(v) {
@@ -150,8 +160,43 @@ function sectionBadgeUiClass(status) {
   return 'ui-badge ui-badge-warning'
 }
 
-function materialText(arr = []) {
-  return Array.isArray(arr) && arr.length ? arr.join(', ') : '—'
+function materialText(items = []) {
+  return arr(items)
+    .map((x) => {
+      if (typeof x === 'string') return x
+      const name = s(x?.materialName) || s(x?.materialCode)
+      const qty = Number(x?.qty || 0)
+      return name ? `${name}${qty > 0 ? ` x${qty}` : ''}` : ''
+    })
+    .filter(Boolean)
+    .join(', ') || '—'
+}
+
+function normalizeMaterialItems(items = []) {
+  return arr(items)
+    .map((x) => {
+      if (typeof x === 'string') {
+        const found = materialOptions.value.find((m) => up(m.code) === up(x))
+        return {
+          materialId: found?._id || null,
+          materialCode: up(found?.code || x),
+          materialName: s(found?.name || x),
+          qty: 1,
+        }
+      }
+
+      const found = materialOptions.value.find(
+        (m) => up(m.code) === up(x?.materialCode || x?.code || x?.name)
+      )
+
+      return {
+        materialId: x?.materialId || x?._id || found?._id || null,
+        materialCode: up(x?.materialCode || x?.code || found?.code || x?.name),
+        materialName: s(x?.materialName || x?.name || found?.name || x?.materialCode),
+        qty: Math.max(1, Number(x?.qty || 1)),
+      }
+    })
+    .filter((x) => s(x.materialCode))
 }
 
 function canEdit(item) {
@@ -177,6 +222,80 @@ function upsertRow(doc) {
   syncDetailItem()
 }
 
+function selectedEditRoomId() {
+  return s(editForm.value.roomId)
+}
+
+function selectedEditMaterial(code) {
+  return arr(editForm.value.materials).find((x) => up(x?.materialCode) === up(code)) || null
+}
+
+function isEditMaterialOn(code) {
+  return !!selectedEditMaterial(code)
+}
+
+function onEditRoomChange(roomId) {
+  const picked = roomOptions.value.find((x) => s(x._id) === s(roomId))
+
+  if (!picked) {
+    editForm.value.roomId = ''
+    editForm.value.roomCode = ''
+    editForm.value.roomName = ''
+    return
+  }
+
+  editForm.value.roomId = s(picked._id)
+  editForm.value.roomCode = up(picked.code)
+  editForm.value.roomName = s(picked.name)
+}
+
+function toggleEditMaterial(item) {
+  if (!editForm.value.materialRequired) return
+
+  const code = up(item?.code)
+  if (!code) return
+
+  const next = [...arr(editForm.value.materials)]
+  const idx = next.findIndex((x) => up(x?.materialCode) === code)
+
+  if (idx >= 0) {
+    next.splice(idx, 1)
+  } else {
+    next.push({
+      materialId: item?._id || null,
+      materialCode: up(item?.code),
+      materialName: s(item?.name),
+      qty: 1,
+    })
+  }
+
+  editForm.value.materials = next
+}
+
+function increaseEditMaterialQty(item) {
+  const found = selectedEditMaterial(item?.code)
+  if (!found) return
+
+  const stock = Math.max(0, Number(item?.totalQty || 0))
+  const current = Math.max(0, Number(found.qty || 0))
+  if (current >= stock) return
+
+  found.qty = current + 1
+}
+
+function decreaseEditMaterialQty(item) {
+  const found = selectedEditMaterial(item?.code)
+  if (!found) return
+
+  const current = Math.max(0, Number(found.qty || 0))
+  if (current <= 1) {
+    toggleEditMaterial(item)
+    return
+  }
+
+  found.qty = current - 1
+}
+
 /* ───────────────── EMPLOYEE PICK ───────────────── */
 async function loadEmployees(q = '') {
   try {
@@ -193,6 +312,42 @@ async function loadEmployees(q = '') {
 function onEmployeeChanged() {
   localStorage.setItem('bookingRoomEmployeeId', employeeId.value || '')
   fetchData()
+}
+
+/* ───────────────── MASTER DATA ───────────────── */
+async function loadMasters() {
+  try {
+    loadingMasters.value = true
+
+    const [roomRes, materialRes] = await Promise.all([
+      api.get('/public/booking-room/rooms/active'),
+      api.get('/public/booking-room/materials/active'),
+    ])
+
+    roomOptions.value = arr(roomRes?.data).map((x) => ({
+      _id: x?._id || '',
+      code: up(x?.code),
+      name: s(x?.name),
+      isActive: x?.isActive !== false,
+    }))
+
+    materialOptions.value = arr(materialRes?.data).map((x) => ({
+      _id: x?._id || '',
+      code: up(x?.code),
+      name: s(x?.name),
+      totalQty: Math.max(0, Number(x?.totalQty || 0)),
+      isActive: x?.isActive !== false,
+    }))
+  } catch (e) {
+    roomOptions.value = []
+    materialOptions.value = []
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Failed to load room/material list.',
+    })
+  } finally {
+    loadingMasters.value = false
+  }
 }
 
 /* ───────────────── FETCH ───────────────── */
@@ -237,7 +392,8 @@ const filteredRows = computed(() => {
         r.purpose,
         r.requirementNote,
         r.roomName,
-        (r.materials || []).join(','),
+        r.roomCode,
+        materialText(r.materials),
         r.roomStatus,
         r.materialStatus,
         r.overallStatus,
@@ -263,19 +419,6 @@ function closeDetail() {
 }
 
 /* ───────────────── EDIT ───────────────── */
-function toggleEditMaterial(material) {
-  const key = up(material)
-  const arr = Array.isArray(editForm.value.materials) ? [...editForm.value.materials] : []
-  const idx = arr.findIndex((x) => up(x) === key)
-  if (idx >= 0) arr.splice(idx, 1)
-  else arr.push(key)
-  editForm.value.materials = BOOKING_ROOM_MATERIALS.filter((x) => arr.includes(x))
-}
-
-function isEditMaterialOn(material) {
-  return (editForm.value.materials || []).some((x) => up(x) === up(material))
-}
-
 function openEdit(item) {
   if (!canEdit(item)) {
     showToast({ type: 'info', message: 'This request can no longer be edited.' })
@@ -293,10 +436,14 @@ function openEdit(item) {
     purpose: s(item.purpose),
     participantEstimate: Number(item.participantEstimate || 1),
     requirementNote: s(item.requirementNote),
+
     roomRequired: !!item.roomRequired,
-    roomName: s(item.roomName),
+    roomId: s(item.roomId || item.room?._id || ''),
+    roomCode: s(item.roomCode || item.room?.roomCode || ''),
+    roomName: s(item.roomName || item.room?.roomName || ''),
+
     materialRequired: !!item.materialRequired,
-    materials: Array.isArray(item.materials) ? [...item.materials] : [],
+    materials: normalizeMaterialItems(item.materials),
   }
   editOpen.value = true
 }
@@ -325,7 +472,7 @@ function validateEditForm() {
     e.push('Please choose at least room or material.')
   }
 
-  if (f.roomRequired && !s(f.roomName)) {
+  if (f.roomRequired && !s(f.roomId) && !s(f.roomCode) && !s(f.roomName)) {
     e.push('Room name is required.')
   }
 
@@ -361,10 +508,21 @@ async function submitEdit() {
       purpose: compactText(editForm.value.purpose),
       participantEstimate: Number(editForm.value.participantEstimate || 1),
       requirementNote: compactText(editForm.value.requirementNote),
+
       roomRequired: !!editForm.value.roomRequired,
+      roomId: editForm.value.roomRequired ? (editForm.value.roomId || null) : null,
+      roomCode: editForm.value.roomRequired ? s(editForm.value.roomCode) : '',
       roomName: editForm.value.roomRequired ? s(editForm.value.roomName) : '',
+
       materialRequired: !!editForm.value.materialRequired,
-      materials: editForm.value.materialRequired ? editForm.value.materials : [],
+      materials: editForm.value.materialRequired
+        ? arr(editForm.value.materials).map((x) => ({
+            materialId: x?.materialId || null,
+            materialCode: s(x?.materialCode),
+            materialName: s(x?.materialName),
+            qty: Math.max(1, Number(x?.qty || 1)),
+          }))
+        : [],
     }
 
     const doc = await updateBookingRoom(editItem.value._id, payload)
@@ -429,7 +587,7 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  await loadEmployees()
+  await Promise.all([loadEmployees(), loadMasters()])
 
   if (s(employeeId.value)) {
     await subscribeEmployeeIfNeeded(employeeId.value)
@@ -458,7 +616,7 @@ onBeforeUnmount(() => {
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div class="text-sm font-extrabold">Meeting Room Request History</div>
 
-            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[240px_220px_160px_160px_auto] md:items-end">
+            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[240px_220px_160px_160px_160px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
                 <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
@@ -491,13 +649,33 @@ onBeforeUnmount(() => {
               </div>
 
               <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
+                <select
+                  v-model="overallStatus"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                >
+                  <option v-for="(label, key) in STATUS_OPTIONS" :key="key" :value="key">
+                    {{ label }}
+                  </option>
+                </select>
+              </div>
+
+              <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
-                <input v-model="dateFrom" type="date" class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none" />
+                <input
+                  v-model="dateFrom"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
               </div>
 
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
-                <input v-model="dateTo" type="date" class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none" />
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
               </div>
 
               <div class="flex gap-2">
@@ -818,7 +996,7 @@ onBeforeUnmount(() => {
 
   <!-- EDIT MODAL -->
   <div v-if="editOpen" class="ui-modal-backdrop">
-    <div class="ui-modal p-0 overflow-hidden max-w-3xl">
+    <div class="ui-modal p-0 overflow-hidden max-w-4xl">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit Meeting Room Request</div>
@@ -896,10 +1074,15 @@ onBeforeUnmount(() => {
 
               <div class="mt-3 ui-field">
                 <label class="ui-label">Room Name</label>
-                <select v-model="editForm.roomName" class="ui-select" :disabled="editBusy || !editForm.roomRequired">
+                <select
+                  :value="selectedEditRoomId()"
+                  class="ui-select"
+                  :disabled="editBusy || !editForm.roomRequired"
+                  @change="onEditRoomChange($event.target.value)"
+                >
                   <option value="">Select room</option>
-                  <option v-for="room in BOOKING_ROOM_NAMES" :key="room" :value="room">
-                    {{ room }}
+                  <option v-for="room in roomOptions" :key="room._id" :value="room._id">
+                    {{ room.name }} {{ room.code ? `(${room.code})` : '' }}
                   </option>
                 </select>
               </div>
@@ -925,19 +1108,99 @@ onBeforeUnmount(() => {
 
               <div class="mt-3 ui-field">
                 <label class="ui-label">Materials</label>
-                <div class="flex flex-wrap gap-2">
-                  <button
-                    v-for="item in BOOKING_ROOM_MATERIALS"
-                    :key="item"
-                    type="button"
-                    class="ui-chip"
-                    :class="isEditMaterialOn(item) ? 'ui-chip-on' : ''"
-                    :disabled="editBusy || !editForm.materialRequired"
-                    @click="toggleEditMaterial(item)"
+
+                <div class="grid gap-2 sm:grid-cols-2">
+                  <div
+                    v-for="item in materialOptions"
+                    :key="item._id"
+                    class="rounded-xl border p-2.5 transition"
+                    :class="isEditMaterialOn(item.code)
+                      ? 'border-sky-400 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/20'
+                      : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/60'"
                   >
-                    <i class="fa-solid" :class="isEditMaterialOn(item) ? 'fa-circle-check' : 'fa-circle'" />
-                    {{ item }}
-                  </button>
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                          <button
+                            type="button"
+                            class="inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] transition"
+                            :class="isEditMaterialOn(item.code)
+                              ? 'border-sky-500 bg-sky-500 text-white'
+                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'"
+                            :disabled="editBusy || !editForm.materialRequired"
+                            @click="toggleEditMaterial(item)"
+                          >
+                            <i
+                              class="fa-solid"
+                              :class="isEditMaterialOn(item.code) ? 'fa-check' : 'fa-plus'"
+                            />
+                          </button>
+
+                          <div class="min-w-0">
+                            <div class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                              {{ item.name || item.code }}
+                            </div>
+                            <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                              {{ item.code }} • Stock {{ Number(item.totalQty || 0) }}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="isEditMaterialOn(item.code)"
+                        class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-1
+                               dark:border-slate-700 dark:bg-slate-950"
+                      >
+                        <button
+                          type="button"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-[11px]
+                                 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                          :disabled="editBusy"
+                          @click="decreaseEditMaterialQty(item)"
+                        >
+                          <i class="fa-solid fa-minus" />
+                        </button>
+
+                        <span class="min-w-[24px] text-center text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                          {{ selectedEditMaterial(item.code)?.qty || 0 }}
+                        </span>
+
+                        <button
+                          type="button"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-[11px]
+                                 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50
+                                 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                          :disabled="editBusy || (selectedEditMaterial(item.code)?.qty || 0) >= Number(item.totalQty || 0)"
+                          @click="increaseEditMaterialQty(item)"
+                        >
+                          <i class="fa-solid fa-plus" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  v-if="editForm.materialRequired && editForm.materials?.length"
+                  class="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2
+                         dark:border-emerald-900/40 dark:bg-emerald-950/20"
+                >
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+                    Selected Materials
+                  </div>
+
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <span
+                      v-for="item in editForm.materials"
+                      :key="item.materialCode"
+                      class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px]
+                             font-medium text-emerald-800 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-200"
+                    >
+                      <i class="fa-solid fa-paperclip text-[10px]" />
+                      {{ item.materialName || item.materialCode }} x{{ Number(item.qty || 0) }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -960,7 +1223,7 @@ onBeforeUnmount(() => {
             Cancel
           </button>
 
-          <button class="ui-btn ui-btn-primary" type="button" :disabled="editBusy" @click="submitEdit">
+          <button class="ui-btn ui-btn-primary" type="button" :disabled="editBusy || loadingMasters" @click="submitEdit">
             <i v-if="editBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
             Save Changes
           </button>
