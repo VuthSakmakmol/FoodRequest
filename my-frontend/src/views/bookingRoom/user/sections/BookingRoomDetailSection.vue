@@ -1,4 +1,3 @@
-<!-- src/views/bookingRoom/user/sections/BookingRoomDetailSection.vue -->
 <script setup>
 import { computed, watch, onMounted } from 'vue'
 import dayjs from 'dayjs'
@@ -12,7 +11,11 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['load-schedule'])
+/*
+  Parent should listen with:
+  @load-availability="loadAvailability"
+*/
+const emit = defineEmits(['load-availability'])
 
 /* ───────── Time options ───────── */
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
@@ -38,9 +41,14 @@ function clampBookingDate(val) {
   return d.format('YYYY-MM-DD')
 }
 
+/* ───────── Ask parent to refresh room/material availability ───────── */
+function triggerAvailability() {
+  emit('load-availability')
+}
+
 function onBookingDateChange() {
   props.form.bookingDate = clampBookingDate(props.form.bookingDate)
-  emit('load-schedule')
+  triggerAvailability()
 }
 
 /* ───────── Clamp date if user somehow sets past date ───────── */
@@ -56,7 +64,7 @@ watch(
   }
 )
 
-/* ───────── Sync split time fields ───────── */
+/* ───────── Sync split time fields from HH:mm ───────── */
 watch(
   () => props.form.timeStart,
   (val) => {
@@ -77,6 +85,7 @@ watch(
   { immediate: true }
 )
 
+/* ───────── Build HH:mm from split fields ───────── */
 watch(
   [() => props.form.timeStartHour, () => props.form.timeStartMinute],
   ([h, m]) => {
@@ -91,6 +100,7 @@ watch(
   }
 )
 
+/* ───────── Default minute when hour selected ───────── */
 watch(() => props.form.timeStartHour, (h) => {
   if (h && !props.form.timeStartMinute) props.form.timeStartMinute = '00'
 })
@@ -99,7 +109,7 @@ watch(() => props.form.timeEndHour, (h) => {
   if (h && !props.form.timeEndMinute) props.form.timeEndMinute = '00'
 })
 
-/* ───────── Validation hint ───────── */
+/* ───────── Inline hint only, no toast ───────── */
 const timeError = computed(() => {
   if (!props.form.timeStart || !props.form.timeEnd) return ''
   const s = toMinutes(props.form.timeStart)
@@ -108,12 +118,25 @@ const timeError = computed(() => {
   return ''
 })
 
+/*
+  React immediately whenever date/time changes.
+  Parent will refresh availability and room cards can become
+  "NOT AVAILABLE" + disabled immediately.
+*/
+watch(
+  [() => props.form.bookingDate, () => props.form.timeStart, () => props.form.timeEnd],
+  () => {
+    triggerAvailability()
+  }
+)
 
 onMounted(() => {
   props.form.bookingDate = clampBookingDate(props.form.bookingDate || minBookingDate.value)
 
   if (!props.form.timeStartMinute) props.form.timeStartMinute = '00'
   if (!props.form.timeEndMinute) props.form.timeEndMinute = '00'
+
+  triggerAvailability()
 })
 </script>
 
@@ -261,7 +284,6 @@ onMounted(() => {
                 />
               </div>
             </div>
-
 
             <p v-if="timeError" class="text-[11px] text-red-500 dark:text-red-300">
               {{ timeError }}

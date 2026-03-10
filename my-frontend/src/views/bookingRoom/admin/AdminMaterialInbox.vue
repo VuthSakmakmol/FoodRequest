@@ -2,6 +2,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
+import * as XLSX from 'xlsx'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
@@ -20,12 +21,17 @@ function up(v) {
 function arr(v) {
   return Array.isArray(v) ? v : []
 }
+function compactText(v) {
+  return String(v || '').replace(/\s+/g, ' ').trim()
+}
 function num(v, fallback = 0) {
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
 }
 function fmtDate(v) {
-  return s(v) || '—'
+  if (!v) return '—'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD') : String(v)
 }
 function fmtTime(v) {
   return s(v) || '—'
@@ -33,7 +39,7 @@ function fmtTime(v) {
 function fmtDateTime(v) {
   if (!v) return '—'
   const d = dayjs(v)
-  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—'
+  return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : String(v)
 }
 function cleanText(v) {
   return s(v) || '—'
@@ -50,38 +56,80 @@ function materialItemsToText(items = []) {
       .join(', ') || '—'
   )
 }
+function toYmdSafe(v) {
+  if (!v) return ''
+  const sv = String(v).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(sv)) return sv
+  const d = dayjs(sv)
+  return d.isValid() ? d.format('YYYY-MM-DD') : ''
+}
+function passDateFilter(date, from, to) {
+  const d = toYmdSafe(date)
+  const f1 = s(from)
+  const f2 = s(to)
 
-function materialStatusClass(status) {
-  const val = up(status)
-  if (val === 'APPROVED') return 'ui-badge ui-badge-success'
-  if (val === 'REJECTED') return 'ui-badge ui-badge-danger'
-  if (val === 'PENDING') return 'ui-badge ui-badge-warning'
-  if (val === 'PARTIAL_APPROVED') return 'ui-badge ui-badge-info'
-  if (val === 'NOT_REQUIRED') return 'ui-badge'
-  if (val === 'CANCELLED') return 'ui-badge'
+  if (!f1 && !f2) return true
+
+  const start = f1 || f2
+  const end = f2 || f1
+
+  if (!d) return false
+  return d >= start && d <= end
+}
+
+/* ───────────────── UI Helpers ───────────────── */
+function overallStatusClass(v) {
+  const st = up(v)
+  if (st === 'APPROVED') return 'ui-badge ui-badge-success'
+  if (st === 'PARTIAL_APPROVED') return 'ui-badge ui-badge-info'
+  if (st === 'REJECTED') return 'ui-badge ui-badge-danger'
+  if (st === 'CANCELLED') return 'ui-badge'
+  if (st.includes('PENDING')) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
 
-function overallStatusClass(status) {
-  const val = up(status)
-  if (val === 'APPROVED') return 'ui-badge ui-badge-success'
-  if (val === 'REJECTED' || val === 'CANCELLED') return 'ui-badge ui-badge-danger'
-  if (val === 'PARTIAL_APPROVED') return 'ui-badge ui-badge-info'
-  if (val.includes('PENDING')) return 'ui-badge ui-badge-warning'
-  if (val === 'NOT_REQUIRED') return 'ui-badge'
+function roomStatusClass(v) {
+  const st = up(v)
+  if (st === 'APPROVED') return 'ui-badge ui-badge-success'
+  if (st === 'REJECTED') return 'ui-badge ui-badge-danger'
+  if (st === 'NOT_REQUIRED') return 'ui-badge'
+  if (st === 'PENDING') return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
 
-function roomStatusClass(status) {
-  const val = up(status)
-  if (val === 'APPROVED') return 'ui-badge ui-badge-success'
-  if (val === 'REJECTED') return 'ui-badge ui-badge-danger'
-  if (val === 'PENDING') return 'ui-badge ui-badge-warning'
-  if (val === 'NOT_REQUIRED') return 'ui-badge'
-  return 'ui-badge ui-badge-info'
+function materialStatusClass(v) {
+  const st = up(v)
+  if (st === 'APPROVED') return 'ui-badge ui-badge-success'
+  if (st === 'REJECTED') return 'ui-badge ui-badge-danger'
+  if (st === 'NOT_REQUIRED') return 'ui-badge'
+  if (st === 'PENDING') return 'ui-badge ui-badge-warning'
+  if (st === 'PARTIAL_APPROVED') return 'ui-badge ui-badge-info'
+  return 'ui-badge'
 }
 
-function isVisibleForScope(row, currentScope) {
+function typeBadgeUiClass(item) {
+  const hasRoom = !!item?.roomRequired
+  const hasMaterial = !!item?.materialRequired
+  if (hasRoom && hasMaterial) return 'ui-badge ui-badge-info'
+  if (hasRoom) return 'ui-badge ui-badge-success'
+  if (hasMaterial) return 'ui-badge ui-badge-warning'
+  return 'ui-badge'
+}
+
+function bookingTypeLabel(item) {
+  const hasRoom = !!item?.roomRequired
+  const hasMaterial = !!item?.materialRequired
+  if (hasRoom && hasMaterial) return 'Room + Material'
+  if (hasRoom) return 'Room Only'
+  if (hasMaterial) return 'Material Only'
+  return '—'
+}
+
+function isPendingMaterial(row) {
+  return up(row?.materialStatus) === 'PENDING'
+}
+
+function isRowVisibleForScope(row, currentScope) {
   if (!row || !row._id) return false
   if (!row.materialRequired) return false
   if (up(row.overallStatus) === 'CANCELLED') return false
@@ -93,10 +141,6 @@ function isVisibleForScope(row, currentScope) {
   return up(row.materialStatus) === 'PENDING'
 }
 
-function isActionable(row) {
-  return up(row?.materialStatus) === 'PENDING'
-}
-
 /* ───────────────── Responsive ───────────────── */
 const isMobile = ref(false)
 function updateIsMobile() {
@@ -106,11 +150,13 @@ function updateIsMobile() {
 
 /* ───────────────── State ───────────────── */
 const loading = ref(false)
-const acting = ref(false)
+const submitting = ref(false)
 
 const rows = ref([])
-const search = ref('')
-const scope = ref('ACTIONABLE')
+const scope = ref('ALL')
+const q = ref('')
+const dateFrom = ref('')
+const dateTo = ref('')
 
 const page = ref(1)
 const perPage = ref(10)
@@ -120,40 +166,44 @@ const detailOpen = ref(false)
 const detailRow = ref(null)
 
 const decisionOpen = ref(false)
-const decisionMode = ref('APPROVED')
 const decisionRow = ref(null)
+const decisionType = ref('APPROVED')
 const decisionNote = ref('')
 
 let availabilityRefreshTimer = null
 
 /* ───────────────── Computed ───────────────── */
 const processedRows = computed(() => {
-  const term = s(search.value).toLowerCase()
+  const keyword = s(q.value).toLowerCase()
+  let result = arr(rows.value)
 
-  let result = arr(rows.value).filter((row) => {
-    if (!term) return true
+  if (keyword) {
+    result = result.filter((row) => {
+      const hay = [
+        row?.employeeId,
+        row?.employee?.name,
+        row?.employee?.department,
+        row?.employee?.position,
+        row?.meetingTitle,
+        row?.roomCode,
+        row?.roomName,
+        row?.purpose,
+        row?.requirementNote,
+        row?.overallStatus,
+        row?.roomStatus,
+        row?.materialStatus,
+        materialItemsToText(row?.materials),
+        bookingTypeLabel(row),
+        row?.submittedVia,
+      ]
+        .map((x) => String(x || '').toLowerCase())
+        .join(' ')
 
-    return [
-      s(row?.employeeId),
-      s(row?.employee?.name),
-      s(row?.employee?.department),
-      s(row?.employee?.position),
-      s(row?.bookingDate),
-      s(row?.timeStart),
-      s(row?.timeEnd),
-      s(row?.meetingTitle),
-      s(row?.purpose),
-      s(row?.requirementNote),
-      s(row?.roomCode),
-      s(row?.roomName),
-      s(row?.materialStatus),
-      s(row?.overallStatus),
-      materialItemsToText(row?.materials),
-    ]
-      .join(' ')
-      .toLowerCase()
-      .includes(term)
-  })
+      return hay.includes(keyword)
+    })
+  }
+
+  result = result.filter((row) => passDateFilter(row?.bookingDate, dateFrom.value, dateTo.value))
 
   result.sort((a, b) => {
     const aTime = dayjs(a?.createdAt).isValid() ? dayjs(a.createdAt).valueOf() : 0
@@ -177,25 +227,171 @@ const pageCount = computed(() => {
   return Math.ceil(processedRows.value.length / per) || 1
 })
 
-const pendingCount = computed(() =>
-  arr(rows.value).filter((x) => up(x?.materialStatus) === 'PENDING').length
-)
-const approvedCount = computed(() =>
-  arr(rows.value).filter((x) => up(x?.materialStatus) === 'APPROVED').length
-)
-const rejectedCount = computed(() =>
-  arr(rows.value).filter((x) => up(x?.materialStatus) === 'REJECTED').length
-)
+const canSubmitDecision = computed(() => {
+  if (submitting.value) return false
+  if (!decisionRow.value?._id) return false
+  if (!['APPROVED', 'REJECTED'].includes(up(decisionType.value))) return false
 
-const canActOnDecision = computed(() => {
-  return !acting.value && !!decisionRow.value?._id && ['APPROVED', 'REJECTED'].includes(up(decisionMode.value))
+  if (up(decisionType.value) === 'REJECTED' && !s(decisionNote.value)) {
+    return false
+  }
+
+  return true
 })
 
-watch([search, perPage], () => {
+watch([q, perPage, dateFrom, dateTo], () => {
   page.value = 1
 })
 
-/* ───────────────── Sync helpers ───────────────── */
+/* ───────────────── API ───────────────── */
+async function fetchRows({ silent = false } = {}) {
+  try {
+    if (!silent) loading.value = true
+
+    const { data } = await api.get('/booking-room/material/inbox', {
+      params: { scope: scope.value },
+    })
+
+    rows.value = Array.isArray(data) ? data : []
+    syncDetailRow()
+    syncDecisionRow()
+  } catch (e) {
+    console.error('fetchRows error', e)
+    rows.value = []
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Unable to load material inbox.',
+    })
+  } finally {
+    if (!silent) loading.value = false
+  }
+}
+
+async function submitDecision() {
+  if (!canSubmitDecision.value) {
+    if (up(decisionType.value) === 'REJECTED' && !s(decisionNote.value)) {
+      showToast({ type: 'warning', message: 'Reject reason is required.' })
+    }
+    return
+  }
+
+  try {
+    submitting.value = true
+
+    const { data } = await api.post(`/booking-room/${decisionRow.value._id}/material-decision`, {
+      decision: up(decisionType.value),
+      note: compactText(decisionNote.value),
+    })
+
+    upsertRealtimeRow(data)
+
+    showToast({
+      type: 'success',
+      message: `Material request ${up(decisionType.value).toLowerCase()} successfully.`,
+    })
+
+    closeDecision()
+    closeDetail()
+  } catch (e) {
+    console.error('submitDecision error', e)
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Unable to submit decision.',
+    })
+  } finally {
+    submitting.value = false
+  }
+}
+
+/* ───────────────── Actions ───────────────── */
+function refreshAll() {
+  fetchRows()
+}
+
+function resetSearch() {
+  q.value = ''
+  scope.value = 'ALL'
+  dateFrom.value = ''
+  dateTo.value = ''
+  page.value = 1
+}
+
+function onScopeChange() {
+  page.value = 1
+  fetchRows()
+}
+
+function openDetail(row) {
+  detailRow.value = row || null
+  detailOpen.value = true
+}
+
+function closeDetail() {
+  detailOpen.value = false
+  detailRow.value = null
+}
+
+function openDecision(row, type) {
+  decisionRow.value = row || null
+  decisionType.value = up(type) === 'REJECTED' ? 'REJECTED' : 'APPROVED'
+  decisionNote.value = ''
+  decisionOpen.value = true
+}
+
+function closeDecision() {
+  if (submitting.value) return
+  decisionOpen.value = false
+  decisionRow.value = null
+  decisionType.value = 'APPROVED'
+  decisionNote.value = ''
+}
+
+function exportExcel() {
+  try {
+    const exportRows = processedRows.value.map((row, index) => ({
+      No: index + 1,
+      CreatedAt: fmtDateTime(row.createdAt),
+      BookingDate: fmtDate(row.bookingDate),
+      TimeStart: fmtTime(row.timeStart),
+      TimeEnd: fmtTime(row.timeEnd),
+      EmployeeID: s(row.employeeId),
+      EmployeeName: s(row.employee?.name),
+      Department: s(row.employee?.department),
+      Position: s(row.employee?.position),
+      MeetingTitle: s(row.meetingTitle),
+      Purpose: s(row.purpose),
+      RequestType: bookingTypeLabel(row),
+      RoomCode: s(row.roomCode),
+      RoomName: s(row.roomName),
+      RoomStatus: s(row.roomStatus),
+      MaterialStatus: s(row.materialStatus),
+      Materials: row.materialRequired ? materialItemsToText(row.materials) : 'Not Required',
+      OverallStatus: s(row.overallStatus),
+      ParticipantEstimate: Number(row.participantEstimate || 0),
+      RequirementNote: s(row.requirementNote),
+      CancelReason: s(row.cancelReason),
+      UpdatedAt: fmtDateTime(row.updatedAt),
+    }))
+
+    if (!exportRows.length) {
+      showToast({ type: 'warning', message: 'No data to export.' })
+      return
+    }
+
+    const ws = XLSX.utils.json_to_sheet(exportRows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Material Inbox')
+
+    const today = dayjs().format('YYYYMMDD_HHmm')
+    XLSX.writeFile(wb, `admin_material_inbox_${today}.xlsx`)
+    showToast({ type: 'success', message: 'Excel exported successfully.' })
+  } catch (e) {
+    console.error('exportExcel error', e)
+    showToast({ type: 'error', message: 'Failed to export Excel.' })
+  }
+}
+
+/* ───────────────── Live row sync ───────────────── */
 function syncDetailRow() {
   if (!detailRow.value?._id) return
   const found = rows.value.find((x) => String(x._id) === String(detailRow.value._id))
@@ -211,7 +407,7 @@ function syncDecisionRow() {
 function upsertRealtimeRow(doc) {
   if (!doc?._id) return
 
-  const visible = isVisibleForScope(doc, scope.value)
+  const visible = isRowVisibleForScope(doc, scope.value)
   const id = String(doc._id)
   const idx = rows.value.findIndex((x) => String(x._id) === id)
 
@@ -229,101 +425,6 @@ function upsertRealtimeRow(doc) {
   syncDecisionRow()
 }
 
-/* ───────────────── API ───────────────── */
-async function loadRows({ silent = false } = {}) {
-  try {
-    if (!silent) loading.value = true
-    const { data } = await api.get('/booking-room/material/inbox', {
-      params: { scope: scope.value },
-    })
-    rows.value = arr(data)
-    syncDetailRow()
-    syncDecisionRow()
-  } catch (e) {
-    showToast({
-      type: 'error',
-      title: 'Load failed',
-      message: e?.response?.data?.message || 'Failed to load material inbox.',
-    })
-  } finally {
-    if (!silent) loading.value = false
-  }
-}
-
-async function submitDecision() {
-  if (!decisionRow.value?._id || !canActOnDecision.value) return
-
-  try {
-    acting.value = true
-
-    const { data } = await api.post(`/booking-room/${decisionRow.value._id}/material-decision`, {
-      decision: decisionMode.value,
-      note: s(decisionNote.value),
-    })
-
-    upsertRealtimeRow(data)
-
-    showToast({
-      type: 'success',
-      title: 'Decision saved',
-      message:
-        up(decisionMode.value) === 'APPROVED'
-          ? 'Material request approved successfully.'
-          : 'Material request rejected successfully.',
-    })
-
-    closeDecision()
-  } catch (e) {
-    showToast({
-      type: 'error',
-      title: 'Decision failed',
-      message: e?.response?.data?.message || 'Unable to save decision.',
-    })
-  } finally {
-    acting.value = false
-  }
-}
-
-/* ───────────────── UI Actions ───────────────── */
-function refreshAll() {
-  loadRows()
-}
-
-function resetFilters() {
-  search.value = ''
-  scope.value = 'ACTIONABLE'
-}
-
-function onScopeChange() {
-  page.value = 1
-  loadRows()
-}
-
-function openDetail(row) {
-  detailRow.value = row || null
-  detailOpen.value = true
-}
-
-function closeDetail() {
-  detailOpen.value = false
-  detailRow.value = null
-}
-
-function openDecision(row, mode) {
-  decisionRow.value = row || null
-  decisionMode.value = up(mode) === 'REJECTED' ? 'REJECTED' : 'APPROVED'
-  decisionNote.value = ''
-  decisionOpen.value = true
-}
-
-function closeDecision() {
-  if (acting.value) return
-  decisionOpen.value = false
-  decisionRow.value = null
-  decisionNote.value = ''
-}
-
-/* ───────────────── Realtime ───────────────── */
 function onReqCreated(doc) {
   if (!doc?.materialRequired) return
   upsertRealtimeRow(doc)
@@ -339,19 +440,20 @@ function onAvailabilityChanged() {
 
   if (availabilityRefreshTimer) clearTimeout(availabilityRefreshTimer)
   availabilityRefreshTimer = setTimeout(() => {
-    loadRows({ silent: true })
+    fetchRows({ silent: true })
   }, 250)
 }
 
 /* ───────────────── Modal UX ───────────────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
-  if (on) document.body.classList.add('overflow-hidden')
-  else document.body.classList.remove('overflow-hidden')
+  const b = document.body
+  if (on) b.classList.add('overflow-hidden')
+  else b.classList.remove('overflow-hidden')
 }
 
 watch([detailOpen, decisionOpen], ([det, dec]) => {
-  lockBodyScroll(det || dec)
+  lockBodyScroll(!!(det || dec))
 })
 
 function onKeydown(e) {
@@ -363,6 +465,7 @@ function onKeydown(e) {
 /* ───────────────── Lifecycle ───────────────── */
 onMounted(async () => {
   updateIsMobile()
+
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateIsMobile)
     window.addEventListener('keydown', onKeydown)
@@ -372,7 +475,7 @@ onMounted(async () => {
     await subscribeRoleIfNeeded('MATERIAL_ADMIN')
   } catch {}
 
-  await loadRows()
+  await fetchRows()
 
   socket.on('bookingroom:req:created', onReqCreated)
   socket.on('bookingroom:req:updated', onReqUpdated)
@@ -402,14 +505,10 @@ onBeforeUnmount(() => {
   <div class="ui-page">
     <div class="ui-container py-2">
       <div class="ui-card overflow-hidden">
-        <!-- Hero -->
+        <!-- Header -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div class="min-w-[220px]">
-              <div class="text-sm font-extrabold">Material Inbox</div>
-            </div>
-
-            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[180px_260px_auto] md:items-end">
+            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[160px_220px_150px_150px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Scope</label>
                 <select
@@ -417,8 +516,8 @@ onBeforeUnmount(() => {
                   class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
                   @change="onScopeChange"
                 >
+                  <option value="ALL">All Requests</option>
                   <option value="ACTIONABLE">Actionable</option>
-                  <option value="ALL">All</option>
                 </select>
               </div>
 
@@ -427,18 +526,36 @@ onBeforeUnmount(() => {
                 <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
                   <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
                   <input
-                    v-model="search"
+                    v-model="q"
                     type="text"
-                    placeholder="Requester, meeting, room, material..."
+                    placeholder="Employee, title, material..."
                     class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
               </div>
 
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+                <input
+                  v-model="dateFrom"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
+              </div>
+
+              <div>
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                />
+              </div>
+
               <div class="flex gap-2">
                 <button
-                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
                   type="button"
+                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
                   :disabled="loading"
                   @click="refreshAll"
                 >
@@ -447,9 +564,18 @@ onBeforeUnmount(() => {
                 </button>
 
                 <button
-                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
                   type="button"
-                  @click="resetFilters(); loadRows()"
+                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
+                  @click="exportExcel"
+                >
+                  <i class="fa-solid fa-file-excel text-[11px]" />
+                  Export
+                </button>
+
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
+                  @click="resetSearch(); fetchRows()"
                 >
                   <i class="fa-solid fa-broom text-[11px]" />
                   Clear
@@ -460,7 +586,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Body -->
-        <div class="p-3 space-y-3">
+        <div class="p-3">
           <div v-if="loading && !processedRows.length" class="space-y-2">
             <div class="ui-skeleton h-9 w-full" />
             <div v-for="i in 3" :key="'sk-' + i" class="ui-skeleton h-14 w-full" />
@@ -483,27 +609,18 @@ onBeforeUnmount(() => {
                       {{ fmtDateTime(row.createdAt) }}
                     </div>
 
-                    <div class="mt-1 text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                      {{ row.meetingTitle || '—' }}
-                    </div>
-
-                    <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-                      {{ row.employee?.name || row.employeeId || '—' }}
-                    </div>
-
-                    <div class="mt-2 flex flex-wrap items-center gap-2">
-                      <span :class="materialStatusClass(row.materialStatus)">
-                        {{ row.materialStatus || '—' }}
-                      </span>
-                      <span :class="overallStatusClass(row.overallStatus)">
-                        {{ row.overallStatus || '—' }}
+                    <div class="mt-1 flex flex-wrap items-center gap-2">
+                      <span :class="typeBadgeUiClass(row)">
+                        {{ bookingTypeLabel(row) }}
                       </span>
                     </div>
                   </div>
 
-                  <button class="ui-btn ui-btn-xs ui-btn-soft" type="button" @click="openDetail(row)">
-                    Detail
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <button class="ui-btn ui-btn-xs ui-btn-soft" type="button" @click="openDetail(row)">
+                      Detail
+                    </button>
+                  </div>
                 </div>
 
                 <div class="mt-2 ui-divider" />
@@ -521,32 +638,56 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="mt-2 ui-frame p-2">
-                  <div class="ui-label !mb-1">Room</div>
-                  <div class="text-[11px] text-slate-700 dark:text-slate-200">
-                    {{ row.roomName || row.roomCode || '—' }}
+                  <div class="ui-label !mb-1">Requester</div>
+                  <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                    {{ row.employee?.name || '—' }}
                   </div>
-                  <div class="mt-1">
-                    <span :class="roomStatusClass(row.roomStatus)">{{ row.roomStatus || '—' }}</span>
-                  </div>
-                </div>
-
-                <div class="mt-2 ui-frame p-2">
-                  <div class="ui-label !mb-1">Materials</div>
-                  <div class="text-[11px] text-slate-700 dark:text-slate-200">
-                    {{ materialItemsToText(row.materials) || '—' }}
+                  <div class="text-[10px] text-slate-500 dark:text-slate-400">
+                    {{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}
                   </div>
                 </div>
 
                 <div class="mt-2 ui-frame p-2">
-                  <div class="ui-label !mb-1">Purpose</div>
+                  <div class="ui-label !mb-1">Meeting Title</div>
                   <div class="text-[11px] text-slate-700 dark:text-slate-200">
-                    {{ row.purpose || '—' }}
+                    {{ row.meetingTitle || '—' }}
+                  </div>
+                </div>
+
+                <div class="mt-2 ui-frame p-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="ui-label !mb-1">Room</div>
+                      <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                        {{ row.roomName || '—' }}
+                      </div>
+                      <div class="text-[10px] text-slate-500 dark:text-slate-400">
+                        {{ row.roomCode || '—' }}
+                      </div>
+                    </div>
+                    <span :class="roomStatusClass(row.roomStatus)">
+                      {{ row.roomStatus || '—' }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mt-2 ui-frame p-2">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="ui-label !mb-1">Material</div>
+                      <div class="text-[11px] text-slate-700 dark:text-slate-200">
+                        {{ row.materialRequired ? materialItemsToText(row.materials) : 'Not Required' }}
+                      </div>
+                    </div>
+                    <span :class="materialStatusClass(row.materialStatus)">
+                      {{ row.materialStatus || '—' }}
+                    </span>
                   </div>
                 </div>
 
                 <div class="mt-3 flex justify-end gap-2">
                   <button
-                    v-if="isActionable(row)"
+                    v-if="isPendingMaterial(row)"
                     type="button"
                     class="ui-btn ui-btn-primary ui-btn-xs"
                     @click="openDecision(row, 'APPROVED')"
@@ -555,7 +696,7 @@ onBeforeUnmount(() => {
                   </button>
 
                   <button
-                    v-if="isActionable(row)"
+                    v-if="isPendingMaterial(row)"
                     type="button"
                     class="ui-btn ui-btn-rose ui-btn-xs"
                     @click="openDecision(row, 'REJECTED')"
@@ -574,12 +715,12 @@ onBeforeUnmount(() => {
                     <th class="ui-th">Created</th>
                     <th class="ui-th">Booking Date</th>
                     <th class="ui-th">Time</th>
-                    <th class="ui-th">Requester</th>
-                    <th class="ui-th">Meeting</th>
+                    <th class="ui-th">Employee</th>
+                    <th class="ui-th">Title</th>
+                    <th class="ui-th">Type</th>
                     <th class="ui-th">Room</th>
-                    <th class="ui-th">Materials</th>
-                    <th class="ui-th">Material Status</th>
-                    <th class="ui-th">Overall</th>
+                    <th class="ui-th">Material</th>
+                    <th class="ui-th">Status</th>
                     <th class="ui-th text-center">Actions</th>
                   </tr>
                 </thead>
@@ -606,89 +747,91 @@ onBeforeUnmount(() => {
 
                     <td class="ui-td">
                       <div class="min-w-0">
-                        <div class="truncate font-semibold text-slate-900 dark:text-slate-100">
-                          {{ row.employee?.name || row.employeeId || '—' }}
+                        <div class="truncate font-semibold" :title="row.employee?.name || '—'">
+                          {{ row.employee?.name || '—' }}
                         </div>
                         <div class="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
-                          {{ row.employeeId || '—' }}
-                          <span v-if="row.employee?.department"> • {{ row.employee.department }}</span>
+                          {{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}
                         </div>
                       </div>
                     </td>
 
                     <td class="ui-td">
                       <div class="min-w-0">
-                        <div class="truncate font-semibold text-slate-900 dark:text-slate-100">
+                        <div class="truncate font-semibold" :title="row.meetingTitle || '—'">
                           {{ row.meetingTitle || '—' }}
                         </div>
-                        <div class="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
-                          {{ row.purpose || '—' }}
-                        </div>
                       </div>
                     </td>
 
                     <td class="ui-td">
-                      <div class="min-w-0">
-                        <div class="truncate font-semibold text-slate-900 dark:text-slate-100">
-                          {{ row.roomName || row.roomCode || '—' }}
-                        </div>
-                        <div class="mt-1">
-                          <span :class="roomStatusClass(row.roomStatus)">{{ row.roomStatus || '—' }}</span>
-                        </div>
-                      </div>
-                    </td>
-
-                    <td class="ui-td">
-                      <div class="truncate" :title="materialItemsToText(row.materials)">
-                        {{ materialItemsToText(row.materials) || '—' }}
-                      </div>
-                    </td>
-
-                    <td class="ui-td">
-                      <span :class="materialStatusClass(row.materialStatus)">
-                        {{ row.materialStatus || '—' }}
-                      </span>
-                    </td>
-
-                    <td class="ui-td">
-                      <span :class="overallStatusClass(row.overallStatus)">
-                        {{ row.overallStatus || '—' }}
+                      <span :class="typeBadgeUiClass(row)">
+                        {{ bookingTypeLabel(row) }}
                       </span>
                     </td>
 
                     <td class="ui-td text-center">
-                      <div class="flex items-center justify-center gap-2">
-                        <button
-                          type="button"
-                          class="ui-btn ui-btn-soft ui-btn-xs"
-                          @click="openDetail(row)"
-                          title="View detail"
+                      <div class="flex flex-col items-center gap-1">
+                        <span class="truncate text-center">
+                          {{ row.roomName || '—' }}
+                        </span>
+                        <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                          {{ row.roomCode || '—' }}
+                        </span>
+                        <span :class="roomStatusClass(row.roomStatus)">
+                          {{ row.roomStatus || '—' }}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td class="ui-td text-center">
+                      <div class="flex flex-col items-center gap-1">
+                        <span
+                          class="truncate text-center"
+                          :title="row.materialRequired ? materialItemsToText(row.materials) : 'Not Required'"
                         >
+                          {{ row.materialRequired ? materialItemsToText(row.materials) : 'Not Required' }}
+                        </span>
+                        <span :class="materialStatusClass(row.materialStatus)">
+                          {{ row.materialStatus || '—' }}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td class="ui-td">
+                      <div class="flex flex-col items-start gap-1">
+                        <span :class="overallStatusClass(row.overallStatus)">
+                          {{ row.overallStatus || '—' }}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td class="ui-td text-center">
+                      <div class="flex items-center justify-center gap-2">
+                        <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(row)">
                           <i class="fa-solid fa-eye text-[11px]" />
                         </button>
 
                         <button
-                          v-if="isActionable(row)"
+                          v-if="isPendingMaterial(row)"
                           type="button"
                           class="ui-btn ui-btn-primary ui-btn-xs"
                           @click="openDecision(row, 'APPROVED')"
-                          title="Approve"
                         >
                           Approve
                         </button>
 
                         <button
-                          v-if="isActionable(row)"
+                          v-if="isPendingMaterial(row)"
                           type="button"
                           class="ui-btn ui-btn-rose ui-btn-xs"
                           @click="openDecision(row, 'REJECTED')"
-                          title="Reject"
                         >
                           Reject
                         </button>
 
                         <span
-                          v-if="!isActionable(row)"
+                          v-if="!isPendingMaterial(row)"
                           class="text-[11px] text-slate-400 dark:text-slate-500"
                         >
                           —
@@ -703,24 +846,32 @@ onBeforeUnmount(() => {
             <!-- Pagination -->
             <div
               v-if="processedRows.length"
-              class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600
+              class="mt-3 flex flex-col gap-1.5 border-t border-slate-200 pt-2 text-[11px] text-slate-600
                      dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
             >
               <div class="flex items-center gap-2">
-                <select v-model="perPage" class="ui-select !py-1.5 !text-[11px] !rounded-full">
+                <select
+                  v-model="perPage"
+                  class="ui-select !h-8 !min-h-8 !w-[78px] !py-0 !pl-2.5 !pr-7 !text-[11px] !rounded-full"
+                >
                   <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
                 </select>
-
-                <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                  {{ processedRows.length }} request(s)
-                </span>
               </div>
 
               <div class="flex items-center justify-end gap-1">
                 <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
-                <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
+                <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">
+                  Prev
+                </button>
                 <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
-                <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
+                <button
+                  type="button"
+                  class="ui-pagebtn"
+                  :disabled="page >= pageCount"
+                  @click="page = Math.min(pageCount, page + 1)"
+                >
+                  Next
+                </button>
                 <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
               </div>
             </div>
@@ -729,17 +880,13 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Detail Modal -->
-      <div
-        v-if="detailOpen && detailRow"
-        class="ui-modal-backdrop"
-        @click.self="closeDetail"
-      >
+      <div v-if="detailOpen && detailRow" class="ui-modal-backdrop" @click.self="closeDetail">
         <div class="ui-modal ui-modal-xl p-0 overflow-hidden">
           <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
             <div class="min-w-0">
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Material Request Detail</div>
               <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                {{ detailRow.meetingTitle || 'Booking Detail' }}
+                Created: {{ fmtDateTime(detailRow.createdAt) }}
               </div>
             </div>
 
@@ -749,16 +896,9 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="max-h-[calc(100vh-140px)] overflow-auto p-4 space-y-3">
+          <div class="p-4 space-y-3 max-h-[calc(100vh-140px)] overflow-auto">
             <div class="ui-frame p-3">
               <div class="grid gap-3 md:grid-cols-3">
-                <div>
-                  <div class="ui-label">Material Status</div>
-                  <span :class="materialStatusClass(detailRow.materialStatus)">
-                    {{ detailRow.materialStatus || '—' }}
-                  </span>
-                </div>
-
                 <div>
                   <div class="ui-label">Overall Status</div>
                   <span :class="overallStatusClass(detailRow.overallStatus)">
@@ -766,97 +906,179 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
 
+                <div>
+                  <div class="ui-label">Request Type</div>
+                  <span :class="typeBadgeUiClass(detailRow)">
+                    {{ bookingTypeLabel(detailRow) }}
+                  </span>
+                </div>
+
                 <div class="md:text-right">
-                  <div class="ui-label">Created At</div>
+                  <div class="ui-label">Booking Date</div>
                   <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                    {{ fmtDateTime(detailRow.createdAt) }}
+                    {{ fmtDate(detailRow.bookingDate) }}
                   </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid gap-3 lg:grid-cols-2">
-              <div class="ui-card p-3">
-                <div class="ui-section-title">Requester Information</div>
-                <div class="mt-2 grid gap-3 sm:grid-cols-2 text-[12px]">
-                  <div>
-                    <div class="ui-label">Requester</div>
-                    <div class="font-extrabold">{{ detailRow.employee?.name || '—' }}</div>
-                  </div>
-                  <div>
-                    <div class="ui-label">Employee ID</div>
-                    <div class="font-extrabold">{{ detailRow.employeeId || '—' }}</div>
-                  </div>
-                  <div>
-                    <div class="ui-label">Department</div>
-                    <div class="font-extrabold">{{ cleanText(detailRow.employee?.department) }}</div>
-                  </div>
-                  <div>
-                    <div class="ui-label">Position</div>
-                    <div class="font-extrabold">{{ cleanText(detailRow.employee?.position) }}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div class="ui-card p-3">
-                <div class="ui-section-title">Booking Information</div>
-                <div class="mt-2 grid gap-3 sm:grid-cols-2 text-[12px]">
-                  <div>
-                    <div class="ui-label">Date</div>
-                    <div class="font-extrabold">{{ fmtDate(detailRow.bookingDate) }}</div>
-                  </div>
-                  <div>
-                    <div class="ui-label">Time</div>
-                    <div class="font-extrabold">{{ fmtTime(detailRow.timeStart) }} - {{ fmtTime(detailRow.timeEnd) }}</div>
-                  </div>
-                  <div class="sm:col-span-2">
-                    <div class="ui-label">Meeting Title</div>
-                    <div class="font-extrabold">{{ detailRow.meetingTitle || '—' }}</div>
-                  </div>
-                  <div>
-                    <div class="ui-label">Room</div>
-                    <div class="font-extrabold">{{ detailRow.roomName || detailRow.roomCode || '—' }}</div>
-                  </div>
-                  <div>
-                    <div class="ui-label">Participants</div>
-                    <div class="font-extrabold">{{ detailRow.participantEstimate || 1 }}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="grid gap-3 lg:grid-cols-2">
-              <div class="ui-card p-3">
-                <div class="ui-section-title">Purpose</div>
-                <div class="mt-2 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
-                  {{ detailRow.purpose || '—' }}
-                </div>
-              </div>
-
-              <div class="ui-card p-3">
-                <div class="ui-section-title">Requirement Note</div>
-                <div class="mt-2 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
-                  {{ detailRow.requirementNote || '—' }}
                 </div>
               </div>
             </div>
 
             <div class="ui-card p-3">
-              <div class="flex items-center justify-between gap-2">
-                <div class="ui-section-title">Material Items</div>
-                <span :class="materialStatusClass(detailRow.materialStatus)">
-                  {{ detailRow.materialStatus || '—' }}
-                </span>
+              <div class="ui-section-title">Requester Information</div>
+              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
+                <div>
+                  <div class="ui-label">Name</div>
+                  <div class="font-extrabold">{{ cleanText(detailRow.employee?.name) }}</div>
+                </div>
+                <div>
+                  <div class="ui-label">Employee ID</div>
+                  <div class="font-extrabold">{{ cleanText(detailRow.employeeId) }}</div>
+                </div>
+                <div>
+                  <div class="ui-label">Department</div>
+                  <div>{{ cleanText(detailRow.employee?.department) }}</div>
+                </div>
+                <div>
+                  <div class="ui-label">Contact</div>
+                  <div>{{ cleanText(detailRow.employee?.contactNumber) }}</div>
+                </div>
+                <div class="md:col-span-2">
+                  <div class="ui-label">Submitted Via</div>
+                  <div>{{ cleanText(detailRow.submittedVia) }}</div>
+                </div>
               </div>
+            </div>
 
-              <div
-                v-if="!arr(detailRow.materials).length"
-                class="mt-2 ui-frame p-4 text-sm text-slate-500 dark:text-slate-400"
-              >
-                No materials requested.
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Meeting Info</div>
+              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
+                <div>
+                  <div class="ui-label">Meeting Title</div>
+                  <div class="font-extrabold">{{ cleanText(detailRow.meetingTitle) }}</div>
+                </div>
+                <div>
+                  <div class="ui-label">Time</div>
+                  <div class="font-extrabold">
+                    {{ fmtTime(detailRow.timeStart) }} - {{ fmtTime(detailRow.timeEnd) }}
+                  </div>
+                </div>
+                <div>
+                  <div class="ui-label">Participant Estimate</div>
+                  <div>{{ detailRow.participantEstimate ?? '—' }}</div>
+                </div>
+                <div>
+                  <div class="ui-label">Updated At</div>
+                  <div>{{ fmtDateTime(detailRow.updatedAt) }}</div>
+                </div>
               </div>
+            </div>
 
-              <div v-else class="mt-2 overflow-x-auto">
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Resource Status</div>
+              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
+                <div class="ui-frame p-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="font-extrabold">Room</div>
+                    <span :class="roomStatusClass(detailRow.roomStatus)">
+                      {{ detailRow.roomStatus || '—' }}
+                    </span>
+                  </div>
+
+                  <div class="mt-2 text-slate-700 dark:text-slate-200">
+                    {{ detailRow.roomRequired ? cleanText(detailRow.roomName) : 'Not Required' }}
+                  </div>
+
+                  <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                    Code: {{ cleanText(detailRow.roomCode) }}
+                  </div>
+
+                  <div class="mt-3 grid gap-2 sm:grid-cols-2 text-[12px]">
+                    <div>
+                      <div class="ui-label">Decision By</div>
+                      <div>{{ cleanText(detailRow.roomApproval?.byName || detailRow.roomApproval?.byLoginId) }}</div>
+                    </div>
+                    <div>
+                      <div class="ui-label">Decision At</div>
+                      <div>{{ fmtDateTime(detailRow.roomApproval?.decidedAt) }}</div>
+                    </div>
+                    <div class="sm:col-span-2">
+                      <div class="ui-label">Note</div>
+                      <div class="whitespace-pre-wrap text-[11px] text-slate-500 dark:text-slate-400">
+                        {{ cleanText(detailRow.roomApproval?.note) }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="ui-frame p-3">
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="font-extrabold">Material</div>
+                    <span :class="materialStatusClass(detailRow.materialStatus)">
+                      {{ detailRow.materialStatus || '—' }}
+                    </span>
+                  </div>
+
+                  <div class="mt-2 text-slate-700 dark:text-slate-200">
+                    {{ detailRow.materialRequired ? materialItemsToText(detailRow.materials) : 'Not Required' }}
+                  </div>
+
+                  <div class="mt-3 grid gap-2 sm:grid-cols-2 text-[12px]">
+                    <div>
+                      <div class="ui-label">Decision</div>
+                      <div>{{ cleanText(detailRow.materialApproval?.decision) }}</div>
+                    </div>
+                    <div>
+                      <div class="ui-label">Decision By</div>
+                      <div>{{ cleanText(detailRow.materialApproval?.byName || detailRow.materialApproval?.byLoginId) }}</div>
+                    </div>
+                    <div>
+                      <div class="ui-label">Decision At</div>
+                      <div>{{ fmtDateTime(detailRow.materialApproval?.decidedAt) }}</div>
+                    </div>
+                    <div class="sm:col-span-2">
+                      <div class="ui-label">Note</div>
+                      <div class="whitespace-pre-wrap text-[11px] text-slate-500 dark:text-slate-400">
+                        {{ cleanText(detailRow.materialApproval?.note) }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Requirement Note</div>
+              <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
+                {{ cleanText(detailRow.requirementNote) }}
+              </div>
+            </div>
+
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Final Request Status</div>
+              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
+                <div>
+                  <div class="ui-label">Overall</div>
+                  <span :class="overallStatusClass(detailRow.overallStatus)">
+                    {{ detailRow.overallStatus || '—' }}
+                  </span>
+                </div>
+
+                <div>
+                  <div class="ui-label">Cancel Reason</div>
+                  <div>{{ cleanText(detailRow.cancelReason) }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Purpose</div>
+              <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
+                {{ cleanText(detailRow.purpose) }}
+              </div>
+            </div>
+
+            <div v-if="arr(detailRow.materials).length" class="ui-card p-3">
+              <div class="ui-section-title">Material Items</div>
+              <div class="mt-2 overflow-x-auto">
                 <table class="min-w-full text-sm">
                   <thead class="bg-slate-50 dark:bg-slate-800/70">
                     <tr class="text-left text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
@@ -886,54 +1108,25 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div
-              v-if="detailRow.materialApproval?.decision || detailRow.materialApproval?.byName || detailRow.materialApproval?.byLoginId"
-              class="ui-card p-3"
-            >
-              <div class="ui-section-title">Decision Info</div>
-              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
-                <div>
-                  <div class="ui-label">Decision By</div>
-                  <div class="font-extrabold">
-                    {{ detailRow.materialApproval?.byName || detailRow.materialApproval?.byLoginId || '—' }}
-                  </div>
-                </div>
-                <div>
-                  <div class="ui-label">Decided At</div>
-                  <div class="font-extrabold">
-                    {{ fmtDateTime(detailRow.materialApproval?.decidedAt) }}
-                  </div>
-                </div>
-                <div class="md:col-span-2">
-                  <div class="ui-label">Note</div>
-                  <div class="font-extrabold whitespace-pre-wrap">
-                    {{ detailRow.materialApproval?.note || '—' }}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="flex items-center justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
-              <button type="button" class="ui-btn ui-btn-ghost" @click="closeDetail">
-                Close
-              </button>
+            <div class="flex justify-end gap-2 pt-1">
+              <button type="button" class="ui-btn ui-btn-ghost" @click="closeDetail">Close</button>
 
               <button
-                v-if="isActionable(detailRow)"
+                v-if="isPendingMaterial(detailRow)"
                 type="button"
                 class="ui-btn ui-btn-primary"
                 @click="openDecision(detailRow, 'APPROVED')"
               >
-                Approve
+                Approve Material
               </button>
 
               <button
-                v-if="isActionable(detailRow)"
+                v-if="isPendingMaterial(detailRow)"
                 type="button"
                 class="ui-btn ui-btn-rose"
                 @click="openDecision(detailRow, 'REJECTED')"
               >
-                Reject
+                Reject Material
               </button>
             </div>
           </div>
@@ -941,110 +1134,95 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Decision Modal -->
-      <div
-        v-if="decisionOpen && decisionRow"
-        class="ui-modal-backdrop"
-        @click.self="closeDecision"
-      >
+      <div v-if="decisionOpen && decisionRow" class="ui-modal-backdrop" @click.self="closeDecision">
         <div class="ui-modal ui-modal-md p-0 overflow-hidden">
           <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-            <div class="flex items-center gap-3">
-              <div
-                class="grid h-10 w-10 shrink-0 place-items-center rounded-2xl text-white"
-                :class="up(decisionMode) === 'APPROVED' ? 'bg-emerald-500' : 'bg-rose-500'"
-              >
-                <i :class="up(decisionMode) === 'APPROVED' ? 'fa-solid fa-check' : 'fa-solid fa-xmark'" />
+            <div class="min-w-0">
+              <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">
+                {{ decisionType === 'REJECTED' ? 'Reject Material Request' : 'Approve Material Request' }}
               </div>
-
-              <div class="min-w-0">
-                <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">
-                  {{ up(decisionMode) === 'APPROVED' ? 'Approve Request' : 'Reject Request' }}
-                </div>
-                <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                  {{ decisionRow.meetingTitle || '—' }}
-                </div>
+              <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                {{ decisionRow.meetingTitle || '—' }}
               </div>
             </div>
 
-            <button
-              class="ui-btn ui-btn-ghost ui-btn-xs"
-              type="button"
-              :disabled="acting"
-              @click="closeDecision"
-            >
+            <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeDecision">
               <i class="fa-solid fa-xmark text-[11px]" />
             </button>
           </div>
 
           <div class="p-4 space-y-3">
             <div class="ui-frame p-3">
-              <div class="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-                Request Summary
-              </div>
+              <div class="grid gap-3 sm:grid-cols-2 text-[12px]">
+                <div>
+                  <div class="ui-label">Employee</div>
+                  <div class="font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ decisionRow.employee?.name || '—' }} ({{ decisionRow.employeeId || '—' }})
+                  </div>
+                </div>
 
-              <div class="mt-2 space-y-1 text-[12px]">
-                <div><span class="font-semibold text-slate-700 dark:text-slate-200">Requester:</span> <span class="text-slate-900 dark:text-slate-100">{{ decisionRow.employee?.name || decisionRow.employeeId || '—' }}</span></div>
-                <div><span class="font-semibold text-slate-700 dark:text-slate-200">Meeting:</span> <span class="text-slate-900 dark:text-slate-100">{{ decisionRow.meetingTitle || '—' }}</span></div>
-                <div><span class="font-semibold text-slate-700 dark:text-slate-200">Date:</span> <span class="text-slate-900 dark:text-slate-100">{{ fmtDate(decisionRow.bookingDate) }}</span></div>
-                <div><span class="font-semibold text-slate-700 dark:text-slate-200">Time:</span> <span class="text-slate-900 dark:text-slate-100">{{ fmtTime(decisionRow.timeStart) }} - {{ fmtTime(decisionRow.timeEnd) }}</span></div>
-                <div><span class="font-semibold text-slate-700 dark:text-slate-200">Materials:</span> <span class="text-slate-900 dark:text-slate-100">{{ materialItemsToText(decisionRow.materials) || '—' }}</span></div>
+                <div>
+                  <div class="ui-label">Booking Schedule</div>
+                  <div class="font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ fmtDate(decisionRow.bookingDate) }} • {{ fmtTime(decisionRow.timeStart) }} - {{ fmtTime(decisionRow.timeEnd) }}
+                  </div>
+                </div>
+
+                <div>
+                  <div class="ui-label">Materials Requested</div>
+                  <div class="font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ materialItemsToText(decisionRow.materials) }}
+                  </div>
+                </div>
+
+                <div>
+                  <div class="ui-label">Current Status</div>
+                  <span :class="materialStatusClass(decisionRow.materialStatus)">
+                    {{ decisionRow.materialStatus || '—' }}
+                  </span>
+                </div>
               </div>
             </div>
 
             <div class="ui-card p-3">
-              <div class="ui-label">Decision</div>
-              <div class="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  class="ui-chip"
-                  :class="up(decisionMode) === 'APPROVED' ? 'ui-chip-on !border-emerald-500/50 !bg-emerald-500/10 !text-emerald-600 dark:!text-emerald-300' : ''"
-                  @click="decisionMode = 'APPROVED'"
-                >
-                  <i class="fa-solid fa-check" />
-                  Approve
-                </button>
-
-                <button
-                  type="button"
-                  class="ui-chip"
-                  :class="up(decisionMode) === 'REJECTED' ? 'ui-chip-on !border-rose-500/50 !bg-rose-500/10 !text-rose-600 dark:!text-rose-300' : ''"
-                  @click="decisionMode = 'REJECTED'"
-                >
-                  <i class="fa-solid fa-xmark" />
-                  Reject
-                </button>
-              </div>
-
               <div class="mt-3">
-                <label class="ui-label">Note</label>
+                <label class="ui-label">
+                  {{ decisionType === 'REJECTED' ? 'Reject Reason *' : 'Decision Note (Optional)' }}
+                </label>
                 <textarea
                   v-model="decisionNote"
-                  rows="4"
-                  :placeholder="up(decisionMode) === 'APPROVED' ? 'Optional note...' : 'Reason for rejection...'"
+                  rows="3"
                   class="ui-textarea"
+                  :class="decisionType === 'REJECTED' && !decisionNote.trim()
+                    ? '!border-rose-300 !ring-1 !ring-rose-200 dark:!border-rose-700'
+                    : ''"
+                  :placeholder="decisionType === 'REJECTED'
+                    ? 'Please enter reject reason...'
+                    : 'Add any remarks for the requester...'"
                 />
               </div>
             </div>
 
             <div class="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                class="ui-btn ui-btn-ghost"
-                :disabled="acting"
-                @click="closeDecision"
-              >
+              <button type="button" class="ui-btn ui-btn-ghost" :disabled="submitting" @click="closeDecision">
                 Cancel
               </button>
 
               <button
                 type="button"
                 class="ui-btn"
-                :class="up(decisionMode) === 'APPROVED' ? 'ui-btn-primary' : 'ui-btn-rose'"
-                :disabled="!canActOnDecision"
+                :class="decisionType === 'REJECTED' ? 'ui-btn-rose' : 'ui-btn-primary'"
+                :disabled="!canSubmitDecision"
                 @click="submitDecision"
               >
-                <i v-if="acting" class="fa-solid fa-spinner animate-spin text-[11px]" />
-                {{ up(decisionMode) === 'APPROVED' ? 'Approve Request' : 'Reject Request' }}
+                <i
+                  :class="submitting
+                    ? 'fa-solid fa-spinner animate-spin'
+                    : decisionType === 'REJECTED'
+                      ? 'fa-solid fa-xmark'
+                      : 'fa-solid fa-check'"
+                />
+                {{ decisionType === 'REJECTED' ? 'Confirm Reject' : 'Confirm Approve' }}
               </button>
             </div>
           </div>

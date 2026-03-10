@@ -1,3 +1,4 @@
+//backend/models/bookingRoom/BookingRoom.js
 const mongoose = require('mongoose')
 
 function safeStr(v) {

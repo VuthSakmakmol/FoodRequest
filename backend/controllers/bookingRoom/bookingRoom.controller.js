@@ -510,6 +510,125 @@ async function assertMaterialApprovalConflict({ bookingDate, timeStart, timeEnd,
   }
 }
 
+async function assertRoomMasterCanDeactivate({ roomDoc, excludePast = true }) {
+  if (!roomDoc?._id) return
+
+  const query = {
+    roomRequired: true,
+    roomStatus: 'APPROVED',
+    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
+    $or: [
+      { roomId: roomDoc._id },
+      { roomCode: up(roomDoc.code) },
+      { roomName: s(roomDoc.name) },
+    ],
+  }
+
+  if (excludePast) {
+    query.bookingDate = { $gte: nowPPDate() }
+  }
+
+  const exists = await BookingRoom.findOne(query)
+    .select('_id bookingDate timeStart timeEnd roomName roomCode')
+    .lean()
+
+  if (exists) {
+    throw createError(
+      409,
+      `Cannot deactivate room "${s(roomDoc.name) || up(roomDoc.code)}" because it is used by approved booking ${s(exists.bookingDate)} ${s(exists.timeStart)}-${s(exists.timeEnd)}.`
+    )
+  }
+}
+
+async function assertMaterialMasterCanDeactivate({ materialDoc, excludePast = true }) {
+  if (!materialDoc?._id) return
+
+  const query = {
+    materialRequired: true,
+    materialStatus: 'APPROVED',
+    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
+    'materials.materialCode': up(materialDoc.code),
+  }
+
+  if (excludePast) {
+    query.bookingDate = { $gte: nowPPDate() }
+  }
+
+  const exists = await BookingRoom.findOne(query)
+    .select('_id bookingDate timeStart timeEnd materials')
+    .lean()
+
+  if (exists) {
+    throw createError(
+      409,
+      `Cannot deactivate material "${s(materialDoc.name) || up(materialDoc.code)}" because it is used by approved booking ${s(exists.bookingDate)} ${s(exists.timeStart)}-${s(exists.timeEnd)}.`
+    )
+  }
+}
+
+async function assertMaterialMasterQtyCanShrink({ materialDoc, nextTotalQty }) {
+  const code = up(materialDoc?.code)
+  if (!code) return
+
+  const rows = await BookingRoom.find({
+    bookingDate: { $gte: nowPPDate() },
+    materialRequired: true,
+    materialStatus: 'APPROVED',
+    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
+    'materials.materialCode': code,
+  })
+    .select('bookingDate timeStart timeEnd materials')
+    .lean()
+
+  if (!rows.length) return
+
+  // Build sweep-line events per date/code to find max simultaneous usage.
+  const byDate = new Map()
+
+  for (const row of rows) {
+    const date = s(row.bookingDate)
+    if (!date) continue
+
+    let qty = 0
+    for (const item of arr(row.materials)) {
+      if (up(item?.materialCode) === code) {
+        qty += Math.max(0, Number(item?.qty || 0))
+      }
+    }
+    if (qty <= 0) continue
+
+    if (!byDate.has(date)) byDate.set(date, [])
+    byDate.get(date).push(
+      { t: toMinutes(row.timeStart), delta: +qty, kind: 'start' },
+      { t: toMinutes(row.timeEnd), delta: -qty, kind: 'end' }
+    )
+  }
+
+  let maxUsed = 0
+
+  for (const events of byDate.values()) {
+    // End first, then start, so 09:00-10:00 and 10:00-11:00 do not overlap.
+    events.sort((a, b) => {
+      if (a.t !== b.t) return a.t - b.t
+      if (a.kind === b.kind) return 0
+      return a.kind === 'end' ? -1 : 1
+    })
+
+    let running = 0
+    for (const ev of events) {
+      running += ev.delta
+      if (running > maxUsed) maxUsed = running
+    }
+  }
+
+  if (Number(nextTotalQty) < maxUsed) {
+    throw createError(
+      409,
+      `Cannot reduce material "${s(materialDoc?.name) || code}" stock to ${Number(nextTotalQty)} because approved future bookings require up to ${maxUsed} at the same time.`
+    )
+  }
+}
+
 function buildAdminFilter({
   date,
   dateFrom,
@@ -593,7 +712,7 @@ async function listActiveMaterials(_req, res, next) {
 
 async function getAvailability(req, res, next) {
   try {
-    const { date, timeStart, timeEnd } = req.query || {}
+    const { date, timeStart, timeEnd, excludeId = '' } = req.query || {}
 
     if (!isValidDate(date)) throw createError(400, 'Invalid date (YYYY-MM-DD).')
     if (!isValidTime(timeStart) || !isValidTime(timeEnd)) {
@@ -606,17 +725,23 @@ async function getAvailability(req, res, next) {
     const startMin = toMinutes(timeStart)
     const endMin = toMinutes(timeEnd)
 
+    const bookingQuery = {
+      bookingDate: s(date),
+      overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
+      $or: [
+        { roomStatus: 'APPROVED' },
+        { materialStatus: 'APPROVED' },
+      ],
+    }
+
+    if (s(excludeId)) {
+      bookingQuery._id = { $ne: s(excludeId) }
+    }
+
     const [rooms, materials, bookings] = await Promise.all([
       BookingRoomResource.find({ isActive: true }).sort({ name: 1 }).lean(),
       BookingRoomMaterial.find({ isActive: true }).sort({ name: 1 }).lean(),
-      BookingRoom.find({
-        bookingDate: s(date),
-        overallStatus: { $nin: ['CANCELLED', 'REJECTED'] },
-        $or: [
-          { roomStatus: 'APPROVED' },
-          { materialStatus: 'APPROVED' },
-        ],
-      })
+      BookingRoom.find(bookingQuery)
         .select('timeStart timeEnd roomRequired roomCode roomName roomStatus materialRequired materials materialStatus')
         .lean(),
     ])
@@ -634,6 +759,7 @@ async function getAvailability(req, res, next) {
     const usedMaterialMap = {}
     for (const row of overlapRows) {
       if (!(row.materialRequired && up(row.materialStatus) === 'APPROVED')) continue
+
       for (const item of arr(row.materials)) {
         const code = up(item?.materialCode)
         const qty = Number(item?.qty || 0)
@@ -646,13 +772,17 @@ async function getAvailability(req, res, next) {
       date: s(date),
       timeStart: s(timeStart),
       timeEnd: s(timeEnd),
-      rooms: rooms.map((r) => ({
-        _id: r._id,
-        code: s(r.code),
-        name: s(r.name),
-        isAvailable: !busyRoomCodes.has(up(r.code)),
-        status: busyRoomCodes.has(up(r.code)) ? 'BOOKED' : 'AVAILABLE',
-      })),
+      excludeId: s(excludeId),
+      rooms: rooms.map((r) => {
+        const blocked = busyRoomCodes.has(up(r.code))
+        return {
+          _id: r._id,
+          code: s(r.code),
+          name: s(r.name),
+          isAvailable: !blocked,
+          status: blocked ? 'BOOKED' : 'AVAILABLE',
+        }
+      }),
       materials: materials.map((m) => {
         const usedQty = Number(usedMaterialMap[up(m.code)] || 0)
         const totalQty = Number(m.totalQty || 0)
@@ -1323,6 +1453,13 @@ async function updateRoomMaster(req, res, next) {
       throw createError(409, 'Room code or room name already exists.')
     }
 
+    if (doc.isActive && !nextIsActive) {
+      await assertRoomMasterCanDeactivate({
+        roomDoc: doc,
+        excludePast: true,
+      })
+    }
+
     doc.code = nextCode
     doc.name = nextName
     doc.isActive = nextIsActive
@@ -1342,6 +1479,13 @@ async function updateRoomMaster(req, res, next) {
       action: 'UPDATED',
     })
 
+    emitBookingRoomAvailability(req, {
+      type: 'ROOM',
+      action: 'UPDATED',
+      roomId: String(doc._id),
+      code: s(doc.code),
+    }, 'bookingroom:availability:changed')
+
     return res.json(doc)
   } catch (err) {
     next(err)
@@ -1355,6 +1499,11 @@ async function deleteRoomMaster(req, res, next) {
     const { id } = req.params
     const doc = await BookingRoomResource.findById(id)
     if (!doc) throw createError(404, 'Room not found.')
+
+    await assertRoomMasterCanDeactivate({
+      roomDoc: doc,
+      excludePast: true,
+    })
 
     doc.isActive = false
     await doc.save()
@@ -1371,6 +1520,13 @@ async function deleteRoomMaster(req, res, next) {
       type: 'ROOM',
       action: 'DELETED',
     })
+
+    emitBookingRoomAvailability(req, {
+      type: 'ROOM',
+      action: 'DELETED',
+      roomId: String(doc._id),
+      code: s(doc.code),
+    }, 'bookingroom:availability:changed')
 
     return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
   } catch (err) {
@@ -1473,7 +1629,9 @@ async function updateMaterialMaster(req, res, next) {
 
     if (!nextCode) throw createError(400, 'code is required.')
     if (!nextName) throw createError(400, 'name is required.')
-    if (!Number.isFinite(nextTotalQty) || nextTotalQty < 0) throw createError(400, 'totalQty must be >= 0.')
+    if (!Number.isFinite(nextTotalQty) || nextTotalQty < 0) {
+      throw createError(400, 'totalQty must be >= 0.')
+    }
 
     const dup = await BookingRoomMaterial.findOne({
       _id: { $ne: doc._id },
@@ -1482,6 +1640,21 @@ async function updateMaterialMaster(req, res, next) {
 
     if (dup) {
       throw createError(409, 'Material code or material name already exists.')
+    }
+
+    // Safety checks before shrinking/deactivating.
+    if (nextTotalQty < Number(doc.totalQty || 0)) {
+      await assertMaterialMasterQtyCanShrink({
+        materialDoc: doc,
+        nextTotalQty,
+      })
+    }
+
+    if (doc.isActive && !nextIsActive) {
+      await assertMaterialMasterCanDeactivate({
+        materialDoc: doc,
+        excludePast: true,
+      })
     }
 
     doc.code = nextCode
@@ -1504,11 +1677,19 @@ async function updateMaterialMaster(req, res, next) {
       action: 'UPDATED',
     })
 
+    emitBookingRoomAvailability(req, {
+      type: 'MATERIAL',
+      action: 'UPDATED',
+      materialId: String(doc._id),
+      code: s(doc.code),
+    }, 'bookingroom:availability:changed')
+
     return res.json(doc)
   } catch (err) {
     next(err)
   }
 }
+
 
 async function deleteMaterialMaster(req, res, next) {
   try {
@@ -1517,6 +1698,11 @@ async function deleteMaterialMaster(req, res, next) {
     const { id } = req.params
     const doc = await BookingRoomMaterial.findById(id)
     if (!doc) throw createError(404, 'Material not found.')
+
+    await assertMaterialMasterCanDeactivate({
+      materialDoc: doc,
+      excludePast: true,
+    })
 
     doc.isActive = false
     await doc.save()
@@ -1533,6 +1719,13 @@ async function deleteMaterialMaster(req, res, next) {
       type: 'MATERIAL',
       action: 'DELETED',
     })
+
+    emitBookingRoomAvailability(req, {
+      type: 'MATERIAL',
+      action: 'DELETED',
+      materialId: String(doc._id),
+      code: s(doc.code),
+    }, 'bookingroom:availability:changed')
 
     return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
   } catch (err) {

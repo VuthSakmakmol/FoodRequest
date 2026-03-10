@@ -17,9 +17,8 @@ defineOptions({ name: 'PublicBookingRoomRequest' })
 const router = useRouter()
 const { showToast } = useToast()
 
-/* ───────────────── STATE ───────────────── */
 const loadingEmployees = ref(false)
-const loadingMasters = ref(false)
+const loadingAvailability = ref(false)
 const submitting = ref(false)
 
 const employees = ref([])
@@ -27,7 +26,6 @@ const selectedEmployee = ref(null)
 
 const activeRooms = ref([])
 const activeMaterials = ref([])
-const scheduleRows = ref([])
 
 const form = ref({
   employeeId: '',
@@ -45,7 +43,6 @@ const form = ref({
   timeEndMinute: '00',
 
   meetingTitle: '',
-  purpose: '',
   participantEstimate: 1,
   requirementNote: '',
 
@@ -60,10 +57,8 @@ const form = ref({
 
 const errors = ref([])
 
-let mastersRefreshTimer = null
-let scheduleRefreshTimer = null
+let availabilityRefreshTimer = null
 
-/* ───────────────── HELPERS ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -123,7 +118,6 @@ function resetForm({ keepEmployee = true } = {}) {
     timeEndMinute: '00',
 
     meetingTitle: '',
-    purpose: '',
     participantEstimate: 1,
     requirementNote: '',
 
@@ -136,11 +130,11 @@ function resetForm({ keepEmployee = true } = {}) {
     materials: [],
   }
 
-  scheduleRows.value = []
+  activeRooms.value = []
+  activeMaterials.value = []
   errors.value = []
 }
 
-/* ───────────────── EMPLOYEE SEARCH ───────────────── */
 async function loadEmployees(q = '') {
   try {
     loadingEmployees.value = true
@@ -191,10 +185,10 @@ function selectEmployee(emp) {
   }
 }
 
-/* ───────────────── PUBLIC MASTER DATA ───────────────── */
-async function loadMasters({ silent = false } = {}) {
+/* fallback when time not fully chosen yet */
+async function loadActiveMastersOnly({ silent = false } = {}) {
   try {
-    if (!silent) loadingMasters.value = true
+    if (!silent) loadingAvailability.value = true
 
     const [roomRes, materialRes] = await Promise.all([
       api.get('/public/booking-room/rooms/active'),
@@ -206,6 +200,8 @@ async function loadMasters({ silent = false } = {}) {
       code: s(x?.code),
       name: s(x?.name),
       isActive: x?.isActive !== false,
+      isAvailable: true,
+      status: 'AVAILABLE',
     }))
 
     activeMaterials.value = (Array.isArray(materialRes?.data) ? materialRes.data : []).map((x) => ({
@@ -213,7 +209,11 @@ async function loadMasters({ silent = false } = {}) {
       code: up(x?.code),
       name: s(x?.name),
       totalQty: Math.max(0, Number(x?.totalQty || 0)),
+      usedQty: 0,
+      availableQty: Math.max(0, Number(x?.totalQty || 0)),
       isActive: x?.isActive !== false,
+      isAvailable: Math.max(0, Number(x?.totalQty || 0)) > 0,
+      status: Math.max(0, Number(x?.totalQty || 0)) > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
     }))
   } catch (e) {
     activeRooms.value = []
@@ -224,54 +224,70 @@ async function loadMasters({ silent = false } = {}) {
       message: e?.response?.data?.message || 'Failed to load room/material list.',
     })
   } finally {
-    if (!silent) loadingMasters.value = false
+    if (!silent) loadingAvailability.value = false
   }
 }
 
-/* ───────────────── SCHEDULE / AVAILABILITY ───────────────── */
-async function loadSchedule({ silent = false } = {}) {
+async function loadAvailability({ silent = false } = {}) {
   try {
     const date = s(form.value.bookingDate)
+    const timeStart = s(form.value.timeStart)
+    const timeEnd = s(form.value.timeEnd)
+
     if (!date) {
-      scheduleRows.value = []
+      activeRooms.value = []
+      activeMaterials.value = []
       return
     }
 
-    const res = await api.get('/public/booking-room/schedule', {
-      params: { date },
+    if (!timeStart || !timeEnd || toMinutes(timeEnd) <= toMinutes(timeStart)) {
+      await loadActiveMastersOnly({ silent: true })
+      return
+    }
+
+    if (!silent) loadingAvailability.value = true
+
+    const res = await api.get('/public/booking-room/availability', {
+      params: {
+        date,
+        timeStart,
+        timeEnd,
+      },
     })
 
-    scheduleRows.value = Array.isArray(res?.data) ? res.data : []
+    activeRooms.value = (Array.isArray(res?.data?.rooms) ? res.data.rooms : []).map((x) => ({
+      _id: x?._id || '',
+      code: s(x?.code),
+      name: s(x?.name),
+      isActive: true,
+      isAvailable: x?.isAvailable !== false,
+      status: s(x?.status || 'AVAILABLE'),
+    }))
+
+    activeMaterials.value = (Array.isArray(res?.data?.materials) ? res.data.materials : []).map((x) => ({
+      _id: x?._id || '',
+      code: up(x?.code),
+      name: s(x?.name),
+      totalQty: Math.max(0, Number(x?.totalQty || 0)),
+      usedQty: Math.max(0, Number(x?.usedQty || 0)),
+      availableQty: Math.max(0, Number(x?.availableQty || 0)),
+      isActive: true,
+      isAvailable: x?.isAvailable !== false,
+      status: s(x?.status || 'AVAILABLE'),
+    }))
   } catch (e) {
     if (!silent) {
       showToast({
         type: 'error',
-        message: e?.response?.data?.message || 'Failed to load schedule.',
+        message: e?.response?.data?.message || 'Failed to check availability.',
       })
     }
-    scheduleRows.value = []
+    activeRooms.value = []
+    activeMaterials.value = []
+  } finally {
+    if (!silent) loadingAvailability.value = false
   }
 }
-
-/* ───────────────── COMPUTED ───────────────── */
-const timeRangeLabel = computed(() => {
-  if (!form.value.timeStart || !form.value.timeEnd) return '—'
-  return `${form.value.timeStart} - ${form.value.timeEnd}`
-})
-
-const selectedMaterialsLabel = computed(() => {
-  const rows = Array.isArray(form.value.materials) ? form.value.materials : []
-  if (!rows.length) return '—'
-
-  return rows
-    .map((x) => {
-      const name = s(x?.materialName) || s(x?.materialCode)
-      const qty = Math.max(0, Number(x?.qty || 0))
-      return name ? `${name}${qty > 0 ? ` x${qty}` : ''}` : ''
-    })
-    .filter(Boolean)
-    .join(', ')
-})
 
 const requestTypeLabel = computed(() => {
   if (form.value.roomRequired && form.value.materialRequired) return 'Room + Material'
@@ -280,7 +296,6 @@ const requestTypeLabel = computed(() => {
   return '—'
 })
 
-/* ───────────────── VALIDATION ───────────────── */
 function validateForm() {
   const e = []
   const f = form.value
@@ -316,7 +331,6 @@ function validateForm() {
   return e
 }
 
-/* ───────────────── SUBMIT ───────────────── */
 async function submit() {
   syncLegacyTimeParts()
 
@@ -339,7 +353,6 @@ async function submit() {
       timeStart: s(form.value.timeStart),
       timeEnd: s(form.value.timeEnd),
       meetingTitle: compactText(form.value.meetingTitle),
-      purpose: compactText(form.value.purpose),
       participantEstimate: Number(form.value.participantEstimate || 1),
       requirementNote: compactText(form.value.requirementNote),
 
@@ -383,56 +396,45 @@ async function submit() {
   }
 }
 
-/* ───────────────── REALTIME ───────────────── */
-function queueMastersRefresh() {
-  if (mastersRefreshTimer) clearTimeout(mastersRefreshTimer)
-  mastersRefreshTimer = setTimeout(() => {
-    loadMasters({ silent: true })
-  }, 250)
-}
-
-function queueScheduleRefresh() {
-  if (scheduleRefreshTimer) clearTimeout(scheduleRefreshTimer)
-  scheduleRefreshTimer = setTimeout(() => {
-    loadSchedule({ silent: true })
+function queueAvailabilityRefresh() {
+  if (availabilityRefreshTimer) clearTimeout(availabilityRefreshTimer)
+  availabilityRefreshTimer = setTimeout(() => {
+    loadAvailability({ silent: true })
   }, 250)
 }
 
 function onRoomMasterChanged() {
-  queueMastersRefresh()
+  queueAvailabilityRefresh()
 }
 
 function onMaterialMasterChanged() {
-  queueMastersRefresh()
+  queueAvailabilityRefresh()
 }
 
 function onMastersChanged() {
-  queueMastersRefresh()
+  queueAvailabilityRefresh()
 }
 
 function onAvailabilityChanged() {
-  queueScheduleRefresh()
+  queueAvailabilityRefresh()
 }
 
 function onReqCreated() {
-  queueScheduleRefresh()
+  queueAvailabilityRefresh()
 }
 
 function onReqUpdated() {
-  queueScheduleRefresh()
+  queueAvailabilityRefresh()
 }
 
-/* ───────────────── INIT ───────────────── */
 onMounted(async () => {
-  await Promise.all([loadEmployees(), loadMasters()])
+  await Promise.all([loadEmployees(), loadActiveMastersOnly()])
 
   const savedId = localStorage.getItem('bookingRoomEmployeeId') || ''
   if (savedId) {
     const found = employees.value.find((x) => s(x.employeeId) === s(savedId))
     if (found) selectEmployee(found)
   }
-
-  await loadSchedule()
 
   socket.on('bookingroom:room-master:created', onRoomMasterChanged)
   socket.on('bookingroom:room-master:updated', onRoomMasterChanged)
@@ -450,13 +452,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (mastersRefreshTimer) {
-    clearTimeout(mastersRefreshTimer)
-    mastersRefreshTimer = null
-  }
-  if (scheduleRefreshTimer) {
-    clearTimeout(scheduleRefreshTimer)
-    scheduleRefreshTimer = null
+  if (availabilityRefreshTimer) {
+    clearTimeout(availabilityRefreshTimer)
+    availabilityRefreshTimer = null
   }
 
   socket.off('bookingroom:room-master:created', onRoomMasterChanged)
@@ -479,7 +477,6 @@ onBeforeUnmount(() => {
   <div class="ui-page">
     <div class="ui-container py-2">
       <div class="ui-card overflow-hidden">
-        <!-- HERO -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
@@ -490,7 +487,7 @@ onBeforeUnmount(() => {
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"
-                :disabled="submitting || loadingMasters"
+                :disabled="submitting || loadingAvailability"
                 @click="submit"
               >
                 <i v-if="submitting" class="fa-solid fa-spinner animate-spin text-[11px]" />
@@ -500,9 +497,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- BODY -->
         <div class="space-y-3 p-3">
-          <!-- Errors -->
           <div
             v-if="errors.length"
             class="rounded-xl border border-rose-300 bg-rose-50 p-3 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/30 dark:text-rose-200"
@@ -513,7 +508,6 @@ onBeforeUnmount(() => {
             </ul>
           </div>
 
-          <!-- Row 1: Requester + Booking Detail -->
           <div class="grid gap-3 xl:grid-cols-12">
             <div class="xl:col-span-4">
               <BookingRoomRequesterSection
@@ -527,23 +521,20 @@ onBeforeUnmount(() => {
             <div class="xl:col-span-8">
               <BookingRoomDetailSection
                 :form="form"
-                :schedule-rows="scheduleRows"
-                :time-range-label="timeRangeLabel"
-                @load-schedule="loadSchedule"
+                @load-availability="loadAvailability"
               />
             </div>
           </div>
 
-          <!-- Row 2: Request Type only -->
           <div>
             <BookingRoomRequestTypeSection
               :form="form"
               :BOOKING_ROOM_NAMES="activeRooms"
               :BOOKING_ROOM_MATERIALS="activeMaterials"
+              :loading-availability="loadingAvailability"
             />
           </div>
 
-          <!-- FOOT -->
           <div class="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-[11px] dark:border-slate-800">
             <div class="text-slate-500 dark:text-slate-400">
               Please review requester, booking detail, and request type before submitting.
@@ -552,7 +543,7 @@ onBeforeUnmount(() => {
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"
-                :disabled="submitting || loadingMasters"
+                :disabled="submitting || loadingAvailability"
                 @click="submit"
               >
                 <i v-if="submitting" class="fa-solid fa-spinner animate-spin text-[11px]" />
