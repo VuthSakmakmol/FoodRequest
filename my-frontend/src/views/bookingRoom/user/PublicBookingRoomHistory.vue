@@ -65,7 +65,6 @@ const editForm = ref({
   timeStart: '',
   timeEnd: '',
   meetingTitle: '',
-  purpose: '',
   participantEstimate: 1,
   requirementNote: '',
 
@@ -255,7 +254,6 @@ function syncEditItem() {
       timeStart: s(found.timeStart),
       timeEnd: s(found.timeEnd),
       meetingTitle: s(found.meetingTitle),
-      purpose: s(found.purpose),
       participantEstimate: Number(found.participantEstimate || 1),
       requirementNote: s(found.requirementNote),
 
@@ -461,7 +459,6 @@ const processedRows = computed(() => {
         r.timeStart,
         r.timeEnd,
         r.meetingTitle,
-        r.purpose,
         r.requirementNote,
         r.roomName,
         r.roomCode,
@@ -523,7 +520,6 @@ function openEdit(item) {
     timeStart: s(item.timeStart),
     timeEnd: s(item.timeEnd),
     meetingTitle: s(item.meetingTitle),
-    purpose: s(item.purpose),
     participantEstimate: Number(item.participantEstimate || 1),
     requirementNote: s(item.requirementNote),
 
@@ -573,7 +569,6 @@ function validateEditForm() {
   }
 
   if (!compactText(f.meetingTitle)) e.push('Meeting title is required.')
-  if (!compactText(f.purpose)) e.push('Purpose is required.')
 
   editErrors.value = e
   return e
@@ -597,7 +592,6 @@ async function submitEdit() {
       timeStart: s(editForm.value.timeStart),
       timeEnd: s(editForm.value.timeEnd),
       meetingTitle: compactText(editForm.value.meetingTitle),
-      purpose: compactText(editForm.value.purpose),
       participantEstimate: Number(editForm.value.participantEstimate || 1),
       requirementNote: compactText(editForm.value.requirementNote),
 
@@ -839,7 +833,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Title, room, material..."
+                    placeholder="Meeting title, room, material..."
                     class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -945,10 +939,6 @@ onBeforeUnmount(() => {
                         {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                       </div>
 
-                      <div class="mt-1 text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                        {{ item.meetingTitle || 'Meeting Request' }}
-                      </div>
-
                       <div class="mt-1 flex flex-wrap items-center gap-2">
                         <span :class="typeBadgeUiClass(item)">{{ bookingRoomTypeLabel(item) }}</span>
                         <span :class="statusBadgeUiClass(item.overallStatus)">
@@ -1025,8 +1015,8 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="mt-2 ui-frame p-2">
-                    <div class="ui-label !mb-1">Purpose</div>
-                    <div class="text-[11px] text-slate-700 dark:text-slate-200">{{ item.purpose || '—' }}</div>
+                    <div class="ui-label !mb-1">Meeting Title</div>
+                    <div class="text-[11px] text-slate-700 dark:text-slate-200">{{ item.meetingTitle || '—' }}</div>
                   </div>
                 </div>
               </div>
@@ -1070,11 +1060,8 @@ onBeforeUnmount(() => {
 
                       <td class="ui-td">
                         <div class="min-w-0">
-                          <div class="truncate font-semibold" :title="item.meetingTitle || item.purpose">
+                          <div class="truncate font-semibold" :title="item.meetingTitle || '—'">
                             {{ item.meetingTitle || '—' }}
-                          </div>
-                          <div class="mt-0.5 truncate text-[11px] text-slate-500 dark:text-slate-400">
-                            {{ item.purpose || '—' }}
                           </div>
                         </div>
                       </td>
@@ -1085,16 +1072,21 @@ onBeforeUnmount(() => {
                         </span>
                       </td>
 
-                      <td class="ui-td">
-                        <div class="flex flex-col gap-1">
-                          <span class="truncate">{{ item.roomRequired ? (item.roomName || '—') : 'Not Required' }}</span>
+                      <td class="ui-td text-center">
+                        <div class="flex flex-col items-center gap-1">
+                          <span class="truncate text-center">
+                            {{ item.roomRequired ? (item.roomName || '—') : 'Not Required' }}
+                          </span>
                           <span :class="sectionBadgeUiClass(item.roomStatus)">{{ item.roomStatus }}</span>
                         </div>
                       </td>
 
-                      <td class="ui-td">
-                        <div class="flex flex-col gap-1">
-                          <span class="truncate" :title="item.materialRequired ? materialText(item.materials) : 'Not Required'">
+                      <td class="ui-td text-center">
+                        <div class="flex flex-col items-center gap-1">
+                          <span
+                            class="truncate text-center"
+                            :title="item.materialRequired ? materialText(item.materials) : 'Not Required'"
+                          >
                             {{ item.materialRequired ? materialText(item.materials) : 'Not Required' }}
                           </span>
                           <span :class="sectionBadgeUiClass(item.materialStatus)">{{ item.materialStatus }}</span>
@@ -1237,10 +1229,6 @@ onBeforeUnmount(() => {
                   <div class="font-extrabold">{{ fmtTime(detailItem?.timeStart) }} - {{ fmtTime(detailItem?.timeEnd) }}</div>
                 </div>
                 <div>
-                  <div class="ui-label">Purpose</div>
-                  <div>{{ detailItem?.purpose || '—' }}</div>
-                </div>
-                <div>
                   <div class="ui-label">Participant Estimate</div>
                   <div>{{ detailItem?.participantEstimate || '—' }}</div>
                 </div>
@@ -1283,7 +1271,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="ui-card p-3">
-              <div class="ui-section-title">Requirement Note</div>
+              <div class="ui-section-title">Note</div>
               <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
                 {{ detailItem?.requirementNote || '—' }}
               </div>
@@ -1361,16 +1349,9 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="grid gap-3 md:grid-cols-2">
-                <div class="ui-field">
-                  <label class="ui-label">Meeting Title</label>
-                  <input v-model="editForm.meetingTitle" type="text" class="ui-input" :disabled="editBusy" />
-                </div>
-
-                <div class="ui-field">
-                  <label class="ui-label">Purpose</label>
-                  <input v-model="editForm.purpose" type="text" class="ui-input" :disabled="editBusy" />
-                </div>
+              <div class="ui-field">
+                <label class="ui-label">Meeting Title</label>
+                <input v-model="editForm.meetingTitle" type="text" class="ui-input" :disabled="editBusy" />
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">
