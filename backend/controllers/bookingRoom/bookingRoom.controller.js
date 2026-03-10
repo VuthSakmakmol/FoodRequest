@@ -17,6 +17,25 @@ const {
 let User = null
 try { User = require('../../models/User') } catch { User = null }
 
+/* ───────────────── notify (Telegram) ───────────────── */
+let notify = null
+try {
+  notify = require('../../services/telegram/bookingRoom')
+  console.log('✅ bookingRoom telegram notify loaded')
+} catch (e) {
+  console.warn('⚠️ bookingRoom telegram notify NOT loaded:', e?.message)
+  notify = null
+}
+
+async function safeNotify(fn, ...args) {
+  try {
+    if (typeof fn !== 'function') return
+    return await fn(...args)
+  } catch (e) {
+    console.warn('⚠️ BookingRoom Telegram notify failed:', e?.response?.data || e?.message)
+  }
+}
+
 const OVERALL_NON_BLOCKING_STATUSES = ['REJECTED', 'CANCELLED']
 
 function s(v) {
@@ -52,7 +71,7 @@ function nowPPDate() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' })
 }
 
-function safeObjectId(v) {
+function safeId(v) {
   const raw = s(v)
   return raw || null
 }
@@ -157,8 +176,48 @@ function emitBookingRoomMastersChanged(req, payload = {}, event = 'bookingroom:m
   }
 }
 
-async function notifySafe(_type, _payload) {
-  return
+async function notifySafe(type, payload = {}) {
+  try {
+    if (!notify) return
+
+    const bookingId = s(payload?.bookingId)
+    if (!bookingId) return
+
+    const doc = await BookingRoom.findById(bookingId).lean()
+    if (!doc) return
+
+    const kind = up(type)
+
+    if (kind === 'BOOKING_ROOM_CREATED') {
+      await safeNotify(notify?.notifyBookingCreatedToEmployee, doc)
+      await safeNotify(notify?.notifyCurrentApprover, doc)
+      return
+    }
+
+    // requester updated request; usually avoid spamming approvers again
+    if (kind === 'BOOKING_ROOM_UPDATED') {
+      await safeNotify(notify?.notifyBookingUpdatedToEmployee, doc)
+      return
+    }
+
+    if (kind === 'BOOKING_ROOM_CANCELLED') {
+      await safeNotify(notify?.notifyBookingCancelledToEmployee, doc)
+      return
+    }
+
+    if (kind === 'BOOKING_ROOM_ROOM_DECISION') {
+      await safeNotify(notify?.notifyRoomDecisionToEmployee, doc)
+      await safeNotify(notify?.notifyCurrentApprover, doc)
+      return
+    }
+
+    if (kind === 'BOOKING_ROOM_MATERIAL_DECISION') {
+      await safeNotify(notify?.notifyMaterialDecisionToEmployee, doc)
+      await safeNotify(notify?.notifyCurrentApprover, doc)
+    }
+  } catch (e) {
+    console.warn('⚠️ notifySafe failed:', e?.message)
+  }
 }
 
 function deriveOverallStatus(doc) {
@@ -230,7 +289,7 @@ async function buildEmployeeSnapshot(employeeId) {
 async function findActiveRoomMaster({ roomId, roomCode, roomName }) {
   const conditions = []
 
-  if (safeObjectId(roomId)) conditions.push({ _id: safeObjectId(roomId) })
+  if (safeId(roomId)) conditions.push({ _id: safeId(roomId) })
   if (s(roomCode)) conditions.push({ code: up(roomCode) })
   if (s(roomName)) conditions.push({ name: s(roomName) })
 
@@ -279,7 +338,7 @@ function normalizeRawMaterialPayload(v) {
       if (!Number.isFinite(qty) || qty <= 0) continue
 
       out.push({
-        materialId: safeObjectId(item.materialId || item._id),
+        materialId: safeId(item.materialId || item._id),
         materialCode: code,
         materialName: s(item.materialName || item.name),
         qty,
@@ -582,7 +641,6 @@ async function assertMaterialMasterQtyCanShrink({ materialDoc, nextTotalQty }) {
 
   if (!rows.length) return
 
-  // Build sweep-line events per date/code to find max simultaneous usage.
   const byDate = new Map()
 
   for (const row of rows) {
@@ -607,7 +665,6 @@ async function assertMaterialMasterQtyCanShrink({ materialDoc, nextTotalQty }) {
   let maxUsed = 0
 
   for (const events of byDate.values()) {
-    // End first, then start, so 09:00-10:00 and 10:00-11:00 do not overlap.
     events.sort((a, b) => {
       if (a.t !== b.t) return a.t - b.t
       if (a.kind === b.kind) return 0
@@ -1057,6 +1114,11 @@ async function cancelBooking(req, res, next) {
 
     doc.overallStatus = 'CANCELLED'
     doc.cancelReason = cancelReason
+
+    // optional cleanup for better downstream state consistency
+    if (doc.roomRequired && up(doc.roomStatus) === 'PENDING') doc.roomStatus = 'REJECTED'
+    if (doc.materialRequired && up(doc.materialStatus) === 'PENDING') doc.materialStatus = 'REJECTED'
+
     doc.updatedAt = new Date()
     await doc.save()
 
@@ -1132,6 +1194,10 @@ async function roomDecision(req, res, next) {
       throw createError(400, 'decision must be APPROVED or REJECTED.')
     }
 
+    if (normalizedDecision === 'REJECTED' && !s(note)) {
+      throw createError(400, 'Reject reason is required.')
+    }
+
     const doc = await BookingRoom.findById(id)
     if (!doc) throw createError(404, 'Booking not found.')
 
@@ -1189,6 +1255,10 @@ async function materialDecision(req, res, next) {
     const normalizedDecision = up(decision)
     if (!['APPROVED', 'REJECTED'].includes(normalizedDecision)) {
       throw createError(400, 'decision must be APPROVED or REJECTED.')
+    }
+
+    if (normalizedDecision === 'REJECTED' && !s(note)) {
+      throw createError(400, 'Reject reason is required.')
     }
 
     const doc = await BookingRoom.findById(id)
@@ -1642,7 +1712,6 @@ async function updateMaterialMaster(req, res, next) {
       throw createError(409, 'Material code or material name already exists.')
     }
 
-    // Safety checks before shrinking/deactivating.
     if (nextTotalQty < Number(doc.totalQty || 0)) {
       await assertMaterialMasterQtyCanShrink({
         materialDoc: doc,
@@ -1689,7 +1758,6 @@ async function updateMaterialMaster(req, res, next) {
     next(err)
   }
 }
-
 
 async function deleteMaterialMaster(req, res, next) {
   try {

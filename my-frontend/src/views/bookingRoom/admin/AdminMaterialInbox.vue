@@ -278,20 +278,24 @@ async function submitDecision() {
   try {
     submitting.value = true
 
-    const { data } = await api.post(`/booking-room/${decisionRow.value._id}/material-decision`, {
-      decision: up(decisionType.value),
-      note: compactText(decisionNote.value),
+    const currentId = decisionRow.value?._id
+    const currentType = up(decisionType.value)
+    const currentNote = compactText(decisionNote.value)
+
+    const { data } = await api.post(`/booking-room/${currentId}/material-decision`, {
+      decision: currentType,
+      note: currentNote,
     })
+
+    closeDecision(true)
+    closeDetail()
 
     upsertRealtimeRow(data)
 
     showToast({
       type: 'success',
-      message: `Material request ${up(decisionType.value).toLowerCase()} successfully.`,
+      message: `Material request ${currentType.toLowerCase()} successfully.`,
     })
-
-    closeDecision()
-    closeDetail()
   } catch (e) {
     console.error('submitDecision error', e)
     showToast({
@@ -338,8 +342,8 @@ function openDecision(row, type) {
   decisionOpen.value = true
 }
 
-function closeDecision() {
-  if (submitting.value) return
+function closeDecision(force = false) {
+  if (submitting.value && !force) return
   decisionOpen.value = false
   decisionRow.value = null
   decisionType.value = 'APPROVED'
