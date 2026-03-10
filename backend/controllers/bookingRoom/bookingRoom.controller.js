@@ -7,6 +7,13 @@ const BookingRoomResource = require('../../models/bookingRoom/BookingRoomResourc
 const BookingRoomMaterial = require('../../models/bookingRoom/BookingRoomMaterial')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
+const {
+  broadcastBookingRoomRequest,
+  broadcastBookingRoomAvailability,
+  broadcastBookingRoomMaster,
+  broadcastBookingRoomMastersChanged,
+} = require('../../utils/bookingRoom.realtime')
+
 let User = null
 try { User = require('../../models/User') } catch { User = null }
 
@@ -106,12 +113,48 @@ function canAdminView(req) {
   )
 }
 
-function emitBookingRoom(req, event, payload) {
+function getIo(req) {
+  return req.io || req.app?.get('io') || null
+}
+
+function emitBookingRoom(req, payload, event = 'bookingroom:req:updated') {
   try {
-    const io = req.io
+    const io = getIo(req)
     if (!io) return
-    io.emit(event, payload)
-  } catch {}
+    broadcastBookingRoomRequest(io, payload, event)
+  } catch (e) {
+    console.warn('⚠️ booking room realtime emit failed:', e?.message)
+  }
+}
+
+function emitBookingRoomAvailability(req, payload, event = 'bookingroom:availability:changed') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastBookingRoomAvailability(io, payload, event)
+  } catch (e) {
+    console.warn('⚠️ booking room availability realtime emit failed:', e?.message)
+  }
+}
+
+function emitBookingRoomMaster(req, payload, event) {
+  try {
+    const io = getIo(req)
+    if (!io || !event) return
+    broadcastBookingRoomMaster(io, payload, event)
+  } catch (e) {
+    console.warn('⚠️ booking room master realtime emit failed:', e?.message)
+  }
+}
+
+function emitBookingRoomMastersChanged(req, payload = {}, event = 'bookingroom:masters:changed') {
+  try {
+    const io = getIo(req)
+    if (!io) return
+    broadcastBookingRoomMastersChanged(io, payload, event)
+  } catch (e) {
+    console.warn('⚠️ booking room masters changed emit failed:', e?.message)
+  }
 }
 
 async function notifySafe(_type, _payload) {
@@ -467,7 +510,17 @@ async function assertMaterialApprovalConflict({ bookingDate, timeStart, timeEnd,
   }
 }
 
-function buildAdminFilter({ date, dateFrom, dateTo, overallStatus, roomStatus, materialStatus, q, roomCode, materialCode }) {
+function buildAdminFilter({
+  date,
+  dateFrom,
+  dateTo,
+  overallStatus,
+  roomStatus,
+  materialStatus,
+  q,
+  roomCode,
+  materialCode,
+}) {
   const filter = {}
 
   const single = s(date)
@@ -512,69 +565,6 @@ function buildAdminFilter({ date, dateFrom, dateTo, overallStatus, roomStatus, m
   }
 
   return filter
-}
-
-function shapeCreated(doc) {
-  return {
-    bookingId: String(doc._id),
-    _id: String(doc._id),
-    employeeId: doc.employeeId,
-    employee: doc.employee || null,
-    bookingDate: doc.bookingDate,
-    timeStart: doc.timeStart,
-    timeEnd: doc.timeEnd,
-    meetingTitle: doc.meetingTitle || '',
-    purpose: doc.purpose || '',
-    participantEstimate: doc.participantEstimate || 1,
-    requirementNote: doc.requirementNote || '',
-    roomRequired: !!doc.roomRequired,
-    roomId: doc.roomId || null,
-    roomCode: doc.roomCode || '',
-    roomName: doc.roomName || '',
-    room: doc.room || null,
-    materialRequired: !!doc.materialRequired,
-    materials: doc.materials || [],
-    roomStatus: doc.roomStatus,
-    materialStatus: doc.materialStatus,
-    overallStatus: doc.overallStatus,
-    createdAt: doc.createdAt,
-    updatedAt: doc.updatedAt,
-  }
-}
-
-function shapeUpdated(doc) {
-  return {
-    bookingId: String(doc._id),
-    patch: {
-      bookingDate: doc.bookingDate,
-      timeStart: doc.timeStart,
-      timeEnd: doc.timeEnd,
-      meetingTitle: doc.meetingTitle || '',
-      purpose: doc.purpose || '',
-      participantEstimate: doc.participantEstimate || 1,
-      requirementNote: doc.requirementNote || '',
-      roomRequired: !!doc.roomRequired,
-      roomId: doc.roomId || null,
-      roomCode: doc.roomCode || '',
-      roomName: doc.roomName || '',
-      room: doc.room || null,
-      materialRequired: !!doc.materialRequired,
-      materials: doc.materials || [],
-      roomStatus: doc.roomStatus,
-      materialStatus: doc.materialStatus,
-      overallStatus: doc.overallStatus,
-      updatedAt: doc.updatedAt,
-    },
-  }
-}
-
-function shapeStatus(doc) {
-  return {
-    bookingId: String(doc._id),
-    roomStatus: doc.roomStatus,
-    materialStatus: doc.materialStatus,
-    overallStatus: doc.overallStatus,
-  }
 }
 
 async function listActiveRooms(_req, res, next) {
@@ -694,6 +684,7 @@ async function createBooking(req, res, next) {
     validateBasePayload(payload)
     const normalized = await normalizeRequestPayload(payload)
     const employeeSnapshot = await buildEmployeeSnapshot(employeeId)
+    const actor = pickIdentityFrom(req)
 
     if (normalized.roomRequired) {
       await assertRoomApprovalConflict({
@@ -716,6 +707,9 @@ async function createBooking(req, res, next) {
     const doc = await BookingRoom.create({
       employeeId,
       employee: employeeSnapshot,
+
+      requesterLoginId: actor.loginId,
+      createdByLoginId: actor.loginId,
 
       bookingDate: normalized.bookingDate,
       timeStart: normalized.timeStart,
@@ -745,7 +739,8 @@ async function createBooking(req, res, next) {
     doc.overallStatus = deriveOverallStatus(doc)
     await doc.save()
 
-    emitBookingRoom(req, 'bookingRoom:created', shapeCreated(doc))
+    emitBookingRoom(req, doc, 'bookingroom:req:created')
+    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
     await notifySafe('BOOKING_ROOM_CREATED', { bookingId: doc._id })
 
     return res.status(201).json(doc)
@@ -822,10 +817,8 @@ async function updateBooking(req, res, next) {
       if (!doc.canRequesterEditOrCancel()) {
         throw createError(400, 'This request can no longer be edited.')
       }
-    } else {
-      if (up(doc.roomStatus) === 'APPROVED' || up(doc.materialStatus) === 'APPROVED') {
-        throw createError(400, 'This request can no longer be edited.')
-      }
+    } else if (up(doc.roomStatus) === 'APPROVED' || up(doc.materialStatus) === 'APPROVED') {
+      throw createError(400, 'This request can no longer be edited.')
     }
 
     validateBasePayload(payload)
@@ -849,6 +842,12 @@ async function updateBooking(req, res, next) {
         materials: normalized.materials,
         excludeId: doc._id,
       })
+    }
+
+    if (!s(doc.requesterLoginId)) {
+      const actor = pickIdentityFrom(req)
+      doc.requesterLoginId = actor.loginId
+      doc.createdByLoginId = doc.createdByLoginId || actor.loginId
     }
 
     doc.bookingDate = normalized.bookingDate
@@ -878,7 +877,8 @@ async function updateBooking(req, res, next) {
     doc.updatedAt = new Date()
     await doc.save()
 
-    emitBookingRoom(req, 'bookingRoom:updated', shapeUpdated(doc))
+    emitBookingRoom(req, doc, 'bookingroom:req:updated')
+    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
     await notifySafe('BOOKING_ROOM_UPDATED', { bookingId: doc._id })
 
     return res.json(doc)
@@ -911,14 +911,18 @@ async function cancelBooking(req, res, next) {
       if (!doc.canRequesterEditOrCancel()) {
         throw createError(400, 'This request can no longer be cancelled.')
       }
-    } else {
-      if (up(doc.roomStatus) === 'APPROVED' || up(doc.materialStatus) === 'APPROVED') {
-        throw createError(400, 'This request can no longer be cancelled.')
-      }
+    } else if (up(doc.roomStatus) === 'APPROVED' || up(doc.materialStatus) === 'APPROVED') {
+      throw createError(400, 'This request can no longer be cancelled.')
     }
 
     if (doc.bookingDate < nowPPDate()) {
       throw createError(400, 'Cannot cancel a past booking.')
+    }
+
+    if (!s(doc.requesterLoginId)) {
+      const actor = pickIdentityFrom(req)
+      doc.requesterLoginId = actor.loginId
+      doc.createdByLoginId = doc.createdByLoginId || actor.loginId
     }
 
     doc.overallStatus = 'CANCELLED'
@@ -926,7 +930,8 @@ async function cancelBooking(req, res, next) {
     doc.updatedAt = new Date()
     await doc.save()
 
-    emitBookingRoom(req, 'bookingRoom:status', shapeStatus(doc))
+    emitBookingRoom(req, doc, 'bookingroom:req:updated')
+    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
     await notifySafe('BOOKING_ROOM_CANCELLED', { bookingId: doc._id })
 
     return res.json({ ok: true, overallStatus: doc.overallStatus })
@@ -940,7 +945,6 @@ async function listRoomInbox(req, res, next) {
     if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
 
     const { scope = 'ACTIONABLE' } = req.query || {}
-
     const filter = { roomRequired: true }
 
     if (up(scope) === 'ALL') {
@@ -966,7 +970,6 @@ async function listMaterialInbox(req, res, next) {
     if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
 
     const { scope = 'ACTIONABLE' } = req.query || {}
-
     const filter = { materialRequired: true }
 
     if (up(scope) === 'ALL') {
@@ -1033,7 +1036,8 @@ async function roomDecision(req, res, next) {
     doc.updatedAt = new Date()
     await doc.save()
 
-    emitBookingRoom(req, 'bookingRoom:status', shapeStatus(doc))
+    emitBookingRoom(req, doc, 'bookingroom:req:updated')
+    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
     await notifySafe('BOOKING_ROOM_ROOM_DECISION', {
       bookingId: doc._id,
       decision: normalizedDecision,
@@ -1091,7 +1095,8 @@ async function materialDecision(req, res, next) {
     doc.updatedAt = new Date()
     await doc.save()
 
-    emitBookingRoom(req, 'bookingRoom:status', shapeStatus(doc))
+    emitBookingRoom(req, doc, 'bookingroom:req:updated')
+    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
     await notifySafe('BOOKING_ROOM_MATERIAL_DECISION', {
       bookingId: doc._id,
       decision: normalizedDecision,
@@ -1252,7 +1257,6 @@ async function createRoomMaster(req, res, next) {
     if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
 
     const payload = req.body || {}
-
     const code = up(payload.code).replace(/\s+/g, '_')
     const name = s(payload.name)
     const isActive = payload.isActive !== false
@@ -1272,6 +1276,19 @@ async function createRoomMaster(req, res, next) {
       code,
       name,
       isActive,
+    })
+
+    emitBookingRoomMaster(req, {
+      _id: String(doc._id),
+      type: 'ROOM',
+      action: 'CREATED',
+      room: doc,
+    }, 'bookingroom:room-master:created')
+
+    emitBookingRoomMastersChanged(req, {
+      _id: String(doc._id),
+      type: 'ROOM',
+      action: 'CREATED',
     })
 
     return res.status(201).json(doc)
@@ -1311,6 +1328,20 @@ async function updateRoomMaster(req, res, next) {
     doc.isActive = nextIsActive
 
     await doc.save()
+
+    emitBookingRoomMaster(req, {
+      _id: String(doc._id),
+      type: 'ROOM',
+      action: 'UPDATED',
+      room: doc,
+    }, 'bookingroom:room-master:updated')
+
+    emitBookingRoomMastersChanged(req, {
+      _id: String(doc._id),
+      type: 'ROOM',
+      action: 'UPDATED',
+    })
+
     return res.json(doc)
   } catch (err) {
     next(err)
@@ -1322,12 +1353,24 @@ async function deleteRoomMaster(req, res, next) {
     if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
 
     const { id } = req.params
-
     const doc = await BookingRoomResource.findById(id)
     if (!doc) throw createError(404, 'Room not found.')
 
     doc.isActive = false
     await doc.save()
+
+    emitBookingRoomMaster(req, {
+      _id: String(doc._id),
+      type: 'ROOM',
+      action: 'DELETED',
+      room: doc,
+    }, 'bookingroom:room-master:deleted')
+
+    emitBookingRoomMastersChanged(req, {
+      _id: String(doc._id),
+      type: 'ROOM',
+      action: 'DELETED',
+    })
 
     return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
   } catch (err) {
@@ -1368,7 +1411,6 @@ async function createMaterialMaster(req, res, next) {
     if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
 
     const payload = req.body || {}
-
     const code = up(payload.code).replace(/\s+/g, '_')
     const name = s(payload.name)
     const totalQty = Math.max(0, Number(payload.totalQty || 0))
@@ -1393,6 +1435,19 @@ async function createMaterialMaster(req, res, next) {
       isActive,
     })
 
+    emitBookingRoomMaster(req, {
+      _id: String(doc._id),
+      type: 'MATERIAL',
+      action: 'CREATED',
+      material: doc,
+    }, 'bookingroom:material-master:created')
+
+    emitBookingRoomMastersChanged(req, {
+      _id: String(doc._id),
+      type: 'MATERIAL',
+      action: 'CREATED',
+    })
+
     return res.status(201).json(doc)
   } catch (err) {
     next(err)
@@ -1411,7 +1466,9 @@ async function updateMaterialMaster(req, res, next) {
 
     const nextCode = payload.code != null ? up(payload.code).replace(/\s+/g, '_') : up(doc.code)
     const nextName = payload.name != null ? s(payload.name) : s(doc.name)
-    const nextTotalQty = payload.totalQty != null ? Math.max(0, Number(payload.totalQty || 0)) : Number(doc.totalQty || 0)
+    const nextTotalQty = payload.totalQty != null
+      ? Math.max(0, Number(payload.totalQty || 0))
+      : Number(doc.totalQty || 0)
     const nextIsActive = payload.isActive != null ? !!payload.isActive : !!doc.isActive
 
     if (!nextCode) throw createError(400, 'code is required.')
@@ -1433,6 +1490,20 @@ async function updateMaterialMaster(req, res, next) {
     doc.isActive = nextIsActive
 
     await doc.save()
+
+    emitBookingRoomMaster(req, {
+      _id: String(doc._id),
+      type: 'MATERIAL',
+      action: 'UPDATED',
+      material: doc,
+    }, 'bookingroom:material-master:updated')
+
+    emitBookingRoomMastersChanged(req, {
+      _id: String(doc._id),
+      type: 'MATERIAL',
+      action: 'UPDATED',
+    })
+
     return res.json(doc)
   } catch (err) {
     next(err)
@@ -1444,12 +1515,24 @@ async function deleteMaterialMaster(req, res, next) {
     if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
 
     const { id } = req.params
-
     const doc = await BookingRoomMaterial.findById(id)
     if (!doc) throw createError(404, 'Material not found.')
 
     doc.isActive = false
     await doc.save()
+
+    emitBookingRoomMaster(req, {
+      _id: String(doc._id),
+      type: 'MATERIAL',
+      action: 'DELETED',
+      material: doc,
+    }, 'bookingroom:material-master:deleted')
+
+    emitBookingRoomMastersChanged(req, {
+      _id: String(doc._id),
+      type: 'MATERIAL',
+      action: 'DELETED',
+    })
 
     return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
   } catch (err) {

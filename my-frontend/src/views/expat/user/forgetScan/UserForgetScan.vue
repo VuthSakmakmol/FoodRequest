@@ -10,6 +10,11 @@
   ✅ Fixed: detail modal type display consistency
   ✅ Safer date-to-date filter (normalizes to YYYY-MM-DD)
   ✅ Realtime: forgetscan:req:created / forgetscan:req:updated
+  ✅ NEW: Approver mode shown in:
+     - mobile cards
+     - desktop table
+     - detail modal
+     - search
 -->
 
 <script setup>
@@ -61,7 +66,7 @@ const editError = ref('')
 const editItem = ref(null)
 const editForm = ref({
   forgotDate: '',
-  forgotType: 'FORGET_IN', // ✅ string (single select)
+  forgotType: 'FORGET_IN',
   reason: '',
 })
 
@@ -128,6 +133,26 @@ function typeBadgeUiClass(t) {
   return 'ui-badge ui-badge-info'
 }
 
+/* ✅ NEW: approval mode helpers */
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_GM') return 'Manager + GM'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  if (m === 'COO_ONLY') return 'COO only'
+  return m || '—'
+}
+
+function modeBadgeUiClass(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_ONLY') return 'ui-badge ui-badge-success'
+  if (m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO') return 'ui-badge ui-badge-info'
+  if (m === 'GM_ONLY' || m === 'COO_ONLY' || m === 'GM_AND_COO') return 'ui-badge'
+  return 'ui-badge'
+}
+
 /* normalize types from row (new schema + backward compat) */
 function getTypesArray(row) {
   const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
@@ -156,7 +181,7 @@ function typesToTextFromRow(row) {
   return arr.map((t) => TYPE_LABEL[t] || t).join(' + ')
 }
 
-/* ✅ safe for template ref unwrapping */
+/* safe for template ref unwrapping */
 function unwrapObj(maybeRef) {
   return maybeRef?.value ?? maybeRef ?? {}
 }
@@ -210,10 +235,8 @@ function canEdit(item) {
 /* normalize forgotDate to YYYY-MM-DD for filter compare */
 function toYmdSafe(v) {
   if (!v) return ''
-  // if already YYYY-MM-DD
   const s = String(v).trim()
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
-  // try dayjs parse
   const d = dayjs(s)
   return d.isValid() ? d.format('YYYY-MM-DD') : ''
 }
@@ -258,8 +281,6 @@ function closeCreate() {
   createOpen.value = false
 }
 
-/* ✅ Decide: reason required or optional?
-   - Here: REQUIRED (better for audit). If you want optional, tell me and I’ll change it. */
 function validateCreate(v) {
   const d = String(v?.forgotDate || '').trim()
   const types = Array.isArray(v?.forgotTypes) ? v.forgotTypes.map(up).filter(Boolean) : []
@@ -287,7 +308,6 @@ async function submitCreate() {
       reason: compactText(form.value.reason),
     }
 
-    // ✅ NEW schema: submit ONE request even if both selected
     const res = await api.post('/leave/forget-scan', payload)
     if (res?.data?._id) upsertRow(res.data)
 
@@ -297,17 +317,6 @@ async function submitCreate() {
     })
 
     createOpen.value = false
-
-    /* If you truly want "both = TWO requests" (old backend single-type),
-       replace the single POST above with this:
-
-       const types = payload.forgotTypes
-       for (const t of types) {
-         const one = { forgotDate: payload.forgotDate, forgotType: t, reason: payload.reason }
-         const r = await api.post('/leave/forget-scan', one)
-         if (r?.data?._id) upsertRow(r.data)
-       }
-    */
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Submit failed.' })
   } finally {
@@ -373,11 +382,10 @@ async function submitEdit() {
   try {
     const payload = {
       forgotDate: String(editForm.value.forgotDate || '').trim(),
-      forgotTypes: [up(editForm.value.forgotType)], // ✅ store as array (new schema)
+      forgotTypes: [up(editForm.value.forgotType)],
       reason: compactText(editForm.value.reason),
     }
 
-    // ✅ FIXED: only ONE PATCH
     const res = await api.patch(`/leave/forget-scan/${editItem.value._id}`, payload)
 
     const doc = res?.data
@@ -405,7 +413,6 @@ function closeDetail() {
   viewItem.value = null
 }
 
-/* keep detail modal synced with latest data */
 watch(
   () => rows.value,
   (list) => {
@@ -463,6 +470,8 @@ const filteredRows = computed(() => {
         getTypesArray(r).join(','),
         r.status,
         r.reason,
+        r.approvalMode,
+        modeLabel(r.approvalMode),
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -551,7 +560,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Reason, date, status..."
+                    placeholder="Reason, date, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -622,6 +631,12 @@ onBeforeUnmount(() => {
                     Type:
                     <span class="font-extrabold">{{ typesToTextFromRow(item) }}</span>
                   </div>
+
+                  <div class="mt-1">
+                    <span :class="modeBadgeUiClass(item.approvalMode)">
+                      {{ modeLabel(item.approvalMode) }}
+                    </span>
+                  </div>
                 </div>
 
                 <div class="shrink-0 text-right space-y-2">
@@ -672,6 +687,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Forgot Date</th>
                   <th class="ui-th">Type</th>
+                  <th class="ui-th">Mode</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
                   <th class="ui-th text-center">Actions</th>
@@ -683,6 +699,12 @@ onBeforeUnmount(() => {
                   <td class="ui-td">{{ fmtDateTime(item.createdAt) }}</td>
                   <td class="ui-td">{{ fmtYmd(item.forgotDate) }}</td>
                   <td class="ui-td">{{ typesToTextFromRow(item) }}</td>
+
+                  <td class="ui-td">
+                    <span :class="modeBadgeUiClass(item.approvalMode)">
+                      {{ modeLabel(item.approvalMode) }}
+                    </span>
+                  </td>
 
                   <td class="ui-td">
                     <span :class="statusBadgeUiClass(item.status)">
@@ -811,7 +833,12 @@ onBeforeUnmount(() => {
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
         <div class="min-w-0">
           <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit Forget Scan</div>
-          <div class="text-[11px] text-slate-500 dark:text-slate-400">Edit is single request (choose one type).</div>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+            <span>Edit is single request (choose one type).</span>
+            <span :class="modeBadgeUiClass(editItem?.approvalMode)">
+              {{ modeLabel(editItem?.approvalMode) }}
+            </span>
+          </div>
         </div>
         <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" :disabled="editBusy" @click="closeEdit">
           <i class="fa-solid fa-xmark text-[11px]" />
@@ -889,7 +916,7 @@ onBeforeUnmount(() => {
 
       <div class="p-4 space-y-3">
         <div class="ui-frame p-3">
-          <div class="grid gap-3 md:grid-cols-3">
+          <div class="grid gap-3 md:grid-cols-4">
             <div>
               <div class="ui-label">Status</div>
               <span :class="statusBadgeUiClass(viewItem?.status)">
@@ -901,6 +928,13 @@ onBeforeUnmount(() => {
               <div class="ui-label">Type</div>
               <span :class="typeBadgeUiClass(getTypeKey(viewItem))">
                 {{ TYPE_LABEL[getTypeKey(viewItem)] || getTypeKey(viewItem) || '—' }}
+              </span>
+            </div>
+
+            <div>
+              <div class="ui-label">Approver Mode</div>
+              <span :class="modeBadgeUiClass(viewItem?.approvalMode)">
+                {{ modeLabel(viewItem?.approvalMode) }}
               </span>
             </div>
 

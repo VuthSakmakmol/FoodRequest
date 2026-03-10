@@ -39,7 +39,6 @@ const groups = [
     children: [
       { label: 'Material Inbox', icon: 'fa-solid fa-inbox', to: { name: 'booking-room-material-inbox' } },
       { label: 'Material Master', icon: 'fa-solid fa-boxes-stacked', to: { name: 'booking-room-admin-materials' } },
-      { label: 'Booking List', icon: 'fa-solid fa-list-check', to: { name: 'booking-room-admin-list-material' } },
     ],
   },
 ]

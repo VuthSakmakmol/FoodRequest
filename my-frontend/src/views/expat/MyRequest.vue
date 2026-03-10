@@ -16,13 +16,21 @@
      - Multi-day: Start day AM/PM optional, End day AM/PM optional (at least one edge required)
      - Hint text shows what user is selecting
 
-  ✅ NEW RULE (YOUR REQUEST):
+  ✅ NEW RULE:
      - If there is ANY approval activity (actedAt / APPROVED / REJECTED),
        user CANNOT edit OR cancel (even if still pending at another level)
 
-  ✅ NEW FILTER (YOUR REQUEST):
+  ✅ NEW FILTER:
      - Filter by LEAVE DATE range (startDate/endDate overlap),
        NOT by request created date.
+
+  ✅ NEW: Approver mode shown in:
+     - mobile cards
+     - desktop table
+     - search
+     - cancel modal
+     - files modal header
+     - edit modal header
 
   ✅ Dialog/Modal improvements:
      - ESC closes top-most modal
@@ -62,9 +70,9 @@ const myRequests = ref([])
 const search = ref('')
 const statusFilter = ref('ALL')
 
-/* ✅ NEW: leave date range filter */
-const leaveFrom = ref('') // YYYY-MM-DD
-const leaveTo = ref('') // YYYY-MM-DD
+/* ✅ leave date range filter */
+const leaveFrom = ref('')
+const leaveTo = ref('')
 
 // pagination
 const page = ref(1)
@@ -93,8 +101,32 @@ function statusBadgeUiClass(s) {
   return 'ui-badge'
 }
 
+/* ───────── NEW: approval mode helpers ───────── */
+function up(v) {
+  return String(v ?? '').trim().toUpperCase()
+}
+
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_GM') return 'Manager + GM'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  if (m === 'COO_ONLY') return 'COO only'
+  return m || '—'
+}
+
+function modeBadgeUiClass(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_ONLY') return 'ui-badge ui-badge-success'
+  if (m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO') return 'ui-badge ui-badge-info'
+  if (m === 'GM_ONLY' || m === 'COO_ONLY' || m === 'GM_AND_COO') return 'ui-badge'
+  return 'ui-badge'
+}
+
 /* ─────────────────────────────────────────────────────────────
-   ✅ NEW RULE: lock edit/cancel after ANY approval activity
+   lock edit/cancel after ANY approval activity
 ───────────────────────────────────────────────────────────── */
 function hasAnyApprovalActivity(item) {
   const approvals = Array.isArray(item?.approvals) ? item.approvals : []
@@ -104,14 +136,14 @@ function hasAnyApprovalActivity(item) {
   })
 }
 
-/** ✅ Cancel allowed only when pending AND no approval activity */
+/** Cancel allowed only when pending AND no approval activity */
 function canCancel(item) {
   const st = String(item?.status || '').toUpperCase()
   if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) return false
   return !hasAnyApprovalActivity(item)
 }
 
-/** ✅ Edit allowed only when pending AND no approval activity */
+/** Edit allowed only when pending AND no approval activity */
 function canEdit(item) {
   const st = String(item?.status || '').toUpperCase()
   if (!['PENDING_MANAGER', 'PENDING_GM', 'PENDING_COO'].includes(st)) return false
@@ -119,9 +151,7 @@ function canEdit(item) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   ✅ Leave-date overlap filter (startDate/endDate vs leaveFrom/leaveTo)
-   - If only one side set, it becomes both from/to.
-   - Overlap condition: reqEnd >= from && reqStart <= to
+   Leave-date overlap filter
 ───────────────────────────────────────────────────────────── */
 function overlapsRange(reqStart, reqEnd, filterFrom, filterTo) {
   const rs = String(reqStart || '').trim()
@@ -231,7 +261,7 @@ async function fetchLeaveTypes() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Attachments Preview Modal (instant preview)
+   Attachments Preview Modal
 ───────────────────────────────────────────────────────────── */
 const filesOpen = ref(false)
 const filesRequest = ref(null)
@@ -349,7 +379,6 @@ const delTarget = ref({ requestId: '', attId: '', filename: '' })
 const deleting = ref(false)
 
 const canDeleteFiles = computed(() => {
-  // delete only if edit allowed (no approval started)
   return canEdit(filesRequest.value)
 })
 
@@ -399,8 +428,6 @@ async function confirmDeleteAttachment() {
 
 /* ─────────────────────────────────────────────────────────────
    EDIT REQUEST modal
-   ✅ Single-day can be FULL or HALF (AM/PM)
-   ✅ Multi-day edges optional (at least 1 edge required)
 ───────────────────────────────────────────────────────────── */
 const editOpen = ref(false)
 const editItem = ref(null)
@@ -412,16 +439,12 @@ const editForm = ref({
   startDate: '',
   endDate: '',
   reason: '',
-
-  // single-day: '' = FULL, 'AM'/'PM' = half-day
   singleHalf: '',
-
-  // multi-day edges (optional but at least 1 edge required)
-  startHalfPart: '', // AM/PM or ''
-  endHalfPart: '', // AM/PM or ''
+  startHalfPart: '',
+  endHalfPart: '',
 })
 
-/* ───────── Holidays (for working-day calculation) ───────── */
+/* ───────── Holidays ───────── */
 const holidaySet = ref(new Set())
 
 async function fetchHolidays() {
@@ -481,10 +504,8 @@ const requestedDaysEdit = computed(() => {
   const work = baseWorkingDaysEdit.value
   if (!work) return 0
 
-  // single-day: FULL = 1, AM/PM = 0.5
   if (!isMultiDayEdit.value) return editForm.value.singleHalf ? 0.5 : 1
 
-  // multi-day edges
   let total = work
   if (editForm.value.startHalfPart) total -= 0.5
   if (editForm.value.endHalfPart) total -= 0.5
@@ -533,7 +554,7 @@ const halfHintText = computed(() => {
 })
 
 /* new evidence */
-const newEvidence = ref([]) // {id,file}
+const newEvidence = ref([])
 const editEvidenceInputEl = ref(null)
 
 function cryptoId() {
@@ -638,11 +659,7 @@ function openEdit(item) {
     startDate: start,
     endDate: end,
     reason: String(item.reason || ''),
-
-    // single-day: FULL if not half-day
     singleHalf: !isMulti ? (legacyHalf ? (partForSingle || 'AM') : '') : '',
-
-    // multi-day: allow edges based on existing data
     startHalfPart: isMulti ? (startHalf || '') : '',
     endHalfPart: isMulti ? (endHalf || '') : '',
   }
@@ -667,13 +684,10 @@ watch(
     if (!editForm.value.endDate) editForm.value.endDate = editForm.value.startDate
     if (editForm.value.endDate < editForm.value.startDate) editForm.value.endDate = editForm.value.startDate
 
-    // when switching from multi -> single
     if (!isMultiDayEdit.value) {
-      // single day: clear edges
       editForm.value.startHalfPart = ''
       editForm.value.endHalfPart = ''
     } else {
-      // multi-day: singleHalf irrelevant
       if (!editForm.value.singleHalf) editForm.value.singleHalf = ''
     }
   }
@@ -687,10 +701,8 @@ const canSaveEdit = computed(() => {
   if (!editForm.value.endDate) return false
   if (editForm.value.endDate < editForm.value.startDate) return false
 
-  // single-day: FULL or half allowed
   if (!isMultiDayEdit.value) return true
 
-  // multi-day: at least one edge required
   return !!(editForm.value.startHalfPart || editForm.value.endHalfPart)
 })
 
@@ -755,7 +767,6 @@ async function saveEdit() {
 const processedRequests = computed(() => {
   const items = [...myRequests.value]
 
-  // keep your existing default sort (request createdAt desc)
   items.sort(
     (a, b) => (b.createdAt ? dayjs(b.createdAt).valueOf() : 0) - (a.createdAt ? dayjs(a.createdAt).valueOf() : 0)
   )
@@ -767,7 +778,6 @@ const processedRequests = computed(() => {
     result = result.filter((r) => String(r.status || '').toUpperCase() === st)
   }
 
-  // ✅ NEW: filter by leave date overlap (startDate/endDate)
   result = result.filter((r) => overlapsRange(r.startDate, r.endDate, leaveFrom.value, leaveTo.value))
 
   const q = search.value.trim().toLowerCase()
@@ -777,7 +787,16 @@ const processedRequests = computed(() => {
       const period = `${r.startDate || ''} ${r.endDate || ''}`.toLowerCase()
       const reason = String(r.reason || '').toLowerCase()
       const st = statusLabel(r.status || '').toLowerCase()
-      return code.includes(q) || period.includes(q) || reason.includes(q) || st.includes(q)
+      const modeRaw = String(r.approvalMode || '').toLowerCase()
+      const modeText = modeLabel(r.approvalMode).toLowerCase()
+      return (
+        code.includes(q) ||
+        period.includes(q) ||
+        reason.includes(q) ||
+        st.includes(q) ||
+        modeRaw.includes(q) ||
+        modeText.includes(q)
+      )
     })
   }
 
@@ -797,7 +816,6 @@ const pageCount = computed(() => {
   return Math.ceil(processedRequests.value.length / per) || 1
 })
 
-// ✅ reset page when filters change
 watch([search, statusFilter, perPage, leaveFrom, leaveTo], () => {
   page.value = 1
 })
@@ -810,7 +828,6 @@ async function fetchMyRequests(silent = false) {
     const res = await api.get('/leave/requests/my')
     const list = Array.isArray(res.data) ? res.data : []
 
-    // ✅ ensure attachments array exists so Files column can show count safely
     myRequests.value = list.map((r) => ({
       ...r,
       attachments: Array.isArray(r.attachments) ? r.attachments : [],
@@ -858,7 +875,7 @@ function setupRealtime() {
   )
 }
 
-/* ───────── modal UX: body scroll lock + ESC ───────── */
+/* ───────── modal UX ───────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
   const b = document.body
@@ -928,7 +945,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Type, status or reason..."
+                    placeholder="Type, status, mode or reason..."
                     class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -950,7 +967,6 @@ onBeforeUnmount(() => {
                 </select>
               </div>
 
-              <!-- ✅ NEW: Leave From -->
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Leave From</label>
                 <input
@@ -960,7 +976,6 @@ onBeforeUnmount(() => {
                 />
               </div>
 
-              <!-- ✅ NEW: Leave To -->
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Leave To</label>
                 <input
@@ -999,7 +1014,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-else>
-            <!-- ✅ Mobile cards -->
+            <!-- Mobile cards -->
             <div v-if="isMobile" class="space-y-2">
               <div v-if="!pagedRequests.length" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
                 You have not submitted any leave requests yet.
@@ -1011,9 +1026,16 @@ onBeforeUnmount(() => {
                     <div class="text-[11px] text-slate-500 dark:text-slate-400">
                       {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                     </div>
+
                     <div class="mt-1 flex flex-wrap items-center gap-2">
                       <span class="ui-badge ui-badge-info">{{ item.leaveTypeCode || '—' }}</span>
                       <span :class="statusBadgeUiClass(item.status)">{{ statusLabel(item.status) }}</span>
+                    </div>
+
+                    <div class="mt-2">
+                      <span :class="modeBadgeUiClass(item.approvalMode)">
+                        {{ modeLabel(item.approvalMode) }}
+                      </span>
                     </div>
                   </div>
 
@@ -1059,7 +1081,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- ✅ Desktop table -->
+            <!-- Desktop table -->
             <div v-else class="ui-table-wrap">
               <table class="ui-table">
                 <thead>
@@ -1068,6 +1090,7 @@ onBeforeUnmount(() => {
                     <th class="ui-th">Type</th>
                     <th class="ui-th">Leave Date</th>
                     <th class="ui-th">Days</th>
+                    <th class="ui-th">Mode</th>
                     <th class="ui-th">Status</th>
                     <th class="ui-th">Reason</th>
                     <th class="ui-th text-center">File</th>
@@ -1077,7 +1100,7 @@ onBeforeUnmount(() => {
 
                 <tbody>
                   <tr v-if="!pagedRequests.length">
-                    <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                    <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                       You have not submitted any leave requests yet.
                     </td>
                   </tr>
@@ -1100,6 +1123,12 @@ onBeforeUnmount(() => {
                     </td>
 
                     <td class="ui-td">
+                      <span :class="modeBadgeUiClass(item.approvalMode)">
+                        {{ modeLabel(item.approvalMode) }}
+                      </span>
+                    </td>
+
+                    <td class="ui-td">
                       <span :class="statusBadgeUiClass(item.status)">{{ statusLabel(item.status) }}</span>
                     </td>
 
@@ -1107,7 +1136,6 @@ onBeforeUnmount(() => {
                       <span class="block w-full truncate text-left">{{ item.reason || '—' }}</span>
                     </td>
 
-                    <!-- ✅ File column (SwapDay style) -->
                     <td class="ui-td text-center">
                       <button
                         v-if="item.attachments?.length"
@@ -1182,9 +1210,11 @@ onBeforeUnmount(() => {
                 and <span class="font-extrabold">no approval has started</span>.
               </div>
 
-              <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <span class="ui-badge ui-badge-info">{{ cancelItem?.leaveTypeCode }}</span>
-                <span class="mx-1 opacity-60">•</span>
+                <span :class="modeBadgeUiClass(cancelItem?.approvalMode)">
+                  {{ modeLabel(cancelItem?.approvalMode) }}
+                </span>
                 <span>{{ cancelItem?.startDate }} → {{ cancelItem?.endDate }}</span>
               </div>
 
@@ -1214,8 +1244,13 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
             <div class="min-w-0">
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Attachments</div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                {{ filesRequest?.leaveTypeCode }} • {{ filesRequest?.startDate }} → {{ filesRequest?.endDate }}
+              <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span>{{ filesRequest?.leaveTypeCode }}</span>
+                <span>•</span>
+                <span>{{ filesRequest?.startDate }} → {{ filesRequest?.endDate }}</span>
+                <span :class="modeBadgeUiClass(filesRequest?.approvalMode)">
+                  {{ modeLabel(filesRequest?.approvalMode) }}
+                </span>
               </div>
               <div v-if="filesRequest && !canEdit(filesRequest)" class="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
                 Attachments are locked because approval has started.
@@ -1235,7 +1270,6 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-[320px_1fr] gap-0">
-            <!-- left list -->
             <div class="md:border-r border-slate-200 dark:border-slate-800 p-3 max-h-[40vh] md:max-h-[calc(100vh-140px)] overflow-auto">
               <div v-if="filesLoading" class="text-[11px] text-slate-500 dark:text-slate-400">Loading…</div>
               <div v-else-if="filesError" class="text-[11px] font-semibold text-rose-600 dark:text-rose-300">{{ filesError }}</div>
@@ -1276,7 +1310,6 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <!-- right preview -->
             <div class="p-3">
               <div v-if="!selectedAttId" class="h-[45vh] md:h-[520px] grid place-items-center text-[12px] text-slate-500 dark:text-slate-400">
                 Select a file
@@ -1399,7 +1432,12 @@ onBeforeUnmount(() => {
           <div class="flex items-start justify-between gap-3">
             <div>
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit request</div>
-              <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">Allowed only before any approval started.</div>
+              <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+                <span>Allowed only before any approval started.</span>
+                <span :class="modeBadgeUiClass(editItem?.approvalMode)">
+                  {{ modeLabel(editItem?.approvalMode) }}
+                </span>
+              </div>
             </div>
             <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeEdit">
               <i class="fa-solid fa-xmark text-[11px]" />
@@ -1447,7 +1485,6 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="mt-2 space-y-2">
-                  <!-- single day -->
                   <div v-if="!isMultiDayEdit" class="flex justify-end gap-2">
                     <button type="button" class="sq-chip" :class="!editForm.singleHalf ? 'sq-chip-on' : ''" @click="editForm.singleHalf = ''">
                       FULL
@@ -1460,7 +1497,6 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
 
-                  <!-- multi day edges -->
                   <div v-else class="grid gap-2 sm:grid-cols-2">
                     <div class="ui-frame p-2">
                       <div class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Start day</div>
@@ -1611,7 +1647,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* small square chips reused */
 .sq-chip {
   @apply grid place-items-center rounded-xl border border-slate-200 bg-white text-[11px] font-extrabold text-slate-700
          hover:bg-slate-50 active:translate-y-[0.5px] disabled:opacity-40 disabled:cursor-not-allowed
@@ -1623,13 +1658,11 @@ onBeforeUnmount(() => {
   @apply border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200;
 }
 
-/* icon btn padding same as your standard */
 .ui-icon-btn {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;
 }
 
-/* modal width helpers (safe on mobile) */
 .ui-modal-xl {
   width: min(1100px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);

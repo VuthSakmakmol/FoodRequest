@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
+import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 
 defineOptions({ name: 'AdminBookingRoomMaterial' })
 
@@ -61,6 +62,8 @@ const confirmTitle = ref('')
 const confirmMessage = ref('')
 const confirmAction = ref(null)
 
+let masterRefreshTimer = null
+
 /* ───────────────── Computed ───────────────── */
 const filteredRows = computed(() => {
   let list = arr(rows.value)
@@ -91,9 +94,9 @@ const activeCount = computed(() => arr(rows.value).filter((x) => x.isActive).len
 const inactiveCount = computed(() => arr(rows.value).filter((x) => !x.isActive).length)
 
 /* ───────────────── API ───────────────── */
-async function loadRows() {
+async function loadRows({ silent = false } = {}) {
   try {
-    loading.value = true
+    if (!silent) loading.value = true
 
     const { data } = await api.get('/booking-room/admin/materials', {
       params: {
@@ -118,7 +121,7 @@ async function loadRows() {
       message: e?.response?.data?.message || 'Failed to load material list.',
     })
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -274,8 +277,48 @@ function closeConfirm() {
   confirmOpen.value = false
 }
 
+/* ───────────────── Realtime ───────────────── */
+function queueMasterRefresh() {
+  if (masterRefreshTimer) clearTimeout(masterRefreshTimer)
+  masterRefreshTimer = setTimeout(() => {
+    loadRows({ silent: true })
+  }, 250)
+}
+
+function onMaterialMasterChanged() {
+  queueMasterRefresh()
+}
+
+function onMastersChanged(payload) {
+  if (up(payload?.type) && up(payload?.type) !== 'MATERIAL') return
+  queueMasterRefresh()
+}
+
 /* ───────────────── Lifecycle ───────────────── */
-onMounted(loadRows)
+onMounted(async () => {
+  try {
+    await subscribeRoleIfNeeded('MATERIAL_ADMIN')
+  } catch {}
+
+  await loadRows()
+
+  socket.on('bookingroom:material-master:created', onMaterialMasterChanged)
+  socket.on('bookingroom:material-master:updated', onMaterialMasterChanged)
+  socket.on('bookingroom:material-master:deleted', onMaterialMasterChanged)
+  socket.on('bookingroom:masters:changed', onMastersChanged)
+})
+
+onBeforeUnmount(() => {
+  if (masterRefreshTimer) {
+    clearTimeout(masterRefreshTimer)
+    masterRefreshTimer = null
+  }
+
+  socket.off('bookingroom:material-master:created', onMaterialMasterChanged)
+  socket.off('bookingroom:material-master:updated', onMaterialMasterChanged)
+  socket.off('bookingroom:material-master:deleted', onMaterialMasterChanged)
+  socket.off('bookingroom:masters:changed', onMastersChanged)
+})
 </script>
 
 <template>

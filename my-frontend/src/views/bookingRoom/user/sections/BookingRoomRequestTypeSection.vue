@@ -208,9 +208,6 @@ function materialQtyText(code) {
                     Meeting Room
                   </h3>
                 </div>
-                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Select active room master from backend
-                </p>
               </div>
 
               <button
@@ -282,9 +279,6 @@ function materialQtyText(code) {
                     IT Material
                   </h3>
                 </div>
-                <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                  Choose active materials and quantity
-                </p>
               </div>
 
               <button

@@ -3,6 +3,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
+import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 
 defineOptions({ name: 'AdminBookingRoomRoom' })
 
@@ -18,7 +19,7 @@ function cleanText(v) { return s(v) || '—' }
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
-  isMobile.value = window.innerWidth < 1024 // lg breakpoint
+  isMobile.value = window.innerWidth < 1024
 }
 
 /* ───────── State ───────── */
@@ -41,6 +42,8 @@ const showModal = ref(false)
 const showDeleteModal = ref(false)
 const targetDelete = ref(null)
 
+let masterRefreshTimer = null
+
 /* ───────── Computed ───────── */
 const modalTitle = computed(() => (editingId.value ? 'Edit Room' : 'Create Room'))
 const submitLabel = computed(() => (saving.value ? 'Saving...' : editingId.value ? 'Update' : 'Create'))
@@ -49,18 +52,14 @@ const canSubmit = computed(() => {
   return !saving.value && !!normCode(form.value.code) && !!s(form.value.name)
 })
 
-
 const filteredRows = computed(() => {
-  // Client-side filtering fallback if backend doesn't handle 'q' perfectly, 
-  // but usually we just rely on API. Since the original relied on API mostly,
-  // we'll just return rows.
   return rows.value
 })
 
 /* ───────── API ───────── */
-async function fetchRows() {
+async function fetchRows({ silent = false } = {}) {
   try {
-    loading.value = true
+    if (!silent) loading.value = true
     const { data } = await api.get('/booking-room/admin/rooms', {
       params: {
         active: active.value,
@@ -77,7 +76,7 @@ async function fetchRows() {
       message: e?.response?.data?.message || 'Unable to load room list.',
     })
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -169,6 +168,23 @@ function closeDeleteModal() {
   targetDelete.value = null
 }
 
+/* ───────── Realtime ───────── */
+function queueMasterRefresh() {
+  if (masterRefreshTimer) clearTimeout(masterRefreshTimer)
+  masterRefreshTimer = setTimeout(() => {
+    fetchRows({ silent: true })
+  }, 250)
+}
+
+function onRoomMasterChanged() {
+  queueMasterRefresh()
+}
+
+function onMastersChanged(payload) {
+  if (up(payload?.type) && up(payload?.type) !== 'ROOM') return
+  queueMasterRefresh()
+}
+
 /* ───────── Modal UX: Body Lock & ESC ───────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
@@ -187,37 +203,51 @@ function onKeydown(e) {
 }
 
 /* ───────── Lifecycle ───────── */
-onMounted(() => {
+onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateIsMobile)
     window.addEventListener('keydown', onKeydown)
   }
-  fetchRows()
+
+  try {
+    await subscribeRoleIfNeeded('ROOM_ADMIN')
+  } catch {}
+
+  await fetchRows()
+
+  socket.on('bookingroom:room-master:created', onRoomMasterChanged)
+  socket.on('bookingroom:room-master:updated', onRoomMasterChanged)
+  socket.on('bookingroom:room-master:deleted', onRoomMasterChanged)
+  socket.on('bookingroom:masters:changed', onMastersChanged)
 })
 
 onBeforeUnmount(() => {
   lockBodyScroll(false)
+
+  if (masterRefreshTimer) {
+    clearTimeout(masterRefreshTimer)
+    masterRefreshTimer = null
+  }
+
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', updateIsMobile)
     window.removeEventListener('keydown', onKeydown)
   }
+
+  socket.off('bookingroom:room-master:created', onRoomMasterChanged)
+  socket.off('bookingroom:room-master:updated', onRoomMasterChanged)
+  socket.off('bookingroom:room-master:deleted', onRoomMasterChanged)
+  socket.off('bookingroom:masters:changed', onMastersChanged)
 })
 </script>
 
 <template>
   <div class="ui-page min-h-[calc(100vh-48px)] p-2 sm:p-4">
-    
-    <!-- ✅ Max Width Container -->
     <div class="mx-auto w-full max-w-7xl space-y-4">
-      
-      <!-- Top Card (Hero + Filters) -->
       <div class="ui-card overflow-hidden">
-        
-        <!-- Hero & Inline Stats -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-
             <div class="flex flex-wrap items-center gap-2 shrink-0">
               <button type="button" class="ui-hero-btn" @click="fetchRows" :disabled="loading">
                 <i :class="loading ? 'fa-solid fa-spinner animate-spin' : 'fa-solid fa-rotate-right'" class="text-[11px]" />
@@ -231,7 +261,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Compact Filters using .ui-field -->
         <div class="p-4 bg-slate-50/50 dark:bg-slate-900/20">
           <div class="grid gap-3 grid-cols-1 md:grid-cols-3 lg:grid-cols-4">
             <div class="ui-field">
@@ -242,7 +271,7 @@ onBeforeUnmount(() => {
                 <option value="INACTIVE">Inactive</option>
               </select>
             </div>
-            
+
             <div class="ui-field lg:col-span-2">
               <label class="ui-label">Search Keyword</label>
               <div class="relative">
@@ -258,7 +287,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Main Body / Table Area -->
       <div>
         <div v-if="loading && !rows.length" class="space-y-3">
           <div class="ui-skeleton h-12 w-full" />
@@ -266,7 +294,6 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-else>
-          <!-- ✅ Mobile Cards -->
           <div v-if="isMobile" class="space-y-3">
             <div v-if="!filteredRows.length" class="ui-frame p-6 text-center text-[12px] text-slate-500 dark:text-slate-400">
               No rooms found.
@@ -300,7 +327,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- ✅ Desktop Table w/ Horizontal Scrolling -->
           <div v-else class="ui-table-wrap ui-scrollbar w-full overflow-x-auto block border border-slate-200 dark:border-slate-800 rounded-xl shadow-sm bg-white dark:bg-slate-900">
             <table class="ui-table min-w-[760px] w-full text-left">
               <thead>
@@ -355,14 +381,10 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-
     </div>
 
-    <!-- ✅ Create / Edit Modal -->
     <div v-if="showModal" class="ui-modal-backdrop" @click.self="closeModal">
       <div class="ui-modal !max-w-lg p-0 overflow-hidden">
-        
-        <!-- Modal Header -->
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
           <div class="flex items-center gap-3">
             <div class="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-sky-500 text-white shadow-sky-500/30">
@@ -382,7 +404,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- Modal Body -->
         <div class="p-5">
           <form id="roomForm" class="space-y-4" @submit.prevent="submitForm">
             <div class="ui-field">
@@ -410,7 +431,6 @@ onBeforeUnmount(() => {
           </form>
         </div>
 
-        <!-- Footer -->
         <div class="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 flex items-center justify-end gap-2">
           <button type="button" class="ui-btn ui-btn-soft" @click="closeModal" :disabled="saving">
             Cancel
@@ -428,11 +448,8 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- ✅ Delete Modal -->
     <div v-if="showDeleteModal" class="ui-modal-backdrop" @click.self="closeDeleteModal">
       <div class="ui-modal !max-w-md p-0 overflow-hidden">
-        
-        <!-- Modal Header -->
         <div class="flex items-center justify-between px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
           <div class="flex items-center gap-3">
             <div class="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-rose-500 text-white shadow-rose-500/30">
@@ -452,7 +469,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <!-- Modal Body -->
         <div class="p-5 space-y-4">
           <div class="text-[13px] font-medium text-slate-700 dark:text-slate-200">
             Are you sure you want to delete this room? It will be marked as <span class="font-bold text-rose-500">INACTIVE</span>.
@@ -472,7 +488,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Footer -->
         <div class="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20 flex items-center justify-end gap-2">
           <button type="button" class="ui-btn ui-btn-soft" @click="closeDeleteModal" :disabled="deleting">
             Cancel
@@ -489,6 +504,5 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-
   </div>
 </template>

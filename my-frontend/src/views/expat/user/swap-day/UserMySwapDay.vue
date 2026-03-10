@@ -7,6 +7,11 @@
   ✅ Responsive: mobile cards + desktop table
   ✅ Detail modal included
   ✅ Realtime: swap:req:created / swap:req:updated
+  ✅ NEW: Approver mode shown in:
+     - mobile cards
+     - desktop table
+     - detail modal
+     - search
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -33,7 +38,7 @@ const rows = ref([])
 const search = ref('')
 const statusFilter = ref('ALL')
 
-/* ✅ NEW: date-to-date filter (Work Date range: requestStartDate/requestEndDate) */
+/* ✅ date-to-date filter (Work Date range: requestStartDate/requestEndDate) */
 const dateFrom = ref('') // YYYY-MM-DD
 const dateTo = ref('') // YYYY-MM-DD
 
@@ -76,6 +81,25 @@ function statusBadgeUiClass(s) {
   return 'ui-badge'
 }
 
+function modeLabel(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_AND_GM') return 'Manager + GM'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  if (m === 'COO_ONLY') return 'COO only'
+  return m || '—'
+}
+
+function modeBadgeUiClass(mode) {
+  const m = up(mode)
+  if (m === 'MANAGER_ONLY') return 'ui-badge ui-badge-success'
+  if (m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO') return 'ui-badge ui-badge-info'
+  if (m === 'GM_ONLY' || m === 'COO_ONLY' || m === 'GM_AND_COO') return 'ui-badge'
+  return 'ui-badge'
+}
+
 function fmtDateTime(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD HH:mm')
@@ -113,7 +137,7 @@ function canEditOrCancel(item) {
   return true
 }
 
-/* ✅ NEW: date-to-date filter helper (overlap check on requestStartDate/requestEndDate) */
+/* ✅ date-to-date filter helper (overlap check on requestStartDate/requestEndDate) */
 function passDateFilterByWorkRange(item, from, to) {
   const f1 = String(from || '').trim()
   const f2 = String(to || '').trim()
@@ -202,7 +226,7 @@ const filteredRows = computed(() => {
     result = result.filter((r) => up(r.status) === up(statusFilter.value))
   }
 
-  /* ✅ NEW: date-to-date filter by WORK date range */
+  /* ✅ date-to-date filter by WORK date range */
   result = result.filter((r) => passDateFilterByWorkRange(r, dateFrom.value, dateTo.value))
 
   if (search.value.trim()) {
@@ -217,6 +241,8 @@ const filteredRows = computed(() => {
         r.offEndDate,
         r.employeeName,
         r.department,
+        r.approvalMode,
+        modeLabel(r.approvalMode),
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -292,7 +318,6 @@ onBeforeUnmount(() => {
               <div class="text-sm font-extrabold">Swap Working Day</div>
             </div>
 
-            <!-- ✅ ONLY CHANGE: add Date From / Date To in the filter bar -->
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_170px_170px_auto] md:items-end">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
@@ -301,7 +326,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Reason, date, status..."
+                    placeholder="Reason, date, status, mode..."
                     class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -352,7 +377,7 @@ onBeforeUnmount(() => {
             No swap requests found.
           </div>
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-else-if="isMobile" class="space-y-2">
             <article v-for="item in filteredRows" :key="item._id" class="ui-card p-3">
               <div class="flex items-start justify-between gap-3">
@@ -370,6 +395,12 @@ onBeforeUnmount(() => {
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
                     Swap:
                     <span class="font-extrabold">{{ fmtYmd(item.offStartDate) }} → {{ fmtYmd(item.offEndDate) }}</span>
+                  </div>
+
+                  <div class="mt-1">
+                    <span :class="modeBadgeUiClass(item.approvalMode)">
+                      {{ modeLabel(item.approvalMode) }}
+                    </span>
                   </div>
                 </div>
 
@@ -408,7 +439,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table">
               <thead>
@@ -416,6 +447,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Work Date</th>
                   <th class="ui-th">Swap Date</th>
+                  <th class="ui-th">Mode</th>
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
                   <th class="ui-th text-center">Actions</th>
@@ -430,6 +462,12 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td whitespace-nowrap">{{ item.requestStartDate }} → {{ item.requestEndDate }}</td>
                   <td class="ui-td whitespace-nowrap">{{ item.offStartDate }} → {{ item.offEndDate }}</td>
+
+                  <td class="ui-td whitespace-nowrap">
+                    <span :class="modeBadgeUiClass(item.approvalMode)">
+                      {{ modeLabel(item.approvalMode) }}
+                    </span>
+                  </td>
 
                   <td class="ui-td whitespace-nowrap">
                     <span :class="statusBadgeUiClass(item.status)">
@@ -480,7 +518,7 @@ onBeforeUnmount(() => {
     </div>
   </div>
 
-  <!-- ✅ DETAIL MODAL -->
+  <!-- DETAIL MODAL -->
   <div v-if="viewOpen" class="ui-modal-backdrop" @click.self="closeDetail">
     <div class="ui-modal p-0 overflow-hidden">
       <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
@@ -508,11 +546,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="text-right md:text-left">
-              <div class="ui-label">Editable?</div>
-              <div class="text-[12px] font-extrabold">
-                <span v-if="canEditOrCancel(viewItem)" class="text-emerald-600 dark:text-emerald-400">Yes</span>
-                <span v-else class="text-slate-500 dark:text-slate-400">No</span>
-              </div>
+              <div class="ui-label">Approver Mode</div>
+              <span :class="modeBadgeUiClass(viewItem?.approvalMode)">
+                {{ modeLabel(viewItem?.approvalMode) }}
+              </span>
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <div class="ui-label">Editable?</div>
+            <div class="text-[12px] font-extrabold">
+              <span v-if="canEditOrCancel(viewItem)" class="text-emerald-600 dark:text-emerald-400">Yes</span>
+              <span v-else class="text-slate-500 dark:text-slate-400">No</span>
             </div>
           </div>
         </div>

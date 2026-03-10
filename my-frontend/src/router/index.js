@@ -546,12 +546,6 @@ const router = createRouter({
           component: AdminBookingRoomRooms,
           meta: { title: 'Room Master' },
         },
-        {
-          path: 'bookings',
-          name: 'booking-room-admin-list-room',
-          component: () => import('@/views/bookingRoom/admin/AdminBookingRoomList.vue'),
-          meta: { title: 'Booking List' },
-        },
       ],
     },
 
@@ -575,12 +569,6 @@ const router = createRouter({
           name: 'booking-room-admin-materials',
           component: AdminBookingRoomMaterials,
           meta: { title: 'Material Master' },
-        },
-        {
-          path: 'bookings',
-          name: 'booking-room-admin-list-material',
-          component: () => import('@/views/bookingRoom/admin/AdminBookingRoomList.vue'),
-          meta: { title: 'Booking List' },
         },
       ],
     },

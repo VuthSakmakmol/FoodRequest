@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
 import { useRouter } from 'vue-router'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
+import socket from '@/utils/socket'
 
 import { searchBookingRoomEmployees } from '@/utils/bookingRoom.api'
 
@@ -58,6 +59,9 @@ const form = ref({
 })
 
 const errors = ref([])
+
+let mastersRefreshTimer = null
+let scheduleRefreshTimer = null
 
 /* ───────────────── HELPERS ───────────────── */
 function s(v) {
@@ -188,9 +192,9 @@ function selectEmployee(emp) {
 }
 
 /* ───────────────── PUBLIC MASTER DATA ───────────────── */
-async function loadMasters() {
+async function loadMasters({ silent = false } = {}) {
   try {
-    loadingMasters.value = true
+    if (!silent) loadingMasters.value = true
 
     const [roomRes, materialRes] = await Promise.all([
       api.get('/public/booking-room/rooms/active'),
@@ -220,12 +224,12 @@ async function loadMasters() {
       message: e?.response?.data?.message || 'Failed to load room/material list.',
     })
   } finally {
-    loadingMasters.value = false
+    if (!silent) loadingMasters.value = false
   }
 }
 
 /* ───────────────── SCHEDULE / AVAILABILITY ───────────────── */
-async function loadSchedule() {
+async function loadSchedule({ silent = false } = {}) {
   try {
     const date = s(form.value.bookingDate)
     if (!date) {
@@ -239,6 +243,12 @@ async function loadSchedule() {
 
     scheduleRows.value = Array.isArray(res?.data) ? res.data : []
   } catch (e) {
+    if (!silent) {
+      showToast({
+        type: 'error',
+        message: e?.response?.data?.message || 'Failed to load schedule.',
+      })
+    }
     scheduleRows.value = []
   }
 }
@@ -373,6 +383,45 @@ async function submit() {
   }
 }
 
+/* ───────────────── REALTIME ───────────────── */
+function queueMastersRefresh() {
+  if (mastersRefreshTimer) clearTimeout(mastersRefreshTimer)
+  mastersRefreshTimer = setTimeout(() => {
+    loadMasters({ silent: true })
+  }, 250)
+}
+
+function queueScheduleRefresh() {
+  if (scheduleRefreshTimer) clearTimeout(scheduleRefreshTimer)
+  scheduleRefreshTimer = setTimeout(() => {
+    loadSchedule({ silent: true })
+  }, 250)
+}
+
+function onRoomMasterChanged() {
+  queueMastersRefresh()
+}
+
+function onMaterialMasterChanged() {
+  queueMastersRefresh()
+}
+
+function onMastersChanged() {
+  queueMastersRefresh()
+}
+
+function onAvailabilityChanged() {
+  queueScheduleRefresh()
+}
+
+function onReqCreated() {
+  queueScheduleRefresh()
+}
+
+function onReqUpdated() {
+  queueScheduleRefresh()
+}
+
 /* ───────────────── INIT ───────────────── */
 onMounted(async () => {
   await Promise.all([loadEmployees(), loadMasters()])
@@ -384,6 +433,45 @@ onMounted(async () => {
   }
 
   await loadSchedule()
+
+  socket.on('bookingroom:room-master:created', onRoomMasterChanged)
+  socket.on('bookingroom:room-master:updated', onRoomMasterChanged)
+  socket.on('bookingroom:room-master:deleted', onRoomMasterChanged)
+
+  socket.on('bookingroom:material-master:created', onMaterialMasterChanged)
+  socket.on('bookingroom:material-master:updated', onMaterialMasterChanged)
+  socket.on('bookingroom:material-master:deleted', onMaterialMasterChanged)
+
+  socket.on('bookingroom:masters:changed', onMastersChanged)
+  socket.on('bookingroom:availability:changed', onAvailabilityChanged)
+
+  socket.on('bookingroom:req:created', onReqCreated)
+  socket.on('bookingroom:req:updated', onReqUpdated)
+})
+
+onBeforeUnmount(() => {
+  if (mastersRefreshTimer) {
+    clearTimeout(mastersRefreshTimer)
+    mastersRefreshTimer = null
+  }
+  if (scheduleRefreshTimer) {
+    clearTimeout(scheduleRefreshTimer)
+    scheduleRefreshTimer = null
+  }
+
+  socket.off('bookingroom:room-master:created', onRoomMasterChanged)
+  socket.off('bookingroom:room-master:updated', onRoomMasterChanged)
+  socket.off('bookingroom:room-master:deleted', onRoomMasterChanged)
+
+  socket.off('bookingroom:material-master:created', onMaterialMasterChanged)
+  socket.off('bookingroom:material-master:updated', onMaterialMasterChanged)
+  socket.off('bookingroom:material-master:deleted', onMaterialMasterChanged)
+
+  socket.off('bookingroom:masters:changed', onMastersChanged)
+  socket.off('bookingroom:availability:changed', onAvailabilityChanged)
+
+  socket.off('bookingroom:req:created', onReqCreated)
+  socket.off('bookingroom:req:updated', onReqUpdated)
 })
 </script>
 
