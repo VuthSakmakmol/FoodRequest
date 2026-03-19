@@ -5,6 +5,12 @@ const router = express.Router()
 
 const auth = require('../../middlewares/auth')
 const ctrl = require('../../controllers/leave/leaveProfiles.admin.controller')
+// const { runLeaveContractReminderJob } = require('../../services/leave/leave.contractReminder.service')
+const {
+  runLeaveContractReminderJob,
+  getCurrentLeaveContractReminders,
+} = require('../../services/leave/leave.contractReminder.service')
+console.log('getCurrentLeaveContractReminders typeof =', typeof getCurrentLeaveContractReminders)
 
 // ✅ guard against "argument handler must be a function"
 function h(fn, name) {
@@ -25,14 +31,14 @@ function h(fn, name) {
 router.use(auth.requireAuth)
 router.use(auth.requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'))
 
-// Approvers (must include GM + COO in your controller logic)
+/* ───────────────── Approvers ───────────────── */
 router.get('/approvers', h(ctrl.getApprovers, 'getApprovers'))
 
-// Profiles list
+/* ───────────────── Profiles list ───────────────── */
 router.get('/profiles', h(ctrl.getProfilesGrouped, 'getProfilesGrouped'))
 router.get('/profiles/grouped', h(ctrl.getProfilesGrouped, 'getProfilesGrouped'))
 
-// Profile CRUD
+/* ───────────────── Profile CRUD ───────────────── */
 router.get('/profiles/:employeeId', h(ctrl.getProfileOne, 'getProfileOne'))
 router.post('/profiles', h(ctrl.createProfileSingle, 'createProfileSingle'))
 
@@ -41,23 +47,45 @@ router.put('/profiles/:employeeId', h(ctrl.updateProfile, 'updateProfile'))
 
 router.delete('/profiles/:employeeId', h(ctrl.deactivateProfile, 'deactivateProfile'))
 
-// Bulk create: manager + employees
+/* ───────────────── Bulk create: manager + employees ───────────────── */
 router.post('/profiles/manager', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
 router.post('/managers', h(ctrl.createManagerWithEmployees, 'createManagerWithEmployees'))
 
-// Renew contract
+/* ───────────────── Renew contract ───────────────── */
 router.post('/profiles/:employeeId/contracts/renew', h(ctrl.renewContract, 'renewContract'))
 
-// Contract history
+/* ───────────────── Contract history ───────────────── */
 router.get('/profiles/:employeeId/contracts', h(ctrl.getContractHistory, 'getContractHistory'))
 
-// Recalculate
+/* ───────────────── Recalculate ───────────────── */
 router.post('/profiles/:employeeId/recalculate', h(ctrl.recalculateBalances, 'recalculateBalances'))
 
-// Admin reset password (no old password)
+/* ───────────────── Admin reset password ───────────────── */
 router.patch('/profiles/:employeeId/password', h(ctrl.resetUserPassword, 'resetUserPassword'))
 
-// Update per-contract carry
+/* ───────────────── Update per-contract carry ───────────────── */
 router.patch('/profiles/:employeeId/contracts/:contractNo', h(ctrl.updateContractCarry, 'updateContractCarry'))
+
+/* ───────────────── Manual contract reminder test ─────────────────
+   POST /api/admin/leave/contracts/reminders/run
+   Use this in Postman to manually run the reminder job.
+*/
+router.post('/contracts/reminders/run', async (req, res, next) => {
+  try {
+    const result = await runLeaveContractReminderJob()
+    return res.json({ ok: true, result })
+  } catch (err) {
+    next(err)
+  }
+})
+
+router.get('/contracts/reminders', async (req, res, next) => {
+  try {
+    const items = await getCurrentLeaveContractReminders()
+    return res.json({ ok: true, items })
+  } catch (err) {
+    next(err)
+  }
+})
 
 module.exports = router

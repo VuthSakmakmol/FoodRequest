@@ -11,6 +11,10 @@ const compression = require('compression')
 const rateLimit = require('express-rate-limit')
 const { Server } = require('socket.io')
 
+const {
+  startLeaveContractReminderJob,
+  stopLeaveContractReminderJob,
+} = require('./jobs/leave.contractReminder.job')
 const { startTelegramPolling, stopTelegramPolling } = require('./services/telegram.polling')
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime')
 
@@ -243,10 +247,18 @@ const PORT = Number(process.env.PORT || 4333)
       const proto = forceHTTPS ? 'https' : 'http'
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`)
       console.log('✅ Try login POST /api/auth/login')
+
+      startLeaveContractReminderJob()
+      console.log('✅ Leave contract reminder job started')
     })
 
     const shutdown = async (sig) => {
       console.log(`\n${sig} received. Shutting down...`)
+
+      try {
+        stopLeaveContractReminderJob()
+      } catch (_) {}
+
       try {
         await stopTelegramPolling()
       } catch (_) {}

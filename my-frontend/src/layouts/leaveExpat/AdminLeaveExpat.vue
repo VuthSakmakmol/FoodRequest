@@ -1,15 +1,23 @@
 <!-- src/layouts/LeaveExpat/AdminLeaveExpat.vue -->
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import dayjs from 'dayjs'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuth } from '@/store/auth'
+import api from '@/utils/api'
+import { useToast } from '@/composables/useToast'
 import ToastContainer from '@/components/AppToast.vue'
+
+import ContractReminderBanner from '@/views/expat/admin/contractRemind/ContractReminderBanner.vue'
+import ContractReminderList from '@/views/expat/admin/contractRemind/ContractReminderList.vue'
+import RenewModal from '@/views/expat/admin/profiles/components/RenewModal.vue'
 
 defineOptions({ name: 'AdminLeaveExpat' })
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuth()
+const { showToast } = useToast()
 
 /* ───────── Responsive ───────── */
 const isMobile = ref(false)
@@ -37,13 +45,7 @@ const groups = [
     header: 'Leave Approval',
     icon: 'fa-solid fa-clipboard-check',
     children: [
-      // { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-manager-inbox' } },
-      // { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-gm-inbox' } },
-      // { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-coo-inbox' } },
-      // { label: 'Leave Types', icon: 'fa-solid fa-gear', to: { name: 'leave-admin-types' } },
       { label: 'Expat Profiles', icon: 'fa-solid fa-user-group', to: { name: 'leave-admin-profiles' } },
-      // { label: 'Report Summary', icon: 'fa-solid fa-chart-column', to: { name: 'leave-admin-report' } },
-      // { label: 'Add Signature', icon: 'fa-solid fa-add', to: { name: 'leave-add-signature' } },
     ],
   },
   {
@@ -51,9 +53,6 @@ const groups = [
     header: 'SwapDay Approval',
     icon: 'fa-solid fa-right-left',
     children: [
-      // { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-swap-day-manager-inbox' } },
-      // { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-swap-day-gm-inbox' } },
-      // { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-swap-day-coo-inbox' } },
       { label: 'SwapDay Report', icon: 'fa-solid fa-file-export', to: { name: 'leave-admin-swap-day-report' } },
     ],
   },
@@ -62,10 +61,7 @@ const groups = [
     header: 'Forget Scan Approval',
     icon: 'fa-solid fa-fingerprint',
     children: [
-      // { label: 'Manager Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-forget-scan-manager-inbox' } },
-      // { label: 'GM Inbox', icon: 'fa-solid fa-user-tie', to: { name: 'leave-admin-forget-scan-gm-inbox' } },
-      // { label: 'COO Inbox', icon: 'fa-solid fa-user-shield', to: { name: 'leave-admin-forget-scan-coo-inbox' } },
-      { label: 'Forget Scan Report', icon: 'fa-solid fa-file-export', to: { name: 'admin-forget-scan-report'}},
+      { label: 'Forget Scan Report', icon: 'fa-solid fa-file-export', to: { name: 'admin-forget-scan-report' } },
     ],
   },
   {
@@ -76,7 +72,7 @@ const groups = [
       {
         label: 'Central Data',
         icon: 'fa-solid fa-table',
-        to: { name: 'leave-admin-central-data' }, // ✅ must match router name
+        to: { name: 'leave-admin-central-data' },
       },
     ],
   },
@@ -109,7 +105,9 @@ function isGroupActive(g) {
 
 function handleSectionClick(key) {
   const wasOpen = !!open[key]
-  Object.keys(open).forEach((k) => (open[k] = false))
+  Object.keys(open).forEach((k) => {
+    open[k] = false
+  })
   open[key] = !wasOpen
 }
 
@@ -122,14 +120,263 @@ function toggleAuth() {
   router.push({ name: 'greeting' })
 }
 
-onMounted(() => {
+/* ───────── Helpers ───────── */
+function s(v) {
+  return String(v ?? '').trim()
+}
+function num(v, fallback = 0) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+/* ───────── Contract reminders (global for all admin leave pages) ───────── */
+const contractReminderLoading = ref(false)
+const contractReminders = ref([])
+const contractReminderListOpen = ref(false)
+const contractReminderDismissed = ref(false)
+
+let reminderPollTimer = null
+let reminderInitialLoaded = false
+const seenReminderKeys = new Set()
+
+function reminderKey(item) {
+  return [
+    s(item?.employeeId),
+    num(item?.contractNo, 0),
+    s(item?.endDate),
+    num(item?.daysLeft, 0),
+    s(item?.reminderType),
+  ].join('|')
+}
+
+function normalizeReminderRow(raw = {}) {
+  return {
+    employeeId: s(raw.employeeId),
+    employeeName: s(raw.employeeName || raw.name),
+    name: s(raw.name || raw.employeeName),
+    department: s(raw.department),
+    managerLoginId: s(raw.managerLoginId),
+    contractNo: num(raw.contractNo),
+    startDate: s(raw.startDate),
+    endDate: s(raw.endDate),
+    daysLeft: num(raw.daysLeft, 0),
+    reminderType: s(raw.reminderType),
+  }
+}
+
+const activeReminderCount = computed(() => contractReminders.value.length)
+const hasContractReminders = computed(() => activeReminderCount.value > 0)
+const showContractReminderBanner = computed(() => hasContractReminders.value && !contractReminderDismissed.value)
+
+function markCurrentRemindersSeen(rows = []) {
+  for (const row of rows) seenReminderKeys.add(reminderKey(row))
+}
+
+function detectNewReminders(rows = []) {
+  return rows.some((row) => !seenReminderKeys.has(reminderKey(row)))
+}
+
+async function fetchContractReminders({ silent = false, allowAutoOpen = false } = {}) {
+  if (contractReminderLoading.value) return
+  contractReminderLoading.value = true
+
+  try {
+    const res = await api.get('/admin/leave/contracts/reminders')
+    const list = Array.isArray(res?.data?.items)
+      ? res.data.items
+      : Array.isArray(res?.data)
+        ? res.data
+        : []
+
+    const nextRows = list.map(normalizeReminderRow)
+    const hasNew = reminderInitialLoaded ? detectNewReminders(nextRows) : false
+
+    contractReminders.value = nextRows
+
+    if (!reminderInitialLoaded) {
+      markCurrentRemindersSeen(nextRows)
+      reminderInitialLoaded = true
+    } else if (hasNew) {
+      markCurrentRemindersSeen(nextRows)
+      contractReminderDismissed.value = false
+
+      if (allowAutoOpen && nextRows.length) {
+        contractReminderListOpen.value = true
+        showToast({
+          type: 'warning',
+          title: 'Contract reminder',
+          message:
+            nextRows.length === 1
+              ? 'A contract reminder needs action.'
+              : `${nextRows.length} contract reminders need action.`,
+        })
+      }
+    }
+
+    if (!nextRows.length) {
+      contractReminderDismissed.value = false
+    }
+  } catch (e) {
+    const status = e?.response?.status
+    const msg = e?.response?.data?.message || e?.message || 'Failed to load contract reminders.'
+
+    if (!silent && status !== 404) {
+      showToast({ type: 'error', title: 'Reminder load failed', message: msg })
+    }
+
+    if (status === 404) {
+      contractReminders.value = []
+    }
+  } finally {
+    contractReminderLoading.value = false
+  }
+}
+
+function startReminderPolling() {
+  stopReminderPolling()
+  reminderPollTimer = window.setInterval(() => {
+    fetchContractReminders({ silent: true, allowAutoOpen: true })
+  }, 60 * 1000)
+}
+
+function stopReminderPolling() {
+  if (reminderPollTimer) {
+    window.clearInterval(reminderPollTimer)
+    reminderPollTimer = null
+  }
+}
+
+function handleOpenReminderList() {
+  contractReminderListOpen.value = true
+  contractReminderDismissed.value = false
+  markCurrentRemindersSeen(contractReminders.value)
+}
+
+function handleCloseReminderList() {
+  contractReminderListOpen.value = false
+}
+
+function handleDismissReminderBanner() {
+  contractReminderDismissed.value = true
+}
+
+function handleOpenReminderProfile(item) {
+  const employeeId = s(item?.employeeId)
+  if (!employeeId) return
+  contractReminderListOpen.value = false
+  contractReminderDismissed.value = false
+  router.push({ name: 'leave-admin-profile-edit', params: { employeeId } })
+}
+
+/* ───────── Renew modal direct open ───────── */
+const renewModalOpen = ref(false)
+const renewSubmitting = ref(false)
+const renewError = ref('')
+
+const renewEmployeeId = ref('')
+const renewEmployeeName = ref('')
+
+const renewForm = reactive({
+  newContractDate: '',
+  clearOldLeave: true,
+  note: '',
+})
+
+function resetRenewState() {
+  renewError.value = ''
+  renewEmployeeId.value = ''
+  renewEmployeeName.value = ''
+  renewForm.newContractDate = ''
+  renewForm.clearOldLeave = true
+  renewForm.note = ''
+}
+
+function openRenewModal(item) {
+  const employeeId = s(item?.employeeId)
+  if (!employeeId) return
+
+  contractReminderListOpen.value = false
+  contractReminderDismissed.value = false
+
+  renewError.value = ''
+  renewEmployeeId.value = employeeId
+  renewEmployeeName.value = s(item?.name || item?.employeeName)
+  renewForm.newContractDate = dayjs().format('YYYY-MM-DD')
+  renewForm.clearOldLeave = true
+  renewForm.note = ''
+  renewModalOpen.value = true
+}
+
+function closeRenewModal() {
+  if (renewSubmitting.value) return
+  renewModalOpen.value = false
+  resetRenewState()
+}
+
+async function submitRenewModal() {
+  if (renewSubmitting.value) return
+
+  const employeeId = s(renewEmployeeId.value)
+  if (!employeeId) {
+    renewError.value = 'Employee ID is missing.'
+    return
+  }
+
+  if (!s(renewForm.newContractDate)) {
+    renewError.value = 'New contract start date is required.'
+    return
+  }
+
+  renewSubmitting.value = true
+  renewError.value = ''
+
+  try {
+    await api.post(`/admin/leave/profiles/${encodeURIComponent(employeeId)}/contracts/renew`, {
+      newContractDate: s(renewForm.newContractDate),
+      clearUnusedAL: !!renewForm.clearOldLeave,
+      note: s(renewForm.note),
+    })
+
+    showToast({
+      type: 'success',
+      title: 'Contract renewed',
+      message: `${employeeId} contract renewed successfully.`,
+    })
+
+    renewModalOpen.value = false
+    resetRenewState()
+
+    await fetchContractReminders({ silent: true, allowAutoOpen: false })
+
+    window.dispatchEvent(
+      new CustomEvent('leave-contract-renewed', {
+        detail: { employeeId },
+      })
+    )
+  } catch (e) {
+    renewError.value = e?.response?.data?.message || e?.message || 'Failed to renew contract.'
+  } finally {
+    renewSubmitting.value = false
+  }
+}
+
+function handleRenewReminder(item) {
+  openRenewModal(item)
+}
+
+/* ───────── Lifecycle ───────── */
+onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
   if (isMobile.value) mobileDrawerOpen.value = false
+
+  await fetchContractReminders({ silent: false, allowAutoOpen: false })
+  if (typeof window !== 'undefined') startReminderPolling()
 })
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
+  stopReminderPolling()
 })
 </script>
 
@@ -144,7 +391,6 @@ onBeforeUnmount(() => {
       :class="sidebarExpanded ? 'w-64' : 'w-16'"
       style="border-color: rgb(var(--ui-border));"
     >
-      <!-- Top brand -->
       <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
         <button
           type="button"
@@ -165,10 +411,8 @@ onBeforeUnmount(() => {
         <div v-if="sidebarExpanded" class="w-9" />
       </div>
 
-      <!-- Nav -->
       <nav class="flex-1 overflow-y-auto ui-scrollbar px-2 py-2">
         <div v-for="g in groups" :key="g.key" class="mb-2">
-          <!-- Group header (looks like header, not like a page) -->
           <button
             type="button"
             class="group relative w-full rounded-xl px-2.5 py-2 transition border text-left"
@@ -179,7 +423,6 @@ onBeforeUnmount(() => {
             "
             @click="handleSectionClick(g.key)"
           >
-            <!-- left accent bar (active group) -->
             <span
               class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full"
               :class="isGroupActive(g) ? 'bg-sky-500' : 'bg-transparent'"
@@ -222,7 +465,6 @@ onBeforeUnmount(() => {
             </div>
           </button>
 
-          <!-- Children -->
           <div v-show="open[g.key]" class="mt-1 pl-10 space-y-1">
             <button
               v-for="it in g.children"
@@ -236,7 +478,6 @@ onBeforeUnmount(() => {
               "
               @click="handleNavClick(it)"
             >
-              <!-- active left marker -->
               <span
                 class="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full"
                 :class="isActive(it) ? 'bg-white/90' : 'bg-transparent'"
@@ -249,7 +490,20 @@ onBeforeUnmount(() => {
         </div>
       </nav>
 
-      <!-- User -->
+      <div v-if="hasContractReminders" class="px-2 pb-2">
+        <button
+          type="button"
+          class="flex w-full items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-extrabold text-amber-800
+                 hover:bg-amber-100 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100 dark:hover:bg-amber-950/40"
+          @click="handleOpenReminderList"
+        >
+          <i class="fa-solid fa-bell" />
+          <span v-if="sidebarExpanded" class="truncate">
+            {{ activeReminderCount }} reminder{{ activeReminderCount === 1 ? '' : 's' }}
+          </span>
+        </button>
+      </div>
+
       <div class="border-t px-2 py-2" style="border-color: rgb(var(--ui-border));">
         <div class="flex items-center gap-2">
           <div class="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
@@ -283,7 +537,8 @@ onBeforeUnmount(() => {
       <div v-if="mobileDrawerOpen" class="fixed inset-0 z-30 md:hidden">
         <div class="absolute inset-0 bg-black/30" @click="closeMobileDrawer" />
 
-        <aside class="absolute inset-y-0 left-0 flex w-60 max-w-[70vw] flex-col bg-white dark:bg-slate-950/95 shadow-2xl"
+        <aside
+          class="absolute inset-y-0 left-0 flex w-60 max-w-[70vw] flex-col bg-white dark:bg-slate-950/95 shadow-2xl"
           style="border-right: 1px solid rgb(var(--ui-border));"
         >
           <div class="flex items-center justify-between border-b px-2 py-2" style="border-color: rgb(var(--ui-border));">
@@ -303,7 +558,6 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <!-- Same nav as desktop (expanded always on mobile) -->
           <nav class="flex-1 overflow-y-auto ui-scrollbar px-2 py-2">
             <div v-for="g in groups" :key="g.key + '-m'" class="mb-2">
               <button
@@ -377,6 +631,20 @@ onBeforeUnmount(() => {
             </div>
           </nav>
 
+          <div v-if="hasContractReminders" class="px-2 pb-2">
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-extrabold text-amber-800
+                     hover:bg-amber-100 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100 dark:hover:bg-amber-950/40"
+              @click="handleOpenReminderList"
+            >
+              <i class="fa-solid fa-bell" />
+              <span class="truncate">
+                {{ activeReminderCount }} reminder{{ activeReminderCount === 1 ? '' : 's' }}
+              </span>
+            </button>
+          </div>
+
           <div class="border-t px-2 py-2" style="border-color: rgb(var(--ui-border));">
             <div class="flex items-center gap-2">
               <div class="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
@@ -436,11 +704,61 @@ onBeforeUnmount(() => {
       </header>
 
       <main class="flex-1 min-h-0 overflow-auto">
-        <div class="w-full px-2 sm:px-4 lg:px-6 2xl:px-10 py-3">
+        <div class="w-full px-2 sm:px-4 lg:px-6 2xl:px-10 py-3 space-y-3">
+          <ContractReminderBanner
+            v-if="showContractReminderBanner"
+            :reminders="contractReminders"
+            :loading="contractReminderLoading"
+            @refresh="fetchContractReminders()"
+            @open-list="handleOpenReminderList"
+            @open-profile="handleOpenReminderProfile"
+            @renew="handleRenewReminder"
+          />
+
+          <div
+            v-if="showContractReminderBanner"
+            class="flex justify-end -mt-1"
+          >
+            <button
+              type="button"
+              class="ui-btn ui-btn-ghost ui-btn-sm"
+              @click="handleDismissReminderBanner"
+            >
+              <i class="fa-solid fa-eye-slash text-[11px]" />
+              Hide banner for now
+            </button>
+          </div>
+
           <router-view />
         </div>
       </main>
     </div>
+
+    <ContractReminderList
+      :open="contractReminderListOpen"
+      :reminders="contractReminders"
+      :loading="contractReminderLoading"
+      @close="handleCloseReminderList"
+      @refresh="fetchContractReminders()"
+      @open-profile="handleOpenReminderProfile"
+      @renew="handleRenewReminder"
+    />
+
+    <RenewModal
+      :open="renewModalOpen"
+      :submitting="renewSubmitting"
+      :error="renewError"
+      :newContractDate="renewForm.newContractDate"
+      :clearOldLeave="renewForm.clearOldLeave"
+      :note="renewForm.note"
+      :employeeId="renewEmployeeId"
+      :employeeName="renewEmployeeName"
+      @close="closeRenewModal"
+      @submit="submitRenewModal"
+      @update:newContractDate="renewForm.newContractDate = $event"
+      @update:clearOldLeave="renewForm.clearOldLeave = $event"
+      @update:note="renewForm.note = $event"
+    />
   </div>
 </template>
 
