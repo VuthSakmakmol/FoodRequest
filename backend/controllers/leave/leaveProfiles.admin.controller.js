@@ -803,10 +803,14 @@ exports.recalculateBalances = async (req, res) => {
 /* ─────────────────────────────────────────────────────────────
    PATCH /admin/leave/profiles/:employeeId/password
    body: { password }
+   ✅ Admin resets password without old password
+   ✅ Immediately invalidates old sessions via passwordVersion bump
 ───────────────────────────────────────────────────────────── */
 exports.resetUserPassword = async (req, res) => {
   const employeeId = s(req.params.employeeId)
   const { password } = req.body || {}
+
+  if (!password) throw createError(400, 'password is required')
 
   const prof = await LeaveProfile.findOne({ employeeId }).lean()
   if (!prof) throw createError(404, 'Profile not found')
@@ -820,7 +824,8 @@ exports.resetUserPassword = async (req, res) => {
   const user = await User.findOne({ loginId })
   if (!user) throw createError(404, 'User account not found for this profile')
 
-  // ✅ IMPORTANT: use shared method -> bumps passwordVersion
+  // ✅ Admin reset: no need old password
+  // ✅ Must invalidate all old sessions
   if (typeof user.setPassword === 'function') {
     await user.setPassword(password)
   } else {
@@ -830,5 +835,10 @@ exports.resetUserPassword = async (req, res) => {
     await user.save()
   }
 
-  return res.json({ ok: true, loginId })
+  return res.json({
+    ok: true,
+    message: 'Password reset successfully. Existing sessions were invalidated.',
+    loginId,
+    passwordVersion: Number(user.passwordVersion || 0),
+  })
 }

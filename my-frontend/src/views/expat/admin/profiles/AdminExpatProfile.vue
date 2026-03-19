@@ -32,6 +32,16 @@ function safeTxt(v) {
 function mustYmd(v) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim())
 }
+function normApprovalMode(v) {
+  const s = String(v || '').trim().toUpperCase()
+  if (s === 'MANAGER_AND_GM') return 'MANAGER_AND_GM'
+  if (s === 'MANAGER_AND_COO') return 'MANAGER_AND_COO'
+  if (s === 'GM_AND_COO') return 'GM_AND_COO'
+  if (s === 'MANAGER_ONLY') return 'MANAGER_ONLY'
+  if (s === 'GM_ONLY') return 'GM_ONLY'
+  if (s === 'COO_ONLY') return 'COO_ONLY'
+  return 'MANAGER_AND_GM'
+}
 
 /* password toggle */
 const showRowPwd = ref([])
@@ -67,7 +77,7 @@ function updateIsMobile() {
 const loading = ref(false)
 const error = ref('')
 
-/* ✅ smooth: checkbox is UI-only, appliedInactive triggers fetch only when clicking Apply */
+/* smooth: checkbox is UI-only, appliedInactive triggers fetch only when clicking Apply */
 const includeInactive = ref(false)
 const appliedInactive = ref(false)
 
@@ -82,13 +92,8 @@ function statusChipClasses(active) {
 }
 function modeChipClasses(mode) {
   const m = up(mode)
-
-  // COO involved -> indigo
   if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
-
-  // single approver -> emerald/sky
   if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
-
   return 'ui-badge ui-badge-info'
 }
 
@@ -113,7 +118,7 @@ function compactBalances(balances) {
     const b = m.get(k)
     if (!b) continue
     const used = num(b.used)
-    const remaining = num(b.remaining) // ✅ backend already includes carry
+    const remaining = num(b.remaining)
     out.push({ k, used, remaining, pair: `${used}/${remaining}` })
   }
   return out
@@ -143,6 +148,8 @@ function goEdit(employeeId) {
   router.push({ name: 'leave-admin-profile-edit', params: { employeeId: id } })
 }
 
+const defaultGm = ref({ loginId: 'leave_gm', name: 'Expat GM', role: 'LEAVE_GM' })
+const defaultCoo = ref({ loginId: 'leave_coo', name: 'COO', role: 'LEAVE_COO' })
 /* ─────────────────────────────────────────────────────────────
    API: grouped list
 ───────────────────────────────────────────────────────────── */
@@ -273,48 +280,6 @@ function nextPage() {
 watch(q, () => (page.value = 1))
 
 /* ─────────────────────────────────────────────────────────────
-   Approvers (backend returns { gm:[...], coo:[...] })
-───────────────────────────────────────────────────────────── */
-const approversLoading = ref(false)
-const approversError = ref('')
-const defaultGm = ref({ loginId: 'leave_gm', name: 'Expat GM', role: 'LEAVE_GM' })
-const defaultCoo = ref({ loginId: 'leave_coo', name: 'COO', role: 'LEAVE_COO' })
-
-async function fetchDefaultApprovers() {
-  approversLoading.value = true
-  approversError.value = ''
-  try {
-    const res = await api.get('/admin/leave/approvers')
-    const gmList = Array.isArray(res.data?.gm) ? res.data.gm : []
-    const cooList = Array.isArray(res.data?.coo) ? res.data.coo : []
-
-    // pick first if exists (or keep seeded fallback)
-    if (gmList.length) {
-      const a = gmList[0]
-      defaultGm.value = {
-        loginId: String(a.loginId || '').trim() || defaultGm.value.loginId,
-        name: String(a.label || a.name || '').trim() || defaultGm.value.name,
-        role: 'LEAVE_GM',
-      }
-    }
-    if (cooList.length) {
-      const a = cooList[0]
-      defaultCoo.value = {
-        loginId: String(a.loginId || '').trim() || defaultCoo.value.loginId,
-        name: String(a.label || a.name || '').trim() || defaultCoo.value.name,
-        role: 'LEAVE_COO',
-      }
-    }
-  } catch (e) {
-    console.warn('fetchDefaultApprovers failed; using seed fallbacks', e)
-    approversError.value =
-      e?.response?.data?.message || e?.message || 'Failed to load approvers (using seed defaults).'
-  } finally {
-    approversLoading.value = false
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────
    Create modal + form
 ───────────────────────────────────────────────────────────── */
 const createOpen = ref(false)
@@ -342,29 +307,28 @@ function hasValue(v) {
 }
 
 function managerDisplayName(g) {
-  // If manager missing => show GM
-  // priority: manager.name -> "GM"
   return hasValue(g?.manager?.name) ? String(g.manager.name).trim() : 'GM'
 }
 
 function managerBadgeLabel(g) {
-  // Badge label: MANAGER or GM
   return hasValue(g?.manager?.name) ? 'MANAGER' : 'GM'
 }
 
 /* strong password rule (OPTIONAL input) */
 function validateStrongPassword(pwd) {
   const p = String(pwd || '')
-  if (!p) return { ok: true } // optional
+  if (!p) return { ok: true }
   if (p.length < 13) return { ok: false, message: 'Password must be at least 13 characters.' }
   const hasUpper = /[A-Z]/.test(p)
   const hasLower = /[a-z]/.test(p)
   const hasNum = /\d/.test(p)
   const hasSym = /[^A-Za-z0-9]/.test(p)
   const score = [hasUpper, hasLower, hasNum, hasSym].filter(Boolean).length
-  if (score < 3) return {
-    ok: false,
-    message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.',
+  if (score < 3) {
+    return {
+      ok: false,
+      message: 'Password must include at least 3 of: uppercase, lowercase, number, symbol.',
+    }
   }
   return { ok: true }
 }
@@ -409,15 +373,17 @@ async function searchEmployees(qText) {
   const qv = String(qText || '').trim()
   if (!qv) return []
 
-  // ✅ Keep it simple: your api wrapper already uses baseURL; this should be correct
   const res = await api.get('/public/employees', { params: { q: qv } })
 
   const data = res.data
   const arr =
-    Array.isArray(data) ? data :
-    Array.isArray(data?.rows) ? data.rows :
-    Array.isArray(data?.data) ? data.data :
-    []
+    Array.isArray(data)
+      ? data
+      : Array.isArray(data?.rows)
+        ? data.rows
+        : Array.isArray(data?.data)
+          ? data.data
+          : []
 
   return arr
 }
@@ -444,6 +410,149 @@ function clearSelected(model) {
   model.error = ''
   model.activeIndex = 0
   model.open = false
+}
+
+/* rows */
+function newRow() {
+  return {
+    key: Math.random().toString(16).slice(2),
+    joinDate: '',
+    contractDate: '',
+    carry: emptyCarry(),
+    isActive: true,
+    password: '',
+  }
+}
+
+const form = ref({
+  approvalMode: 'MANAGER_AND_GM',
+  rows: [newRow()],
+  singleJoinDate: '',
+  singleContractDate: '',
+  singleCarry: emptyCarry(),
+  singleActive: true,
+  singlePassword: '',
+})
+
+function ensureRowSearchModels() {
+  const need = form.value.rows.length
+  while (rowSearches.value.length < need) rowSearches.value.push(createSearchModel())
+  while (rowSearches.value.length > need) rowSearches.value.pop()
+  ensurePwdToggles()
+}
+
+/* approver rules */
+const needsGm = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY' || m === 'MANAGER_ONLY'
+})
+const needsCoo = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY' || m === 'GM_ONLY'
+})
+const needsManager = computed(() => {
+  const m = up(form.value.approvalMode)
+  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
+})
+
+const approverReady = computed(() => {
+  const gmOk = !!String(defaultGm.value?.loginId || '').trim()
+  const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
+  if (needsGm.value && !gmOk) return false
+  if (needsCoo.value && !cooOk) return false
+  return true
+})
+
+/* create modal approver preview */
+const currentManagerPreview = computed(() => {
+  if (!needsManager.value) return null
+
+  const selected =
+    createTab.value === 'bulk'
+      ? mgrSearch.value.selected
+      : singleMgrSearch.value.selected
+
+  if (!selected) {
+    return {
+      loginId: '',
+      employeeId: '',
+      name: 'Not selected',
+      role: 'MANAGER',
+    }
+  }
+
+  return {
+    loginId: String(pickLoginId(selected) || '').trim(),
+    employeeId: String(pickEmployeeId(selected) || '').trim(),
+    name: String(pickName(selected) || '').trim() || 'Unknown',
+    role: 'MANAGER',
+  }
+})
+
+const currentGmPreview = computed(() => {
+  if (!needsGm.value) return null
+  return {
+    loginId: String(defaultGm.value?.loginId || 'leave_gm').trim(),
+    name: String(defaultGm.value?.name || 'Expat GM').trim(),
+    role: normApprovalMode(form.value.approvalMode) === 'MANAGER_ONLY' ? 'FYI' : 'APPROVER',
+  }
+})
+
+const currentCooPreview = computed(() => {
+  if (!needsCoo.value) return null
+  return {
+    loginId: String(defaultCoo.value?.loginId || 'leave_coo').trim(),
+    name: String(defaultCoo.value?.name || 'COO').trim(),
+    role: normApprovalMode(form.value.approvalMode) === 'GM_ONLY' ? 'FYI' : 'APPROVER',
+  }
+})
+
+const approverFlowPreview = computed(() => {
+  const mode = normApprovalMode(form.value.approvalMode)
+  const items = []
+
+  if (mode === 'MANAGER_AND_GM') {
+    if (currentManagerPreview.value) items.push({ ...currentManagerPreview.value, step: 1, badge: 'APPROVER' })
+    if (currentGmPreview.value) items.push({ ...currentGmPreview.value, step: 2, badge: 'APPROVER' })
+    return items
+  }
+
+  if (mode === 'MANAGER_AND_COO') {
+    if (currentManagerPreview.value) items.push({ ...currentManagerPreview.value, step: 1, badge: 'APPROVER' })
+    if (currentCooPreview.value) items.push({ ...currentCooPreview.value, step: 2, badge: 'APPROVER' })
+    return items
+  }
+
+  if (mode === 'GM_AND_COO') {
+    if (currentGmPreview.value) items.push({ ...currentGmPreview.value, step: 1, badge: 'APPROVER' })
+    if (currentCooPreview.value) items.push({ ...currentCooPreview.value, step: 2, badge: 'APPROVER' })
+    return items
+  }
+
+  if (mode === 'MANAGER_ONLY') {
+    if (currentManagerPreview.value) items.push({ ...currentManagerPreview.value, step: 1, badge: 'APPROVER' })
+    if (currentGmPreview.value) items.push({ ...currentGmPreview.value, step: 2, badge: 'FYI' })
+    return items
+  }
+
+  if (mode === 'GM_ONLY') {
+    if (currentGmPreview.value) items.push({ ...currentGmPreview.value, step: 1, badge: 'APPROVER' })
+    if (currentCooPreview.value) items.push({ ...currentCooPreview.value, step: 2, badge: 'FYI' })
+    return items
+  }
+
+  if (mode === 'COO_ONLY') {
+    if (currentCooPreview.value) items.push({ ...currentCooPreview.value, step: 1, badge: 'APPROVER' })
+    return items
+  }
+
+  return items
+})
+
+function approverBadgeClass(badge) {
+  const v = String(badge || '').toUpperCase()
+  if (v === 'FYI') return 'ui-badge ui-badge-warning'
+  return 'ui-badge ui-badge-success'
 }
 
 function exportCurrentViewExcel() {
@@ -476,65 +585,11 @@ async function runSearchSimple(model) {
   }
 }
 
-/* ✅ IMPORTANT: no capture=true */
 function onDocClick() {
   ;[mgrSearch.value, singleMgrSearch.value, singleEmpSearch.value, ...rowSearches.value].forEach((m) => {
     if (m) m.open = false
   })
 }
-
-/* rows */
-function newRow() {
-  return {
-    key: Math.random().toString(16).slice(2),
-    joinDate: '',
-    contractDate: '',
-    carry: emptyCarry(),
-    isActive: true,
-    password: '',
-  }
-}
-
-const form = ref({
-  approvalMode: 'MANAGER_AND_GM',
-  rows: [newRow()],
-  singleJoinDate: '',
-  singleContractDate: '',
-  singleCarry: emptyCarry(),
-  singleActive: true,
-  singlePassword: '',
-})
-
-function ensureRowSearchModels() {
-  const need = form.value.rows.length
-  while (rowSearches.value.length < need) rowSearches.value.push(createSearchModel())
-  while (rowSearches.value.length > need) rowSearches.value.pop()
-  ensurePwdToggles()
-}
-
-/* ✅ approver required rules must support GM_ONLY + MANAGER_ONLY + COO_ONLY */
-const needsGm = computed(() => {
-  const m = up(form.value.approvalMode)
-  return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY'
-})
-const needsCoo = computed(() => {
-  const m = up(form.value.approvalMode)
-  return m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY'
-})
-
-/* ✅ THIS is the one your template uses to HIDE/SHOW direct manager */
-const needsManager = computed(() => {
-  const m = up(form.value.approvalMode)
-  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
-})
-
-const approverReady = computed(() => {
-  const gmOk = !!String(defaultGm.value?.loginId || '').trim()
-  const cooOk = !!String(defaultCoo.value?.loginId || '').trim()
-  if (needsGm.value && !gmOk) return false
-  if (needsCoo.value && !cooOk) return false
-  return true
-})
 
 function openCreate() {
   createError.value = ''
@@ -561,7 +616,6 @@ function openCreate() {
   ensureRowSearchModels()
 
   createOpen.value = true
-  fetchDefaultApprovers()
 }
 
 function closeCreate() {
@@ -588,30 +642,21 @@ function syncSingleContract() {
   }
 }
 
-/**
- * ✅ YOUR CONCEPT FIX:
- * - When creating profile, create ONLY employee account.
- * - Manager is OPTIONAL (even in manager modes) because manager may be created later.
- * - So we do NOT block submit when manager is missing.
- */
-
 /* ─────────────────────────────────────────────────────────────
    Submit Create
-   ✅ Bulk -> POST /admin/leave/profiles/manager
-   ✅ Single -> POST /admin/leave/profiles
 ───────────────────────────────────────────────────────────── */
 async function submitCreate() {
   createError.value = ''
   try {
     saving.value = true
 
-    const mode = up(form.value.approvalMode || '')
+    const mode = normApprovalMode(form.value.approvalMode || '')
     if (!['MANAGER_AND_GM', 'MANAGER_AND_COO', 'GM_AND_COO', 'MANAGER_ONLY', 'GM_ONLY', 'COO_ONLY'].includes(mode)) {
       throw new Error('Invalid approval mode.')
     }
 
-    const needGm = mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY'
-    const needCoo = mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO' || mode === 'COO_ONLY'
+    const needGm = mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY' || mode === 'MANAGER_ONLY'
+    const needCoo = mode === 'GM_AND_COO' || mode === 'MANAGER_AND_COO' || mode === 'COO_ONLY' || mode === 'GM_ONLY'
 
     const gmLoginId = needGm ? String(defaultGm.value?.loginId || '').trim() : ''
     const cooLoginId = needCoo ? String(defaultCoo.value?.loginId || '').trim() : ''
@@ -624,9 +669,10 @@ async function submitCreate() {
       ? String(pickLoginId(createTab.value === 'bulk' ? mgrSearch.value.selected : singleMgrSearch.value.selected) || '').trim()
       : ''
 
-    // ─────────────────────────────
-    // BULK
-    // ─────────────────────────────
+    if (needMgr && !managerLoginId) {
+      throw new Error('Manager is required for this approval mode.')
+    }
+
     if (createTab.value === 'bulk') {
       const rows = form.value.rows || []
       if (!rows.length) throw new Error('Please add at least 1 employee.')
@@ -655,13 +701,13 @@ async function submitCreate() {
           contractDate,
           carry,
           isActive: r.isActive !== false,
-          password: String(r.password || '').trim() || undefined, // optional
+          password: String(r.password || '').trim() || undefined,
         }
       })
 
       const payload = {
         approvalMode: mode,
-        managerLoginId: managerLoginId || '', // optional
+        managerLoginId,
         gmLoginId,
         cooLoginId,
         employees,
@@ -680,9 +726,6 @@ async function submitCreate() {
       return
     }
 
-    // ─────────────────────────────
-    // SINGLE
-    // ─────────────────────────────
     const emp = singleEmpSearch.value.selected
     const employeeId = pickEmployeeId(emp)
     if (!employeeId) throw new Error('Employee is required.')
@@ -707,10 +750,10 @@ async function submitCreate() {
       contractDate,
       carry,
       isActive: form.value.singleActive !== false,
-      managerLoginId: managerLoginId || '', // optional
+      managerLoginId,
       gmLoginId,
       cooLoginId,
-      password: String(form.value.singlePassword || '').trim() || undefined, // optional
+      password: String(form.value.singlePassword || '').trim() || undefined,
     }
 
     await api.post('/admin/leave/profiles', payload)
@@ -729,8 +772,6 @@ async function submitCreate() {
 
 /* ─────────────────────────────────────────────────────────────
    Export (ONLY 2 SHEETS)
-   1) AllEmployees (Ent -> Quota)
-   2) Authorize (was Summary)
 ───────────────────────────────────────────────────────────── */
 function buildBalanceMap(balances) {
   const arr = Array.isArray(balances) ? balances : []
@@ -766,7 +807,6 @@ function buildRow(e, managerName = '') {
     ContractEnd: fmt(e.contractEndDate),
     Status: e.isActive ? 'Active' : 'Inactive',
 
-    // ✅ Ent -> Quota
     AL_Used: AL.used,
     AL_Quota: AL.ent,
     AL_Remain: AL.remain,
@@ -791,7 +831,6 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
 
   const wb = XLSX.utils.book_new()
 
-  // ✅ Sheet 1: Authorize (was Summary)
   const authorizeRows = base.map((g) => ({
     GroupLabel: managerBadgeLabel(g),
     AuthorizeName: managerDisplayName(g),
@@ -811,7 +850,6 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
   ]
   XLSX.utils.book_append_sheet(wb, wsAuthorize, 'Authorize')
 
-  // ✅ Sheet 2: AllEmployees (ONE sheet only) + Ent -> Quota
   const allEmployeesRows = []
   for (const g of base) {
     const managerName = managerDisplayName(g)
@@ -829,13 +867,9 @@ function exportExcelFromGroups(groupsToExport, { scope = 'Export' } = {}) {
     { wch: 12 },
     { wch: 12 },
     { wch: 10 },
-
     { wch: 10 }, { wch: 10 }, { wch: 10 },
     { wch: 10 }, { wch: 10 }, { wch: 10 },
-    { wch: 10 },
-    { wch: 10 },
-    { wch: 10 },
-    { wch: 10 },
+    { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
   ]
   XLSX.utils.book_append_sheet(wb, wsAll, 'AllEmployees')
 
@@ -854,7 +888,6 @@ watch(createOpen, (open) => {
   document.body.classList.toggle('overflow-hidden', !!open)
 })
 
-/* ✅ IMPORTANT: when mode switches to non-manager mode, clear manager pickers */
 watch(
   () => form.value.approvalMode,
   () => {
@@ -874,7 +907,6 @@ onMounted(() => {
   if (typeof document !== 'undefined') document.addEventListener('click', onDocClick)
 
   fetchGroups()
-  fetchDefaultApprovers()
   ensureRowSearchModels()
 })
 
@@ -908,8 +940,7 @@ onBeforeUnmount(() => {
                   v-model="q"
                   type="text"
                   placeholder="Employee / manager / department..."
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none
-                         focus:ring-2 focus:ring-white/25"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none focus:ring-2 focus:ring-white/25"
                 />
               </div>
             </div>
@@ -919,7 +950,15 @@ onBeforeUnmount(() => {
                 <input v-model="includeInactive" type="checkbox" class="h-4 w-4 rounded border-white/30 bg-transparent" />
                 <span>Include inactive</span>
               </label>
+              <button
+                type="button"
+                class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
+                @click="appliedInactive = includeInactive; fetchGroups()"
+              >
+                Apply
+              </button>
             </div>
+
             <div class="flex items-center gap-2">
               <button
                 type="button"
@@ -984,8 +1023,7 @@ onBeforeUnmount(() => {
                   v-model="q"
                   type="text"
                   placeholder="Employee / manager / dept..."
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none
-                         focus:ring-2 focus:ring-white/25"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none focus:ring-2 focus:ring-white/25"
                 />
               </div>
               <div class="mt-1 text-[10px] text-white/75">Smooth search (no reload).</div>
@@ -1004,6 +1042,15 @@ onBeforeUnmount(() => {
                 >
                   <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}/page</option>
                 </select>
+
+                <button
+                  type="button"
+                  class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
+                  @click="appliedInactive = includeInactive; fetchGroups()"
+                >
+                  Apply
+                </button>
+
                 <button
                   type="button"
                   class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15 disabled:opacity-60"
@@ -1043,8 +1090,7 @@ onBeforeUnmount(() => {
       <div class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-3">
         <div
           v-if="error"
-          class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
-                 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+          class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
         >
           <span class="font-semibold">Failed:</span> {{ error }}
         </div>
@@ -1068,13 +1114,13 @@ onBeforeUnmount(() => {
                 <div class="min-w-0">
                   <div class="truncate text-[12px] font-extrabold text-ui-fg">
                     <span class="ui-badge ui-badge-indigo mr-2">{{ managerBadgeLabel(g) }}</span>
-                      {{ managerDisplayName(g) }}
-                      <span
-                        v-if="String(g.manager?.employeeId || '').trim()"
-                        class="ml-1 font-mono text-[11px] text-ui-muted"
-                      >
-                        ({{ safeTxt(g.manager?.employeeId) }})
-                      </span>
+                    {{ managerDisplayName(g) }}
+                    <span
+                      v-if="String(g.manager?.employeeId || '').trim()"
+                      class="ml-1 font-mono text-[11px] text-ui-muted"
+                    >
+                      ({{ safeTxt(g.manager?.employeeId) }})
+                    </span>
                   </div>
                   <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
@@ -1153,13 +1199,13 @@ onBeforeUnmount(() => {
                 <div class="min-w-0">
                   <div class="truncate text-[12px] font-extrabold text-ui-fg">
                     <span class="ui-badge ui-badge-indigo mr-2">{{ managerBadgeLabel(g) }}</span>
-                      {{ managerDisplayName(g) }}
-                      <span
-                        v-if="String(g.manager?.employeeId || '').trim()"
-                        class="ml-1 font-mono text-[11px] text-ui-muted"
-                      >
-                        ({{ safeTxt(g.manager?.employeeId) }})
-                      </span>
+                    {{ managerDisplayName(g) }}
+                    <span
+                      v-if="String(g.manager?.employeeId || '').trim()"
+                      class="ml-1 font-mono text-[11px] text-ui-muted"
+                    >
+                      ({{ safeTxt(g.manager?.employeeId) }})
+                    </span>
                   </div>
                   <div class="truncate text-[11px] text-ui-muted">{{ safeTxt(g.manager?.department) }}</div>
                 </div>
@@ -1274,8 +1320,7 @@ onBeforeUnmount(() => {
             <div class="flex items-center gap-2">
               <select
                 v-model.number="pageSize"
-                class="h-8 rounded-xl border border-ui-border/70 bg-ui-card/70 px-2 text-[11px] text-ui-fg outline-none
-                      focus:ring-2 focus:ring-ui-ring/30"
+                class="h-8 rounded-xl border border-ui-border/70 bg-ui-card/70 px-2 text-[11px] text-ui-fg outline-none focus:ring-2 focus:ring-ui-ring/30"
               >
                 <option v-for="n in PAGE_SIZES" :key="n" :value="n">{{ n }}</option>
               </select>
@@ -1299,8 +1344,8 @@ onBeforeUnmount(() => {
         <div v-if="createOpen" class="ui-modal-backdrop">
           <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden" @click.stop>
             <!-- Header -->
-            <div class="ui-hero rounded-b-none px-4 py-3">
-              <div class="flex items-start justify-between gap-2">
+              <div class="ui-hero rounded-b-none px-3 py-2 sm:px-4 sm:py-3">
+                <div class="flex items-start justify-between gap-2">
                 <div>
                   <div class="text-[14px] font-extrabold text-ui-fg">New leave profile</div>
                 </div>
@@ -1310,7 +1355,7 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <div class="mt-3 inline-flex rounded-full border border-ui-border/60 bg-ui-card/60 p-0.5">
+              <!-- <div class="mt-3 inline-flex rounded-full border border-ui-border/60 bg-ui-card/60 p-0.5">
                 <button
                   type="button"
                   class="ui-btn ui-btn-xs"
@@ -1327,7 +1372,7 @@ onBeforeUnmount(() => {
                 >
                   Single
                 </button>
-              </div>
+              </div> -->
             </div>
 
             <!-- Body -->
@@ -1344,7 +1389,61 @@ onBeforeUnmount(() => {
                 </select>
               </div>
 
-              <!-- ✅ Direct manager picker (HIDDEN if mode does NOT involve manager) -->
+              <!-- Approver flow preview -->
+              <div class="ui-card !rounded-2xl p-3">
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <div class="text-[12px] font-extrabold text-ui-fg">Approver flow preview</div>
+                  </div>
+
+                  <span class="ui-badge ui-badge-info">
+                    {{ modeLabel(form.approvalMode) }}
+                  </span>
+                </div>
+
+                <div class="mt-3 space-y-2">
+                  <div
+                    v-for="item in approverFlowPreview"
+                    :key="`${item.step}-${item.loginId}-${item.badge}`"
+                    class="ui-card !rounded-2xl px-3 py-2"
+                  >
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="ui-badge">{{ item.step }}</span>
+                          <span class="text-[12px] font-extrabold text-ui-fg">{{ item.name || 'Unknown' }}</span>
+                          <span :class="approverBadgeClass(item.badge)">{{ item.badge }}</span>
+                        </div>
+
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          <span class="font-semibold">Role:</span> {{ item.role }}
+                        </div>
+
+                        <div class="mt-1 flex flex-wrap gap-3 text-[11px] text-ui-muted">
+                          <span>
+                            <span class="font-semibold">Login ID:</span>
+                            <span class="font-mono">{{ item.loginId || '—' }}</span>
+                          </span>
+
+                          <span v-if="item.employeeId">
+                            <span class="font-semibold">Employee ID:</span>
+                            <span class="font-mono">{{ item.employeeId }}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    v-if="needsManager && !currentManagerPreview?.loginId"
+                    class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-700 dark:border-amber-700/50 dark:bg-amber-950/30 dark:text-amber-200"
+                  >
+                    Manager is required for this mode. Please select a direct manager.
+                  </div>
+                </div>
+              </div>
+
+              <!-- Direct manager picker -->
               <div v-if="needsManager">
                 <div class="ui-label">Direct manager</div>
 
@@ -1463,7 +1562,6 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
 
-                  <!-- Employee picker -->
                   <div class="mt-2">
                     <div class="ui-label">Employee *</div>
                     <div class="relative" @click.stop>
@@ -1695,18 +1793,9 @@ onBeforeUnmount(() => {
 
               <div
                 v-if="createError"
-                class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
-                       dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+                class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
               >
                 <span class="font-semibold">Failed:</span> {{ createError }}
-              </div>
-
-              <div
-                v-if="approversError && !createError"
-                class="ui-card !rounded-2xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 text-[11px] text-indigo-700
-                       dark:border-indigo-700/60 dark:bg-indigo-950/40 dark:text-indigo-200"
-              >
-                {{ approversError }}
               </div>
             </div>
 

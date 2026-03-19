@@ -41,7 +41,7 @@
     "department": "Management Office",
     "position": "Import & Export Manager",
     "contactNumber": "096 641 8799",
-    "telegramChatId": "",
+    "telegramChatId": "1889224520",
     "isActive": true
   },
     {
@@ -67,7 +67,7 @@
     "name": "Cabidig Ricardo III Bugto",
     "department": "Management Production",
     "contactNumber": " 012-231 925",
-    "telegramChatId": "",
+    "telegramChatId": "1988346929",
     "isActive": true
   },
     {
@@ -166,7 +166,7 @@
     "department": "Management Production",
     "position": "Marker Supervisor",
     "contactNumber": "085259143",
-    "telegramChatId": "",
+    "telegramChatId": "5277288744",
     "isActive": true
   },
     {
@@ -238,7 +238,7 @@
     "department": "Management Production",
     "position": "QA Upstream Supervisor",
     "contactNumber": "099217362",
-    "telegramChatId": "",
+    "telegramChatId": "1988346929",
     "isActive": true
   },
     {
@@ -247,7 +247,7 @@
     "department": "Management Production",
     "position": "PPC Supervisor",
     "contactNumber": "0965642895",
-    "telegramChatId": "",
+    "telegramChatId": "8664761869",
     "isActive": true
   },
     {
@@ -346,7 +346,7 @@
     "department": "Management Production",
     "position": "QA Manager",
     "contactNumber": "0966915161",
-    "telegramChatId": "",
+    "telegramChatId": "6072161669",
     "isActive": true
   },
     {
@@ -391,7 +391,7 @@
     "department": "Management Production",
     "position": "Heat Transfer Supervisor",
     "contactNumber": "0",
-    "telegramChatId": "",
+    "telegramChatId": "8570321280",
     "isActive": true
   },
     {
@@ -400,7 +400,7 @@
     "department": "Management Production",
     "position": "Technician Supervisor",
     "contactNumber": "0978701431",
-    "telegramChatId": "",
+    "telegramChatId": "7112849840",
     "isActive": true
   },
     {
@@ -490,7 +490,7 @@
     "department": "Quality Assurance",
     "position": "Lab Supervisor",
     "contactNumber": "093 697 255",
-    "telegramChatId": "",
+    "telegramChatId": "1819382335",
     "isActive": true
   },
     {
@@ -2308,7 +2308,17 @@
     "department": "Accessory Warehouse",
     "position": "",
     "contactNumber": "0000000000",
+    "telegramChatId": "1338749159",
+    "isActive": true
+  },
+  {
+    "employeeId": "52610003",
+    "name": "SAWANNA KERTSAKNAWAENGNOI",
+    "department": "Production Planning",
+    "position": "Planning Supervisor",
+    "contactNumber": "",
     "telegramChatId": "",
     "isActive": true
   }
+
 ]
