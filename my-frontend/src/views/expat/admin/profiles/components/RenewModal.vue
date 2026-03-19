@@ -1,9 +1,10 @@
 <script setup>
+import { ref, watch } from 'vue'
 import dayjs from 'dayjs'
 
 defineOptions({ name: 'RenewModal' })
 
-defineProps({
+const props = defineProps({
   open: { type: Boolean, default: false },
   submitting: { type: Boolean, default: false },
   error: { type: String, default: '' },
@@ -15,13 +16,38 @@ defineProps({
   employeeName: { type: String, default: '' },
 })
 
-defineEmits([
+const emit = defineEmits([
   'close',
   'submit',
   'update:newContractDate',
   'update:clearOldLeave',
   'update:note',
 ])
+
+const confirmOpen = ref(false)
+
+function askConfirm() {
+  if (props.submitting) return
+  confirmOpen.value = true
+}
+
+function closeConfirm() {
+  if (props.submitting) return
+  confirmOpen.value = false
+}
+
+function confirmSubmit() {
+  if (props.submitting) return
+  confirmOpen.value = false
+  emit('submit')
+}
+
+watch(
+  () => props.open,
+  (v) => {
+    if (!v) confirmOpen.value = false
+  }
+)
 </script>
 
 <template>
@@ -34,7 +60,12 @@ defineEmits([
               <div class="text-[14px] font-extrabold text-ui-fg">Renew contract</div>
               <div class="text-[11px] text-ui-muted">{{ employeeId }} · {{ employeeName || '—' }}</div>
             </div>
-            <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="submitting" @click="$emit('close')">
+            <button
+              type="button"
+              class="ui-btn ui-btn-ghost ui-btn-sm"
+              :disabled="submitting"
+              @click="$emit('close')"
+            >
               <i class="fa-solid fa-xmark text-xs" />
             </button>
           </div>
@@ -65,7 +96,11 @@ defineEmits([
                     </div>
                   </div>
 
-                  <button type="button" class="ui-btn ui-btn-soft ui-btn-sm" @click="$emit('update:clearOldLeave', !clearOldLeave)">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-soft ui-btn-sm"
+                    @click="$emit('update:clearOldLeave', !clearOldLeave)"
+                  >
                     <i class="fa-solid" :class="clearOldLeave ? 'fa-toggle-on' : 'fa-toggle-off'" />
                   </button>
                 </div>
@@ -85,6 +120,14 @@ defineEmits([
           </div>
 
           <div
+            class="ui-card !rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-800
+                   dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100"
+          >
+            <span class="font-semibold">Important:</span>
+            Renewing contract will create a new contract period and recalculate balances based on the selected option.
+          </div>
+
+          <div
             v-if="error"
             class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
                    dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
@@ -94,13 +137,82 @@ defineEmits([
         </div>
 
         <div class="shrink-0 flex items-center justify-end gap-2 border-t border-ui-border/60 bg-ui-card/70 px-4 py-3">
-          <button type="button" class="ui-btn ui-btn-ghost" :disabled="submitting" @click="$emit('close')">Cancel</button>
+          <button
+            type="button"
+            class="ui-btn ui-btn-ghost"
+            :disabled="submitting"
+            @click="$emit('close')"
+          >
+            Cancel
+          </button>
 
-          <button type="button" class="ui-btn ui-btn-primary" :disabled="submitting" @click="$emit('submit')">
-            <i class="fa-solid" :class="submitting ? 'fa-circle-notch fa-spin' : 'fa-arrows-rotate'" />
-            {{ submitting ? 'Saving…' : 'Renew' }}
+          <button
+            type="button"
+            class="ui-btn ui-btn-primary"
+            :disabled="submitting"
+            @click="askConfirm"
+          >
+            <i class="fa-solid fa-arrows-rotate" />
+            Renew
           </button>
         </div>
+
+        <!-- confirm layer -->
+        <transition name="modal-fade">
+          <div
+            v-if="confirmOpen"
+            class="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-4"
+          >
+            <div class="ui-card w-full max-w-md !rounded-2xl p-4 shadow-2xl">
+              <div class="flex items-start gap-3">
+                <div
+                  class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl
+                         bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                >
+                  <i class="fa-solid fa-triangle-exclamation" />
+                </div>
+
+                <div class="min-w-0 flex-1">
+                  <div class="text-[14px] font-extrabold text-ui-fg">Are you sure?</div>
+                  <div class="mt-1 text-[12px] text-ui-muted leading-5">
+                    You are about to renew this contract for
+                    <span class="font-semibold text-ui-fg">{{ employeeId }}</span>
+                    <span v-if="employeeName"> · {{ employeeName }}</span>.
+                  </div>
+
+                  <div class="mt-3 ui-card !rounded-xl bg-ui-bg-2/70 px-3 py-2 text-[11px]">
+                    <div><span class="font-semibold">New start date:</span> {{ newContractDate || '—' }}</div>
+                    <div class="mt-1">
+                      <span class="font-semibold">AL option:</span>
+                      {{ clearOldLeave ? 'Clear unused AL' : 'Carry AL forward' }}
+                    </div>
+                  </div>
+
+                  <div class="mt-4 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      class="ui-btn ui-btn-ghost"
+                      :disabled="submitting"
+                      @click="closeConfirm"
+                    >
+                      No
+                    </button>
+
+                    <button
+                      type="button"
+                      class="ui-btn ui-btn-primary"
+                      :disabled="submitting"
+                      @click="confirmSubmit"
+                    >
+                      <i class="fa-solid" :class="submitting ? 'fa-circle-notch fa-spin' : 'fa-check'" />
+                      {{ submitting ? 'Saving…' : 'Yes, renew' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
       </div>
     </div>
   </transition>

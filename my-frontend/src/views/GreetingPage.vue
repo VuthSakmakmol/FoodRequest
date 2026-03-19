@@ -95,41 +95,7 @@ const scrollToServices = () => {
 
         <!-- Right preview -->
         <div class="hidden md:block">
-          <div
-            class="relative rounded-2xl bg-slate-950/10 backdrop-blur-md border border-sky-100/30
-                   shadow-[0_18px_60px_rgba(15,23,42,0.55)] p-4"
-          >
-            <div class="flex items-center justify-between mb-3">
-              <div>
-                <p class="text-xs text-sky-100/80">Today</p>
-                <p class="text-sm font-semibold text-white">Requests overview</p>
-              </div>
-              <span class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/40 px-3 py-1 text-[11px]">
-                <span class="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
-                Live
-              </span>
-            </div>
-
-            <div class="grid grid-cols-3 gap-2 text-[11px]">
-              <div class="rounded-xl bg-slate-950/40 border border-sky-100/15 px-3 py-2">
-                <p class="text-sky-100/70 mb-1">Food orders</p>
-                <p class="text-base font-bold text-white">128</p>
-              </div>
-              <div class="rounded-xl bg-slate-950/40 border border-emerald-100/15 px-3 py-2">
-                <p class="text-sky-100/70 mb-1">Vehicle Reservation</p>
-                <p class="text-base font-bold text-white">36</p>
-              </div>
-              <div class="rounded-xl bg-slate-950/40 border border-amber-100/15 px-3 py-2">
-                <p class="text-sky-100/70 mb-1">Leave (expat)</p>
-                <p class="text-base font-bold text-white">9</p>
-              </div>
-            </div>
-
-            <div class="mt-3 text-[10px] text-sky-100/80 flex items-center justify-between">
-              <span>Powered by Trax IT</span>
-              <span>Dashboard sample</span>
-            </div>
-          </div>
+          
         </div>
       </div>
     </header>

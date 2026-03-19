@@ -166,19 +166,13 @@ function contractEndFromStart(startYMD) {
 
 function normalizeCarryObj(c) {
   const src = c && typeof c === 'object' ? c : {}
-  const out = {
+  return {
     AL: num(src.AL),
     SP: num(src.SP),
     MC: num(src.MC),
     MA: num(src.MA),
     UL: num(src.UL),
   }
-
-  // ✅ SP borrows from AL (store into AL carry; SP carry forced 0)
-  out.AL = num(out.AL) + num(out.SP)
-  out.SP = 0
-
-  return out
 }
 
 function getIo(req) {

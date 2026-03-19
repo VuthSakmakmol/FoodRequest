@@ -383,45 +383,39 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
   // ✅ SP and AL are the same pool (SP borrows from AL)
   // Any SP carry must be treated as AL carry.
   const carry = {
-    ...carryRaw,
-    AL: num(carryRaw.AL) + num(carryRaw.SP),
-    SP: 0,
-  }
+  AL: num(carryRaw.AL),
+  SP: num(carryRaw.SP),
+  MC: num(carryRaw.MC),
+  MA: num(carryRaw.MA),
+  UL: num(carryRaw.UL),
+  BL: num(carryRaw.BL),
+}
 
+// SP manual carry/edit = already used SP history / adjustment
+const totalSPUsed = usedSP + Math.max(0, carry.SP)
 
-  // ✅ base request usage (SP always borrows from AL)
-  const AL_USED_TOTAL = usedAL + usedSP
+// AL manual carry/edit stays on AL only
+const totalALUsed = usedAL + totalSPUsed
 
-  // ✅ AL with carry
-  const alCarryApplied = applyCarry(AL_ENT, AL_USED_TOTAL, carry.AL)
-  const alRemaining = alCarryApplied.remaining
-  const alUsedDisplay = alCarryApplied.usedDisplay
+const spRemaining = Math.max(0, SP_ENT - totalSPUsed)
+const alRemaining = AL_ENT - totalALUsed + carry.AL
 
-  // ✅ SP remaining: (7 - usedSP) capped by max(0, AL remaining)
-  const spEntRemaining = Number(SP_ENT - usedSP)
-  const spRemaining = Math.max(0, Math.min(spEntRemaining, Math.max(0, alRemaining)))
-
-  // display SP used (carry normally 0, but supported)
-  const spCarryApplied = applyCarry(SP_ENT, usedSP, carry.SP)
-
-  const mcCarryApplied = applyCarry(MC_ENT, usedMC, carry.MC)
-  const maCarryApplied = applyCarry(MA_ENT, usedMA, carry.MA)
-
-  // UL is unlimited -> remaining is always 0, but we still allow carry to affect “used display” if you store UL carry negative
-  const ulCarryApplied = applyCarry(UL_ENT, usedUL, carry.UL)
+const mcCarryApplied = applyCarry(MC_ENT, usedMC, carry.MC)
+const maCarryApplied = applyCarry(MA_ENT, usedMA, carry.MA)
+const ulCarryApplied = applyCarry(UL_ENT, usedUL, carry.UL)
 
   return {
     balances: [
       {
         leaveTypeCode: 'AL',
         yearlyEntitlement: AL_ENT,
-        used: alUsedDisplay,
+        used: totalALUsed,
         remaining: alRemaining,
       },
       {
         leaveTypeCode: 'SP',
         yearlyEntitlement: SP_ENT,
-        used: spCarryApplied.usedDisplay,
+        used: totalSPUsed,
         remaining: spRemaining,
       },
       {
@@ -440,14 +434,14 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
         leaveTypeCode: 'UL',
         yearlyEntitlement: 0,
         used: ulCarryApplied.usedDisplay,
-        remaining: 0, // ✅ UL is unlimited
+        remaining: 0,
       },
       {
         leaveTypeCode: 'BL',
         yearlyEntitlement: 0,
         used: usedBL,
-        remaining: 0
-      }
+        remaining: 0,
+      },
     ],
     meta: {
       asOfYMD,
