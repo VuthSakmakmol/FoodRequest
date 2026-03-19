@@ -77,12 +77,36 @@ function updateIsMobile() {
 const loading = ref(false)
 const error = ref('')
 
-/* smooth: checkbox is UI-only, appliedInactive triggers fetch only when clicking Apply */
-const includeInactive = ref(false)
-const appliedInactive = ref(false)
-
-const q = ref('')
+const includeInactive = ref(localStorage.getItem('leaveProfiles.includeInactive') === 'true')
+const appliedInactive = ref(localStorage.getItem('leaveProfiles.appliedInactive') === 'true')
+const q = ref(localStorage.getItem('leaveProfiles.q') || '')
 const groups = ref([])
+
+/* backend pagination state */
+const page = ref(Number(localStorage.getItem('leaveProfiles.page') || 1))
+const pageSize = ref(Number(localStorage.getItem('leaveProfiles.pageSize') || 10))
+const PAGE_SIZES = [10, 20, 50, 100, 500, 1000]
+
+const totalRows = ref(0)
+const totalPages = ref(1)
+const pageFrom = ref(0)
+const pageTo = ref(0)
+
+watch(page, (v) => {
+  localStorage.setItem('leaveProfiles.page', String(Math.max(1, Number(v || 1))))
+})
+watch(pageSize, (v) => {
+  localStorage.setItem('leaveProfiles.pageSize', String(Math.max(1, Number(v || 10))))
+})
+watch(includeInactive, (v) => {
+  localStorage.setItem('leaveProfiles.includeInactive', v ? 'true' : 'false')
+})
+watch(appliedInactive, (v) => {
+  localStorage.setItem('leaveProfiles.appliedInactive', v ? 'true' : 'false')
+})
+watch(q, (v) => {
+  localStorage.setItem('leaveProfiles.q', String(v || ''))
+})
 
 /* ─────────────────────────────────────────────────────────────
    Chips
@@ -96,7 +120,6 @@ function modeChipClasses(mode) {
   if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
   return 'ui-badge ui-badge-info'
 }
-
 function modeLabel(mode) {
   const m = up(mode)
   if (m === 'GM_AND_COO') return 'GM + COO'
@@ -150,34 +173,47 @@ function goEdit(employeeId) {
 
 const defaultGm = ref({ loginId: 'leave_gm', name: 'Expat GM', role: 'LEAVE_GM' })
 const defaultCoo = ref({ loginId: 'leave_coo', name: 'COO', role: 'LEAVE_COO' })
+
 /* ─────────────────────────────────────────────────────────────
-   API: grouped list
+   API: grouped list (backend pagination)
 ───────────────────────────────────────────────────────────── */
+const pagedManagers = computed(() => (Array.isArray(groups.value) ? groups.value : []))
+const currentPageCount = computed(() =>
+  pagedManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
+)
+const managerCount = computed(() => pagedManagers.value.length)
+
 async function fetchGroups() {
   loading.value = true
   error.value = ''
   try {
     const res = await api.get('/admin/leave/profiles/grouped', {
-      params: { includeInactive: appliedInactive.value ? 'true' : 'false' },
+      params: {
+        includeInactive: appliedInactive.value ? 'true' : 'false',
+        q: q.value || '',
+        page: page.value,
+        pageSize: pageSize.value,
+      },
     })
 
-    const data = res.data
-    const arr = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.groups)
-        ? data.groups
-        : Array.isArray(data?.rows)
-          ? data.rows
-          : Array.isArray(data?.data)
-            ? data.data
-            : []
+    const data = res?.data || {}
 
-    groups.value = arr
+    groups.value = Array.isArray(data?.groups) ? data.groups : []
+
+    totalRows.value = Number(data?.pagination?.totalRows || 0)
+    totalPages.value = Math.max(1, Number(data?.pagination?.totalPages || 1))
+    page.value = Math.max(1, Number(data?.pagination?.page || 1))
+    pageFrom.value = Number(data?.pagination?.from || 0)
+    pageTo.value = Number(data?.pagination?.to || 0)
   } catch (e) {
     console.error('fetchGroups error', e)
     error.value = e?.response?.data?.message || e?.message || 'Failed to load profiles.'
     showToast({ type: 'error', title: 'Failed to load', message: error.value })
     groups.value = []
+    totalRows.value = 0
+    totalPages.value = 1
+    pageFrom.value = 0
+    pageTo.value = 0
   } finally {
     loading.value = false
   }
@@ -186,98 +222,37 @@ async function fetchGroups() {
 function clearFilters() {
   q.value = ''
   includeInactive.value = false
-}
-
-/* ─────────────────────────────────────────────────────────────
-   Filtering (client-side only; smooth typing)
-───────────────────────────────────────────────────────────── */
-const filteredManagers = computed(() => {
-  const term = String(q.value || '').trim().toLowerCase()
-  const base = Array.isArray(groups.value) ? groups.value : []
-
-  return base
-    .map((g) => {
-      const emps = (g.employees || []).filter((e) => {
-        const hay = [
-          e.employeeId,
-          e.name,
-          e.department,
-          e.managerLoginId,
-          e.gmLoginId,
-          e.cooLoginId,
-          e.approvalMode,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-        return term ? hay.includes(term) : true
-      })
-      return { ...g, employees: emps }
-    })
-    .filter((g) => (g.employees || []).length > 0)
-})
-
-const filteredCount = computed(() =>
-  filteredManagers.value.reduce((sum, g) => sum + (g.employees?.length || 0), 0)
-)
-const managerCount = computed(() => filteredManagers.value.length)
-
-/* ─────────────────────────────────────────────────────────────
-   Pagination (flatten -> slice -> regroup)
-───────────────────────────────────────────────────────────── */
-const page = ref(1)
-const pageSize = ref(10)
-const PAGE_SIZES = [10, 20, 50, 100, 500, 1000]
-
-const flatEmployees = computed(() => {
-  const out = []
-  for (const g of filteredManagers.value) {
-    for (const e of g.employees || []) out.push(e)
-  }
-  return out
-})
-
-const totalRows = computed(() => flatEmployees.value.length)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalRows.value / pageSize.value)))
-
-watch([totalRows, pageSize], () => {
+  appliedInactive.value = false
   page.value = 1
-})
-watch(page, () => {
-  if (page.value > totalPages.value) page.value = totalPages.value
-  if (page.value < 1) page.value = 1
-})
-
-const pageFrom = computed(() => {
-  if (!totalRows.value) return 0
-  return (page.value - 1) * pageSize.value + 1
-})
-const pageTo = computed(() => Math.min(totalRows.value, page.value * pageSize.value))
-
-const pagedEmployees = computed(() => {
-  const start = (page.value - 1) * pageSize.value
-  return flatEmployees.value.slice(start, start + pageSize.value)
-})
-
-const pagedIdSet = computed(() => new Set(pagedEmployees.value.map((e) => String(e.employeeId || '').trim())))
-
-const pagedManagers = computed(() => {
-  const set = pagedIdSet.value
-  return filteredManagers.value
-    .map((g) => ({
-      ...g,
-      employees: (g.employees || []).filter((e) => set.has(String(e.employeeId || '').trim())),
-    }))
-    .filter((g) => (g.employees || []).length > 0)
-})
+  fetchGroups()
+}
 
 function prevPage() {
-  page.value = Math.max(1, page.value - 1)
+  if (page.value <= 1) return
+  page.value -= 1
 }
 function nextPage() {
-  page.value = Math.min(totalPages.value, page.value + 1)
+  if (page.value >= totalPages.value) return
+  page.value += 1
 }
-watch(q, () => (page.value = 1))
+
+watch(page, () => {
+  fetchGroups()
+})
+
+watch(pageSize, () => {
+  page.value = 1
+  fetchGroups()
+})
+
+let searchTimer = null
+watch(q, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    fetchGroups()
+  }, 300)
+})
 
 /* ─────────────────────────────────────────────────────────────
    Create modal + form
@@ -914,6 +889,7 @@ onBeforeUnmount(() => {
   if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
   if (typeof document !== 'undefined') document.removeEventListener('click', onDocClick)
   if (typeof document !== 'undefined') document.body.classList.remove('overflow-hidden')
+  clearTimeout(searchTimer)
 })
 </script>
 
@@ -926,8 +902,9 @@ onBeforeUnmount(() => {
           <div class="min-w-[240px]">
             <div class="text-[18px] sm:text-[22px] font-extrabold tracking-tight">Expat Profiles</div>
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ totalRows }}</b></span>
               <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Showing: <b>{{ currentPageCount }}</b></span>
             </div>
           </div>
 
@@ -953,7 +930,7 @@ onBeforeUnmount(() => {
               <button
                 type="button"
                 class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
-                @click="appliedInactive = includeInactive; fetchGroups()"
+                @click="appliedInactive = includeInactive; page = 1; fetchGroups()"
               >
                 Apply
               </button>
@@ -1008,7 +985,7 @@ onBeforeUnmount(() => {
             <div class="text-[12px] text-emerald-50/90">Profiles grouped by manager.</div>
 
             <div class="mt-2 flex flex-wrap items-center gap-2">
-              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ filteredCount }}</b></span>
+              <span class="ui-badge bg-white/15 border-white/25 text-white">Employees: <b>{{ totalRows }}</b></span>
               <span class="ui-badge bg-white/15 border-white/25 text-white">Managers: <b>{{ managerCount }}</b></span>
               <span class="ui-badge bg-white/15 border-white/25 text-white">Page: <b>{{ page }}/{{ totalPages }}</b></span>
             </div>
@@ -1026,7 +1003,7 @@ onBeforeUnmount(() => {
                   class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 pl-8 text-[12px] text-white placeholder:text-white/70 outline-none focus:ring-2 focus:ring-white/25"
                 />
               </div>
-              <div class="mt-1 text-[10px] text-white/75">Smooth search (no reload).</div>
+              <div class="mt-1 text-[10px] text-white/75">Server search.</div>
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -1046,7 +1023,7 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[12px] font-extrabold text-white hover:bg-white/15"
-                  @click="appliedInactive = includeInactive; fetchGroups()"
+                  @click="appliedInactive = includeInactive; page = 1; fetchGroups()"
                 >
                   Apply
                 </button>
@@ -1317,6 +1294,10 @@ onBeforeUnmount(() => {
           class="mt-3 ui-card !rounded-2xl px-3 py-2 text-[11px] text-ui-muted flex flex-wrap items-center justify-between gap-2"
         >
           <div class="flex flex-wrap items-center gap-3">
+            <div class="ui-badge">
+              Showing <b>{{ pageFrom }}</b>-<b>{{ pageTo }}</b> of <b>{{ totalRows }}</b>
+            </div>
+
             <div class="flex items-center gap-2">
               <select
                 v-model.number="pageSize"
@@ -1344,8 +1325,8 @@ onBeforeUnmount(() => {
         <div v-if="createOpen" class="ui-modal-backdrop">
           <div class="ui-modal max-h-[calc(100vh-3rem)] flex flex-col overflow-hidden" @click.stop>
             <!-- Header -->
-              <div class="ui-hero rounded-b-none px-3 py-2 sm:px-4 sm:py-3">
-                <div class="flex items-start justify-between gap-2">
+            <div class="ui-hero rounded-b-none px-3 py-2 sm:px-4 sm:py-3">
+              <div class="flex items-start justify-between gap-2">
                 <div>
                   <div class="text-[14px] font-extrabold text-ui-fg">New leave profile</div>
                 </div>
@@ -1355,7 +1336,8 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <!-- <div class="mt-3 inline-flex rounded-full border border-ui-border/60 bg-ui-card/60 p-0.5">
+              <!--
+              <div class="mt-3 inline-flex rounded-full border border-ui-border/60 bg-ui-card/60 p-0.5">
                 <button
                   type="button"
                   class="ui-btn ui-btn-xs"
@@ -1372,7 +1354,8 @@ onBeforeUnmount(() => {
                 >
                   Single
                 </button>
-              </div> -->
+              </div>
+              -->
             </div>
 
             <!-- Body -->

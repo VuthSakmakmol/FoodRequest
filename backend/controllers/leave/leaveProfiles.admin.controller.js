@@ -71,7 +71,6 @@ const APPROVAL_MODES = Object.freeze([
 ])
 
 function normalizeApprovalMode(v) {
-  // ✅ Use model's normalize if available
   if (typeof LeaveProfile?.normalizeApprovalMode === 'function') {
     return LeaveProfile.normalizeApprovalMode(v)
   }
@@ -89,20 +88,12 @@ function modeInvolvesManager(mode) {
   return mode === 'MANAGER_AND_GM' || mode === 'MANAGER_AND_COO' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesGm(mode) {
-  // ✅ include MANAGER_ONLY for GM FYI
   return mode === 'MANAGER_AND_GM' || mode === 'GM_AND_COO' || mode === 'GM_ONLY' || mode === 'MANAGER_ONLY'
 }
 function modeInvolvesCoo(mode) {
-  // ✅ include GM_ONLY for COO FYI
   return mode === 'MANAGER_AND_COO' || mode === 'GM_AND_COO' || mode === 'COO_ONLY' || mode === 'GM_ONLY'
 }
 
-/**
- * ✅ REQUIRED:
- * - Manager required for manager modes
- * - GM required when mode includes GM (approver OR FYI)
- * - COO required when mode includes COO (approver OR FYI)
- */
 function validateModeApprovers(mode, { managerLoginId, gmLoginId, cooLoginId }) {
   const m = normalizeApprovalMode(mode)
 
@@ -110,31 +101,26 @@ function validateModeApprovers(mode, { managerLoginId, gmLoginId, cooLoginId }) 
   const gm = s(gmLoginId)
   const coo = s(cooLoginId)
 
-  // manager required for manager flows
   if (m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY') {
     if (!manager) throw createError(400, 'managerLoginId is required for this approval mode')
   }
 
-  // MANAGER_ONLY => GM required for FYI
   if (m === 'MANAGER_ONLY') {
     if (!gm) throw createError(400, 'gmLoginId is required for MANAGER_ONLY (FYI)')
     return
   }
 
-  // GM_ONLY => GM approver required + COO FYI required
   if (m === 'GM_ONLY') {
     if (!gm) throw createError(400, 'gmLoginId is required for GM_ONLY')
     if (!coo) throw createError(400, 'cooLoginId is required for GM_ONLY (FYI)')
     return
   }
 
-  // COO_ONLY => COO required
   if (m === 'COO_ONLY') {
     if (!coo) throw createError(400, 'cooLoginId is required for COO_ONLY')
     return
   }
 
-  // Standard modes
   if (m === 'MANAGER_AND_GM') {
     if (!gm) throw createError(400, 'gmLoginId is required for MANAGER_AND_GM')
     return
@@ -305,6 +291,30 @@ function setPointersToLatest(profileDoc) {
   profileDoc.contractEndDate = isValidYMD(latest.endDate) ? s(latest.endDate) : contractEndFromStart(latest.startDate)
 }
 
+function applyCarryToBalancesForDisplay(balances = [], carry = {}) {
+  const carryObj = normalizeCarryObj(carry)
+  const byCode = new Map(Object.entries(carryObj).map(([k, v]) => [up(k), num(v)]))
+
+  return (Array.isArray(balances) ? balances : []).map((row) => {
+    const code = up(row?.leaveTypeCode)
+    const yearlyEntitlement = num(row?.yearlyEntitlement)
+    const used = num(row?.used)
+    const remaining = num(row?.remaining)
+
+    const carryValue = num(byCode.get(code) ?? 0)
+    const extraUsedFromCarry = carryValue < 0 ? Math.abs(carryValue) : 0
+    const nextRemaining = remaining + carryValue
+
+    return {
+      ...row,
+      yearlyEntitlement,
+      used: used + extraUsedFromCarry,
+      remaining: code === 'UL' ? Math.max(0, nextRemaining) : nextRemaining,
+    }
+  })
+}
+
+// ✅ FIXED: recompute based on latest contract start date, not blindly on "today"
 async function recomputeAndSaveBalances(profileDoc) {
   const employeeId = s(profileDoc.employeeId)
 
@@ -312,11 +322,24 @@ async function recomputeAndSaveBalances(profileDoc) {
     .sort({ startDate: 1 })
     .lean()
 
-  const snap = computeBalances(profileDoc.toObject ? profileDoc.toObject() : profileDoc, approved, new Date())
+  const profilePlain = profileDoc.toObject ? profileDoc.toObject() : profileDoc
+  const latest = latestContract(profileDoc.contracts || [])
 
-  const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
+  const asOfDate = isValidYMD(latest?.startDate)
+    ? ymdToUTCDate(latest.startDate)
+    : new Date()
+
+  const snap = computeBalances(profilePlain, approved, asOfDate, {
+    asOfYMD: isValidYMD(latest?.startDate) ? s(latest.startDate) : undefined,
+    contractNo: latest?.contractNo || undefined,
+  })
+
+  let nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
   const nextAsOf = s(snap?.meta?.asOfYMD || profileDoc.balancesAsOf || '')
   const nextEnd = s(snap?.meta?.contractYear?.endDate || profileDoc.contractEndDate || '')
+
+  const activeCarry = normalizeCarryObj(latest?.carry || {})
+  nextBalances = applyCarryToBalancesForDisplay(nextBalances, activeCarry)
 
   profileDoc.balances = nextBalances
   if (nextAsOf) profileDoc.balancesAsOf = nextAsOf
@@ -338,22 +361,51 @@ exports.getApprovalModes = async (req, res) => {
 ───────────────────────────────────────────────────────────── */
 exports.getProfilesGrouped = async (req, res) => {
   const includeInactive = String(req.query.includeInactive || '').toLowerCase() === 'true'
-  const query = includeInactive ? {} : { isActive: true }
+  const q = s(req.query.q).toLowerCase()
+  const page = Math.max(1, num(req.query.page) || 1)
+  const pageSize = Math.max(1, Math.min(1000, num(req.query.pageSize) || 10))
 
-  const rows = await LeaveProfile.find(query, { __v: 0 }).sort({ employeeId: 1 }).lean()
+  const baseQuery = includeInactive ? {} : { isActive: true }
+
+  const rows = await LeaveProfile.find(baseQuery, { __v: 0 })
+    .sort({ employeeId: 1 })
+    .lean()
+
   const enriched = await Promise.all((rows || []).map((p) => attachEmployeeDirectory(p)))
 
-  const list = enriched.map((p) => ({
+  const normalized = enriched.map((p) => ({
     ...p,
     approvalMode: normalizeApprovalMode(p.approvalMode),
   }))
 
-  const map = new Map()
-  for (const p of list) {
-    const key = s(p.managerLoginId) || 'NO_MANAGER'
-    if (!map.has(key)) map.set(key, [])
-    map.get(key).push(p)
-  }
+  const filtered = normalized.filter((p) => {
+    if (!q) return true
+
+    const hay = [
+      p.employeeId,
+      p.name,
+      p.department,
+      p.managerLoginId,
+      p.gmLoginId,
+      p.cooLoginId,
+      p.approvalMode,
+      p.employeeLoginId,
+      p.contractDate,
+      p.contractEndDate,
+      p.joinDate,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+
+    return hay.includes(q)
+  })
+
+  const totalRows = filtered.length
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
+  const safePage = Math.min(page, totalPages)
+  const start = (safePage - 1) * pageSize
+  const pageRows = filtered.slice(start, start + pageSize)
 
   async function lookupManager(loginId) {
     const key = s(loginId)
@@ -364,7 +416,15 @@ exports.getProfilesGrouped = async (req, res) => {
       { employeeId: 1, name: 1, fullName: 1, department: 1 }
     ).lean()
 
-    if (!emp) return { loginId: key, employeeId: key, name: key, department: '' }
+    if (!emp) {
+      return {
+        loginId: key,
+        employeeId: key,
+        name: key,
+        department: '',
+      }
+    }
+
     return {
       loginId: key,
       employeeId: s(emp.employeeId),
@@ -373,19 +433,41 @@ exports.getProfilesGrouped = async (req, res) => {
     }
   }
 
+  const map = new Map()
+  for (const p of pageRows) {
+    const key = s(p.managerLoginId) || 'NO_MANAGER'
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(p)
+  }
+
   const entries = [...map.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0])))
 
-  const out = []
-  for (const [managerLoginId, profiles] of entries) {
+  const groups = []
+  for (const [managerLoginId, employees] of entries) {
     const manager = await lookupManager(managerLoginId)
-    out.push({
+    groups.push({
       managerLoginId,
       manager,
-      employees: profiles.sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId))),
+      employees: employees.sort((a, b) => String(a.employeeId).localeCompare(String(b.employeeId))),
     })
   }
 
-  return res.json(out)
+  return res.json({
+    ok: true,
+    groups,
+    pagination: {
+      page: safePage,
+      pageSize,
+      totalRows,
+      totalPages,
+      from: totalRows ? start + 1 : 0,
+      to: Math.min(totalRows, start + pageSize),
+    },
+    filters: {
+      q: s(req.query.q),
+      includeInactive,
+    },
+  })
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -403,7 +485,6 @@ exports.getProfileOne = async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    POST /admin/leave/profiles
-   Create SINGLE employee profile + create employee user account (only employee)
 ───────────────────────────────────────────────────────────── */
 exports.createProfileSingle = async (req, res) => {
   const body = req.body || {}
@@ -419,20 +500,14 @@ exports.createProfileSingle = async (req, res) => {
 
   const approvalMode = normalizeApprovalMode(body.approvalMode)
 
-  // ✅ Manager REQUIRED for manager modes
   const managerLoginId = modeInvolvesManager(approvalMode) ? s(body.managerLoginId) : ''
   if (managerLoginId) await ensureManagerRole(managerLoginId)
 
-  // ✅ GM fixed whenever mode includes GM (approver OR FYI)
   const gmLoginId = modeInvolvesGm(approvalMode) ? FIXED.GM_LOGIN_ID : ''
-
-  // ✅ COO fixed whenever mode includes COO (approver OR FYI)
   const cooLoginId = modeInvolvesCoo(approvalMode) ? FIXED.COO_LOGIN_ID : ''
 
-  // ✅ IMPORTANT: pass ALL three
   validateModeApprovers(approvalMode, { managerLoginId, gmLoginId, cooLoginId })
 
-  // ✅ Create ONLY employee account
   await ensureUserAccount({
     loginId: employeeLoginId,
     employeeId,
@@ -492,20 +567,17 @@ exports.createProfileSingle = async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    POST /admin/leave/profiles/manager
-   Bulk create employees (managerLoginId is applied to all)
 ───────────────────────────────────────────────────────────── */
 exports.createManagerWithEmployees = async (req, res) => {
   const body = req.body || {}
   const approvalMode = normalizeApprovalMode(body.approvalMode)
 
-  // ✅ Manager REQUIRED for manager modes
   const managerLoginId = modeInvolvesManager(approvalMode) ? s(body.managerLoginId) : ''
   if (managerLoginId) await ensureManagerRole(managerLoginId)
 
   const gmLoginId = modeInvolvesGm(approvalMode) ? FIXED.GM_LOGIN_ID : ''
   const cooLoginId = modeInvolvesCoo(approvalMode) ? FIXED.COO_LOGIN_ID : ''
 
-  // ✅ IMPORTANT: pass ALL three
   validateModeApprovers(approvalMode, { managerLoginId, gmLoginId, cooLoginId })
 
   const employees = Array.isArray(body.employees) ? body.employees : []
@@ -590,16 +662,13 @@ exports.updateProfile = async (req, res) => {
 
   const nextApprovalMode = normalizeApprovalMode(body.approvalMode ?? doc.approvalMode)
 
-  // ✅ Manager REQUIRED for manager modes
   const managerAllowed = modeInvolvesManager(nextApprovalMode)
   const nextManager = managerAllowed ? s(body.managerLoginId ?? doc.managerLoginId) : ''
   if (nextManager) await ensureManagerRole(nextManager)
 
-  // ✅ GM/COO fixed based on mode
   const nextGm = modeInvolvesGm(nextApprovalMode) ? FIXED.GM_LOGIN_ID : ''
   const nextCoo = modeInvolvesCoo(nextApprovalMode) ? FIXED.COO_LOGIN_ID : ''
 
-  // ✅ IMPORTANT: pass ALL three
   validateModeApprovers(nextApprovalMode, {
     managerLoginId: nextManager,
     gmLoginId: nextGm,
@@ -633,7 +702,7 @@ exports.updateProfile = async (req, res) => {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   DELETE /admin/leave/profiles/:employeeId  (soft deactivate)
+   DELETE /admin/leave/profiles/:employeeId
 ───────────────────────────────────────────────────────────── */
 exports.deactivateProfile = async (req, res) => {
   const employeeId = s(req.params.employeeId)
@@ -660,7 +729,6 @@ exports.getContractHistory = async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    PATCH /admin/leave/profiles/:employeeId/contracts/:contractNo
-   Update carry for a specific contract
 ───────────────────────────────────────────────────────────── */
 exports.updateContractCarry = async (req, res) => {
   const employeeId = s(req.params.employeeId)
@@ -706,7 +774,6 @@ exports.renewContract = async (req, res) => {
   if (!Array.isArray(doc.contracts)) doc.contracts = []
   const latest = latestContract(doc.contracts)
 
-  // Close snapshot of latest contract (if not closed)
   if (latest && !latest.closedAt) {
     const asOf = isValidYMD(latest.endDate) ? latest.endDate : s(doc.contractEndDate)
     const asOfDate = ymdToUTCDate(asOf) || new Date()
@@ -715,7 +782,10 @@ exports.renewContract = async (req, res) => {
       .sort({ startDate: 1 })
       .lean()
 
-    const snap = computeBalances(doc.toObject ? doc.toObject() : doc, approved, asOfDate)
+    const snap = computeBalances(doc.toObject ? doc.toObject() : doc, approved, asOfDate, {
+      asOfYMD: asOf,
+      contractNo: latest?.contractNo || undefined,
+    })
 
     latest.closedAt = new Date()
     latest.closedBy = s(req.user?.loginId || '')
@@ -730,9 +800,6 @@ exports.renewContract = async (req, res) => {
     }
   }
 
-  // Determine AL carry into new contract:
-  // - clearUnusedAL=true => keep negative only, clear positive
-  // - clearUnusedAL=false => carry full remaining
   let alRemaining = 0
   try {
     const al = (doc.balances || []).find((b) => up(b.leaveTypeCode) === 'AL')
@@ -796,9 +863,6 @@ exports.recalculateBalances = async (req, res) => {
 
 /* ─────────────────────────────────────────────────────────────
    PATCH /admin/leave/profiles/:employeeId/password
-   body: { password }
-   ✅ Admin resets password without old password
-   ✅ Immediately invalidates old sessions via passwordVersion bump
 ───────────────────────────────────────────────────────────── */
 exports.resetUserPassword = async (req, res) => {
   const employeeId = s(req.params.employeeId)
@@ -818,8 +882,6 @@ exports.resetUserPassword = async (req, res) => {
   const user = await User.findOne({ loginId })
   if (!user) throw createError(404, 'User account not found for this profile')
 
-  // ✅ Admin reset: no need old password
-  // ✅ Must invalidate all old sessions
   if (typeof user.setPassword === 'function') {
     await user.setPassword(password)
   } else {
