@@ -162,28 +162,6 @@ function renew(item) {
                 Please review whether to renew contract or end contract.
               </span>
             </p>
-
-            <div class="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                class="ui-btn ui-btn-primary ui-btn-sm"
-                :disabled="loading"
-                @click="$emit('open-list')"
-              >
-                <i class="fa-solid fa-list-check text-[11px]" />
-                Review all reminders
-              </button>
-
-              <button
-                type="button"
-                class="ui-btn ui-btn-ghost ui-btn-sm"
-                :disabled="loading"
-                @click="$emit('refresh')"
-              >
-                <i class="fa-solid" :class="loading ? 'fa-circle-notch fa-spin' : 'fa-rotate'" />
-                Refresh
-              </button>
-            </div>
           </div>
         </div>
 
