@@ -150,6 +150,17 @@ function contractEndFromStart(startYMD) {
   return `${yy}-${mm}-${dd}`
 }
 
+function nextDayYMD(ymd) {
+  if (!isValidYMD(ymd)) return ''
+  const dt = ymdToUTCDate(ymd)
+  if (!dt) return ''
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
 function normalizeCarryObj(c) {
   const src = c && typeof c === 'object' ? c : {}
   return {
@@ -764,18 +775,35 @@ exports.updateContractCarry = async (req, res) => {
 ───────────────────────────────────────────────────────────── */
 exports.renewContract = async (req, res) => {
   const employeeId = s(req.params.employeeId)
-  const { newContractDate, clearUnusedAL = true, note = '' } = req.body || {}
-
-  if (!isValidYMD(newContractDate)) throw createError(400, 'newContractDate must be YYYY-MM-DD')
+  const { clearUnusedAL = true, note = '' } = req.body || {}
 
   const doc = await LeaveProfile.findOne({ employeeId })
   if (!doc) throw createError(404, 'Profile not found')
 
-  if (!Array.isArray(doc.contracts)) doc.contracts = []
-  const latest = latestContract(doc.contracts)
+  if (!Array.isArray(doc.contracts) || !doc.contracts.length) {
+    throw createError(400, 'Cannot renew because this profile has no contract history')
+  }
 
-  if (latest && !latest.closedAt) {
-    const asOf = isValidYMD(latest.endDate) ? latest.endDate : s(doc.contractEndDate)
+  const latest = latestContract(doc.contracts)
+  if (!latest) throw createError(400, 'Latest contract not found')
+
+  const latestEndDate = isValidYMD(latest.endDate)
+    ? s(latest.endDate)
+    : s(doc.contractEndDate)
+
+  if (!isValidYMD(latestEndDate)) {
+    throw createError(400, 'Latest contract end date is invalid')
+  }
+
+  // ✅ strict rule: next contract must start exactly the day after latest end date
+  const forcedNewContractDate = nextDayYMD(latestEndDate)
+  if (!isValidYMD(forcedNewContractDate)) {
+    throw createError(400, 'Cannot calculate next contract start date')
+  }
+
+  // close current/latest contract snapshot if still open
+  if (!latest.closedAt) {
+    const asOf = latestEndDate
     const asOfDate = ymdToUTCDate(asOf) || new Date()
 
     const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' })
@@ -812,20 +840,20 @@ exports.renewContract = async (req, res) => {
     ? Math.max(...doc.contracts.map((c) => num(c.contractNo))) + 1
     : 1
 
-  const endDate = contractEndFromStart(newContractDate)
+  const endDate = contractEndFromStart(forcedNewContractDate)
   const newCarry = { AL: nextALCarry, SP: 0, MC: 0, MA: 0, UL: 0 }
 
   doc.contracts.push({
     contractNo: nextContractNo,
-    startDate: s(newContractDate),
+    startDate: forcedNewContractDate,
     endDate,
     carry: newCarry,
     openedAt: new Date(),
     openedBy: s(req.user?.loginId || ''),
     note: s(note || ''),
     openSnapshot: {
-      asOf: s(newContractDate),
-      contractDate: s(newContractDate),
+      asOf: forcedNewContractDate,
+      contractDate: forcedNewContractDate,
       contractEndDate: endDate,
       carry: normalizeCarryObj(newCarry),
       balances: [],
@@ -841,11 +869,13 @@ exports.renewContract = async (req, res) => {
   return res.json({
     ok: true,
     employeeId,
+    forcedNewContractDate,
     contractDate: saved.contractDate,
     contractEndDate: saved.contractEndDate,
     contracts: saved.contracts,
   })
 }
+
 
 /* ─────────────────────────────────────────────────────────────
    POST /admin/leave/profiles/:employeeId/recalculate

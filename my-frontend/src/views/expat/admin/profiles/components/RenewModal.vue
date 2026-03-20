@@ -1,6 +1,6 @@
 <!-- src/views/expat/admin/profiles/components/RenewModal.vue -->
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import dayjs from 'dayjs'
 
 defineOptions({ name: 'RenewModal' })
@@ -9,7 +9,10 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   submitting: { type: Boolean, default: false },
   error: { type: String, default: '' },
+
+  currentContractEndDate: { type: String, default: '' },
   newContractDate: { type: String, default: '' },
+
   clearOldLeave: { type: Boolean, default: true },
   note: { type: String, default: '' },
 
@@ -20,12 +23,23 @@ const props = defineProps({
 const emit = defineEmits([
   'close',
   'submit',
-  'update:newContractDate',
   'update:clearOldLeave',
   'update:note',
 ])
 
 const confirmOpen = ref(false)
+
+const displayCurrentEndDate = computed(() => {
+  if (!props.currentContractEndDate) return '—'
+  const d = dayjs(props.currentContractEndDate)
+  return d.isValid() ? d.format('YYYY-MM-DD') : props.currentContractEndDate
+})
+
+const displayNewContractDate = computed(() => {
+  if (!props.newContractDate) return '—'
+  const d = dayjs(props.newContractDate)
+  return d.isValid() ? d.format('YYYY-MM-DD') : props.newContractDate
+})
 
 function askConfirm() {
   if (props.submitting) return
@@ -59,8 +73,11 @@ watch(
           <div class="flex items-start justify-between gap-2">
             <div>
               <div class="text-[14px] font-extrabold text-ui-fg">Renew contract</div>
-              <div class="text-[11px] text-ui-muted">{{ employeeId }} · {{ employeeName || '—' }}</div>
+              <div class="text-[11px] text-ui-muted">
+                {{ employeeId || '—' }} · {{ employeeName || '—' }}
+              </div>
             </div>
+
             <button
               type="button"
               class="ui-btn ui-btn-ghost ui-btn-sm"
@@ -72,39 +89,112 @@ watch(
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto ui-scrollbar px-4 py-3 space-y-3">
-          <div class="grid gap-3 sm:grid-cols-2">
+        <div class="flex-1 overflow-y-auto ui-scrollbar px-4 py-3 space-y-4">
+          <div class="grid gap-3 sm:grid-cols-1">
             <div>
               <div class="ui-label">New contract start date</div>
-              <input
-                :value="newContractDate"
-                @input="$emit('update:newContractDate', $event.target.value)"
-                type="date"
-                class="ui-date w-full"
-              />
-            </div>
-
-            <div>
-              <div class="ui-label">Clear unused AL?</div>
-              <div class="ui-card !rounded-2xl px-3 py-2">
-                <div class="flex items-start justify-between gap-3">
+              <div class="ui-card !rounded-2xl px-4 py-4">
+                <div class="flex items-center justify-between gap-3">
                   <div class="min-w-0">
-                    <div class="text-[12px] font-extrabold text-ui-fg">
-                      {{ clearOldLeave ? 'Yes (clear AL to 0)' : 'No (carry AL forward)' }}
+                    <div class="text-[15px] font-extrabold text-ui-fg">
+                      {{ displayNewContractDate }}
                     </div>
                     <div class="mt-1 text-[11px] text-ui-muted">
-                      ON: positive AL cleared, negative debt remains. OFF: carry everything.
+                      Auto-generated from previous contract end date + 1 day.
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    class="ui-btn ui-btn-soft ui-btn-sm"
-                    @click="$emit('update:clearOldLeave', !clearOldLeave)"
+                  <div
+                    class="hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl
+                           bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200"
                   >
-                    <i class="fa-solid" :class="clearOldLeave ? 'fa-toggle-on' : 'fa-toggle-off'" />
-                  </button>
+                    <i class="fa-solid fa-calendar-check text-sm" />
+                  </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            class="ui-card !rounded-2xl px-4 py-4 border"
+            :class="
+              clearOldLeave
+                ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-700/50 dark:bg-emerald-950/20'
+                : 'border-amber-200 bg-amber-50/70 dark:border-amber-700/50 dark:bg-amber-950/20'
+            "
+          >
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-2">
+                  <div class="ui-label !mb-0">Clear unused AL?</div>
+
+                  <span
+                    class="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold"
+                    :class="
+                      clearOldLeave
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200'
+                    "
+                  >
+                    {{ clearOldLeave ? 'ON · CLEAR TO 0' : 'OFF · CARRY FORWARD' }}
+                  </span>
+                </div>
+
+                <div class="mt-2 text-[13px] font-bold text-ui-fg">
+                  {{ clearOldLeave ? 'Yes, clear unused AL to 0' : 'No, carry AL forward' }}
+                </div>
+
+                <div class="mt-1 text-[11px] leading-5 text-ui-muted">
+                  <span v-if="clearOldLeave">
+                    Positive AL will be cleared. Negative AL debt will remain.
+                  </span>
+                  <span v-else>
+                    Remaining AL will be carried into the new contract.
+                  </span>
+                </div>
+              </div>
+
+              <div class="shrink-0">
+                <button
+                  type="button"
+                  :disabled="submitting"
+                  class="group relative inline-flex h-[54px] w-[120px] items-center rounded-full border-2 px-2 transition-all duration-200"
+                  :class="
+                    clearOldLeave
+                      ? 'border-emerald-300 bg-emerald-500/15 dark:border-emerald-600 dark:bg-emerald-500/10'
+                      : 'border-slate-300 bg-slate-200/70 dark:border-slate-600 dark:bg-slate-800/80'
+                  "
+                  @click="$emit('update:clearOldLeave', !clearOldLeave)"
+                >
+                  <span
+                    class="absolute left-2 right-2 flex items-center justify-between text-[11px] font-extrabold uppercase tracking-[0.18em]"
+                  >
+                    <span
+                      :class="clearOldLeave ? 'text-emerald-700 dark:text-emerald-200' : 'text-ui-muted'"
+                    >
+                      On
+                    </span>
+                    <span
+                      :class="!clearOldLeave ? 'text-slate-700 dark:text-slate-200' : 'text-ui-muted'"
+                    >
+                      Off
+                    </span>
+                  </span>
+
+                  <span
+                    class="relative z-[1] flex h-10 w-10 items-center justify-center rounded-full shadow-md transition-all duration-200"
+                    :class="
+                      clearOldLeave
+                        ? 'translate-x-[64px] bg-emerald-600 text-white dark:bg-emerald-500'
+                        : 'translate-x-0 bg-white text-slate-700 dark:bg-slate-200 dark:text-slate-900'
+                    "
+                  >
+                    <i
+                      class="fa-solid text-[13px]"
+                      :class="clearOldLeave ? 'fa-check' : 'fa-arrow-right'"
+                    />
+                  </span>
+                </button>
               </div>
             </div>
           </div>
@@ -116,16 +206,8 @@ watch(
               @input="$emit('update:note', $event.target.value)"
               rows="3"
               class="ui-input w-full"
-              placeholder="Example: renewed contract for 3 months"
+              placeholder="Example: annual contract renewal"
             />
-          </div>
-
-          <div
-            class="ui-card !rounded-2xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-[11px] text-amber-800
-                   dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100"
-          >
-            <span class="font-semibold">Important:</span>
-            Renewing contract will create a new contract period and recalculate balances based on the selected option.
           </div>
 
           <div
@@ -158,7 +240,6 @@ watch(
           </button>
         </div>
 
-        <!-- confirm layer -->
         <transition name="modal-fade">
           <div
             v-if="confirmOpen"
@@ -177,12 +258,19 @@ watch(
                   <div class="text-[14px] font-extrabold text-ui-fg">Are you sure?</div>
                   <div class="mt-1 text-[12px] text-ui-muted leading-5">
                     You are about to renew this contract for
-                    <span class="font-semibold text-ui-fg">{{ employeeId }}</span>
+                    <span class="font-semibold text-ui-fg">{{ employeeId || '—' }}</span>
                     <span v-if="employeeName"> · {{ employeeName }}</span>.
                   </div>
 
                   <div class="mt-3 ui-card !rounded-xl bg-ui-bg-2/70 px-3 py-2 text-[11px]">
-                    <div><span class="font-semibold">New start date:</span> {{ newContractDate || '—' }}</div>
+                    <div>
+                      <span class="font-semibold">Current end date:</span>
+                      {{ displayCurrentEndDate }}
+                    </div>
+                    <div class="mt-1">
+                      <span class="font-semibold">New start date:</span>
+                      {{ displayNewContractDate }}
+                    </div>
                     <div class="mt-1">
                       <span class="font-semibold">AL option:</span>
                       {{ clearOldLeave ? 'Clear unused AL' : 'Carry AL forward' }}
@@ -205,7 +293,10 @@ watch(
                       :disabled="submitting"
                       @click="confirmSubmit"
                     >
-                      <i class="fa-solid" :class="submitting ? 'fa-circle-notch fa-spin' : 'fa-check'" />
+                      <i
+                        class="fa-solid"
+                        :class="submitting ? 'fa-circle-notch fa-spin' : 'fa-check'"
+                      />
                       {{ submitting ? 'Saving…' : 'Yes, renew' }}
                     </button>
                   </div>

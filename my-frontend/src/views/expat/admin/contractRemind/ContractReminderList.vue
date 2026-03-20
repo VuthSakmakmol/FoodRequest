@@ -44,6 +44,22 @@ function num(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function isValidYMD(v) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(v))
+}
+
+function nextDayYMD(ymd) {
+  const raw = s(ymd)
+  if (!isValidYMD(raw)) return ''
+  const [y, m, d] = raw.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+
 function fmtDate(v) {
   if (!v) return '—'
   const d = dayjs(v)
@@ -100,22 +116,30 @@ function urgencyBadgeClass(daysLeft) {
 }
 
 const normalizedRows = computed(() => {
-  return (Array.isArray(props.reminders) ? props.reminders : []).map((item, index) => ({
-    ...item,
-    _idx: index,
-    employeeId: s(item?.employeeId),
-    name: s(item?.name || item?.employeeName),
-    department: s(item?.department),
-    managerLoginId: s(item?.managerLoginId),
-    contractNo: num(item?.contractNo),
-    startDate: s(item?.startDate),
-    endDate: s(item?.endDate),
-    daysLeft: num(item?.daysLeft, 0),
-    reminderType: up(item?.reminderType),
-    reminderStage: num(item?.reminderStage || item?.stage || item?.triggerDays, 0),
-    urgencyKey: urgencyKey(item?.daysLeft),
-    urgencyRank: urgencyRank(item?.daysLeft),
-  }))
+  return (Array.isArray(props.reminders) ? props.reminders : []).map((item, index) => {
+    const endDate = s(item?.endDate || item?.contractEndDate || item?.to)
+    const currentContractEndDate = s(item?.currentContractEndDate || endDate)
+
+    return {
+      ...item,
+      _idx: index,
+      employeeId: s(item?.employeeId),
+      name: s(item?.name || item?.employeeName),
+      employeeName: s(item?.employeeName || item?.name),
+      department: s(item?.department),
+      managerLoginId: s(item?.managerLoginId),
+      contractNo: num(item?.contractNo),
+      startDate: s(item?.startDate),
+      endDate,
+      currentContractEndDate,
+      newContractDate: s(item?.newContractDate) || nextDayYMD(currentContractEndDate),
+      daysLeft: num(item?.daysLeft, 0),
+      reminderType: up(item?.reminderType),
+      reminderStage: num(item?.reminderStage || item?.stage || item?.triggerDays, 0),
+      urgencyKey: urgencyKey(item?.daysLeft),
+      urgencyRank: urgencyRank(item?.daysLeft),
+    }
+  })
 })
 
 const filteredRows = computed(() => {
@@ -129,11 +153,14 @@ const filteredRows = computed(() => {
     const haystack = [
       row.employeeId,
       row.name,
+      row.employeeName,
       row.department,
       row.managerLoginId,
       row.contractNo,
       row.startDate,
       row.endDate,
+      row.currentContractEndDate,
+      row.newContractDate,
       row.reminderType,
       row.urgencyKey,
       row.reminderStage,

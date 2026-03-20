@@ -1,23 +1,4 @@
-<!-- src/views/expat/admin/profiles/AdminLeaveProfileEdit.vue
-  ✅ Fullscreen Admin edit page
-  ✅ Profile settings edit (joinDate, approvalMode, approvers, active)
-  ✅ Contract-aware carry edit (per contractNo)
-  ✅ Logs + Renew contract modal (components)
-  ✅ Admin password reset (component)
-
-  ✅ IMPORTANT:
-     - Carry stored ONLY on contracts[].carry
-     - computeBalances() already applies carry into balances.used + balances.remaining
-     - Frontend must NOT apply carry again
-
-  ✅ UPDATED (Fixed approvers):
-     - GM and COO are FIXED accounts:
-         GM  = leave_gm
-         COO = leave_coo
-       => Admin does NOT type GM/COO IDs anymore (read-only display)
-     - MANAGER_ONLY: GM is FYI (read-only) but still stored to send Telegram FYI
-     - GM_ONLY: COO is FYI (read-only) but still stored to send Telegram FYI
--->
+<!-- src/views/expat/admin/profiles/AdminLeaveProfileEdit.vue -->
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -107,19 +88,38 @@ function safeStr(v) {
 function up(v) {
   return String(v || '').trim().toUpperCase()
 }
+function nextDayYMD(ymd) {
+  const s = String(ymd || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
+  const [y, m, d] = s.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
+function latestContract(contracts = []) {
+  const arr = Array.isArray(contracts) ? contracts : []
+  if (!arr.length) return null
+
+  const withStart = arr.filter((c) => isValidYMD(c?.startDate))
+  if (withStart.length) {
+    return withStart.sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)))[0]
+  }
+
+  return arr
+    .slice()
+    .sort((a, b) => Number(b?.contractNo || 0) - Number(a?.contractNo || 0))[0] || null
+}
 
 /* ───────────────── profile form ───────────────── */
 const form = reactive({
   joinDate: '',
   approvalMode: 'MANAGER_AND_GM',
-
-  // backend expects managerLoginId; you still call it managerEmployeeId in UI
   managerEmployeeId: '',
-
-  // fixed, read-only (autofill)
   gmLoginId: '',
   cooLoginId: '',
-
   isActive: true,
 })
 const formError = ref('')
@@ -142,11 +142,8 @@ function normApprovalMode(v) {
   if (s1 === 'MANAGER_ONLY') return 'MANAGER_ONLY'
   if (s1 === 'GM_ONLY') return 'GM_ONLY'
   if (s1 === 'COO_ONLY') return 'COO_ONLY'
-
-  // backward aliases
   if (s1 === 'ADMIN_AND_GM') return 'MANAGER_AND_GM'
   if (s1 === 'MANAGER+GM') return 'MANAGER_AND_GM'
-
   return 'MANAGER_AND_GM'
 }
 
@@ -156,12 +153,10 @@ function modeInvolvesManager(mode) {
 }
 function modeInvolvesGm(mode) {
   const m = normApprovalMode(mode)
-  // ✅ GM involved as approver OR FYI
   return m === 'MANAGER_AND_GM' || m === 'GM_AND_COO' || m === 'GM_ONLY' || m === 'MANAGER_ONLY'
 }
 function modeInvolvesCoo(mode) {
   const m = normApprovalMode(mode)
-  // ✅ COO involved as approver OR FYI
   return m === 'MANAGER_AND_COO' || m === 'GM_AND_COO' || m === 'COO_ONLY' || m === 'GM_ONLY'
 }
 
@@ -172,17 +167,7 @@ const needCoo = computed(() => modeInvolvesCoo(form.approvalMode))
 const isManagerFyiMode = computed(() => normApprovalMode(form.approvalMode) === 'MANAGER_ONLY')
 const isCooFyiMode = computed(() => normApprovalMode(form.approvalMode) === 'GM_ONLY')
 
-/* Manager optional by your policy */
-const managerIsRequired = computed(() => {
-  const m = normApprovalMode(form.approvalMode)
-  return m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY'
-})
-
-/* GM/COO fixed -> no need required UI, still set values automatically */
-const gmIsRequired = computed(() => false)
-const cooIsRequired = computed(() => false)
-
-/* ───────────────── balances normalize (NO carry math here) ───────────────── */
+/* ───────────────── balances normalize ───────────────── */
 function normalizeBalances(rawBalances = []) {
   const map = new Map()
   for (const b of rawBalances || []) {
@@ -197,7 +182,14 @@ function normalizeBalances(rawBalances = []) {
   }
 
   for (const code of TYPE_ORDER.value) {
-    if (!map.has(code)) map.set(code, { leaveTypeCode: code, yearlyEntitlement: 0, used: 0, remaining: 0 })
+    if (!map.has(code)) {
+      map.set(code, {
+        leaveTypeCode: code,
+        yearlyEntitlement: 0,
+        used: 0,
+        remaining: 0,
+      })
+    }
   }
 
   const arr = Array.from(map.values())
@@ -232,7 +224,13 @@ function emptyCarry() {
 }
 function normalizeCarry(src) {
   const c = src || {}
-  return { AL: num(c.AL), SP: num(c.SP), MC: num(c.MC), MA: num(c.MA), UL: num(c.UL) }
+  return {
+    AL: num(c.AL),
+    SP: num(c.SP),
+    MC: num(c.MC),
+    MA: num(c.MA),
+    UL: num(c.UL),
+  }
 }
 function normalizeContracts(raw) {
   const arr = Array.isArray(raw) ? raw : Array.isArray(raw?.contracts) ? raw.contracts : []
@@ -243,7 +241,14 @@ function normalizeContracts(raw) {
       const end = c?.endDate || c?.to || c?.contractEndDate || c?.end || ''
       const carry = normalizeCarry(c?.carry || {})
       const isCurrent = !!(c?.isCurrent || c?.current || c?.active)
-      return { ...c, contractNo: Number(contractNo), startDate: start, endDate: end, carry, isCurrent }
+      return {
+        ...c,
+        contractNo: Number(contractNo),
+        startDate: start,
+        endDate: end,
+        carry,
+        isCurrent,
+      }
     })
     .sort((a, b) => Number(b.contractNo) - Number(a.contractNo))
 }
@@ -266,8 +271,9 @@ function setSelectedContractDefault() {
     contractCarryForm.carry = emptyCarry()
     return
   }
-  const current = contracts.value.find((c) => c.isCurrent) || contracts.value[0]
-  selectedContractNo.value = Number(current.contractNo)
+
+  const latest = latestContract(contracts.value)
+  selectedContractNo.value = latest ? Number(latest.contractNo) : Number(contracts.value[0].contractNo)
   fillContractCarryFormFromSelected()
 }
 watch(selectedContractNo, () => fillContractCarryFormFromSelected())
@@ -276,13 +282,8 @@ watch(selectedContractNo, () => fillContractCarryFormFromSelected())
 function applyFixedApprovers() {
   const mode = normApprovalMode(form.approvalMode)
 
-  // manager stays optional and only used when needed
   if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
-
-  // ✅ GM fixed
   form.gmLoginId = modeInvolvesGm(mode) ? FIXED.GM_LOGIN_ID : ''
-
-  // ✅ COO fixed
   form.cooLoginId = modeInvolvesCoo(mode) ? FIXED.COO_LOGIN_ID : ''
 }
 
@@ -309,12 +310,8 @@ async function fetchContracts() {
   contractsLoading.value = true
   contractsError.value = ''
   try {
-    const res = await api.get(`/admin/leave/profiles/${employeeId.value}`)
-    const p = res?.data?.profile ?? res?.data ?? null
-    profile.value = p
-    if (profile.value) fillFormFromProfile(profile.value)
-
-    contracts.value = normalizeContracts(profile.value?.contracts || profile.value?.contractHistory || [])
+    const res = await api.get(`/admin/leave/profiles/${employeeId.value}/contracts`)
+    contracts.value = normalizeContracts(res?.data?.contracts || [])
     setSelectedContractDefault()
   } catch (e) {
     console.error(e)
@@ -329,22 +326,15 @@ async function fetchContracts() {
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
   form.approvalMode = normApprovalMode(p?.approvalMode)
-
-  // accept either key from backend
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
-
-  // GM/COO are fixed in your system — always overwrite with fixed values when needed
   originalJoinDate.value = toInputDate(p?.joinDate)
   form.isActive = p?.isActive === false ? false : true
-
   applyFixedApprovers()
 
-  // if backend has a stored managerLoginId but this mode doesn't involve manager, clean it visually
   const mode = normApprovalMode(form.approvalMode)
   if (!modeInvolvesManager(mode)) form.managerEmployeeId = ''
 }
 
-/* ✅ On mode switch, auto-fill fixed accounts */
 watch(
   () => form.approvalMode,
   () => applyFixedApprovers()
@@ -360,7 +350,6 @@ const isDirty = computed(() => {
     joinDate: toInputDate(p.joinDate),
     approvalMode: normApprovalMode(p.approvalMode),
     managerEmployeeId: String(p.managerEmployeeId || p.managerLoginId || ''),
-    // fixed values are not stored per profile compare (still compare)
     gmLoginId: String(p.gmLoginId || ''),
     cooLoginId: String(p.cooLoginId || ''),
     isActive: p.isActive === false ? false : true,
@@ -420,13 +409,9 @@ async function forceRecalcBalances() {
 
 function validateApprovers() {
   const m = normApprovalMode(form.approvalMode)
-
-  // ✅ require manager for manager-involved modes
   if ((m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY') && !String(form.managerEmployeeId || '').trim()) {
     return 'Manager employee ID is required for this approval mode.'
   }
-
-  // GM/COO are fixed (auto), so no need validate
   return ''
 }
 
@@ -444,20 +429,13 @@ async function saveProfile() {
 
   saving.value = true
   try {
-    const mode = normApprovalMode(form.approvalMode)
-
     await updateProfile(
       {
         joinDate: form.joinDate ? String(form.joinDate) : null,
-        approvalMode: mode,
-
-        // backend expects managerLoginId (optional)
+        approvalMode: normApprovalMode(form.approvalMode),
         managerLoginId: needManager.value ? String(form.managerEmployeeId || '').trim() || null : null,
-
-        // ✅ fixed accounts (approver OR FYI)
         gmLoginId: needGm.value ? FIXED.GM_LOGIN_ID : null,
         cooLoginId: needCoo.value ? FIXED.COO_LOGIN_ID : null,
-
         isActive: form.isActive !== false,
       },
       { recalc: joinDateChanged.value }
@@ -490,7 +468,9 @@ async function saveProfile() {
 async function saveContractCarry() {
   if (!employeeId.value) return
   const no = Number(selectedContractNo.value)
-  if (!no) return showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
+  if (!no) {
+    return showToast({ type: 'error', title: 'Validation', message: 'Please select a contract.' })
+  }
 
   saving.value = true
   try {
@@ -565,7 +545,9 @@ async function submitResetPassword() {
 
   pwd.submitting = true
   try {
-    await api.patch(`/admin/leave/profiles/${employeeId.value}/password`, { password: String(pwd.password) })
+    await api.patch(`/admin/leave/profiles/${employeeId.value}/password`, {
+      password: String(pwd.password),
+    })
     showToast({ type: 'success', title: 'Password updated', message: 'New password saved for this employee.' })
     closePwdPanel()
   } catch (e) {
@@ -592,6 +574,7 @@ function openContractsModal() {
 /* ───────────────── renew modal ───────────────── */
 const renew = reactive({
   open: false,
+  currentContractEndDate: '',
   newContractDate: '',
   clearOldLeave: true,
   note: '',
@@ -603,41 +586,54 @@ function openRenewModal() {
   renew.error = ''
   renew.note = ''
   renew.clearOldLeave = true
-  renew.newContractDate = dayjs().format('YYYY-MM-DD')
+
+  const latest = latestContract(contracts.value?.length ? contracts.value : readContractHistory(profile.value))
+  const currentEndDate =
+    safeStr(latest?.endDate) ||
+    safeStr(profile.value?.contractEndDate) ||
+    safeStr(profile.value?.endDate) ||
+    ''
+
+  renew.currentContractEndDate = currentEndDate
+  renew.newContractDate = nextDayYMD(currentEndDate)
   renew.open = true
 }
+
 function closeRenewModal() {
   if (renew.submitting) return
   renew.open = false
 }
 
 async function submitRenew() {
-  renew.error = ''
-  if (!employeeId.value) return (renew.error = 'Missing employeeId.')
-  if (!isValidYMD(renew.newContractDate)) return (renew.error = 'Please choose a valid new contract start date.')
+  if (!profile.value?.employeeId) return
 
   renew.submitting = true
+  renew.error = ''
+
   try {
-    await api.post(`/admin/leave/profiles/${employeeId.value}/contracts/renew`, {
-      newContractDate: renew.newContractDate,
-      clearOldLeave: !!renew.clearOldLeave,
-      clearUnusedAL: !!renew.clearOldLeave,
-      note: renew.note ? String(renew.note).trim() : null,
+    await api.post(`/admin/leave/profiles/${profile.value.employeeId}/contracts/renew`, {
+      clearUnusedAL: renew.clearOldLeave,
+      note: renew.note,
     })
 
     showToast({
       type: 'success',
-      title: 'Contract renewed',
-      message: renew.clearOldLeave ? 'Unused AL cleared (debt carried if negative).' : 'AL carried forward.',
+      title: 'Renewed',
+      message: 'Contract renewed successfully.',
     })
 
     renew.open = false
     await fetchProfile()
     await fetchContracts()
-  } catch (e) {
-    console.error(e)
-    renew.error = e?.response?.data?.message || 'Failed to renew contract.'
-    showToast({ type: 'error', title: 'Renew failed', message: renew.error })
+  } catch (err) {
+    renew.error =
+      err?.response?.data?.message || err?.message || 'Failed to renew contract'
+
+    showToast({
+      type: 'error',
+      title: 'Renew failed',
+      message: renew.error,
+    })
   } finally {
     renew.submitting = false
   }
@@ -656,6 +652,7 @@ onMounted(async () => {
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
   await fetchLeaveTypes()
+  await fetchProfile()
   await fetchContracts()
 })
 
@@ -688,8 +685,7 @@ onBeforeUnmount(() => {
       <main class="flex-1 overflow-y-auto ui-scrollbar px-3 sm:px-4 lg:px-6 py-4 space-y-4">
         <div
           v-if="error"
-          class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
-                 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+          class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
         >
           <span class="font-semibold">Failed:</span> {{ error }}
         </div>
@@ -701,7 +697,9 @@ onBeforeUnmount(() => {
         </div>
 
         <template v-else>
-          <div v-if="!profile" class="py-10 text-center text-[11px] text-ui-muted">Profile not loaded.</div>
+          <div v-if="!profile" class="py-10 text-center text-[11px] text-ui-muted">
+            Profile not loaded.
+          </div>
 
           <template v-else>
             <section class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -758,7 +756,10 @@ onBeforeUnmount(() => {
                     <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)" />
 
                     <div class="ui-card !rounded-2xl px-2.5 py-2 sm:col-span-2">
-                      <div class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help" title="Approval chain for this employee profile">
+                      <div
+                        class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help"
+                        title="Approval chain for this employee profile"
+                      >
                         Approval mode
                       </div>
 
@@ -770,14 +771,21 @@ onBeforeUnmount(() => {
                         </select>
 
                         <div class="ui-card !rounded-2xl px-2.5 py-2 bg-ui-bg-2/60">
-                          <div class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help" title="If inactive, employee cannot request leave">
+                          <div
+                            class="ui-label !text-[9px] !tracking-[0.26em] uppercase cursor-help"
+                            title="If inactive, employee cannot request leave"
+                          >
                             Active
                           </div>
 
                           <div class="mt-1.5 flex items-center justify-between gap-2">
                             <div class="text-[11px] font-extrabold text-ui-fg">{{ form.isActive ? 'Yes' : 'No' }}</div>
 
-                            <button type="button" class="ui-btn ui-btn-soft ui-btn-xs !px-2 !py-1" @click="form.isActive = !form.isActive">
+                            <button
+                              type="button"
+                              class="ui-btn ui-btn-soft ui-btn-xs !px-2 !py-1"
+                              @click="form.isActive = !form.isActive"
+                            >
                               <i class="fa-solid text-[10px]" :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
                               Toggle
                             </button>
@@ -795,20 +803,26 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- ✅ show only if mode involves manager -->
                     <div v-if="needManager" class="ui-card !rounded-2xl px-3 py-2">
-                      <div class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help" title="Manager loginId/employeeId (optional by policy)">
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        title="Manager loginId/employeeId (optional by policy)"
+                      >
                         Manager employee ID
                       </div>
                       <div class="mt-1">
-                        <input v-model="form.managerEmployeeId" type="text" placeholder="Example: 51820386" class="ui-input w-full" />
+                        <input
+                          v-model="form.managerEmployeeId"
+                          type="text"
+                          placeholder="Example: 51820386"
+                          class="ui-input w-full"
+                        />
                       </div>
                       <div class="mt-1 text-[10px] text-ui-muted">
                         Current: <span class="font-mono">{{ profile.managerLoginId || '—' }}</span>
                       </div>
                     </div>
 
-                    <!-- ✅ GM is FIXED (read-only) -->
                     <div v-if="needGm" class="ui-card !rounded-2xl px-3 py-2">
                       <div
                         class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
@@ -825,7 +839,6 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <!-- ✅ COO is FIXED (read-only) -->
                     <div v-if="needCoo" class="ui-card !rounded-2xl px-3 py-2 sm:col-span-2">
                       <div
                         class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
@@ -866,7 +879,11 @@ onBeforeUnmount(() => {
                             </tr>
                           </thead>
                           <tbody>
-                            <tr v-for="b in balancesForDisplay" :key="b.leaveTypeCode" class="border-t border-ui-border/60">
+                            <tr
+                              v-for="b in balancesForDisplay"
+                              :key="b.leaveTypeCode"
+                              class="border-t border-ui-border/60"
+                            >
                               <td class="px-3 py-2 font-extrabold text-ui-fg">{{ b.leaveTypeCode }}</td>
                               <td class="px-3 py-2 text-right font-mono text-ui-fg">{{ fmt(b.used) }}</td>
                               <td class="px-3 py-2 text-right font-mono">
@@ -891,8 +908,7 @@ onBeforeUnmount(() => {
 
                 <div
                   v-if="formError"
-                  class="mt-3 ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
-                         dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+                  class="mt-3 ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
                 >
                   <span class="font-semibold">Validation:</span> {{ formError }}
                 </div>
@@ -906,12 +922,22 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="flex flex-wrap items-center gap-2">
-                  <button type="button" class="ui-btn ui-btn-ghost ui-btn-sm" :disabled="contractsLoading" @click="fetchContracts">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-ghost ui-btn-sm"
+                    :disabled="contractsLoading"
+                    @click="fetchContracts"
+                  >
                     <i class="fa-solid fa-rotate text-[11px]" :class="contractsLoading ? 'fa-spin' : ''" />
                     Refresh
                   </button>
 
-                  <button type="button" class="ui-btn ui-btn-primary ui-btn-sm" :disabled="saving || !selectedContract" @click="saveContractCarry">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-primary ui-btn-sm"
+                    :disabled="saving || !selectedContract"
+                    @click="saveContractCarry"
+                  >
                     <i class="fa-solid" :class="saving ? 'fa-circle-notch fa-spin' : 'fa-floppy-disk'" />
                     Save carry
                   </button>
@@ -921,8 +947,7 @@ onBeforeUnmount(() => {
               <div class="p-3 lg:p-4">
                 <div
                   v-if="contractsError"
-                  class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700
-                         dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+                  class="ui-card !rounded-2xl border border-rose-200 bg-rose-50/80 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
                 >
                   <span class="font-semibold">Contracts:</span> {{ contractsError }}
                 </div>
@@ -941,7 +966,8 @@ onBeforeUnmount(() => {
                     </select>
 
                     <div class="mt-2 text-[11px] text-ui-muted">
-                      Selected: <span class="font-mono font-semibold">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
+                      Selected:
+                      <span class="font-mono font-semibold">{{ selectedContract ? `#${selectedContract.contractNo}` : '—' }}</span>
                     </div>
                   </div>
 
@@ -1000,14 +1026,14 @@ onBeforeUnmount(() => {
               :open="renew.open"
               :submitting="renew.submitting"
               :error="renew.error"
-              :newContractDate="renew.newContractDate"
-              :clearOldLeave="renew.clearOldLeave"
+              :new-contract-date="renew.newContractDate"
+              :current-contract-end-date="renew.currentContractEndDate"
+              :clear-old-leave="renew.clearOldLeave"
               :note="renew.note"
-              :employeeId="profile?.employeeId || employeeId"
-              :employeeName="profile?.name || ''"
+              :employee-id="profile?.employeeId || employeeId"
+              :employee-name="profile?.name || ''"
               @close="closeRenewModal"
               @submit="submitRenew"
-              @update:newContractDate="renew.newContractDate = $event"
               @update:clearOldLeave="renew.clearOldLeave = $event"
               @update:note="renew.note = $event"
             />

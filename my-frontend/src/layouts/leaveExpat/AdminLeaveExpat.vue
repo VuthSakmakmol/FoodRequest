@@ -127,6 +127,20 @@ function num(v, fallback = 0) {
   const n = Number(v)
   return Number.isFinite(n) ? n : fallback
 }
+function isValidYMD(v) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(v))
+}
+function nextDayYMD(ymd) {
+  const raw = s(ymd)
+  if (!isValidYMD(raw)) return ''
+  const [y, m, d] = raw.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
+}
 
 /* ───────── Contract reminders (global for all admin leave pages) ───────── */
 const contractReminderLoading = ref(false)
@@ -148,6 +162,7 @@ function reminderKey(item) {
 }
 
 function normalizeReminderRow(raw = {}) {
+  const endDate = s(raw.endDate || raw.contractEndDate || raw.to)
   return {
     employeeId: s(raw.employeeId),
     employeeName: s(raw.employeeName || raw.name),
@@ -156,7 +171,9 @@ function normalizeReminderRow(raw = {}) {
     managerLoginId: s(raw.managerLoginId),
     contractNo: num(raw.contractNo),
     startDate: s(raw.startDate),
-    endDate: s(raw.endDate),
+    endDate,
+    currentContractEndDate: endDate,
+    newContractDate: nextDayYMD(endDate),
     daysLeft: num(raw.daysLeft, 0),
 
     reminderType: s(raw.reminderType),
@@ -297,6 +314,7 @@ const renewError = ref('')
 
 const renewEmployeeId = ref('')
 const renewEmployeeName = ref('')
+const renewCurrentContractEndDate = ref('')
 
 const renewForm = reactive({
   newContractDate: '',
@@ -308,6 +326,7 @@ function resetRenewState() {
   renewError.value = ''
   renewEmployeeId.value = ''
   renewEmployeeName.value = ''
+  renewCurrentContractEndDate.value = ''
   renewForm.newContractDate = ''
   renewForm.clearOldLeave = true
   renewForm.note = ''
@@ -323,7 +342,10 @@ function openRenewModal(item) {
   renewError.value = ''
   renewEmployeeId.value = employeeId
   renewEmployeeName.value = s(item?.name || item?.employeeName)
-  renewForm.newContractDate = dayjs().format('YYYY-MM-DD')
+
+  const currentEndDate = s(item?.currentContractEndDate || item?.endDate || item?.contractEndDate)
+  renewCurrentContractEndDate.value = currentEndDate
+  renewForm.newContractDate = s(item?.newContractDate) || nextDayYMD(currentEndDate)
   renewForm.clearOldLeave = true
   renewForm.note = ''
   renewModalOpen.value = true
@@ -344,17 +366,11 @@ async function submitRenewModal() {
     return
   }
 
-  if (!s(renewForm.newContractDate)) {
-    renewError.value = 'New contract start date is required.'
-    return
-  }
-
   renewSubmitting.value = true
   renewError.value = ''
 
   try {
     await api.post(`/admin/leave/profiles/${encodeURIComponent(employeeId)}/contracts/renew`, {
-      newContractDate: s(renewForm.newContractDate),
       clearUnusedAL: !!renewForm.clearOldLeave,
       note: s(renewForm.note),
     })
@@ -770,6 +786,7 @@ onBeforeUnmount(() => {
       :open="renewModalOpen"
       :submitting="renewSubmitting"
       :error="renewError"
+      :currentContractEndDate="renewCurrentContractEndDate"
       :newContractDate="renewForm.newContractDate"
       :clearOldLeave="renewForm.clearOldLeave"
       :note="renewForm.note"
@@ -777,7 +794,6 @@ onBeforeUnmount(() => {
       :employeeName="renewEmployeeName"
       @close="closeRenewModal"
       @submit="submitRenewModal"
-      @update:newContractDate="renewForm.newContractDate = $event"
       @update:clearOldLeave="renewForm.clearOldLeave = $event"
       @update:note="renewForm.note = $event"
     />

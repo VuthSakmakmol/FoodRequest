@@ -1,3 +1,4 @@
+<!-- src/views/expat/admin/contractRemind/ContractReminderBanner.vue -->
 <script setup>
 import { computed } from 'vue'
 import dayjs from 'dayjs'
@@ -35,10 +36,26 @@ function num(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
+function isValidYMD(v) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(v))
+}
+
 function fmtDate(v) {
   if (!v) return '—'
   const d = dayjs(v)
   return d.isValid() ? d.format('YYYY-MM-DD') : String(v)
+}
+
+function nextDayYMD(ymd) {
+  const s = String(ymd || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
+  const [y, m, d] = s.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + 1)
+  const yy = dt.getUTCFullYear()
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${yy}-${mm}-${dd}`
 }
 
 function urgencyRank(daysLeft) {
@@ -55,18 +72,41 @@ function reminderStageLabel(item) {
   return `${n}-day reminder`
 }
 
+function normalizeReminder(item) {
+  const employeeId = s(item?.employeeId || item?.empId || item?.id)
+  const contractNo = num(item?.contractNo || item?.no || item?.contractNumber || 0, 0)
+  const endDate = s(item?.endDate || item?.contractEndDate || item?.to || '')
+  const currentContractEndDate = endDate
+  const newContractDate = nextDayYMD(currentContractEndDate)
+
+  return {
+    ...item,
+    employeeId,
+    contractNo,
+    endDate,
+    currentContractEndDate,
+    newContractDate,
+    name: s(item?.name || item?.employeeName || ''),
+    department: s(item?.department || ''),
+    daysLeft: num(item?.daysLeft, 9999),
+    reminderStage: num(item?.reminderStage || 0, 0),
+  }
+}
+
 const sortedReminders = computed(() => {
-  return [...(Array.isArray(props.reminders) ? props.reminders : [])].sort((a, b) => {
-    const ua = urgencyRank(a?.daysLeft)
-    const ub = urgencyRank(b?.daysLeft)
-    if (ua !== ub) return ua - ub
+  return [...(Array.isArray(props.reminders) ? props.reminders : [])]
+    .map(normalizeReminder)
+    .sort((a, b) => {
+      const ua = urgencyRank(a?.daysLeft)
+      const ub = urgencyRank(b?.daysLeft)
+      if (ua !== ub) return ua - ub
 
-    const da = num(a?.daysLeft, 9999)
-    const db = num(b?.daysLeft, 9999)
-    if (da !== db) return da - db
+      const da = num(a?.daysLeft, 9999)
+      const db = num(b?.daysLeft, 9999)
+      if (da !== db) return da - db
 
-    return s(a?.employeeId).localeCompare(s(b?.employeeId))
-  })
+      return s(a?.employeeId).localeCompare(s(b?.employeeId))
+    })
 })
 
 const count = computed(() => sortedReminders.value.length)
@@ -107,11 +147,11 @@ function daysLeftLabel(daysLeft) {
 }
 
 function openProfile(item) {
-  emit('open-profile', item)
+  emit('open-profile', normalizeReminder(item))
 }
 
 function renew(item) {
-  emit('renew', item)
+  emit('renew', normalizeReminder(item))
 }
 </script>
 
