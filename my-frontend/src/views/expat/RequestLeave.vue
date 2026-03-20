@@ -21,6 +21,11 @@
      - Sick Leave (SP or SL) requires when requestedDays >= 3
 
   ✅ FIX: MA end date auto = start + 89 days (90 days inclusive)
+
+  ✅ STRICT CONTRACT RANGE:
+     - UI date picker cannot go outside current contract period
+     - submit is blocked if selected dates are outside contract period
+     - MA auto end is clamped by contract end date
 -->
 
 <script setup>
@@ -54,6 +59,20 @@ function cleanTypeName(name, code) {
   if (!c) return n
   const re = new RegExp(`\\s*\\(\\s*${c}\\s*\\)\\s*$`, 'i')
   return n.replace(re, '').trim() || n
+}
+
+const contractInfo = ref({
+  startDate: '',
+  endDate: '',
+})
+
+function isDateWithinContract(ymd) {
+  const d = s(ymd)
+  const from = s(contractInfo.value.startDate)
+  const to = s(contractInfo.value.endDate)
+
+  if (!d || !from || !to) return true
+  return d >= from && d <= to
 }
 
 async function fetchLeaveTypes() {
@@ -181,6 +200,11 @@ async function fetchMyProfile() {
 
     me.value = extractEmployeeInfo(profile)
 
+    contractInfo.value = {
+      startDate: s(profile?.contractDate || profile?.currentContractStartDate || ''),
+      endDate: s(profile?.contractEndDate || profile?.currentContractEndDate || ''),
+    }
+
     let arr = extractBalances(profile)
     arr = applyCarryForDisplay(profile, arr)
 
@@ -209,7 +233,28 @@ const iconByCode = Object.freeze({
   MC: 'fa-solid fa-heart-pulse',
   MA: 'fa-solid fa-person-pregnant',
   UL: 'fa-solid fa-ban',
-  BL: 'fa-solid fa-briefcase', // ✅ Business Leave
+  BL: 'fa-solid fa-briefcase',
+})
+
+/* ───────── Form ───────── */
+const form = ref({
+  leaveTypeCode: '',
+  startDate: '',
+  endDate: '',
+  reason: '',
+  singleHalf: '',
+  startHalfPart: '',
+  endHalfPart: '',
+})
+
+const startOutOfContract = computed(() => {
+  if (!form.value.startDate) return false
+  return !isDateWithinContract(form.value.startDate)
+})
+
+const endOutOfContract = computed(() => {
+  if (!form.value.endDate) return false
+  return !isDateWithinContract(form.value.endDate)
 })
 
 const balancesForUI = computed(() => {
@@ -220,13 +265,11 @@ const balancesForUI = computed(() => {
     if (c) byCode[c] = { ...b, code: c }
   })
 
-  // ✅ Build cards from leave types so BL appears even if not returned in balances
   const list = (leaveTypes.value || [])
     .filter((t) => t?.isActive !== false)
     .map((t) => String(t?.code || '').trim().toUpperCase())
     .filter(Boolean)
 
-  // fallback if types not loaded yet
   const codes = list.length ? list : Object.keys(byCode)
 
   return codes.map((code) => {
@@ -240,19 +283,6 @@ const balancesForUI = computed(() => {
       isSP: code === 'SP',
     }
   })
-})
-
-/* ───────── Form ───────── */
-const form = ref({
-  leaveTypeCode: '',
-  startDate: '',
-  endDate: '',
-  reason: '',
-
-  // Half-day selection is DIRECT (no checkbox):
-  singleHalf: '', // 'AM' | 'PM'
-  startHalfPart: '', // 'AM' | 'PM' | ''
-  endHalfPart: '', // 'AM' | 'PM' | ''
 })
 
 /* ───────── Holidays ───────── */
@@ -274,7 +304,7 @@ async function fetchHolidays() {
 }
 
 /* ───────── Evidence (Optional Attachments) ───────── */
-const evidenceFiles = ref([]) // [{ id, file, previewUrl }]
+const evidenceFiles = ref([])
 const evidenceError = ref('')
 
 function cryptoRandom() {
@@ -347,7 +377,6 @@ const isMultiDay = computed(() => {
   return form.value.endDate > form.value.startDate
 })
 
-/* ✅ MA: 90 calendar days inclusive => end = start + 89 days */
 const MA_DAYS = 90
 function calcMaEnd(startYmd) {
   if (!startYmd) return ''
@@ -366,8 +395,8 @@ function isWorkingDay(ymd) {
   if (!ymd) return false
   const d = dayjs(ymd)
   if (!d.isValid()) return false
-  if (d.day() === 0) return false // Sunday
-  if (holidaySet.value?.has(String(ymd).trim())) return false // holiday from backend env
+  if (d.day() === 0) return false
+  if (holidaySet.value?.has(String(ymd).trim())) return false
   return true
 }
 
@@ -390,7 +419,6 @@ function countWorkingDaysInclusive(startYmd, endYmd) {
   return count
 }
 
-/* ✅ FIX: explicit working checks */
 const startIsWorking = computed(() => isWorkingDay(form.value.startDate))
 const endIsWorking = computed(() => isWorkingDay(form.value.endDate))
 
@@ -408,7 +436,6 @@ const requestedDays = computed(() => {
 
   if (isMA.value) return MA_DAYS
 
-  // backend requires start/end must be working day
   if (!isWorkingDay(start) || !isWorkingDay(end)) return 0
 
   const work = workingRangeCount.value
@@ -416,10 +443,8 @@ const requestedDays = computed(() => {
 
   if (!useHalf.value) return work
 
-  // single-day half
   if (start === end) return form.value.singleHalf ? 0.5 : work
 
-  // multi-day edges
   let total = work
   if (form.value.startHalfPart) total -= 0.5
   if (form.value.endHalfPart) total -= 0.5
@@ -432,7 +457,6 @@ const requestedDaysText = computed(() => {
   return `${v} day(s)`
 })
 
-/* Breakdown hint */
 const requestedBreakdownText = computed(() => {
   if (!form.value.leaveTypeCode) return ''
   if (!form.value.startDate || !form.value.endDate) return ''
@@ -441,6 +465,10 @@ const requestedBreakdownText = computed(() => {
 
   const start = form.value.startDate
   const end = form.value.endDate
+
+  if (!isDateWithinContract(start) || !isDateWithinContract(end)) {
+    return `Leave date must be within your current contract: ${contractInfo.value.startDate || '—'} to ${contractInfo.value.endDate || '—'}.`
+  }
 
   if (!isWorkingDay(start) || !isWorkingDay(end)) {
     return 'Start/End must be a working day (Mon–Sat, not holiday).'
@@ -465,24 +493,17 @@ const requestedBreakdownText = computed(() => {
   return `You request ${total} day(s) from ${base} working day(s): ${parts.join(' + ')}`
 })
 
-/* ───────── Attachment Required Rules (MUST be AFTER form/evidence/requestedDays) ───────── */
+/* ───────── Attachment Required Rules ───────── */
 const leaveCode = computed(() => String(form.value.leaveTypeCode || '').toUpperCase())
 
 const attachmentRequired = computed(() => {
   const t = leaveCode.value
-
-  // MA always requires
   if (t === 'MA') return true
-
-  // BL always requires
   if (t === 'BL') return true
-
-  // Sick leave rule: optional for 1-2 days, required for >=3 days
   if (t === 'SP' || t === 'SL') {
     const days = Number(requestedDays.value || 0)
     return days >= 3
   }
-
   return false
 })
 
@@ -525,18 +546,18 @@ const canSubmit = computed(() => {
   if (!form.value.startDate) return false
   if (!form.value.endDate) return false
 
-  // MA: start must be working day, no half allowed
+  if (!isDateWithinContract(form.value.startDate)) return false
+  if (!isDateWithinContract(form.value.endDate)) return false
+
   if (isMA.value) {
     if (!startIsWorking.value) return false
     if (useHalf.value) return false
   } else {
-    // normal: start & end must be working
     if (!startIsWorking.value || !endIsWorking.value) return false
     if (workingRangeCount.value <= 0) return false
     if (form.value.endDate < form.value.startDate) return false
   }
 
-  // ✅ attachment required rule
   if (!hasRequiredAttachment.value) return false
 
   return true
@@ -558,18 +579,37 @@ function resetForm() {
 
 /* ✅ Dates sync + MA auto end */
 watch(
-  () => [form.value.startDate, form.value.leaveTypeCode],
+  () => [form.value.startDate, form.value.leaveTypeCode, contractInfo.value.endDate],
   () => {
     if (!form.value.startDate) return
 
+    const contractStart = s(contractInfo.value.startDate)
+    const contractEnd = s(contractInfo.value.endDate)
+
+    if (contractStart && form.value.startDate < contractStart) {
+      form.value.startDate = contractStart
+    }
+    if (contractEnd && form.value.startDate > contractEnd) {
+      form.value.startDate = contractEnd
+    }
+
     if (isMA.value) {
-      form.value.endDate = calcMaEnd(form.value.startDate) // ✅ 90 days inclusive
+      const maEnd = calcMaEnd(form.value.startDate)
+      if (contractEnd && maEnd > contractEnd) {
+        form.value.endDate = contractEnd
+      } else {
+        form.value.endDate = maEnd
+      }
       clearAllHalf()
       return
     }
 
     if (!form.value.endDate) form.value.endDate = form.value.startDate
     if (form.value.endDate < form.value.startDate) form.value.endDate = form.value.startDate
+
+    if (contractEnd && form.value.endDate > contractEnd) {
+      form.value.endDate = contractEnd
+    }
   }
 )
 
@@ -579,6 +619,16 @@ watch(
     if (!form.value.startDate) return
     if (!form.value.endDate) form.value.endDate = form.value.startDate
     if (!isMA.value && form.value.endDate < form.value.startDate) form.value.endDate = form.value.startDate
+
+    const contractStart = s(contractInfo.value.startDate)
+    const contractEnd = s(contractInfo.value.endDate)
+
+    if (contractStart && form.value.endDate && form.value.endDate < contractStart) {
+      form.value.endDate = contractStart
+    }
+    if (contractEnd && form.value.endDate && form.value.endDate > contractEnd) {
+      form.value.endDate = contractEnd
+    }
   }
 )
 
@@ -603,8 +653,37 @@ watch(
     if (!v) resetEvidence()
 
     if (String(v || '').toUpperCase() === 'MA') {
-      if (form.value.startDate) form.value.endDate = calcMaEnd(form.value.startDate) // ✅
+      if (form.value.startDate) {
+        const maEnd = calcMaEnd(form.value.startDate)
+        const contractEnd = s(contractInfo.value.endDate)
+        form.value.endDate = contractEnd && maEnd > contractEnd ? contractEnd : maEnd
+      }
       clearAllHalf()
+    }
+  }
+)
+
+watch(
+  () => [contractInfo.value.startDate, contractInfo.value.endDate],
+  ([from, to]) => {
+    if (!from || !to) return
+
+    if (form.value.startDate && form.value.startDate < from) {
+      form.value.startDate = from
+    }
+    if (form.value.startDate && form.value.startDate > to) {
+      form.value.startDate = to
+    }
+
+    if (form.value.endDate && form.value.endDate < from) {
+      form.value.endDate = from
+    }
+    if (form.value.endDate && form.value.endDate > to) {
+      form.value.endDate = to
+    }
+
+    if (form.value.startDate && form.value.endDate && form.value.endDate < form.value.startDate) {
+      form.value.endDate = form.value.startDate
     }
   }
 )
@@ -623,10 +702,32 @@ async function submitRequest() {
   if (!form.value.startDate) return (formError.value = 'Please select start date.')
   if (!form.value.endDate) return (formError.value = 'Please select end date.')
   if (!isMA.value && form.value.endDate < form.value.startDate) return (formError.value = 'End date cannot be earlier than start date.')
-
   if (isMA.value && useHalf.value) return (formError.value = 'MA does not support half-day.')
 
-  // ✅ enforce working-day constraints
+  if (!isDateWithinContract(form.value.startDate) || !isDateWithinContract(form.value.endDate)) {
+    formError.value = `Leave date must be within your current contract: ${contractInfo.value.startDate || '—'} to ${contractInfo.value.endDate || '—'}.`
+    showToast({
+      type: 'error',
+      title: 'Invalid contract range',
+      message: formError.value,
+    })
+    return
+  }
+
+  if (isMA.value) {
+    const maEnd = calcMaEnd(form.value.startDate)
+    const contractEnd = s(contractInfo.value.endDate)
+    if (contractEnd && maEnd > contractEnd) {
+      formError.value = `Maternity Leave exceeds your current contract end date (${contractEnd}).`
+      showToast({
+        type: 'error',
+        title: 'Invalid contract range',
+        message: formError.value,
+      })
+      return
+    }
+  }
+
   if (isMA.value) {
     if (!isWorkingDay(form.value.startDate)) {
       formError.value = 'Start Date must be a working day (Mon–Sat, not holiday).'
@@ -643,7 +744,6 @@ async function submitRequest() {
     }
   }
 
-  // ✅ attachment required message
   if (!hasRequiredAttachment.value) {
     const t = leaveCode.value
     let msg = 'Attachment is required for this leave type.'
@@ -661,7 +761,7 @@ async function submitRequest() {
     const payload = {
       leaveTypeCode: form.value.leaveTypeCode,
       startDate: form.value.startDate,
-      endDate: form.value.endDate, // ✅ MA already auto-calculated, normal uses chosen end
+      endDate: form.value.endDate,
       reason: form.value.reason || '',
     }
 
@@ -899,7 +999,17 @@ onBeforeUnmount(() => {
           <div class="p-3">
             <form class="space-y-2.5" @submit.prevent="submitRequest">
               <div class="ui-card p-3">
-                <!-- Dates + Chips -->
+                <!-- <div
+                  v-if="contractInfo.startDate || contractInfo.endDate"
+                  class="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] font-semibold text-sky-800
+                         dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-200"
+                >
+                  Allowed contract period:
+                  <span class="font-mono">{{ contractInfo.startDate || '—' }}</span>
+                  →
+                  <span class="font-mono">{{ contractInfo.endDate || '—' }}</span>
+                </div> -->
+
                 <div class="grid gap-2">
                   <!-- Start row -->
                   <div class="date-row">
@@ -907,7 +1017,13 @@ onBeforeUnmount(() => {
 
                     <div class="flex-1">
                       <div class="ui-label">Start Date</div>
-                      <input v-model="form.startDate" type="date" class="ui-date" />
+                      <input
+                        v-model="form.startDate"
+                        type="date"
+                        class="ui-date"
+                        :min="contractInfo.startDate || undefined"
+                        :max="contractInfo.endDate || undefined"
+                      />
                     </div>
 
                     <div class="date-right-slot">
@@ -936,6 +1052,8 @@ onBeforeUnmount(() => {
                         type="date"
                         :disabled="isMA"
                         class="ui-date disabled:opacity-70 disabled:cursor-not-allowed"
+                        :min="form.startDate || contractInfo.startDate || undefined"
+                        :max="contractInfo.endDate || undefined"
                       />
                     </div>
 
@@ -948,7 +1066,22 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- ✅ Warnings -->
+                  <div
+                    v-if="startOutOfContract"
+                    class="mt-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800
+                           dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+                  >
+                    Start Date is outside your current contract period.
+                  </div>
+
+                  <div
+                    v-if="endOutOfContract"
+                    class="mt-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-semibold text-rose-800
+                           dark:border-rose-900/40 dark:bg-rose-950/30 dark:text-rose-200"
+                  >
+                    End Date is outside your current contract period.
+                  </div>
+
                   <div
                     v-if="form.startDate && !startIsWorking && !isMA"
                     class="mt-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800
@@ -973,7 +1106,6 @@ onBeforeUnmount(() => {
                     MA Start Date must be a working day (Mon–Sat, not holiday).
                   </div>
 
-                  <!-- ✅ breakdown hint -->
                   <div
                     v-if="form.leaveTypeCode"
                     class="mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-700
@@ -984,7 +1116,6 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
               </div>
-
 
               <!-- Leave type -->
               <div class="ui-card p-3">
@@ -1002,9 +1133,8 @@ onBeforeUnmount(() => {
                   {{ typesError }}
                 </div>
               </div>
-              
 
-              <!-- Evidence (only when type selected) -->
+              <!-- Evidence -->
               <div v-if="form.leaveTypeCode" class="ui-card p-3">
                 <div class="flex items-center justify-between gap-2">
                   <div class="text-[12px] font-extrabold text-slate-800 dark:text-slate-100">
@@ -1100,9 +1230,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* ─────────────────────────────────────────────────────────────
-   Balance Cards (Bigger + 3 per row)
-───────────────────────────────────────────────────────────── */
 .balance-grid {
   display: grid;
   gap: 12px;
@@ -1110,7 +1237,7 @@ onBeforeUnmount(() => {
 }
 @media (min-width: 640px) {
   .balance-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr)); /* ✅ 3 per row */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -1199,9 +1326,6 @@ onBeforeUnmount(() => {
   @apply mt-1 text-[12px] font-bold text-slate-500 dark:text-slate-400;
 }
 
-/* ─────────────────────────────────────────────────────────────
-   Date rows + chips
-───────────────────────────────────────────────────────────── */
 .date-row {
   display: flex;
   align-items: center;
@@ -1226,7 +1350,6 @@ onBeforeUnmount(() => {
   height: 42px;
 }
 
-/* square AM/PM chips */
 .sq-chip {
   @apply grid place-items-center rounded-xl border border-slate-200 bg-white
          text-[11px] font-extrabold text-slate-700

@@ -61,6 +61,14 @@ function uniqUpper(arr) {
   return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
+function isWithinInclusive(ymd, from, to) {
+  const d = s(ymd)
+  const a = s(from)
+  const b = s(to)
+  if (!d || !a || !b) return false
+  return d >= a && d <= b
+}
+
 function allowedStatusesForInboxLevel(level) {
   const lvl = up(level)
   if (lvl === 'MANAGER') {
@@ -579,6 +587,17 @@ exports.createMyRequest = async (req, res, next) => {
 
     const normalized = vr.normalized
 
+    const contractStart = s(prof.contractDate)
+    const contractEnd = s(prof.contractEndDate)
+
+    if (!isWithinInclusive(normalized.startDate, contractStart, contractEnd)) {
+      throw createError(400, `Start date must be within current contract (${contractStart} to ${contractEnd}).`)
+    }
+
+    if (!isWithinInclusive(normalized.endDate, contractStart, contractEnd)) {
+      throw createError(400, `End date must be within current contract (${contractStart} to ${contractEnd}).`)
+    }
+
     // ✅ block duplicate same date+half (allow AM if only PM exists, etc.)
     await assertNoDuplicateDateHalf({ employeeId, normalized })
 
@@ -1068,6 +1087,20 @@ exports.updateMyRequest = async (req, res, next) => {
     }
 
     const normalized = vr.normalized
+
+    const prof = await LeaveProfile.findOne({ employeeId: existing.employeeId }).lean()
+    if (!prof) throw createError(404, 'Leave profile not found')
+
+    const contractStart = s(prof.contractDate)
+    const contractEnd = s(prof.contractEndDate)
+
+    if (!isWithinInclusive(normalized.startDate, contractStart, contractEnd)) {
+      throw createError(400, `Start date must be within current contract (${contractStart} to ${contractEnd}).`)
+    }
+
+    if (!isWithinInclusive(normalized.endDate, contractStart, contractEnd)) {
+      throw createError(400, `End date must be within current contract (${contractStart} to ${contractEnd}).`)
+    }
 
     await assertNoDuplicateDateHalf({
       employeeId: existing.employeeId,
