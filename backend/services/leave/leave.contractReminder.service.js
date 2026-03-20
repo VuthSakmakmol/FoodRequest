@@ -1,4 +1,5 @@
 /* eslint-disable no-console */
+// backend/services/leave/leave.contractReminder.service.js
 const dayjs = require('dayjs')
 
 const LeaveProfile = require('../../models/leave/LeaveProfile')
@@ -11,6 +12,9 @@ const {
 
 function s(v) {
   return String(v ?? '').trim()
+}
+function up(v) {
+  return s(v).toUpperCase()
 }
 function num(v) {
   const n = Number(v ?? 0)
@@ -37,12 +41,47 @@ function diffDaysFromToday(endDateYMD) {
   return end.diff(today, 'day')
 }
 
-function reminderTypeFromDaysLeft(daysLeft) {
-  if (daysLeft === 30) return 'D30'
-  if (daysLeft === 14) return 'D14'
-  if (daysLeft === 7) return 'D7'
-  if (daysLeft === 1) return 'D1'
+/**
+ * Visible in UI when contract is within 30 days or overdue.
+ */
+function isVisibleReminderWindow(daysLeft) {
+  return Number.isFinite(daysLeft) && daysLeft <= 30
+}
+
+/**
+ * Stage bucket from live countdown:
+ * 30..15 => D30
+ * 14..8  => D14
+ * 7..2   => D7
+ * 1..-∞  => D1
+ */
+function stageFromDaysLeft(daysLeft) {
+  const d = num(daysLeft, 999999)
+
+  if (d <= 1) return 'D1'
+  if (d <= 7) return 'D7'
+  if (d <= 14) return 'D14'
+  if (d <= 30) return 'D30'
   return ''
+}
+
+function reminderStageDays(reminderType) {
+  const t = up(reminderType)
+  if (t === 'D30') return 30
+  if (t === 'D14') return 14
+  if (t === 'D7') return 7
+  if (t === 'D1') return 1
+  return 0
+}
+
+function urgencyKeyFromDaysLeft(daysLeft) {
+  const d = num(daysLeft, 999999)
+  if (d < 0) return 'OVERDUE'
+  if (d === 0) return 'CRITICAL'
+  if (d <= 1) return 'CRITICAL'
+  if (d <= 7) return 'URGENT'
+  if (d <= 14) return 'WARNING'
+  return 'UPCOMING'
 }
 
 async function enrichProfile(profile) {
@@ -72,6 +111,48 @@ async function enrichProfile(profile) {
   }
 }
 
+async function getReminderLogMapForProfiles(rows) {
+  const employeeIds = [...new Set((rows || []).map((x) => s(x?.employeeId)).filter(Boolean))]
+  if (!employeeIds.length) return new Map()
+
+  const logs = await LeaveContractReminderLog.find(
+    { employeeId: { $in: employeeIds } },
+    {
+      employeeId: 1,
+      contractNo: 1,
+      reminderType: 1,
+      sentAt: 1,
+      contractEndDate: 1,
+    }
+  )
+    .sort({ sentAt: -1, createdAt: -1 })
+    .lean()
+
+  const map = new Map()
+
+  for (const log of logs) {
+    const key = `${s(log.employeeId)}::${num(log.contractNo)}`
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(log)
+  }
+
+  return map
+}
+
+function hasReminderLog(logs = [], reminderType) {
+  const want = up(reminderType)
+  return (Array.isArray(logs) ? logs : []).some((x) => up(x?.reminderType) === want)
+}
+
+function findLatestLog(logs = [], reminderType) {
+  const want = up(reminderType)
+  return (Array.isArray(logs) ? logs : []).find((x) => up(x?.reminderType) === want) || null
+}
+
+/**
+ * Send once per stage only.
+ * If exact day was missed, it can still send once while inside that stage window.
+ */
 async function runLeaveContractReminderJob() {
   const rows = await LeaveProfile.find(
     { isActive: true },
@@ -86,12 +167,15 @@ async function runLeaveContractReminderJob() {
     }
   ).lean()
 
+  const logMap = await getReminderLogMapForProfiles(rows)
+
   const results = {
     checked: 0,
     matched: 0,
     sent: 0,
     skippedDuplicate: 0,
     skippedInvalid: 0,
+    skippedNotInWindow: 0,
     errors: 0,
   }
 
@@ -109,18 +193,25 @@ async function runLeaveContractReminderJob() {
       }
 
       const daysLeft = diffDaysFromToday(endDate)
-      const reminderType = reminderTypeFromDaysLeft(daysLeft)
+      if (!Number.isFinite(daysLeft)) {
+        results.skippedInvalid += 1
+        continue
+      }
 
+      if (!isVisibleReminderWindow(daysLeft)) {
+        results.skippedNotInWindow += 1
+        continue
+      }
+
+      const reminderType = stageFromDaysLeft(daysLeft)
       if (!reminderType) continue
+
       results.matched += 1
 
-      const exists = await LeaveContractReminderLog.findOne({
-        employeeId: s(profile.employeeId),
-        contractNo,
-        reminderType,
-      }).lean()
+      const key = `${s(profile.employeeId)}::${contractNo}`
+      const logs = logMap.get(key) || []
 
-      if (exists) {
+      if (hasReminderLog(logs, reminderType)) {
         results.skippedDuplicate += 1
         continue
       }
@@ -136,7 +227,7 @@ async function runLeaveContractReminderJob() {
         manager: extra.manager,
       })
 
-      await LeaveContractReminderLog.create({
+      const created = await LeaveContractReminderLog.create({
         employeeId: s(profile.employeeId),
         contractNo,
         reminderType,
@@ -145,6 +236,9 @@ async function runLeaveContractReminderJob() {
         sentTo: Array.isArray(notifyResult?.sentTo) ? notifyResult.sentTo : [],
         note: `daysLeft=${daysLeft}`,
       })
+
+      if (!logMap.has(key)) logMap.set(key, [])
+      logMap.get(key).unshift(created)
 
       results.sent += 1
     } catch (err) {
@@ -170,6 +264,7 @@ async function getCurrentLeaveContractReminders() {
     }
   ).lean()
 
+  const logMap = await getReminderLogMapForProfiles(rows)
   const items = []
 
   for (const profile of rows) {
@@ -181,11 +276,21 @@ async function getCurrentLeaveContractReminders() {
     if (!contractNo || !isValidYMD(endDate)) continue
 
     const daysLeft = diffDaysFromToday(endDate)
-    const reminderType = reminderTypeFromDaysLeft(daysLeft)
-
-    if (!reminderType) continue
+    if (!Number.isFinite(daysLeft)) continue
+    if (!isVisibleReminderWindow(daysLeft)) continue
 
     const extra = await enrichProfile(profile)
+    const key = `${s(profile.employeeId)}::${contractNo}`
+    const logs = logMap.get(key) || []
+
+    const liveStage = stageFromDaysLeft(daysLeft)
+
+    const sentStages = {
+      D30: hasReminderLog(logs, 'D30'),
+      D14: hasReminderLog(logs, 'D14'),
+      D7: hasReminderLog(logs, 'D7'),
+      D1: hasReminderLog(logs, 'D1'),
+    }
 
     items.push({
       employeeId: s(profile.employeeId),
@@ -197,9 +302,21 @@ async function getCurrentLeaveContractReminders() {
       startDate,
       endDate,
       daysLeft,
-      reminderType,
+
+      // current live bucket
+      reminderType: liveStage,
+      reminderStage: reminderStageDays(liveStage),
+
+      urgencyKey: urgencyKeyFromDaysLeft(daysLeft),
       approvalMode: s(profile.approvalMode),
       employeeLoginId: s(profile.employeeLoginId),
+
+      // one-time send history
+      sentStages,
+      sentAt30: findLatestLog(logs, 'D30')?.sentAt || null,
+      sentAt14: findLatestLog(logs, 'D14')?.sentAt || null,
+      sentAt7: findLatestLog(logs, 'D7')?.sentAt || null,
+      sentAt1: findLatestLog(logs, 'D1')?.sentAt || null,
     })
   }
 

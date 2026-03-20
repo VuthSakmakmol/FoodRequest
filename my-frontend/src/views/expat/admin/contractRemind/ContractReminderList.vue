@@ -1,4 +1,3 @@
-<!-- src/views/expat/admin/contractRemind/ContractReminderList.vue -->
 <script setup>
 import { computed, ref, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -29,6 +28,7 @@ const emit = defineEmits([
 
 const query = ref('')
 const urgency = ref('ALL')
+const stageFilter = ref('ALL')
 const sortBy = ref('URGENT')
 
 function s(v) {
@@ -56,6 +56,12 @@ function daysLeftLabel(daysLeft) {
   if (n === 0) return 'Ends today'
   if (n === 1) return '1 day left'
   return `${n} days left`
+}
+
+function stageLabel(stage) {
+  const n = num(stage, 0)
+  if (!n) return '—'
+  return `${n}-day reminder`
 }
 
 function urgencyKey(daysLeft) {
@@ -106,6 +112,7 @@ const normalizedRows = computed(() => {
     endDate: s(item?.endDate),
     daysLeft: num(item?.daysLeft, 0),
     reminderType: up(item?.reminderType),
+    reminderStage: num(item?.reminderStage || item?.stage || item?.triggerDays, 0),
     urgencyKey: urgencyKey(item?.daysLeft),
     urgencyRank: urgencyRank(item?.daysLeft),
   }))
@@ -116,6 +123,8 @@ const filteredRows = computed(() => {
 
   let rows = normalizedRows.value.filter((row) => {
     const matchUrgency = urgency.value === 'ALL' ? true : row.urgencyKey === urgency.value
+    const matchStage =
+      stageFilter.value === 'ALL' ? true : num(row.reminderStage) === num(stageFilter.value)
 
     const haystack = [
       row.employeeId,
@@ -127,12 +136,13 @@ const filteredRows = computed(() => {
       row.endDate,
       row.reminderType,
       row.urgencyKey,
+      row.reminderStage,
     ]
       .join(' ')
       .toLowerCase()
 
     const matchQuery = !q || haystack.includes(q)
-    return matchUrgency && matchQuery
+    return matchUrgency && matchStage && matchQuery
   })
 
   rows = rows.slice().sort((a, b) => {
@@ -144,9 +154,19 @@ const filteredRows = computed(() => {
       return s(a.name).localeCompare(s(b.name)) || a.employeeId.localeCompare(b.employeeId)
     }
 
+    if (sortBy.value === 'STAGE') {
+      return (
+        num(a.reminderStage, 9999) - num(b.reminderStage, 9999) ||
+        a.daysLeft - b.daysLeft ||
+        s(a.endDate).localeCompare(s(b.endDate)) ||
+        a.employeeId.localeCompare(b.employeeId)
+      )
+    }
+
     return (
       a.urgencyRank - b.urgencyRank ||
       a.daysLeft - b.daysLeft ||
+      num(a.reminderStage, 9999) - num(b.reminderStage, 9999) ||
       s(a.endDate).localeCompare(s(b.endDate)) ||
       a.employeeId.localeCompare(b.employeeId)
     )
@@ -164,6 +184,7 @@ const urgentCount = computed(() =>
 function resetFilters() {
   query.value = ''
   urgency.value = 'ALL'
+  stageFilter.value = 'ALL'
   sortBy.value = 'URGENT'
 }
 
@@ -236,7 +257,7 @@ watch(
         </div>
 
         <div class="flex-1 overflow-y-auto ui-scrollbar px-4 py-4 sm:px-5 space-y-4">
-          <section class="grid grid-cols-1 gap-3 lg:grid-cols-[1.35fr_1fr_1fr_auto]">
+          <section class="grid grid-cols-1 gap-3 xl:grid-cols-[1.3fr_0.9fr_0.9fr_0.9fr_auto]">
             <div class="ui-card !rounded-2xl px-3 py-3">
               <div class="ui-label">Search</div>
               <div class="mt-1 relative">
@@ -265,11 +286,23 @@ watch(
             </div>
 
             <div class="ui-card !rounded-2xl px-3 py-3">
+              <div class="ui-label">Reminder stage</div>
+              <select v-model="stageFilter" class="ui-select mt-1 w-full">
+                <option value="ALL">All</option>
+                <option value="30">30 days</option>
+                <option value="14">14 days</option>
+                <option value="7">7 days</option>
+                <option value="1">1 day</option>
+              </select>
+            </div>
+
+            <div class="ui-card !rounded-2xl px-3 py-3">
               <div class="ui-label">Sort by</div>
               <select v-model="sortBy" class="ui-select mt-1 w-full">
                 <option value="URGENT">Urgency</option>
                 <option value="END_DATE">End date</option>
                 <option value="NAME">Name</option>
+                <option value="STAGE">Reminder stage</option>
               </select>
             </div>
 
@@ -329,6 +362,9 @@ watch(
                       {{ row.employeeId || '—' }}
                       <span v-if="row.department"> · {{ row.department }}</span>
                     </div>
+                    <div class="mt-1 text-[11px] text-ui-muted">
+                      {{ stageLabel(row.reminderStage) }}
+                    </div>
                   </div>
 
                   <span
@@ -384,7 +420,7 @@ watch(
           <section class="hidden lg:block">
             <div class="overflow-hidden rounded-2xl border border-ui-border/70 bg-white/80 dark:bg-slate-950/40">
               <div class="overflow-x-auto ui-scrollbar">
-                <table class="w-full min-w-[980px] text-[12px]">
+                <table class="w-full min-w-[1100px] text-[12px]">
                   <thead class="bg-ui-bg-2/70">
                     <tr class="text-left text-ui-muted">
                       <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Employee</th>
@@ -392,14 +428,15 @@ watch(
                       <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Manager</th>
                       <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Contract</th>
                       <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">End date</th>
-                      <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Reminder</th>
+                      <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Stage</th>
+                      <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Countdown</th>
                       <th class="px-4 py-3 text-[10px] font-extrabold uppercase tracking-[0.18em]">Action</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     <tr v-if="loading" v-for="n in 5" :key="`sk-${n}`" class="border-t border-ui-border/60">
-                      <td class="px-4 py-3" colspan="7">
+                      <td class="px-4 py-3" colspan="8">
                         <div class="h-5 animate-pulse rounded bg-ui-bg-2/80" />
                       </td>
                     </tr>
@@ -431,6 +468,10 @@ watch(
                         {{ fmtDate(row.endDate) }}
                       </td>
 
+                      <td class="px-4 py-3 align-middle text-ui-fg">
+                        {{ stageLabel(row.reminderStage) }}
+                      </td>
+
                       <td class="px-4 py-3 align-middle">
                         <span
                           class="inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-extrabold"
@@ -456,7 +497,7 @@ watch(
                     </tr>
 
                     <tr v-if="!loading && !filteredRows.length" class="border-t border-ui-border/60">
-                      <td colspan="7" class="px-4 py-10 text-center text-[12px] text-ui-muted">
+                      <td colspan="8" class="px-4 py-10 text-center text-[12px] text-ui-muted">
                         No reminders found for current filters.
                       </td>
                     </tr>

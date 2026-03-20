@@ -1,3 +1,4 @@
+// backend/models/leave/LeaveContractReminderLog.js
 const mongoose = require('mongoose')
 
 const LeaveContractReminderLogSchema = new mongoose.Schema(

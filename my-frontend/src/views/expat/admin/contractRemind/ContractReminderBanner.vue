@@ -1,4 +1,3 @@
-<!-- src/views/expat/admin/contractRemind/ContractReminderBanner.vue -->
 <script setup>
 import { computed } from 'vue'
 import dayjs from 'dayjs'
@@ -48,6 +47,12 @@ function urgencyRank(daysLeft) {
   if (n <= 7) return 1
   if (n <= 14) return 2
   return 3
+}
+
+function reminderStageLabel(item) {
+  const n = num(item?.reminderStage || 0)
+  if (!n) return ''
+  return `${n}-day reminder`
 }
 
 const sortedReminders = computed(() => {
@@ -196,6 +201,9 @@ function renew(item) {
                 <div class="mt-0.5 text-[11px] text-ui-muted">
                   {{ item.employeeId || '—' }}
                   <span v-if="item.department"> · {{ item.department }}</span>
+                </div>
+                <div v-if="reminderStageLabel(item)" class="mt-1 text-[11px] text-ui-muted">
+                  {{ reminderStageLabel(item) }}
                 </div>
               </div>
 

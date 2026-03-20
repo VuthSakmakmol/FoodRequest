@@ -1,4 +1,3 @@
-<!-- src/layouts/LeaveExpat/AdminLeaveExpat.vue -->
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
@@ -144,8 +143,7 @@ function reminderKey(item) {
     s(item?.employeeId),
     num(item?.contractNo, 0),
     s(item?.endDate),
-    num(item?.daysLeft, 0),
-    s(item?.reminderType),
+    s(item?.reminderType || item?.reminderStage),
   ].join('|')
 }
 
@@ -160,7 +158,28 @@ function normalizeReminderRow(raw = {}) {
     startDate: s(raw.startDate),
     endDate: s(raw.endDate),
     daysLeft: num(raw.daysLeft, 0),
+
     reminderType: s(raw.reminderType),
+    reminderStage: num(raw.reminderStage, 0),
+
+    urgencyKey: s(raw.urgencyKey),
+    approvalMode: s(raw.approvalMode),
+    employeeLoginId: s(raw.employeeLoginId),
+
+    sentStages:
+      raw?.sentStages && typeof raw.sentStages === 'object'
+        ? {
+            D30: !!raw.sentStages.D30,
+            D14: !!raw.sentStages.D14,
+            D7: !!raw.sentStages.D7,
+            D1: !!raw.sentStages.D1,
+          }
+        : { D30: false, D14: false, D7: false, D1: false },
+
+    sentAt30: raw?.sentAt30 || null,
+    sentAt14: raw?.sentAt14 || null,
+    sentAt7: raw?.sentAt7 || null,
+    sentAt1: raw?.sentAt1 || null,
   }
 }
 
@@ -197,7 +216,6 @@ async function fetchContractReminders({ silent = false, allowAutoOpen = false } 
       markCurrentRemindersSeen(nextRows)
       reminderInitialLoaded = true
     } else if (hasNew) {
-      markCurrentRemindersSeen(nextRows)
       contractReminderDismissed.value = false
 
       if (allowAutoOpen && nextRows.length) {
@@ -211,6 +229,10 @@ async function fetchContractReminders({ silent = false, allowAutoOpen = false } 
               : `${nextRows.length} contract reminders need action.`,
         })
       }
+
+      markCurrentRemindersSeen(nextRows)
+    } else {
+      markCurrentRemindersSeen(nextRows)
     }
 
     if (!nextRows.length) {
