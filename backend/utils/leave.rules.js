@@ -361,23 +361,28 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
     BL: num(carryRaw.BL),
   }
 
-  const totalSPUsed = usedSP + Math.max(0, carry.SP)
-  const totalALUsed = usedAL + totalSPUsed
+  /*
+    ✅ RAW balances only here.
+    Do not add carry here.
+    Carry is applied later only for frontend response display.
+  */
+  const totalSPUsed = usedSP
+  const totalALUsed = usedAL + usedSP
 
   const spRemaining = Math.max(0, SP_ENT - totalSPUsed)
-  const alRemaining = AL_ENT - totalALUsed + carry.AL
+  const alRemaining = AL_ENT - totalALUsed
 
-  const mcCarryApplied = applyCarry(MC_ENT, usedMC, carry.MC)
-  const maCarryApplied = applyCarry(MA_ENT, usedMA, carry.MA)
-  const ulCarryApplied = applyCarry(UL_ENT, usedUL, carry.UL)
+  const mcRemaining = MC_ENT - usedMC
+  const maRemaining = MA_ENT - usedMA
+  const ulRemaining = 0
 
   return {
     balances: [
       { leaveTypeCode: 'AL', yearlyEntitlement: AL_ENT, used: totalALUsed, remaining: alRemaining },
       { leaveTypeCode: 'SP', yearlyEntitlement: SP_ENT, used: totalSPUsed, remaining: spRemaining },
-      { leaveTypeCode: 'MC', yearlyEntitlement: MC_ENT, used: mcCarryApplied.usedDisplay, remaining: mcCarryApplied.remaining },
-      { leaveTypeCode: 'MA', yearlyEntitlement: MA_ENT, used: maCarryApplied.usedDisplay, remaining: maCarryApplied.remaining },
-      { leaveTypeCode: 'UL', yearlyEntitlement: 0, used: ulCarryApplied.usedDisplay, remaining: 0 },
+      { leaveTypeCode: 'MC', yearlyEntitlement: MC_ENT, used: usedMC, remaining: mcRemaining },
+      { leaveTypeCode: 'MA', yearlyEntitlement: MA_ENT, used: usedMA, remaining: maRemaining },
+      { leaveTypeCode: 'UL', yearlyEntitlement: 0, used: usedUL, remaining: ulRemaining },
       { leaveTypeCode: 'BL', yearlyEntitlement: 0, used: usedBL, remaining: 0 },
     ],
     meta: {

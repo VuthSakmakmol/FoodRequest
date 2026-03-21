@@ -1,7 +1,7 @@
 /* eslint-disable no-console */
 // backend/controllers/leave/leaveProfiles.admin.controller.js
 //
-// ✅ Admin leave profile management (FIXED VERSION)
+// ✅ Admin leave profile management
 // ✅ Approval modes:
 //    - MANAGER_AND_GM
 //    - MANAGER_AND_COO
@@ -24,6 +24,8 @@
 //    - GM_ONLY: COO stored = leave_coo (FYI read-only)
 //
 // ✅ Contracts-only carry (contracts[].carry only)
+// ✅ RAW balances stored in DB
+// ✅ Carry applied only for response display
 
 const bcrypt = require('bcryptjs')
 const createError = require('http-errors')
@@ -299,7 +301,9 @@ function setPointersToLatest(profileDoc) {
   const latest = latestContract(profileDoc.contracts || [])
   if (!latest || !isValidYMD(latest.startDate)) return
   profileDoc.contractDate = s(latest.startDate)
-  profileDoc.contractEndDate = isValidYMD(latest.endDate) ? s(latest.endDate) : contractEndFromStart(latest.startDate)
+  profileDoc.contractEndDate = isValidYMD(latest.endDate)
+    ? s(latest.endDate)
+    : contractEndFromStart(latest.startDate)
 }
 
 function applyCarryToBalancesForDisplay(balances = [], carry = {}) {
@@ -325,7 +329,19 @@ function applyCarryToBalancesForDisplay(balances = [], carry = {}) {
   })
 }
 
-// ✅ FIXED: recompute based on latest contract start date, not blindly on "today"
+function decorateProfileForResponse(profilePlain = {}) {
+  const latest = latestContract(profilePlain?.contracts || [])
+  const activeCarry = normalizeCarryObj(latest?.carry || {})
+
+  return {
+    ...profilePlain,
+    approvalMode: normalizeApprovalMode(profilePlain?.approvalMode),
+    balances: applyCarryToBalancesForDisplay(profilePlain?.balances || [], activeCarry),
+  }
+}
+
+// ✅ recompute based on latest contract start date, not blindly on "today"
+// ✅ save RAW balances only (do not apply carry here)
 async function recomputeAndSaveBalances(profileDoc) {
   const employeeId = s(profileDoc.employeeId)
 
@@ -345,12 +361,9 @@ async function recomputeAndSaveBalances(profileDoc) {
     contractNo: latest?.contractNo || undefined,
   })
 
-  let nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
+  const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
   const nextAsOf = s(snap?.meta?.asOfYMD || profileDoc.balancesAsOf || '')
   const nextEnd = s(snap?.meta?.contractYear?.endDate || profileDoc.contractEndDate || '')
-
-  const activeCarry = normalizeCarryObj(latest?.carry || {})
-  nextBalances = applyCarryToBalancesForDisplay(nextBalances, activeCarry)
 
   profileDoc.balances = nextBalances
   if (nextAsOf) profileDoc.balancesAsOf = nextAsOf
@@ -384,10 +397,12 @@ exports.getProfilesGrouped = async (req, res) => {
 
   const enriched = await Promise.all((rows || []).map((p) => attachEmployeeDirectory(p)))
 
-  const normalized = enriched.map((p) => ({
-    ...p,
-    approvalMode: normalizeApprovalMode(p.approvalMode),
-  }))
+  const normalized = enriched.map((p) =>
+    decorateProfileForResponse({
+      ...p,
+      approvalMode: normalizeApprovalMode(p.approvalMode),
+    })
+  )
 
   const filtered = normalized.filter((p) => {
     if (!q) return true
@@ -489,8 +504,8 @@ exports.getProfileOne = async (req, res) => {
   const doc = await LeaveProfile.findOne({ employeeId })
   if (!doc) throw createError(404, 'Profile not found')
 
-  const plain = await attachEmployeeDirectory(doc.toObject())
-  plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
+  let plain = await attachEmployeeDirectory(doc.toObject())
+  plain = decorateProfileForResponse(plain)
   return res.json(plain)
 }
 
@@ -571,8 +586,8 @@ exports.createProfileSingle = async (req, res) => {
   const saved = await recomputeAndSaveBalances(doc)
   emitProfile(req, saved, 'leave:profile:created')
 
-  const plain = await attachEmployeeDirectory(saved.toObject())
-  plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
+  let plain = await attachEmployeeDirectory(saved.toObject())
+  plain = decorateProfileForResponse(plain)
   return res.status(201).json(plain)
 }
 
@@ -655,7 +670,10 @@ exports.createManagerWithEmployees = async (req, res) => {
 
     const saved = await recomputeAndSaveBalances(doc)
     emitProfile(req, saved, 'leave:profile:created')
-    created.push(await attachEmployeeDirectory(saved.toObject()))
+
+    let plain = await attachEmployeeDirectory(saved.toObject())
+    plain = decorateProfileForResponse(plain)
+    created.push(plain)
   }
 
   return res.json({ ok: true, createdCount: created.length, created })
@@ -707,8 +725,8 @@ exports.updateProfile = async (req, res) => {
   const saved = await recomputeAndSaveBalances(doc)
   emitProfile(req, saved, 'leave:profile:updated')
 
-  const plain = await attachEmployeeDirectory(saved.toObject())
-  plain.approvalMode = normalizeApprovalMode(plain.approvalMode)
+  let plain = await attachEmployeeDirectory(saved.toObject())
+  plain = decorateProfileForResponse(plain)
   return res.json(plain)
 }
 
@@ -795,53 +813,85 @@ exports.renewContract = async (req, res) => {
     throw createError(400, 'Latest contract end date is invalid')
   }
 
-  // ✅ strict rule: next contract must start exactly the day after latest end date
   const forcedNewContractDate = nextDayYMD(latestEndDate)
   if (!isValidYMD(forcedNewContractDate)) {
     throw createError(400, 'Cannot calculate next contract start date')
   }
 
-  // close current/latest contract snapshot if still open
+  const asOf = latestEndDate
+  const asOfDate = ymdToUTCDate(asOf) || new Date()
+
+  const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' })
+    .sort({ startDate: 1 })
+    .lean()
+
+  /*
+    ✅ IMPORTANT:
+    Build a clean plain object so computeBalances only computes RAW balances
+    for the closing contract.
+  */
+  const plainForClose = doc.toObject ? doc.toObject() : { ...doc }
+  plainForClose.balances = []
+  plainForClose.balancesAsOf = ''
+
+  const closeSnap = computeBalances(plainForClose, approved, asOfDate, {
+    asOfYMD: asOf,
+    contractNo: latest?.contractNo || undefined,
+  })
+
+  const closeRawBalances = Array.isArray(closeSnap?.balances) ? closeSnap.balances : []
+
+  /*
+    ✅ IMPORTANT:
+    RAW balances do not include current contract carry.
+    Apply the CURRENT closing contract carry first
+    so we get the real final visible remaining.
+  */
+  const currentCarry = normalizeCarryObj(latest?.carry || {})
+  const closeDisplayBalances = applyCarryToBalancesForDisplay(closeRawBalances, currentCarry)
+
   if (!latest.closedAt) {
-    const asOf = latestEndDate
-    const asOfDate = ymdToUTCDate(asOf) || new Date()
-
-    const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' })
-      .sort({ startDate: 1 })
-      .lean()
-
-    const snap = computeBalances(doc.toObject ? doc.toObject() : doc, approved, asOfDate, {
-      asOfYMD: asOf,
-      contractNo: latest?.contractNo || undefined,
-    })
-
     latest.closedAt = new Date()
     latest.closedBy = s(req.user?.loginId || '')
     latest.note = s(note || latest.note || '')
 
     latest.closeSnapshot = {
-      asOf: asOf || s(snap?.meta?.asOfYMD || ''),
+      asOf: asOf || s(closeSnap?.meta?.asOfYMD || ''),
       contractDate: s(latest.startDate || doc.contractDate || ''),
       contractEndDate: s(latest.endDate || doc.contractEndDate || ''),
-      carry: normalizeCarryObj(latest.carry),
-      balances: Array.isArray(snap?.balances) ? snap.balances : [],
+      carry: currentCarry,
+      balances: closeDisplayBalances,
     }
   }
 
-  let alRemaining = 0
+  let closingAlRemaining = 0
   try {
-    const al = (doc.balances || []).find((b) => up(b.leaveTypeCode) === 'AL')
-    alRemaining = num(al?.remaining)
+    const al = closeDisplayBalances.find((b) => up(b.leaveTypeCode) === 'AL')
+    closingAlRemaining = num(al?.remaining)
   } catch {}
 
-  const nextALCarry = clearUnusedAL ? (alRemaining < 0 ? alRemaining : 0) : alRemaining
+  /*
+    clearUnusedAL = true
+      => clear positive AL, but still carry negative debt
+    clearUnusedAL = false
+      => carry full displayed remaining forward
+  */
+  const nextALCarry = clearUnusedAL
+    ? (closingAlRemaining < 0 ? closingAlRemaining : 0)
+    : closingAlRemaining
 
   const nextContractNo = doc.contracts.length
     ? Math.max(...doc.contracts.map((c) => num(c.contractNo))) + 1
     : 1
 
   const endDate = contractEndFromStart(forcedNewContractDate)
-  const newCarry = { AL: nextALCarry, SP: 0, MC: 0, MA: 0, UL: 0 }
+  const newCarry = {
+    AL: nextALCarry,
+    SP: 0,
+    MC: 0,
+    MA: 0,
+    UL: 0,
+  }
 
   doc.contracts.push({
     contractNo: nextContractNo,
@@ -876,7 +926,6 @@ exports.renewContract = async (req, res) => {
   })
 }
 
-
 /* ─────────────────────────────────────────────────────────────
    POST /admin/leave/profiles/:employeeId/recalculate
 ───────────────────────────────────────────────────────────── */
@@ -888,7 +937,15 @@ exports.recalculateBalances = async (req, res) => {
   const saved = await recomputeAndSaveBalances(doc)
   emitProfile(req, saved, 'leave:profile:updated')
 
-  return res.json({ ok: true, employeeId, balances: saved.balances, balancesAsOf: saved.balancesAsOf })
+  const latest = latestContract(saved.contracts || [])
+  const activeCarry = normalizeCarryObj(latest?.carry || {})
+
+  return res.json({
+    ok: true,
+    employeeId,
+    balances: applyCarryToBalancesForDisplay(saved.balances || [], activeCarry),
+    balancesAsOf: saved.balancesAsOf,
+  })
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -918,13 +975,72 @@ exports.resetUserPassword = async (req, res) => {
     user.passwordHash = await bcrypt.hash(s(password), 10)
     user.passwordChangedAt = new Date()
     user.passwordVersion = Number(user.passwordVersion || 0) + 1
-    await user.save()
   }
+
+  await user.save()
 
   return res.json({
     ok: true,
     message: 'Password reset successfully. Existing sessions were invalidated.',
     loginId,
     passwordVersion: Number(user.passwordVersion || 0),
+  })
+}
+
+/* ─────────────────────────────────────────────────────────────
+   PATCH /admin/leave/profiles/:employeeId/contracts/:contractNo/date
+   ✅ edit ONLY latest/current contract start date
+   ✅ auto recalculates end date = start + 1 year - 1 day
+───────────────────────────────────────────────────────────── */
+exports.updateContractDate = async (req, res) => {
+  const employeeId = s(req.params.employeeId)
+  const contractNo = Number(req.params.contractNo)
+  const startDate = s(req.body?.startDate)
+
+  if (!Number.isFinite(contractNo) || contractNo <= 0) {
+    throw createError(400, 'Invalid contractNo')
+  }
+
+  if (!isValidYMD(startDate)) {
+    throw createError(400, 'startDate must be YYYY-MM-DD')
+  }
+
+  const doc = await LeaveProfile.findOne({ employeeId })
+  if (!doc) throw createError(404, 'Profile not found')
+
+  const idx = (doc.contracts || []).findIndex((c) => Number(c.contractNo) === contractNo)
+  if (idx < 0) throw createError(404, 'Contract not found')
+
+  const target = doc.contracts[idx]
+  const latest = latestContract(doc.contracts || [])
+
+  if (!latest || Number(latest.contractNo) !== contractNo) {
+    throw createError(400, 'Only the latest/current contract date can be edited')
+  }
+
+  const newEndDate = contractEndFromStart(startDate)
+
+  target.startDate = startDate
+  target.endDate = newEndDate
+
+  if (target.openSnapshot) {
+    target.openSnapshot.asOf = startDate
+    target.openSnapshot.contractDate = startDate
+    target.openSnapshot.contractEndDate = newEndDate
+  }
+
+  doc.contractDate = startDate
+  doc.contractEndDate = newEndDate
+
+  const saved = await recomputeAndSaveBalances(doc)
+  emitProfile(req, saved, 'leave:profile:updated')
+
+  return res.json({
+    ok: true,
+    employeeId,
+    contractNo,
+    contractDate: saved.contractDate,
+    contractEndDate: saved.contractEndDate,
+    contract: saved.contracts.find((c) => Number(c.contractNo) === contractNo),
   })
 }

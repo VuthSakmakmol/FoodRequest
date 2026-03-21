@@ -1,13 +1,4 @@
-<!-- src/views/expat/admin/forgetScan/AdminForgetScanReport.vue
-  ✅ Admin viewer report for Forget Scan requests
-  ✅ Clean header: title row + ONE toolbar row with 6 filters
-  ✅ Filters (6-in-1): Search, Status, EmployeeId, From, To, PerPage
-  ✅ Server paging: limit/skip (best-effort Next/Prev)
-  ✅ Responsive: mobile cards + desktop table (column width config)
-  ✅ Export Excel (xlsx) for current filtered page
-  ✅ Details modal
-  ✅ Realtime updates (forgetscan:req:created / forgetscan:req:updated)
--->
+<!-- src/views/expat/admin/forgetScan/AdminForgetScanReport.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
@@ -17,7 +8,6 @@ import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
-// realtime (same pattern)
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
 defineOptions({ name: 'AdminForgetScanReport' })
@@ -37,17 +27,15 @@ const loading = ref(false)
 const exporting = ref(false)
 const rows = ref([])
 
-/* filters (6 in 1 row) */
 const search = ref('')
 const statusFilter = ref('ALL')
-const employeeIdFilter = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
-const perPage = ref(50)
-const perPageOptions = [20, 50, 100, 200]
 
 /* server pagination */
 const page = ref(1)
+const perPage = ref(50)
+const perPageOptions = [20, 50, 100, 200]
 
 /* view modal */
 const viewOpen = ref(false)
@@ -74,7 +62,10 @@ const STATUS_LABEL = {
   REJECTED: 'Rejected',
   CANCELLED: 'Cancelled',
 }
-const TYPE_LABEL = { FORGET_IN: 'Forget In', FORGET_OUT: 'Forget Out' }
+const TYPE_LABEL = {
+  FORGET_IN: 'Forget In',
+  FORGET_OUT: 'Forget Out',
+}
 const MODE_LABEL = {
   MANAGER_AND_GM: 'Manager + GM',
   MANAGER_AND_COO: 'Manager + COO',
@@ -126,19 +117,25 @@ function typeLabel(v) {
   return TYPE_LABEL[t] || t || '—'
 }
 
+/* ───────────────── stats ───────────────── */
+const pendingCount = computed(() =>
+  rows.value.filter((r) => up(r.status).includes('PENDING')).length
+)
+const approvedCount = computed(() =>
+  rows.value.filter((r) => up(r.status) === 'APPROVED').length
+)
+const rejectedCount = computed(() =>
+  rows.value.filter((r) => up(r.status) === 'REJECTED').length
+)
+
 /* ───────────────── API ─────────────────
-  GET /leave/forget-scan/admin?employeeId=&status=&from=&to=&limit=&skip=
+  GET /leave/forget-scan/admin?status=&from=&to=&limit=&skip=
 */
 function buildQuery() {
   const q = {}
 
-  // status
   if (statusFilter.value !== 'ALL') q.status = up(statusFilter.value)
 
-  // employeeId
-  if (s(employeeIdFilter.value)) q.employeeId = s(employeeIdFilter.value)
-
-  // date range (only apply if both are provided)
   const df = s(dateFrom.value)
   const dt = s(dateTo.value)
   if ((df && !dt) || (!df && dt)) {
@@ -164,13 +161,16 @@ async function fetchRows() {
     const res = await api.get('/leave/forget-scan/admin', { params })
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load forget scan report' })
+    showToast({
+      type: 'error',
+      message: e?.response?.data?.message || 'Failed to load forget scan report',
+    })
   } finally {
     loading.value = false
   }
 }
 
-/* local search within fetched page (safe & snappy) */
+/* local search within current fetched page */
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
@@ -201,25 +201,25 @@ const filteredRows = computed(() => {
     })
   }
 
-  // newest first
   list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
   return list
 })
 
+const totalCount = computed(() => rows.value.length)
 const filteredCount = computed(() => filteredRows.value.length)
 
-/* best-effort next/prev (no total count from backend) */
+/* best-effort next/prev */
 const canPrev = computed(() => page.value > 1)
 const canNext = computed(() => rows.value.length === Number(perPage.value || 50))
 
-/* any server-side filter change resets to page 1 */
 watch(
-  () => [statusFilter.value, employeeIdFilter.value, dateFrom.value, dateTo.value, perPage.value],
+  () => [statusFilter.value, dateFrom.value, dateTo.value, perPage.value],
   () => {
     page.value = 1
     fetchRows()
   }
 )
+
 watch(
   () => page.value,
   () => fetchRows()
@@ -229,7 +229,6 @@ watch(
 function clearFilters() {
   search.value = ''
   statusFilter.value = 'ALL'
-  employeeIdFilter.value = ''
   dateFrom.value = ''
   dateTo.value = ''
   perPage.value = 50
@@ -277,12 +276,10 @@ function excelRows(list) {
       ManagerActedAt: fmtDateTime(mgr?.actedAt),
       ManagerComment: s(r.managerComment || mgr?.note),
 
-      // GmLoginId: s(r.gmLoginId),
       GmStatus: s(gm?.status),
       GmActedAt: fmtDateTime(gm?.actedAt),
       GmComment: s(r.gmComment || gm?.note),
 
-      // CooLoginId: s(r.cooLoginId),
       CooStatus: s(coo?.status),
       CooActedAt: fmtDateTime(coo?.actedAt),
       CooComment: s(r.cooComment || coo?.note),
@@ -297,8 +294,6 @@ function excelRows(list) {
 async function exportExcel() {
   try {
     exporting.value = true
-
-    // export what user currently sees (current page + local search applied)
     const data = excelRows(filteredRows.value)
 
     const ws = XLSX.utils.json_to_sheet(data)
@@ -339,7 +334,6 @@ onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
 
-  // join admin rooms
   try {
     subscribeRoleIfNeeded({ role: 'LEAVE_ADMIN' })
     const empId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
@@ -367,19 +361,36 @@ onBeforeUnmount(() => {
       <div class="ui-card rounded-none border-x-0 border-t-0 overflow-hidden">
         <!-- HERO -->
         <div class="ui-hero-gradient">
-          <!-- Row 1: title + actions -->
-          <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
-              <div class="text-[15px] font-extrabold">Forget Scan Report · Admin</div>
-              <div class="mt-1 flex flex-wrap items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="text-[16px] font-extrabold text-white">Forget Scan Report</div>
+                <span
+                  class="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-extrabold text-white ring-1 ring-inset ring-white/20"
+                >
+                  Admin
+                </span>
+              </div>
+
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
-                <span class="ui-badge ui-badge-info">Page: {{ page }}</span>
+                <span class="ui-badge ui-badge-warning">Pending: {{ pendingCount }}</span>
+                <span class="ui-badge ui-badge-success">Approved: {{ approvedCount }}</span>
+                <span class="ui-badge ui-badge-danger">Rejected: {{ rejectedCount }}</span>
               </div>
             </div>
 
-            <div class="flex items-center gap-2">
-              <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows" title="Refresh">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                class="ui-btn ui-btn-sm ui-btn-soft"
+                type="button"
+                :disabled="loading"
+                @click="fetchRows"
+                title="Refresh"
+              >
                 <i class="fa-solid fa-rotate-right text-[11px]" />
+                Refresh
               </button>
 
               <button
@@ -391,123 +402,118 @@ onBeforeUnmount(() => {
               >
                 <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                 <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
+                Export
               </button>
 
-              <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear">
+              <button
+                class="ui-btn ui-btn-sm ui-btn-ghost"
+                type="button"
+                :disabled="loading"
+                @click="clearFilters"
+                title="Clear filters"
+              >
                 <i class="fa-solid fa-broom text-[11px]" />
+                Clear
               </button>
             </div>
           </div>
 
-          <!-- Row 2: ✅ 6 filters in one row (desktop). On mobile it stacks. -->
-          <div class="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-12">
-            <!-- 1) Search -->
-            <div class="lg:col-span-2">
-              <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
+          <!-- compact filter area -->
+          <div class="mt-4 rounded-2xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm">
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-12">
+              <!-- Search -->
+              <div class="xl:col-span-4 min-w-0">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Search
+                </label>
+                <div
+                  class="flex items-center rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-[11px]
+                         focus-within:border-white/35 focus-within:bg-white/15"
+                >
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/75" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Employee / ID / dept / reason..."
+                    class="w-full min-w-0 bg-transparent text-white placeholder:text-white/60 outline-none"
+                  />
+                </div>
+              </div>
+
+              <!-- Status -->
+              <div class="xl:col-span-2">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Status
+                </label>
+                <select v-model="statusFilter" class="filter-select" title="Status">
+                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
+                    {{ label }}
+                  </option>
+                </select>
+              </div>
+
+              <!-- Request from -->
+              <div class="xl:col-span-3">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Request from
+                </label>
                 <input
-                  v-model="search"
-                  type="text"
-                  placeholder="Search employee / id / dept / reason..."
-                  class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
+                  v-model="dateFrom"
+                  type="date"
+                  class="filter-input"
+                  title="Request from"
+                />
+              </div>
+
+              <!-- Request to -->
+              <div class="xl:col-span-3">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Request to
+                </label>
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="filter-input"
+                  title="Request to"
                 />
               </div>
             </div>
-
-            <!-- 2) Status -->
-            <div class="lg:col-span-2">
-              <select
-                v-model="statusFilter"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                title="Status"
-              >
-                <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
-                  {{ label }}
-                </option>
-              </select>
-            </div>
-
-            <!-- 3) Employee ID -->
-            <div class="lg:col-span-1">
-              <input
-                v-model="employeeIdFilter"
-                type="text"
-                placeholder="Employee ID"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none placeholder:text-white/70"
-              />
-            </div>
-
-            <!-- 4) From -->
-            <div class="lg:col-span-2">
-              <input
-                v-model="dateFrom"
-                type="date"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                title="From"
-              />
-            </div>
-
-            <!-- 5) To -->
-            <div class="lg:col-span-2">
-              <input
-                v-model="dateTo"
-                type="date"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                title="To"
-              />
-            </div>
-
-            <!-- 6) Per page -->
-            <div class="lg:col-span-1">
-              <select
-                v-model="perPage"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                title="Per page"
-              >
-                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">
-                  {{ opt }}
-                </option>
-              </select>
-            </div>
           </div>
-
-          <!-- <div class="mt-2 text-[11px] text-white/80 flex items-center justify-between">
-            <button
-              type="button"
-              class="ui-btn ui-btn-xs ui-btn-soft"
-              :disabled="loading"
-              @click="fetchRows"
-              title="Apply"
-            >
-              <i class="fa-solid fa-filter text-[11px] mr-2" />
-              Apply
-            </button>
-          </div> -->
         </div>
 
         <!-- BODY -->
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
-          <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
+          <div v-if="loading && !filteredRows.length" class="ui-skeleton mb-2 h-14 w-full" />
 
           <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!filteredRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
+            <div
+              v-if="!filteredRows.length && !loading"
+              class="ui-frame p-4 text-center text-[12px] text-slate-500"
+            >
               No items found.
             </div>
 
-            <article v-for="row in filteredRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
+            <article
+              v-for="row in filteredRows"
+              :key="row._id"
+              class="ui-card cursor-pointer p-3"
+              @click="openView(row)"
+            >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 space-y-1">
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
                     Created:
-                    <span class="font-extrabold text-slate-900 dark:text-slate-50">{{ fmtDateTime(row.createdAt) }}</span>
+                    <span class="font-extrabold text-slate-900 dark:text-slate-50">
+                      {{ fmtDateTime(row.createdAt) }}
+                    </span>
                   </div>
 
-                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                  <div class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
                     {{ row.employeeName || row.name || row.employeeId || '—' }}
                   </div>
 
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">
                     ID: {{ row.employeeId || '—' }} · {{ fmtYmd(row.forgotDate) }} · {{ typeLabel(row.forgotType) }}
                   </div>
                 </div>
@@ -529,11 +535,6 @@ onBeforeUnmount(() => {
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Reason</div>
                   <div class="mt-0.5">{{ briefText(row.reason, 140) }}</div>
                 </div>
-              </div>
-
-              <div class="mt-3 flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                <span>Tap to view</span>
-                <span>{{ row.department || '—' }}</span>
               </div>
             </article>
           </div>
@@ -565,20 +566,28 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                    No items found.
+                  </td>
                 </tr>
 
-                <tr v-for="row in filteredRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
+                <tr
+                  v-for="row in filteredRows"
+                  :key="row._id"
+                  class="ui-tr-hover cursor-pointer"
+                  @click="openView(row)"
+                >
                   <td class="ui-td">
                     <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
                   </td>
 
                   <td class="ui-td">
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                    <div class="truncate font-extrabold text-slate-900 dark:text-slate-50">
                       {{ row.employeeName || row.name || row.employeeId || '—' }}
                     </div>
-                    <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                      ID: {{ row.employeeId || '—' }} <span v-if="row.department">· {{ row.department }}</span>
+                    <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                      ID: {{ row.employeeId || '—' }}
+                      <span v-if="row.department">· {{ row.department }}</span>
                     </div>
                   </td>
 
@@ -610,10 +619,19 @@ onBeforeUnmount(() => {
             </table>
           </div>
 
-          <!-- Server Pagination -->
-          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+          <!-- Footer Pagination -->
+          <div
+            class="ui-divider mt-3 flex flex-col gap-2 pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div class="flex items-center gap-2">
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }}</span>
+              <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
+                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">
+                  {{ opt }}
+                </option>
+              </select>
+              <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                Page {{ page }}
+              </span>
             </div>
 
             <div class="flex items-center justify-end gap-1">
@@ -629,10 +647,10 @@ onBeforeUnmount(() => {
     <!-- DETAILS MODAL -->
     <div v-if="viewOpen" class="ui-modal-backdrop">
       <div class="ui-modal p-0 overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <div class="min-w-0">
             <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Forget Scan Details</div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">
               {{ viewItem?.employeeName || viewItem?.name || '—' }} · {{ fmtDateTime(viewItem?.createdAt) }}
             </div>
           </div>
@@ -643,7 +661,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="p-4 space-y-3">
+        <div class="space-y-3 p-4">
           <div class="ui-frame p-3">
             <div class="grid gap-3 md:grid-cols-2">
               <div>
@@ -651,7 +669,9 @@ onBeforeUnmount(() => {
                 <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
                   {{ viewItem?.employeeName || viewItem?.name || '—' }}
                 </div>
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">ID: {{ viewItem?.employeeId || '—' }}</div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                  ID: {{ viewItem?.employeeId || '—' }}
+                </div>
                 <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">
                   Dept: {{ viewItem.department }}
                 </div>
@@ -696,7 +716,7 @@ onBeforeUnmount(() => {
 
           <div class="ui-card p-3">
             <div class="ui-section-title">Reason</div>
-            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+            <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
               {{ viewItem?.reason || '—' }}
             </div>
           </div>
@@ -749,6 +769,32 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.filter-input,
+.filter-select {
+  width: 100%;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.55rem 0.8rem;
+  font-size: 11px;
+  color: white;
+  outline: none;
+}
+
+.filter-input::placeholder {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.filter-input:focus,
+.filter-select:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.filter-select option {
+  color: #0f172a;
+}
+
 .reason-cell {
   display: -webkit-box;
   -webkit-line-clamp: 2;

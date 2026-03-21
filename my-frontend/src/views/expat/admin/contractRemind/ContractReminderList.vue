@@ -29,7 +29,6 @@ const emit = defineEmits([
 const query = ref('')
 const urgency = ref('ALL')
 const stageFilter = ref('ALL')
-const sortBy = ref('URGENT')
 
 function s(v) {
   return String(v ?? '').trim()
@@ -173,23 +172,6 @@ const filteredRows = computed(() => {
   })
 
   rows = rows.slice().sort((a, b) => {
-    if (sortBy.value === 'END_DATE') {
-      return s(a.endDate).localeCompare(s(b.endDate)) || a.employeeId.localeCompare(b.employeeId)
-    }
-
-    if (sortBy.value === 'NAME') {
-      return s(a.name).localeCompare(s(b.name)) || a.employeeId.localeCompare(b.employeeId)
-    }
-
-    if (sortBy.value === 'STAGE') {
-      return (
-        num(a.reminderStage, 9999) - num(b.reminderStage, 9999) ||
-        a.daysLeft - b.daysLeft ||
-        s(a.endDate).localeCompare(s(b.endDate)) ||
-        a.employeeId.localeCompare(b.employeeId)
-      )
-    }
-
     return (
       a.urgencyRank - b.urgencyRank ||
       a.daysLeft - b.daysLeft ||
@@ -203,7 +185,9 @@ const filteredRows = computed(() => {
 })
 
 const totalCount = computed(() => normalizedRows.value.length)
-const overdueCount = computed(() => normalizedRows.value.filter((x) => x.urgencyKey === 'OVERDUE').length)
+const overdueCount = computed(() =>
+  normalizedRows.value.filter((x) => x.urgencyKey === 'OVERDUE').length
+)
 const urgentCount = computed(() =>
   normalizedRows.value.filter((x) => x.urgencyKey === 'CRITICAL' || x.urgencyKey === 'URGENT').length
 )
@@ -212,7 +196,6 @@ function resetFilters() {
   query.value = ''
   urgency.value = 'ALL'
   stageFilter.value = 'ALL'
-  sortBy.value = 'URGENT'
 }
 
 function handleClose() {
@@ -284,7 +267,7 @@ watch(
         </div>
 
         <div class="flex-1 overflow-y-auto ui-scrollbar px-4 py-4 sm:px-5 space-y-4">
-          <section class="grid grid-cols-1 gap-3 xl:grid-cols-[1.3fr_0.9fr_0.9fr_0.9fr_auto]">
+          <section class="grid grid-cols-1 gap-3 xl:grid-cols-[1.4fr_0.9fr_0.9fr_auto]">
             <div class="ui-card !rounded-2xl px-3 py-3">
               <div class="ui-label">Search</div>
               <div class="mt-1 relative">
@@ -320,16 +303,6 @@ watch(
                 <option value="14">14 days</option>
                 <option value="7">7 days</option>
                 <option value="1">1 day</option>
-              </select>
-            </div>
-
-            <div class="ui-card !rounded-2xl px-3 py-3">
-              <div class="ui-label">Sort by</div>
-              <select v-model="sortBy" class="ui-select mt-1 w-full">
-                <option value="URGENT">Urgency</option>
-                <option value="END_DATE">End date</option>
-                <option value="NAME">Name</option>
-                <option value="STAGE">Reminder stage</option>
               </select>
             </div>
 

@@ -59,6 +59,7 @@ const saving = ref(false)
 const error = ref('')
 const profile = ref(null)
 const originalJoinDate = ref('')
+const originalContractDate = ref('')
 
 /* ───────────────── helpers ───────────────── */
 function num(v) {
@@ -108,14 +109,17 @@ function latestContract(contracts = []) {
     return withStart.sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)))[0]
   }
 
-  return arr
-    .slice()
-    .sort((a, b) => Number(b?.contractNo || 0) - Number(a?.contractNo || 0))[0] || null
+  return (
+    arr
+      .slice()
+      .sort((a, b) => Number(b?.contractNo || 0) - Number(a?.contractNo || 0))[0] || null
+  )
 }
 
 /* ───────────────── profile form ───────────────── */
 const form = reactive({
   joinDate: '',
+  contractDate: '',
   approvalMode: 'MANAGER_AND_GM',
   managerEmployeeId: '',
   gmLoginId: '',
@@ -325,9 +329,11 @@ async function fetchContracts() {
 
 function fillFormFromProfile(p) {
   form.joinDate = toInputDate(p?.joinDate)
+  form.contractDate = toInputDate(p?.contractDate)
   form.approvalMode = normApprovalMode(p?.approvalMode)
   form.managerEmployeeId = String(p?.managerEmployeeId || p?.managerLoginId || '')
   originalJoinDate.value = toInputDate(p?.joinDate)
+  originalContractDate.value = toInputDate(p?.contractDate)
   form.isActive = p?.isActive === false ? false : true
   applyFixedApprovers()
 
@@ -341,6 +347,9 @@ watch(
 )
 
 const joinDateChanged = computed(() => String(originalJoinDate.value || '') !== String(form.joinDate || ''))
+const contractDateChanged = computed(
+  () => String(originalContractDate.value || '') !== String(form.contractDate || '')
+)
 
 const isDirty = computed(() => {
   const p = profile.value
@@ -348,6 +357,7 @@ const isDirty = computed(() => {
 
   const a = {
     joinDate: toInputDate(p.joinDate),
+    contractDate: toInputDate(p.contractDate),
     approvalMode: normApprovalMode(p.approvalMode),
     managerEmployeeId: String(p.managerEmployeeId || p.managerLoginId || ''),
     gmLoginId: String(p.gmLoginId || ''),
@@ -356,6 +366,7 @@ const isDirty = computed(() => {
   }
   const b = {
     joinDate: String(form.joinDate || ''),
+    contractDate: String(form.contractDate || ''),
     approvalMode: normApprovalMode(form.approvalMode),
     managerEmployeeId: String(form.managerEmployeeId || ''),
     gmLoginId: String(form.gmLoginId || ''),
@@ -409,16 +420,34 @@ async function forceRecalcBalances() {
 
 function validateApprovers() {
   const m = normApprovalMode(form.approvalMode)
-  if ((m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY') && !String(form.managerEmployeeId || '').trim()) {
+  if (
+    (m === 'MANAGER_AND_GM' || m === 'MANAGER_AND_COO' || m === 'MANAGER_ONLY') &&
+    !String(form.managerEmployeeId || '').trim()
+  ) {
     return 'Manager employee ID is required for this approval mode.'
   }
   return ''
+}
+
+async function saveCurrentContractDate() {
+  if (!employeeId.value) throw new Error('Missing employeeId.')
+  if (!isValidYMD(form.contractDate)) throw new Error('Contract Date is invalid.')
+
+  const latest = latestContract(contracts.value?.length ? contracts.value : readContractHistory(profile.value))
+  const contractNo = Number(latest?.contractNo || selectedContractNo.value)
+
+  if (!contractNo) throw new Error('Current contract not found.')
+
+  await api.patch(`/admin/leave/profiles/${employeeId.value}/contracts/${contractNo}/date`, {
+    startDate: String(form.contractDate),
+  })
 }
 
 async function saveProfile() {
   formError.value = ''
   if (!employeeId.value) return (formError.value = 'Missing employeeId.')
   if (form.joinDate && !isValidYMD(form.joinDate)) return (formError.value = 'Join Date is invalid.')
+  if (form.contractDate && !isValidYMD(form.contractDate)) return (formError.value = 'Contract Date is invalid.')
 
   const approverErr = validateApprovers()
   if (approverErr) {
@@ -441,12 +470,33 @@ async function saveProfile() {
       { recalc: joinDateChanged.value }
     )
 
-    if (joinDateChanged.value) {
+    if (contractDateChanged.value) {
+      await saveCurrentContractDate()
+    }
+
+    if (joinDateChanged.value && contractDateChanged.value) {
       const ok = await forceRecalcBalances()
       showToast({
         type: ok ? 'success' : 'warning',
         title: ok ? 'Saved + Recalculated' : 'Saved',
-        message: ok ? 'Join Date updated and balances recalculated.' : 'Join Date saved. (No recalc endpoint found.)',
+        message: ok
+          ? 'Join date and contract date updated. Balances recalculated.'
+          : 'Join date and contract date updated.',
+      })
+    } else if (joinDateChanged.value) {
+      const ok = await forceRecalcBalances()
+      showToast({
+        type: ok ? 'success' : 'warning',
+        title: ok ? 'Saved + Recalculated' : 'Saved',
+        message: ok
+          ? 'Join Date updated and balances recalculated.'
+          : 'Join Date saved. (No recalc endpoint found.)',
+      })
+    } else if (contractDateChanged.value) {
+      showToast({
+        type: 'success',
+        title: 'Saved',
+        message: 'Contract date updated successfully.',
       })
     } else {
       showToast({ type: 'success', title: 'Saved', message: 'Profile updated.' })
@@ -456,7 +506,7 @@ async function saveProfile() {
     await fetchContracts()
   } catch (e) {
     console.error(e)
-    const msg = e?.response?.data?.message || 'Failed to save.'
+    const msg = e?.response?.data?.message || e?.message || 'Failed to save.'
     formError.value = msg
     showToast({ type: 'error', title: 'Save failed', message: msg })
   } finally {
@@ -626,8 +676,7 @@ async function submitRenew() {
     await fetchProfile()
     await fetchContracts()
   } catch (err) {
-    renew.error =
-      err?.response?.data?.message || err?.message || 'Failed to renew contract'
+    renew.error = err?.response?.data?.message || err?.message || 'Failed to renew contract'
 
     showToast({
       type: 'error',
@@ -753,7 +802,20 @@ onBeforeUnmount(() => {
                       </div>
                     </div>
 
-                    <InfoRow label="Current contract start" :value="fmtYMD(profile.contractDate)" />
+                    <div class="ui-card !rounded-2xl px-3 py-2">
+                      <div
+                        class="ui-label !text-[10px] !tracking-[0.28em] uppercase cursor-help"
+                        title="Current/latest contract start date"
+                      >
+                        Current contract start
+                      </div>
+                      <div class="mt-1">
+                        <input v-model="form.contractDate" type="date" class="ui-date w-full" />
+                        <div class="mt-1 text-[11px] text-ui-muted">
+                          <span v-if="contractDateChanged" class="ml-2 ui-badge">Changed contract date</span>
+                        </div>
+                      </div>
+                    </div>
 
                     <div class="ui-card !rounded-2xl px-2.5 py-2 sm:col-span-2">
                       <div
@@ -786,13 +848,17 @@ onBeforeUnmount(() => {
                               class="ui-btn ui-btn-soft ui-btn-xs !px-2 !py-1"
                               @click="form.isActive = !form.isActive"
                             >
-                              <i class="fa-solid text-[10px]" :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'" />
+                              <i
+                                class="fa-solid text-[10px]"
+                                :class="form.isActive ? 'fa-toggle-on' : 'fa-toggle-off'"
+                              />
                               Toggle
                             </button>
                           </div>
 
                           <div class="mt-1 text-[10px] text-ui-muted">
-                            Current: <span class="font-mono">{{ profile.isActive === false ? 'No' : 'Yes' }}</span>
+                            Current:
+                            <span class="font-mono">{{ profile.isActive === false ? 'No' : 'Yes' }}</span>
                           </div>
                         </div>
                       </div>
@@ -999,19 +1065,43 @@ onBeforeUnmount(() => {
                       <div class="grid grid-cols-2 gap-2">
                         <div>
                           <div class="ui-label">SP</div>
-                          <input v-model.number="contractCarryForm.carry.SP" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                          <input
+                            v-model.number="contractCarryForm.carry.SP"
+                            type="number"
+                            step="0.5"
+                            class="ui-input w-full"
+                            :disabled="!selectedContract"
+                          />
                         </div>
                         <div>
                           <div class="ui-label">MC</div>
-                          <input v-model.number="contractCarryForm.carry.MC" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                          <input
+                            v-model.number="contractCarryForm.carry.MC"
+                            type="number"
+                            step="0.5"
+                            class="ui-input w-full"
+                            :disabled="!selectedContract"
+                          />
                         </div>
                         <div>
                           <div class="ui-label">MA</div>
-                          <input v-model.number="contractCarryForm.carry.MA" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                          <input
+                            v-model.number="contractCarryForm.carry.MA"
+                            type="number"
+                            step="0.5"
+                            class="ui-input w-full"
+                            :disabled="!selectedContract"
+                          />
                         </div>
                         <div>
                           <div class="ui-label">UL</div>
-                          <input v-model.number="contractCarryForm.carry.UL" type="number" step="0.5" class="ui-input w-full" :disabled="!selectedContract" />
+                          <input
+                            v-model.number="contractCarryForm.carry.UL"
+                            type="number"
+                            step="0.5"
+                            class="ui-input w-full"
+                            :disabled="!selectedContract"
+                          />
                         </div>
                       </div>
 

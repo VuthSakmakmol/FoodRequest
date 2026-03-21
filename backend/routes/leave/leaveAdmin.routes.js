@@ -66,6 +66,11 @@ router.patch('/profiles/:employeeId/password', h(ctrl.resetUserPassword, 'resetU
 /* ───────────────── Update per-contract carry ───────────────── */
 router.patch('/profiles/:employeeId/contracts/:contractNo', h(ctrl.updateContractCarry, 'updateContractCarry'))
 
+router.patch(
+  '/profiles/:employeeId/contracts/:contractNo/date',
+  h(ctrl.updateContractDate, 'updateContractDate')
+)
+
 /* ───────────────── Manual contract reminder test ─────────────────
    POST /api/admin/leave/contracts/reminders/run
    Use this in Postman to manually run the reminder job.

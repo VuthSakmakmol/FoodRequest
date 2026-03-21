@@ -35,6 +35,7 @@ const CORE = {
     name: '',
     role: 'LEAVE_GM',
     password: process.env.LEAVE_GM_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
+    // telegramChatId: '1805934121',
     telegramChatId: '7163451169',
   },
 
@@ -42,9 +43,9 @@ const CORE = {
   coo: {
     loginId: 'leave_coo',
     name: 'COO',
-    role: 'LEAVE_COO', // keep LEAVE_GM so backend "getApprovers" can return it
+    role: 'LEAVE_COO',
     password: process.env.LEAVE_COO_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
-    telegramChatId: '7163451169', // put COO telegram chat id here if you have it
+    telegramChatId: '7163451169', 
   },
 }
 

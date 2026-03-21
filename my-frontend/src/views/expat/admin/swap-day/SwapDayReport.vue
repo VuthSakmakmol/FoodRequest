@@ -1,12 +1,3 @@
-<!-- src/views/expat/admin/swap-day/SwapDayReport.vue
-  ✅ Leave Admin / Admin can view ALL Swap Working Day requests
-  ✅ Header filters style MATCHES AdminForgetScanReport (6-in-1 row)
-  ✅ Responsive: mobile cards + desktop table
-  ✅ Export Excel (xlsx)
-  ✅ Details modal + Attachments preview (AttachmentPreviewModal)
-  ✅ Realtime updates (swap:req:created / swap:req:updated)
-  ✅ Reason always shown (fallback fields)
--->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
@@ -17,7 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
-import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
+// import AttachmentPreviewModal from '@/views/expat/user/swap-day/AttachmentPreviewModal.vue'
 
 defineOptions({ name: 'SwapDayReport' })
 
@@ -39,8 +30,6 @@ const search = ref('')
 const statusFilter = ref('ALL')
 const approvalMode = ref('ALL')
 const employeeIdFilter = ref('')
-
-const dateMode = ref('REQUEST')
 const dateFrom = ref('')
 const dateTo = ref('')
 
@@ -64,13 +53,12 @@ const exporting = ref(false)
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
   created: '150px',
-  employee: '260px',
+  employee: '250px',
   mode: '170px',
-  workDate: '200px',
-  swapDate: '200px',
-  file: '110px',
+  workDate: '190px',
+  swapDate: '190px',
   status: '140px',
-  reason: '220px',
+  reason: '240px',
 }
 
 /* ───────────────── CONSTANTS ───────────────── */
@@ -100,11 +88,11 @@ function up(v) {
 
 function fmtDateTime(v) {
   if (!v) return '—'
-  return dayjs(v).format('YYYY-MM-DD HH:mm')
+  return dayjs(v).isValid() ? dayjs(v).format('YYYY-MM-DD HH:mm') : '—'
 }
 function fmtYmd(v) {
   if (!v) return '—'
-  return dayjs(v).format('YYYY-MM-DD')
+  return dayjs(v).isValid() ? dayjs(v).format('YYYY-MM-DD') : '—'
 }
 
 function compactText(v) {
@@ -136,7 +124,7 @@ function normalizeEvidenceList(list) {
   return arr.map((x) => ({ ...x, attId: x?.attId || x?.fileId }))
 }
 
-/* ✅ Reason fallback (IMPORTANT) */
+/* ✅ Reason fallback */
 function reasonText(row) {
   const r = row || {}
   const candidates = [
@@ -150,6 +138,17 @@ function reasonText(row) {
   const pick = candidates.map(compactText).find((x) => !!x)
   return pick || '—'
 }
+
+/* ───────────────── small stats ───────────────── */
+const pendingCount = computed(() =>
+  rows.value.filter((r) => up(r.status).includes('PENDING')).length
+)
+const approvedCount = computed(() =>
+  rows.value.filter((r) => up(r.status) === 'APPROVED').length
+)
+const rejectedCount = computed(() =>
+  rows.value.filter((r) => up(r.status) === 'REJECTED').length
+)
 
 /* ───────────────── API ───────────────── */
 function buildQuery() {
@@ -167,7 +166,6 @@ function buildQuery() {
   } else if (df && dt) {
     q.from = df
     q.to = dt
-    q.dateMode = up(dateMode.value)
   }
 
   q.scope = 'ALL'
@@ -191,8 +189,13 @@ async function fetchRows() {
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
-  if (statusFilter.value !== 'ALL') list = list.filter((r) => up(r.status) === up(statusFilter.value))
-  if (approvalMode.value !== 'ALL') list = list.filter((r) => up(r.approvalMode) === up(approvalMode.value))
+  if (statusFilter.value !== 'ALL') {
+    list = list.filter((r) => up(r.status) === up(statusFilter.value))
+  }
+
+  if (approvalMode.value !== 'ALL') {
+    list = list.filter((r) => up(r.approvalMode) === up(approvalMode.value))
+  }
 
   if (s(employeeIdFilter.value)) {
     const eid = s(employeeIdFilter.value)
@@ -207,7 +210,7 @@ const filteredRows = computed(() => {
         r.employeeName,
         r.name,
         r.department,
-        reasonText(r), // ✅ include reason in search even if field differs
+        reasonText(r),
         r.status,
         r.approvalMode,
         r.requestStartDate,
@@ -227,11 +230,9 @@ const filteredRows = computed(() => {
   const df = s(dateFrom.value)
   const dt = s(dateTo.value)
   if (df && dt) {
-    const pickStart = (r) => (up(dateMode.value) === 'OFF' ? s(r.offStartDate) : s(r.requestStartDate))
-    const pickEnd = (r) => (up(dateMode.value) === 'OFF' ? s(r.offEndDate) : s(r.requestEndDate))
     list = list.filter((r) => {
-      const a = pickStart(r)
-      const b = pickEnd(r) || a
+      const a = s(r.requestStartDate)
+      const b = s(r.requestEndDate) || a
       if (!a) return false
       return a <= dt && b >= df
     })
@@ -258,8 +259,18 @@ const pagedRows = computed(() => {
 })
 
 watch(
-  () => [search.value, statusFilter.value, approvalMode.value, employeeIdFilter.value, perPage.value, dateFrom.value, dateTo.value, dateMode.value],
-  () => (page.value = 1)
+  () => [
+    search.value,
+    statusFilter.value,
+    approvalMode.value,
+    employeeIdFilter.value,
+    perPage.value,
+    dateFrom.value,
+    dateTo.value,
+  ],
+  () => {
+    page.value = 1
+  }
 )
 
 watch(
@@ -315,7 +326,6 @@ function clearFilters() {
   statusFilter.value = 'ALL'
   approvalMode.value = 'ALL'
   employeeIdFilter.value = ''
-  dateMode.value = 'REQUEST'
   dateFrom.value = ''
   dateTo.value = ''
 }
@@ -338,11 +348,7 @@ function excelRows(list) {
     RequestTo: fmtYmd(r.requestEndDate),
     OffFrom: fmtYmd(r.offStartDate),
     OffTo: fmtYmd(r.offEndDate),
-    // Files: safeFileCount(r),
-    Reason: reasonText(r), //  always export reason
-    // ManagerLoginId: s(r.managerLoginId),
-    // GmLoginId: s(r.gmLoginId),
-    // CooLoginId: s(r.cooLoginId),
+    Reason: reasonText(r),
   }))
 }
 
@@ -371,8 +377,12 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
-  if (filesRequest.value?._id && String(filesRequest.value._id) === id) filesRequest.value = { ...filesRequest.value, ...doc }
+  if (viewItem.value?._id && String(viewItem.value._id) === id) {
+    viewItem.value = { ...viewItem.value, ...doc }
+  }
+  if (filesRequest.value?._id && String(filesRequest.value._id) === id) {
+    filesRequest.value = { ...filesRequest.value, ...doc }
+  }
 }
 
 function onSwapCreated(doc) {
@@ -414,146 +424,228 @@ onBeforeUnmount(() => {
       <div class="ui-card rounded-none border-x-0 border-t-0 overflow-hidden">
         <!-- HERO -->
         <div class="ui-hero-gradient">
-          <!-- Row 1: title + actions -->
-          <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
-              <div class="text-[15px] font-extrabold">SwapDay Report · Admin</div>
-              <div class="mt-1 flex flex-wrap items-center gap-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <div class="text-[16px] font-extrabold text-white">Swap Working Day Report</div>
+                <span class="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-extrabold text-white ring-1 ring-inset ring-white/20">
+                  Admin
+                </span>
+              </div>
+
+              <!-- <div class="mt-1 text-[12px] text-white/80">
+                Review all swap requests with compact filters, export, and realtime updates.
+              </div> -->
+
+              <div class="mt-3 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span class="ui-badge ui-badge-warning">Pending: {{ pendingCount }}</span>
+                <span class="ui-badge ui-badge-success">Approved: {{ approvedCount }}</span>
+                <span class="ui-badge ui-badge-danger">Rejected: {{ rejectedCount }}</span>
               </div>
             </div>
 
-            <div class="flex items-center gap-2">
-              <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows" title="Refresh">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                class="ui-btn ui-btn-sm ui-btn-soft"
+                type="button"
+                :disabled="loading"
+                @click="fetchRows"
+                title="Refresh"
+              >
                 <i class="fa-solid fa-rotate-right text-[11px]" />
+                Refresh
               </button>
 
-              <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel" title="Export Excel">
+              <button
+                class="ui-btn ui-btn-sm ui-btn-soft"
+                type="button"
+                :disabled="loading || exporting"
+                @click="exportExcel"
+                title="Export Excel"
+              >
                 <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                 <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
+                Export
               </button>
 
-              <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear">
+              <button
+                class="ui-btn ui-btn-sm ui-btn-ghost"
+                type="button"
+                :disabled="loading"
+                @click="clearFilters"
+                title="Clear filters"
+              >
                 <i class="fa-solid fa-broom text-[11px]" />
+                Clear
               </button>
             </div>
           </div>
 
-          <!-- Row 2: 6 filters in one row (desktop) -->
-          <div class="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-12">
-            <div class="lg:col-span-3 min-w-0">
-              <div class="flex items-center rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-[11px]
-                          focus-within:border-white/40 focus-within:bg-white/15">
-                <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
+          <!-- compact filter area -->
+          <div class="mt-4 rounded-2xl border border-white/15 bg-white/10 p-3 backdrop-blur-sm">
+            <div class="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-12">
+              <!-- Search -->
+              <div class="xl:col-span-3 min-w-0">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Search
+                </label>
+                <div
+                  class="flex items-center rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-[11px]
+                         focus-within:border-white/35 focus-within:bg-white/15"
+                >
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/75" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Employee / ID / reason..."
+                    class="w-full min-w-0 bg-transparent text-white placeholder:text-white/60 outline-none"
+                  />
+                </div>
+              </div>
+
+              <!-- Status -->
+              <div class="xl:col-span-2">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Status
+                </label>
+                <select
+                  v-model="statusFilter"
+                  class="filter-select"
+                  title="Status"
+                >
+                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
+                </select>
+              </div>
+
+              <!-- Mode -->
+              <div class="xl:col-span-2">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Approval mode
+                </label>
+                <select
+                  v-model="approvalMode"
+                  class="filter-select"
+                  title="Approval mode"
+                >
+                  <option v-for="(label, key) in APPROVAL_MODE_LABEL" :key="key" :value="key">{{ label }}</option>
+                </select>
+              </div>
+
+              <!-- Employee ID -->
+              <!-- <div class="xl:col-span-2">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Employee ID
+                </label>
                 <input
-                  v-model="search"
+                  v-model="employeeIdFilter"
                   type="text"
-                  placeholder="Search employee / id / reason..."
-                  class="w-full min-w-0 bg-transparent text-white placeholder:text-white/70 outline-none focus:ring-0"
+                  placeholder="Employee ID"
+                  class="filter-input"
+                />
+              </div> -->
+
+              <!-- Request date from -->
+              <div class="xl:col-span-2">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Request from
+                </label>
+                <input
+                  v-model="dateFrom"
+                  type="date"
+                  class="filter-input"
+                  title="Request from"
                 />
               </div>
+
+              <!-- Request date to -->
+              <div class="xl:col-span-2">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Request to
+                </label>
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="filter-input"
+                  title="Request to"
+                />
+              </div>
+
+              <!-- Per Page -->
+              <!-- <div class="xl:col-span-1">
+                <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">
+                  Per page
+                </label>
+                <select
+                  v-model="perPage"
+                  class="filter-select"
+                  title="Per page"
+                >
+                  <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
+                </select>
+              </div> -->
             </div>
-
-            <div class="lg:col-span-2">
-              <select v-model="statusFilter" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="Status">
-                <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">{{ label }}</option>
-              </select>
-            </div>
-
-            <div class="lg:col-span-2">
-              <select
-                v-model="approvalMode"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                title="Approval mode"
-              >
-                <option v-for="(label, key) in APPROVAL_MODE_LABEL" :key="key" :value="key">{{ label }}</option>
-              </select>
-            </div>
-
-            <div class="lg:col-span-2">
-              <input
-                v-model="employeeIdFilter"
-                type="text"
-                placeholder="Employee ID"
-                class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none placeholder:text-white/70"
-              />
-            </div>
-
-            <div class="lg:col-span-2">
-              <input v-model="dateFrom" type="date" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="From" />
-            </div>
-
-            <div class="lg:col-span-2">
-              <input v-model="dateTo" type="date" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="To" />
-            </div>
-
-            <div class="lg:col-span-3">
-              <select v-model="dateMode" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="Date mode">
-                <option value="REQUEST">Request Date</option>
-                <option value="OFF">Compensatory (Off) Date</option>
-              </select>
-            </div>
-
-            <div class="lg:col-span-1">
-              <select v-model="perPage" class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none" title="Per page">
-                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-              </select>
-            </div>
-          </div>
-
-          <!-- Row 3: DateMode + PerPage -->
-          <div class="mt-2 grid grid-cols-1 gap-2 lg:grid-cols-12">
-            
-
-            <!-- <div class="lg:col-span-6 flex items-center justify-between gap-2">
-              <button class="ui-btn ui-btn-xs ui-btn-soft" type="button" :disabled="loading" @click="fetchRows" title="Apply">
-                <i class="fa-solid fa-filter text-[11px] mr-2" />
-                Apply
-              </button>
-            </div> -->
           </div>
         </div>
 
         <!-- BODY -->
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
-          <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
+          <div v-if="loading && !filteredRows.length" class="ui-skeleton mb-2 h-14 w-full" />
 
           <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">No items found.</div>
+            <div
+              v-if="!pagedRows.length && !loading"
+              class="ui-frame p-4 text-center text-[12px] text-slate-500"
+            >
+              No items found.
+            </div>
 
-            <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
+            <article
+              v-for="row in pagedRows"
+              :key="row._id"
+              class="ui-card cursor-pointer p-3"
+              @click="openView(row)"
+            >
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 space-y-1">
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
                     Created:
-                    <span class="font-extrabold text-slate-900 dark:text-slate-50">{{ fmtDateTime(row.createdAt) }}</span>
+                    <span class="font-extrabold text-slate-900 dark:text-slate-50">
+                      {{ fmtDateTime(row.createdAt) }}
+                    </span>
                   </div>
 
-                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                  <div class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
                     {{ row.employeeName || row.name || row.employeeId || '—' }}
                   </div>
 
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">
                     ID: {{ row.employeeId || '—' }} · {{ modeLabel(row.approvalMode) }}
                   </div>
                 </div>
 
                 <div class="shrink-0 text-right space-y-1">
-                  <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
+                  <span :class="statusBadgeUiClass(row.status)">
+                    {{ STATUS_LABEL[row.status] || row.status }}
+                  </span>
                 </div>
               </div>
 
               <div class="mt-2 grid gap-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <div class="ui-frame p-2">
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Work (Request) Date</div>
-                  <div class="mt-0.5">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div>
+                  <div class="mt-0.5">
+                    {{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}
+                  </div>
                 </div>
 
                 <div class="ui-frame p-2">
                   <div class="font-extrabold text-slate-700 dark:text-slate-200">Swap (Off) Date</div>
-                  <div class="mt-0.5">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div>
+                  <div class="mt-0.5">
+                    {{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}
+                  </div>
                 </div>
 
                 <div class="ui-frame p-2">
@@ -561,37 +653,18 @@ onBeforeUnmount(() => {
                   <div class="mt-0.5">{{ briefText(reasonText(row), 140) }}</div>
                 </div>
               </div>
-
-              <!-- <div class="mt-3 flex items-center justify-between gap-2" @click.stop>
-                <button
-                  v-if="row.attachments?.length"
-                  type="button"
-                  class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                  :disabled="loading"
-                  @click="openFiles(row)"
-                  title="Attachments"
-                  aria-label="Attachments"
-                >
-                  <i class="fa-solid fa-paperclip text-[12px]" />
-                  <span class="ml-1">{{ row.attachments.length }}</span>
-                </button>
-                <span v-else class="text-[11px] text-slate-400">No files</span>
-
-                <span class="text-[11px] text-slate-400">Tap to view</span>
-              </div> -->
             </article>
           </div>
 
           <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1200px]">
+            <table class="ui-table table-fixed w-full min-w-[1180px]">
               <colgroup>
                 <col :style="{ width: COL_WIDTH.created }" />
                 <col :style="{ width: COL_WIDTH.employee }" />
                 <col :style="{ width: COL_WIDTH.mode }" />
                 <col :style="{ width: COL_WIDTH.workDate }" />
                 <col :style="{ width: COL_WIDTH.swapDate }" />
-                <!-- <col :style="{ width: COL_WIDTH.file }" /> -->
                 <col :style="{ width: COL_WIDTH.status }" />
                 <col :style="{ width: COL_WIDTH.reason }" />
               </colgroup>
@@ -603,7 +676,6 @@ onBeforeUnmount(() => {
                   <th class="ui-th">Mode</th>
                   <th class="ui-th">Work (Request)</th>
                   <th class="ui-th">Swap (Off)</th>
-                  <!-- <th class="ui-th text-center">File</th> -->
                   <th class="ui-th">Status</th>
                   <th class="ui-th">Reason</th>
                 </tr>
@@ -611,49 +683,57 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+                  <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                    No items found.
+                  </td>
                 </tr>
 
-                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
-                  <td class="ui-td"><div class="truncate">{{ fmtDateTime(row.createdAt) }}</div></td>
+                <tr
+                  v-for="row in pagedRows"
+                  :key="row._id"
+                  class="ui-tr-hover cursor-pointer"
+                  @click="openView(row)"
+                >
+                  <td class="ui-td">
+                    <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
+                  </td>
 
                   <td class="ui-td">
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                    <div class="truncate font-extrabold text-slate-900 dark:text-slate-50">
                       {{ row.employeeName || row.name || row.employeeId || '—' }}
                     </div>
-                    <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                      ID: {{ row.employeeId || '—' }} <span v-if="row.department">· {{ row.department }}</span>
+                    <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                      ID: {{ row.employeeId || '—' }}
+                      <span v-if="row.department">· {{ row.department }}</span>
                     </div>
                   </td>
 
-                  <td class="ui-td"><div class="truncate">{{ modeLabel(row.approvalMode) }}</div></td>
-
-                  <td class="ui-td"><div class="truncate">{{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}</div></td>
-
-                  <td class="ui-td"><div class="truncate">{{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}</div></td>
-
-                  <!-- <td class="ui-td text-center" @click.stop>
-                    <button
-                      v-if="row.attachments?.length"
-                      type="button"
-                      class="ui-btn ui-btn-xs ui-btn-soft ui-icon-btn"
-                      :disabled="loading"
-                      @click="openFiles(row)"
-                      title="Attachments"
-                      aria-label="Attachments"
-                    >
-                      <i class="fa-solid fa-paperclip text-[12px]" />
-                      <span class="ml-1">{{ row.attachments.length }}</span>
-                    </button>
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td> -->
-
                   <td class="ui-td">
-                    <span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span>
+                    <div class="truncate">{{ modeLabel(row.approvalMode) }}</div>
                   </td>
 
                   <td class="ui-td">
-                    <p class="reason-cell" :title="reasonText(row)">{{ reasonText(row) }}</p>
+                    <div class="truncate">
+                      {{ fmtYmd(row.requestStartDate) }} → {{ fmtYmd(row.requestEndDate) }}
+                    </div>
+                  </td>
+
+                  <td class="ui-td">
+                    <div class="truncate">
+                      {{ fmtYmd(row.offStartDate) }} → {{ fmtYmd(row.offEndDate) }}
+                    </div>
+                  </td>
+
+                  <td class="ui-td">
+                    <span :class="statusBadgeUiClass(row.status)">
+                      {{ STATUS_LABEL[row.status] || row.status }}
+                    </span>
+                  </td>
+
+                  <td class="ui-td">
+                    <p class="reason-cell" :title="reasonText(row)">
+                      {{ reasonText(row) }}
+                    </p>
                   </td>
                 </tr>
               </tbody>
@@ -661,12 +741,16 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Pagination -->
-          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            class="ui-divider mt-3 flex flex-col gap-2 pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
+          >
             <div class="flex items-center gap-2">
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
               </select>
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">Page {{ page }} / {{ pageCount }}</span>
+              <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                Page {{ page }} / {{ pageCount }}
+              </span>
             </div>
 
             <div class="flex items-center justify-end gap-1">
@@ -682,21 +766,16 @@ onBeforeUnmount(() => {
 
     <!-- DETAILS MODAL -->
     <div v-if="viewOpen" class="ui-modal-backdrop">
-      <div class="ui-modal p-0 overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+      <div class="ui-modal overflow-hidden p-0">
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <div class="min-w-0">
             <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Swap Request Details</div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">
               {{ viewItem?.employeeName || viewItem?.name || '—' }} · {{ fmtDateTime(viewItem?.createdAt) }}
             </div>
           </div>
 
           <div class="flex items-center gap-2">
-            <!-- <button v-if="viewItem?.attachments?.length" class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openFiles(viewItem)">
-              <i class="fa-solid fa-paperclip text-[11px]" />
-              Attachments
-            </button> -->
-
             <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
               <i class="fa-solid fa-xmark text-[11px]" />
               Close
@@ -704,7 +783,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="p-4 space-y-3">
+        <div class="space-y-3 p-4">
           <div class="ui-frame p-3">
             <div class="grid gap-3 md:grid-cols-2">
               <div>
@@ -712,16 +791,24 @@ onBeforeUnmount(() => {
                 <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
                   {{ viewItem?.employeeName || viewItem?.name || '—' }}
                 </div>
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">ID: {{ viewItem?.employeeId || '—' }}</div>
-                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">Dept: {{ viewItem.department }}</div>
+                <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                  ID: {{ viewItem?.employeeId || '—' }}
+                </div>
+                <div v-if="viewItem?.department" class="text-[11px] text-slate-500 dark:text-slate-400">
+                  Dept: {{ viewItem.department }}
+                </div>
               </div>
 
               <div class="text-right md:text-left">
                 <div class="ui-label">Status</div>
-                <span :class="statusBadgeUiClass(viewItem?.status)">{{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}</span>
+                <span :class="statusBadgeUiClass(viewItem?.status)">
+                  {{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}
+                </span>
 
                 <div class="mt-2 ui-label">Approval Mode</div>
-                <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">{{ modeLabel(viewItem?.approvalMode) }}</div>
+                <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                  {{ modeLabel(viewItem?.approvalMode) }}
+                </div>
               </div>
             </div>
           </div>
@@ -744,7 +831,7 @@ onBeforeUnmount(() => {
 
           <div class="ui-card p-3">
             <div class="ui-section-title">Reason</div>
-            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+            <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
               {{ reasonText(viewItem) }}
             </div>
           </div>
@@ -757,7 +844,8 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- ATTACHMENT PREVIEW MODAL -->
-    <!-- <AttachmentPreviewModal
+    <!--
+    <AttachmentPreviewModal
       v-model="filesOpen"
       :request-id="filesRequest?._id"
       title="Attachments"
@@ -767,15 +855,43 @@ onBeforeUnmount(() => {
       :delete-path="null"
       :can-delete="false"
       @refresh="refreshFilesAgain()"
-    /> -->
+    />
+    -->
   </div>
 </template>
 
 <style scoped>
+.filter-input,
+.filter-select {
+  width: 100%;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.55rem 0.8rem;
+  font-size: 11px;
+  color: white;
+  outline: none;
+}
+
+.filter-input::placeholder {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.filter-input:focus,
+.filter-select:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.filter-select option {
+  color: #0f172a;
+}
+
 .ui-icon-btn {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;
 }
+
 .reason-cell {
   display: -webkit-box;
   -webkit-line-clamp: 2;

@@ -5,7 +5,7 @@
     "department": "Management Production",
     "position": "Maintenance Manager",
     "contactNumber": "061 277 577",
-    "telegramChatId": "",
+    "telegramChatId": "1407775320",
     "isActive": true
   },
   {
@@ -14,15 +14,6 @@
     "department": "Management Office",
     "position": "Infrastructor Manager",
     "contactNumber": "070 825 643",
-    "telegramChatId": "",
-    "isActive": true
-  },
-    {
-    "employeeId": "51210020",
-    "name": "Pollawut Patumpattanakit",
-    "department": "Management Office",
-    "position": "CEO",
-    "contactNumber": "096 470 7019",
     "telegramChatId": "",
     "isActive": true
   },
@@ -45,21 +36,12 @@
     "isActive": true
   },
     {
-    "employeeId": "51210028",
-    "name": "Saard Kaeokanda",
-    "department": "Management Production",
-    "position": "QC Supervisor",
-    "contactNumber": "061 832 908",
-    "telegramChatId": "",
-    "isActive": true
-  },
-    {
     "employeeId": "51210032",
     "name": "Nares Samoemuean",
     "department": "Management Production",
     "position": "Fabric warehouse Supervisor",
     "contactNumber": "096 889 9675",
-    "telegramChatId": "",
+    "telegramChatId": "5016324706",
     "isActive": true
   },
     {
@@ -98,21 +80,12 @@
     "isActive": true
   },
     {
-    "employeeId": "51410011",
-    "name": "Pittaya Kerdsriphan",
-    "department": "Management Office",
-    "position": "Financial Controller",
-    "contactNumber": "092 694 029",
-    "telegramChatId": "",
-    "isActive": true
-  },
-    {
     "employeeId": "51410012",
     "name": "Evangeline Flores Igos",
     "department": "Management Office",
     "position": "adicomp & Acc WH Supervisor",
     "contactNumber": "085 958 954",
-    "telegramChatId": "",
+    "telegramChatId": "1931604751",
     "isActive": true
   },
     {
@@ -211,7 +184,7 @@
     "department": "Management Office",
     "position": "Coder",
     "contactNumber": "096 8316562",
-    "telegramChatId": "",
+    "telegramChatId": "1450663156",
     "isActive": true
   },
     {
@@ -265,7 +238,7 @@
     "department": "Management Production",
     "position": "QC Supervisor",
     "contactNumber": "085806945",
-    "telegramChatId": "",
+    "telegramChatId": "1566429942",
     "isActive": true
   },
     {
@@ -274,7 +247,7 @@
     "department": "Management Production",
     "position": "General Manager",
     "contactNumber": "0",
-    "telegramChatId": "",
+    "telegramChatId": "1805934121",
     "isActive": true
   },
     {
@@ -292,7 +265,7 @@
     "department": "Management Production",
     "position": "Mechanic Supervisor",
     "contactNumber": "0",
-    "telegramChatId": "",
+    "telegramChatId": "7194485491",
     "isActive": true
   },
     {
@@ -301,16 +274,7 @@
     "department": "ME MANAGER",
     "position": "JOYDEL MATIDIOS  REMULTA",
     "contactNumber": "0962606947",
-    "telegramChatId": "",
-    "isActive": true
-  },
-    {
-    "employeeId": "52410008",
-    "name": "DEGUIT RISTY CALUMBA",
-    "department": "Management Production",
-    "position": "Embroidery & Pad print Supervisor",
-    "contactNumber": "0963228920",
-    "telegramChatId": "",
+    "telegramChatId": "2074020508",
     "isActive": true
   },
     {
@@ -328,7 +292,7 @@
     "department": "Management Production",
     "position": "Planning Supervisor",
     "contactNumber": "015454057",
-    "telegramChatId": "",
+    "telegramChatId": "1000022008",
     "isActive": true
   },
     {
@@ -337,7 +301,7 @@
     "department": "Management Production",
     "position": "Planning Supervisor",
     "contactNumber": "010885473",
-    "telegramChatId": "",
+    "telegramChatId": "7614300727",
     "isActive": true
   },
     {
@@ -355,7 +319,7 @@
     "department": "Management Production",
     "position": "Planning Manager",
     "contactNumber": "0962927673",
-    "telegramChatId": "",
+    "telegramChatId": "1457649752",
     "isActive": true
   },
     {
@@ -372,15 +336,6 @@
     "name": "Boonyapa Pakare",
     "department": "Management Production",
     "position": "Heat Transfer PPC Officer",
-    "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-    {
-    "employeeId": "52510006",
-    "name": "Raymundo Ripdos Villagonzalo",
-    "department": "Management Production",
-    "position": "QA Lab Supervisor",
     "contactNumber": "0",
     "telegramChatId": "",
     "isActive": true
@@ -418,7 +373,7 @@
     "department": "Management Production",
     "position": "QA Supervisor",
     "contactNumber": "0",
-    "telegramChatId": "",
+    "telegramChatId": "1988560174",
     "isActive": true
   },
     {
@@ -436,7 +391,7 @@
     "department": "Management Production",
     "position": "IE Supervisor",
     "contactNumber": "086 649 550",
-    "telegramChatId": "",
+    "telegramChatId": "2091788019",
     "isActive": true
   },
   {
@@ -454,7 +409,7 @@
     "department": "Management Production",
     "position": "Accessory Warehouse Leader",
     "contactNumber": "077 896 053",
-    "telegramChatId": "",
+    "telegramChatId": "1718482118",
     "isActive": true
   },
   {
@@ -472,15 +427,6 @@
     "department": "Management Production",
     "position": "Technician Supervisor",
     "contactNumber": "097 237 2294",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510020",
-    "name": "Ranasinghe Kankanamge Lakshman",
-    "department": "Management Production",
-    "position": "FACTORY MANAGER",
-    "contactNumber": "070 352 006",
     "telegramChatId": "",
     "isActive": true
   },
@@ -526,33 +472,6 @@
     "department": "Management Office",
     "position": "",
     "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "51810018",
-    "name": "GURUSAMY  THANGAPANDI",
-    "department": "Management Production",
-    "position": "",
-    "contactNumber": "081 493 612",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52410003",
-    "name": "THAMMITAGE DUSHAN SAJITH THILAKASIRI",
-    "department": "Management Production",
-    "position": "",
-    "contactNumber": "093584230",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52510010",
-    "name": "MARYVIC LICAY-LICAY",
-    "department": "Management Production",
-    "position": "",
-    "contactNumber": "097 700 2607",
     "telegramChatId": "",
     "isActive": true
   },
@@ -2317,7 +2236,7 @@
     "department": "Production Planning",
     "position": "Planning Supervisor",
     "contactNumber": "",
-    "telegramChatId": "",
+    "telegramChatId": "6479988060",
     "isActive": true
   }
 

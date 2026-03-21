@@ -1,6 +1,9 @@
 // backend/services/telegram.polling.js
 // Telegram polling listener (NO webhook) with MongoDB leader lock.
 // ✅ Safe for multiple servers with same bot token: only ONE polls.
+// ✅ New log strategy:
+//    1) daily logs   -> logs/telegram/daily/YYYY-MM-DD.jsonl
+//    2) all summary  -> logs/telegram/all/contacts.json
 
 const TelegramBot = require('node-telegram-bot-api')
 const mongoose = require('mongoose')
@@ -20,7 +23,10 @@ const POLLING_ENABLED =
 const AUTO_DELETE_WEBHOOK =
   String(process.env.TELEGRAM_AUTO_DELETE_WEBHOOK || 'true').trim().toLowerCase() === 'true'
 
-const LOG_DIR = path.resolve(process.cwd(), 'logs', 'telegram')
+const TELEGRAM_LOG_ROOT = path.resolve(process.cwd(), 'logs', 'telegram')
+const TELEGRAM_DAILY_DIR = path.join(TELEGRAM_LOG_ROOT, 'daily')
+const TELEGRAM_ALL_DIR = path.join(TELEGRAM_LOG_ROOT, 'all')
+const TELEGRAM_ALL_CONTACTS_FILE = path.join(TELEGRAM_ALL_DIR, 'contacts.json')
 
 // Leader lock tuning
 const LEASE_MS = Number(process.env.TELEGRAM_POLLING_LEASE_MS || 30000)
@@ -87,7 +93,6 @@ async function ensureLockDocExists() {
   if (!dbReady()) return
   const Lock = getLockModel()
   try {
-    // Insert once; ignore if already exists
     await Lock.collection.insertOne({
       _id: TOKEN_KEY,
       ownerId: '',
@@ -95,7 +100,6 @@ async function ensureLockDocExists() {
       updatedAt: new Date(),
     })
   } catch (e) {
-    // 11000 means it already exists -> OK
     const msg = String(e?.message || '')
     if (e?.code === 11000 || msg.includes('E11000')) return
     console.warn('⚠️ [TG] ensureLockDocExists error:', tgErr(e))
@@ -110,10 +114,8 @@ async function acquireLock() {
   const now = new Date()
   const newUntil = new Date(Date.now() + LEASE_MS)
 
-  // Ensure doc exists FIRST to avoid upsert-duplicate race
   await ensureLockDocExists()
 
-  // Try acquire if expired OR already ours (NO upsert here)
   const res = await Lock.updateOne(
     {
       _id: TOKEN_KEY,
@@ -167,26 +169,189 @@ async function releaseLock() {
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
 }
+
 function safeFileName(s) {
   return String(s).replace(/[^\w.-]/g, '_')
 }
-function logUpdate(chatId, update) {
+
+function ymd(dateLike = new Date()) {
+  const d = new Date(dateLike)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function isoNow() {
+  return new Date().toISOString()
+}
+
+function s(v) {
+  return String(v ?? '').trim()
+}
+
+function compactText(v) {
+  return String(v ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function readJsonFileSafe(filePath, fallback) {
   try {
-    ensureDir(LOG_DIR)
-    const filePath = path.join(LOG_DIR, `${safeFileName(chatId)}.jsonl`)
-    const record = { savedAt: new Date().toISOString(), chatId: String(chatId), update }
-    fs.appendFile(filePath, JSON.stringify(record) + '\n', (err) => {
-      if (err) console.error('❌ [TG] write telegram log failed:', err.message)
-    })
+    if (!fs.existsSync(filePath)) return fallback
+    const raw = fs.readFileSync(filePath, 'utf8')
+    if (!raw.trim()) return fallback
+    return JSON.parse(raw)
   } catch (e) {
-    console.error('❌ [TG] logUpdate error:', tgErr(e))
+    console.warn(`⚠️ [TG] readJsonFileSafe failed for ${filePath}:`, tgErr(e))
+    return fallback
   }
 }
+
+function writeJsonFileSafe(filePath, data) {
+  try {
+    ensureDir(path.dirname(filePath))
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8')
+    return true
+  } catch (e) {
+    console.error(`❌ [TG] writeJsonFileSafe failed for ${filePath}:`, tgErr(e))
+    return false
+  }
+}
+
+function extractMessageSummary(msg) {
+  const chatId = s(msg?.chat?.id)
+  const from = msg?.from || {}
+  const text = compactText(msg?.text || '')
+  const savedAt = isoNow()
+
+  return {
+    savedAt,
+    dateKey: ymd(savedAt),
+    chatId,
+    chatType: s(msg?.chat?.type),
+    messageId: Number(msg?.message_id || 0) || null,
+
+    username: s(from?.username),
+    firstName: s(from?.first_name),
+    lastName: s(from?.last_name),
+    fullName: compactText(`${s(from?.first_name)} ${s(from?.last_name)}`),
+
+    text,
+
+    isBot: !!from?.is_bot,
+  }
+}
+
+function appendDailyTelegramLog(summary, rawUpdate) {
+  try {
+    ensureDir(TELEGRAM_DAILY_DIR)
+
+    const filePath = path.join(
+      TELEGRAM_DAILY_DIR,
+      `${safeFileName(summary.dateKey)}.jsonl`
+    )
+
+    const record = {
+      ...summary,
+      update: rawUpdate,
+    }
+
+    fs.appendFile(filePath, JSON.stringify(record) + '\n', (err) => {
+      if (err) {
+        console.error('❌ [TG] appendDailyTelegramLog failed:', err.message)
+      }
+    })
+  } catch (e) {
+    console.error('❌ [TG] appendDailyTelegramLog error:', tgErr(e))
+  }
+}
+
+function updateAllContactsSummary(summary) {
+  try {
+    ensureDir(TELEGRAM_ALL_DIR)
+
+    const list = readJsonFileSafe(TELEGRAM_ALL_CONTACTS_FILE, [])
+    const rows = Array.isArray(list) ? list : []
+
+    const idx = rows.findIndex((r) => s(r?.chatId) === summary.chatId)
+    if (idx >= 0) {
+      const prev = rows[idx] || {}
+      rows[idx] = {
+        ...prev,
+        chatId: summary.chatId,
+        chatType: summary.chatType || prev.chatType || '',
+        username: summary.username || prev.username || '',
+        firstName: summary.firstName || prev.firstName || '',
+        lastName: summary.lastName || prev.lastName || '',
+        fullName: summary.fullName || prev.fullName || '',
+
+        firstSeenAt: prev.firstSeenAt || summary.savedAt,
+        lastSeenAt: summary.savedAt,
+
+        lastText: summary.text || '',
+        lastMessageId: summary.messageId || null,
+
+        messageCount: Number(prev.messageCount || 0) + 1,
+
+        // Manual fields for admin use later
+        linkedEmployeeId: s(prev.linkedEmployeeId),
+        linkedEmployeeName: s(prev.linkedEmployeeName),
+        manualChecked: !!prev.manualChecked,
+        note: s(prev.note),
+      }
+    } else {
+      rows.push({
+        chatId: summary.chatId,
+        chatType: summary.chatType || '',
+        username: summary.username || '',
+        firstName: summary.firstName || '',
+        lastName: summary.lastName || '',
+        fullName: summary.fullName || '',
+
+        firstSeenAt: summary.savedAt,
+        lastSeenAt: summary.savedAt,
+
+        lastText: summary.text || '',
+        lastMessageId: summary.messageId || null,
+
+        messageCount: 1,
+
+        // Manual fields for admin use later
+        linkedEmployeeId: '',
+        linkedEmployeeName: '',
+        manualChecked: false,
+        note: '',
+      })
+    }
+
+    rows.sort((a, b) => {
+      const ta = new Date(a?.lastSeenAt || 0).getTime()
+      const tb = new Date(b?.lastSeenAt || 0).getTime()
+      return tb - ta
+    })
+
+    writeJsonFileSafe(TELEGRAM_ALL_CONTACTS_FILE, rows)
+  } catch (e) {
+    console.error('❌ [TG] updateAllContactsSummary error:', tgErr(e))
+  }
+}
+
+function logTelegramUpdate(msg) {
+  try {
+    const summary = extractMessageSummary(msg)
+    if (!summary.chatId) return
+
+    appendDailyTelegramLog(summary, msg)
+    updateAllContactsSummary(summary)
+  } catch (e) {
+    console.error('❌ [TG] logTelegramUpdate error:', tgErr(e))
+  }
+}
+
 function parseStartPayload(text) {
-  const raw = String(text || '').trim()
+  const raw = s(text)
   if (!raw.startsWith('/start')) return null
   const parts = raw.split(/\s+/)
-  return parts[1] ? String(parts[1]).trim() : null
+  return parts[1] ? s(parts[1]) : null
 }
 
 async function saveEmployeeTelegramChatId(employeeId, chatId, from = {}) {
@@ -196,16 +361,16 @@ async function saveEmployeeTelegramChatId(employeeId, chatId, from = {}) {
     return { ok: false, reason: 'NO_MODEL' }
   }
 
-  const empId = String(employeeId || '').trim()
+  const empId = s(employeeId)
   if (!empId) return { ok: false, reason: 'NO_EMPLOYEE_ID' }
 
   const filter = { employeeId: empId }
   const update = {
     $set: {
-      telegramChatId: String(chatId),
-      telegramUsername: String(from.username || ''),
-      telegramFirstName: String(from.first_name || ''),
-      telegramLastName: String(from.last_name || ''),
+      telegramChatId: s(chatId),
+      telegramUsername: s(from.username),
+      telegramFirstName: s(from.first_name),
+      telegramLastName: s(from.last_name),
       telegramUpdatedAt: new Date(),
     },
   }
@@ -259,7 +424,7 @@ function startBotInstance() {
     'Instruction:\n' +
     '- This chat robot is for notification only!\n' +
     '- Please do not reply to this robot.\n' +
-    '- When you succeed login, please change your initial password.\n'+
+    '- When you succeed login, please change your initial password.\n' +
     '============================\n' +
     'This is your initial Account.\n' +
     '- Your ID card number : 5252.....\n' +
@@ -278,8 +443,10 @@ function startBotInstance() {
       if (!chatId) return
       if (msg?.from?.is_bot) return
 
-      logUpdate(chatId, msg)
-      const text = String(msg?.text || '').trim()
+      // ✅ New logging strategy
+      logTelegramUpdate(msg)
+
+      const text = s(msg?.text)
 
       if (text === '/id' || text === '/chatid') {
         await sendMessage(chatId, `🆔 Your chat id is: <code>${chatId}</code>`)
@@ -299,14 +466,18 @@ function startBotInstance() {
         return
       }
 
+      // Keep this block only if you still want manual /start EMP001 linking later.
+      // It does not auto-link by itself unless user sends /start EMP001.
       const payload = parseStartPayload(text)
       if (payload) {
         const r = await saveEmployeeTelegramChatId(payload, chatId, msg?.from || {})
-        if (r.ok) await sendMessage(chatId, '✅ Linked successfully! You will receive notifications here.')
-        else if (r.reason === 'EMPLOYEE_NOT_FOUND')
+        if (r.ok) {
+          await sendMessage(chatId, '✅ Linked successfully! You will receive notifications here.')
+        } else if (r.reason === 'EMPLOYEE_NOT_FOUND') {
           await sendMessage(chatId, '⚠️ Employee ID not found. Please contact admin.')
-        else
+        } else {
           await sendMessage(chatId, '⚠️ Link failed. Please contact admin.')
+        }
         return
       }
 
@@ -361,7 +532,9 @@ async function runLeaderLoop() {
   }
 
   let got = false
-  try { got = await acquireLock() } catch (e) {
+  try {
+    got = await acquireLock()
+  } catch (e) {
     console.warn('⚠️ [TG] acquireLock failed:', tgErr(e))
     got = false
   }
@@ -428,6 +601,14 @@ function startTelegramPolling() {
   if (!BOT_TOKEN) {
     console.log('ℹ️ [TG] Polling: TELEGRAM_BOT_TOKEN missing, skip.')
     return { stop: stopTelegramPolling }
+  }
+
+  ensureDir(TELEGRAM_LOG_ROOT)
+  ensureDir(TELEGRAM_DAILY_DIR)
+  ensureDir(TELEGRAM_ALL_DIR)
+
+  if (!fs.existsSync(TELEGRAM_ALL_CONTACTS_FILE)) {
+    writeJsonFileSafe(TELEGRAM_ALL_CONTACTS_FILE, [])
   }
 
   runLeaderLoop().catch((e) => {
