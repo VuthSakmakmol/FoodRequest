@@ -23,6 +23,23 @@ function asCapacity(v) {
   if (!Number.isFinite(n)) return 1
   return Math.max(1, Math.floor(n))
 }
+function isImageFile(file) {
+  if (!file) return false
+  return ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'].includes(file.type)
+}
+
+function resolveImageUrl(url) {
+  const raw = s(url)
+  if (!raw) return ''
+
+  if (/^https?:\/\//i.test(raw)) return raw
+
+  const base =
+    import.meta.env.VITE_API_BASE ||
+    window.location.origin
+
+  return `${base.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`
+}
 
 /* ───────── Responsive State ───────── */
 const isMobile = ref(false)
@@ -43,7 +60,10 @@ const active = ref('ALL')
 const form = ref({
   name: '',
   capacity: 1,
+  imageFile: null,
   imageUrl: '',
+  previewUrl: '',
+  removeImage: false,
 })
 
 const editingId = ref('')
@@ -61,14 +81,55 @@ const submitLabel = computed(() =>
 )
 
 const canSubmit = computed(() => {
-  return (
-    !saving.value &&
-    !!s(form.value.name) &&
-    asCapacity(form.value.capacity) >= 1
-  )
+  return !saving.value && !!s(form.value.name) && asCapacity(form.value.capacity) >= 1
 })
 
 const filteredRows = computed(() => rows.value)
+
+const currentPreview = computed(() => {
+  if (form.value.removeImage) return ''
+  return form.value.previewUrl || resolveImageUrl(form.value.imageUrl)
+})
+
+/* ───────── File handlers ───────── */
+function revokePreviewUrl() {
+  if (form.value.previewUrl && form.value.previewUrl.startsWith('blob:')) {
+    URL.revokeObjectURL(form.value.previewUrl)
+  }
+  form.value.previewUrl = ''
+}
+
+function onPickImage(event) {
+  const file = event?.target?.files?.[0] || null
+  if (!file) return
+
+  if (!isImageFile(file)) {
+    showToast({
+      type: 'error',
+      title: 'Invalid file',
+      message: 'Only JPG, JPEG, PNG, and WEBP files are allowed.',
+    })
+    event.target.value = ''
+    return
+  }
+
+  revokePreviewUrl()
+  form.value.imageFile = file
+  form.value.removeImage = false
+  form.value.previewUrl = URL.createObjectURL(file)
+}
+
+function removeSelectedImage() {
+  revokePreviewUrl()
+  form.value.imageFile = null
+
+  if (editingId.value && form.value.imageUrl) {
+    form.value.removeImage = true
+  } else {
+    form.value.imageUrl = ''
+    form.value.removeImage = false
+  }
+}
 
 /* ───────── API ───────── */
 async function fetchRows({ silent = false } = {}) {
@@ -102,17 +163,27 @@ async function submitForm() {
   try {
     saving.value = true
 
-    const payload = {
-      name: s(form.value.name),
-      capacity: asCapacity(form.value.capacity),
-      imageUrl: s(form.value.imageUrl),
+    const fd = new FormData()
+    fd.append('name', s(form.value.name))
+    fd.append('capacity', String(asCapacity(form.value.capacity)))
+
+    if (form.value.imageFile) {
+      fd.append('image', form.value.imageFile)
+    }
+
+    if (form.value.removeImage) {
+      fd.append('removeImage', 'true')
     }
 
     if (editingId.value) {
-      await api.patch(`/booking-room/admin/rooms/${editingId.value}`, payload)
+      await api.patch(`/booking-room/admin/rooms/${editingId.value}`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
       showToast({ type: 'success', message: 'Room updated successfully.' })
     } else {
-      await api.post('/booking-room/admin/rooms', payload)
+      await api.post('/booking-room/admin/rooms', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
       showToast({ type: 'success', message: 'Room created successfully.' })
     }
 
@@ -157,10 +228,14 @@ function resetFilters() {
 }
 
 function resetForm() {
+  revokePreviewUrl()
   form.value = {
     name: '',
     capacity: 1,
+    imageFile: null,
     imageUrl: '',
+    previewUrl: '',
+    removeImage: false,
   }
 }
 
@@ -172,11 +247,17 @@ function openCreate() {
 
 function openEdit(row) {
   editingId.value = String(row?._id || '')
+  revokePreviewUrl()
+
   form.value = {
     name: s(row?.name),
     capacity: asCapacity(row?.capacity),
+    imageFile: null,
     imageUrl: s(row?.imageUrl),
+    previewUrl: '',
+    removeImage: false,
   }
+
   showModal.value = true
 }
 
@@ -254,6 +335,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   lockBodyScroll(false)
+  revokePreviewUrl()
 
   if (masterRefreshTimer) {
     clearTimeout(masterRefreshTimer)
@@ -378,7 +460,7 @@ onBeforeUnmount(() => {
                   <td class="ui-td text-center">
                     <div v-if="row.imageUrl" class="flex justify-center">
                       <img
-                        :src="row.imageUrl"
+                        :src="resolveImageUrl(row.imageUrl)"
                         alt="Room"
                         class="h-12 w-20 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
                       />
@@ -450,7 +532,7 @@ onBeforeUnmount(() => {
                   <div class="ui-label">Image</div>
                   <div v-if="row.imageUrl">
                     <img
-                      :src="row.imageUrl"
+                      :src="resolveImageUrl(row.imageUrl)"
                       alt="Room"
                       class="h-16 w-full rounded-lg border border-slate-200 object-cover dark:border-slate-700"
                     />
@@ -536,19 +618,42 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="ui-field">
-              <label class="ui-label">Image URL</label>
-              <input
-                v-model="form.imageUrl"
-                type="text"
-                class="ui-input"
-                placeholder="https://example.com/room.jpg"
-              />
+              <label class="ui-label">Room Image</label>
+
+              <label
+                class="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm font-medium text-slate-600 transition hover:border-sky-400 hover:bg-sky-50 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-300 dark:hover:border-sky-500 dark:hover:bg-slate-800"
+              >
+                <i class="fa-solid fa-image text-slate-400" />
+                <span>{{ form.imageFile ? form.imageFile.name : 'Choose image file' }}</span>
+                <input
+                  type="file"
+                  class="hidden"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  @change="onPickImage"
+                />
+              </label>
+
+              <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                Allowed: JPG, JPEG, PNG, WEBP. Recommended image for room preview.
+              </div>
             </div>
 
-            <div v-if="form.imageUrl" class="ui-field">
-              <label class="ui-label">Preview</label>
+            <div v-if="currentPreview" class="ui-field">
+              <div class="flex items-center justify-between gap-2">
+                <label class="ui-label">Preview</label>
+
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-soft ui-btn-sm"
+                  @click="removeSelectedImage"
+                >
+                  <i class="fa-solid fa-trash-can" />
+                  Remove Image
+                </button>
+              </div>
+
               <img
-                :src="form.imageUrl"
+                :src="currentPreview"
                 alt="Preview"
                 class="h-44 w-full rounded-xl border border-slate-200 object-cover dark:border-slate-700"
               />

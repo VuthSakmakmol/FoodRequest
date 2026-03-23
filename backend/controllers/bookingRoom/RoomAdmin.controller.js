@@ -1,5 +1,6 @@
-// backend/controllers/bookingRoom/RoomAdmin.controller.js
 const createError = require('http-errors')
+const mongoose = require('mongoose')
+const { Readable } = require('stream')
 
 const BookingRoom = require('../../models/bookingRoom/BookingRoom')
 const BookingRoomResource = require('../../models/bookingRoom/BookingRoomResource')
@@ -38,6 +39,7 @@ async function safeNotify(fn, ...args) {
 }
 
 const OVERALL_NON_BLOCKING_STATUSES = ['REJECTED', 'CANCELLED']
+const ROOM_IMAGE_BUCKET = 'booking_room_images'
 
 function s(v) {
   return String(v ?? '').trim()
@@ -259,13 +261,83 @@ async function assertRoomMasterCanDeactivate({ roomDoc, excludePast = true }) {
   }
 }
 
+function getGridFSBucket() {
+  const db = mongoose.connection.db
+  if (!db) {
+    throw createError(500, 'MongoDB connection is not ready.')
+  }
+  return new mongoose.mongo.GridFSBucket(db, { bucketName: ROOM_IMAGE_BUCKET })
+}
+
+function safeRoomImageFilename(originalname) {
+  const raw = s(originalname || 'room-image')
+  const dotIndex = raw.lastIndexOf('.')
+  const ext = dotIndex >= 0 ? raw.slice(dotIndex).toLowerCase() : ''
+  const base = (dotIndex >= 0 ? raw.slice(0, dotIndex) : raw)
+    .replace(/[^a-zA-Z0-9-_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'room-image'
+
+  return `${Date.now()}-${base}${ext}`
+}
+
+async function uploadRoomImageToGridFS(file, meta = {}) {
+  if (!file?.buffer) return null
+
+  const bucket = getGridFSBucket()
+  const filename = safeRoomImageFilename(file.originalname)
+
+  return await new Promise((resolve, reject) => {
+    const uploadStream = bucket.openUploadStream(filename, {
+      contentType: file.mimetype || 'application/octet-stream',
+      metadata: {
+        module: 'booking_room',
+        ...meta,
+      },
+    })
+
+    uploadStream.on('error', reject)
+    uploadStream.on('finish', () => {
+      resolve({
+        fileId: uploadStream.id,
+        filename,
+        contentType: file.mimetype || 'application/octet-stream',
+      })
+    })
+
+    Readable.from(file.buffer).pipe(uploadStream)
+  })
+}
+
+async function deleteRoomImageFromGridFS(fileId) {
+  try {
+    if (!fileId) return
+    const bucket = getGridFSBucket()
+    const objectId =
+      typeof fileId === 'string' ? new mongoose.Types.ObjectId(fileId) : fileId
+    await bucket.delete(objectId)
+  } catch (e) {
+    console.warn('⚠️ failed to delete old room image from GridFS:', e?.message)
+  }
+}
+
+function buildRoomImageApiUrl(roomId) {
+  if (!roomId) return ''
+  return `/api/public/booking-room/rooms/${roomId}/image`
+}
+
 async function listActiveRooms(_req, res, next) {
   try {
     const rows = await BookingRoomResource.find({ isActive: true })
       .sort({ name: 1 })
       .lean()
 
-    return res.json(rows || [])
+    const mapped = (rows || []).map((row) => ({
+      ...row,
+      imageUrl: row.hasImage ? buildRoomImageApiUrl(row._id) : '',
+    }))
+
+    return res.json(mapped)
   } catch (err) {
     next(err)
   }
@@ -395,7 +467,12 @@ async function listRoomMasters(req, res, next) {
       .sort({ isActive: -1, name: 1 })
       .lean()
 
-    return res.json(rows || [])
+    const mapped = (rows || []).map((row) => ({
+      ...row,
+      imageUrl: row.hasImage ? buildRoomImageApiUrl(row._id) : '',
+    }))
+
+    return res.json(mapped)
   } catch (err) {
     next(err)
   }
@@ -408,8 +485,7 @@ async function createRoomMaster(req, res, next) {
     const payload = req.body || {}
     const name = s(payload.name)
     const capacity = toPositiveInt(payload.capacity, 1)
-    const imageUrl = s(payload.imageUrl)
-    const isActive = payload.isActive !== false
+    const isActive = payload.isActive !== 'false' && payload.isActive !== false
 
     if (!name) throw createError(400, 'name is required.')
     if (!Number.isFinite(capacity) || capacity < 1) {
@@ -427,13 +503,29 @@ async function createRoomMaster(req, res, next) {
       throw createError(409, 'Room name already exists.')
     }
 
+    let uploaded = null
+    if (req.file?.buffer) {
+      uploaded = await uploadRoomImageToGridFS(req.file, {
+        roomCode: code,
+        roomName: name,
+      })
+    }
+
     const doc = await BookingRoomResource.create({
       code,
       name,
       capacity,
-      imageUrl,
+      imageFileId: uploaded?.fileId || null,
+      imageFilename: uploaded?.filename || '',
+      imageContentType: uploaded?.contentType || '',
+      hasImage: !!uploaded?.fileId,
       isActive,
     })
+
+    const roomJson = {
+      ...doc.toObject(),
+      imageUrl: doc.hasImage ? buildRoomImageApiUrl(doc._id) : '',
+    }
 
     emitBookingRoomMaster(
       req,
@@ -441,7 +533,7 @@ async function createRoomMaster(req, res, next) {
         _id: String(doc._id),
         type: 'ROOM',
         action: 'CREATED',
-        room: doc,
+        room: roomJson,
       },
       'bookingroom:room-master:created'
     )
@@ -463,7 +555,7 @@ async function createRoomMaster(req, res, next) {
       'bookingroom:availability:changed'
     )
 
-    return res.status(201).json(doc)
+    return res.status(201).json(roomJson)
   } catch (err) {
     next(err)
   }
@@ -482,8 +574,10 @@ async function updateRoomMaster(req, res, next) {
     const nextName = payload.name != null ? s(payload.name) : s(doc.name)
     const nextCapacity =
       payload.capacity != null ? toPositiveInt(payload.capacity, 1) : toPositiveInt(doc.capacity, 1)
-    const nextImageUrl = payload.imageUrl != null ? s(payload.imageUrl) : s(doc.imageUrl)
-    const nextIsActive = payload.isActive != null ? !!payload.isActive : !!doc.isActive
+    const nextIsActive =
+      payload.isActive != null
+        ? payload.isActive !== 'false' && payload.isActive !== false
+        : !!doc.isActive
 
     if (!nextName) throw createError(400, 'name is required.')
     if (!Number.isFinite(nextCapacity) || nextCapacity < 1) {
@@ -509,13 +603,47 @@ async function updateRoomMaster(req, res, next) {
       })
     }
 
+    const oldImageFileId = doc.imageFileId
+
+    if (req.file?.buffer) {
+      const uploaded = await uploadRoomImageToGridFS(req.file, {
+        roomId: String(doc._id),
+        roomCode: nextCode,
+        roomName: nextName,
+      })
+
+      doc.imageFileId = uploaded?.fileId || null
+      doc.imageFilename = uploaded?.filename || ''
+      doc.imageContentType = uploaded?.contentType || ''
+      doc.hasImage = !!uploaded?.fileId
+    }
+
+    if (payload.removeImage === 'true' || payload.removeImage === true) {
+      doc.imageFileId = null
+      doc.imageFilename = ''
+      doc.imageContentType = ''
+      doc.hasImage = false
+    }
+
     doc.code = nextCode
     doc.name = nextName
     doc.capacity = nextCapacity
-    doc.imageUrl = nextImageUrl
     doc.isActive = nextIsActive
 
     await doc.save()
+
+    if (req.file?.buffer && oldImageFileId && String(oldImageFileId) !== String(doc.imageFileId)) {
+      await deleteRoomImageFromGridFS(oldImageFileId)
+    }
+
+    if ((payload.removeImage === 'true' || payload.removeImage === true) && oldImageFileId) {
+      await deleteRoomImageFromGridFS(oldImageFileId)
+    }
+
+    const roomJson = {
+      ...doc.toObject(),
+      imageUrl: doc.hasImage ? buildRoomImageApiUrl(doc._id) : '',
+    }
 
     emitBookingRoomMaster(
       req,
@@ -523,7 +651,7 @@ async function updateRoomMaster(req, res, next) {
         _id: String(doc._id),
         type: 'ROOM',
         action: 'UPDATED',
-        room: doc,
+        room: roomJson,
       },
       'bookingroom:room-master:updated'
     )
@@ -545,7 +673,7 @@ async function updateRoomMaster(req, res, next) {
       'bookingroom:availability:changed'
     )
 
-    return res.json(doc)
+    return res.json(roomJson)
   } catch (err) {
     next(err)
   }
@@ -567,13 +695,18 @@ async function deleteRoomMaster(req, res, next) {
     doc.isActive = false
     await doc.save()
 
+    const roomJson = {
+      ...doc.toObject(),
+      imageUrl: doc.hasImage ? buildRoomImageApiUrl(doc._id) : '',
+    }
+
     emitBookingRoomMaster(
       req,
       {
         _id: String(doc._id),
         type: 'ROOM',
         action: 'DELETED',
-        room: doc,
+        room: roomJson,
       },
       'bookingroom:room-master:deleted'
     )
@@ -601,6 +734,47 @@ async function deleteRoomMaster(req, res, next) {
   }
 }
 
+async function streamRoomImage(req, res, next) {
+  try {
+    const { id } = req.params
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      throw createError(400, 'Invalid room id.')
+    }
+
+    const room = await BookingRoomResource.findById(id)
+      .select('imageFileId imageFilename imageContentType hasImage isActive')
+      .lean()
+
+    if (!room) throw createError(404, 'Room not found.')
+    if (!room.hasImage || !room.imageFileId) throw createError(404, 'Room image not found.')
+
+    const bucket = getGridFSBucket()
+    const fileId =
+      typeof room.imageFileId === 'string'
+        ? new mongoose.Types.ObjectId(room.imageFileId)
+        : room.imageFileId
+
+    const files = await mongoose.connection.db
+      .collection(`${ROOM_IMAGE_BUCKET}.files`)
+      .find({ _id: fileId })
+      .limit(1)
+      .toArray()
+
+    const file = files?.[0]
+    if (!file) throw createError(404, 'Room image file not found.')
+
+    res.setHeader('Content-Type', room.imageContentType || file.contentType || 'application/octet-stream')
+    res.setHeader('Cache-Control', 'public, max-age=86400')
+
+    const downloadStream = bucket.openDownloadStream(fileId)
+    downloadStream.on('error', next)
+    downloadStream.pipe(res)
+  } catch (err) {
+    next(err)
+  }
+}
+
 module.exports = {
   listActiveRooms,
   listRoomAdmins,
@@ -610,4 +784,5 @@ module.exports = {
   createRoomMaster,
   updateRoomMaster,
   deleteRoomMaster,
+  streamRoomImage,
 }

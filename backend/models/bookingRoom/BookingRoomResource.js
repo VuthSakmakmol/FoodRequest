@@ -31,11 +31,28 @@ const BookingRoomResourceSchema = new mongoose.Schema(
       min: 1,
       default: 1,
     },
-    imageUrl: {
+
+    imageFileId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
+    imageFilename: {
       type: String,
       default: '',
       trim: true,
     },
+    imageContentType: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    hasImage: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     isActive: {
       type: Boolean,
       default: true,
@@ -53,7 +70,9 @@ BookingRoomResourceSchema.pre('validate', function (next) {
     this.code = s(this.code).toUpperCase().replace(/\s+/g, '_')
     this.name = s(this.name)
     this.capacity = toPositiveInt(this.capacity, 1)
-    this.imageUrl = s(this.imageUrl)
+    this.imageFilename = s(this.imageFilename)
+    this.imageContentType = s(this.imageContentType)
+    this.hasImage = !!this.imageFileId
     next()
   } catch (err) {
     next(err)

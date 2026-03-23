@@ -177,7 +177,6 @@ app.use('/api/leave', require('./routes/leave/centralReport.routes'))
 // ========================== Public ==========================
 app.use('/api/public', require('./routes/public-directory.routes'))
 app.use('/api/public', require('./routes/food/food-public.routes'))
-app.use('/api/public', require('./routes/bookingRoom/bookingRoom.public.routes'))
 
 // ========================== Food ==========================
 app.use('/api/admin', require('./routes/food/food-admin.routes'))

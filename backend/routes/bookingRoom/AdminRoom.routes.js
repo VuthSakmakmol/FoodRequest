@@ -1,8 +1,8 @@
-// backend/routes/bookingRoom/AdminRoom.routes.js
 const express = require('express')
 const router = express.Router()
 
 const auth = require('../../middlewares/auth')
+const upload = require('../../middlewares/bookingRoomUpload')
 const ctrl = require('../../controllers/bookingRoom/RoomAdmin.controller')
 
 function h(fn, name) {
@@ -51,12 +51,14 @@ router.get(
 router.post(
   '/admin/rooms',
   auth.requireRole('ROOM_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
+  upload.single('image'),
   h(ctrl.createRoomMaster, 'createRoomMaster')
 )
 
 router.patch(
   '/admin/rooms/:id',
   auth.requireRole('ROOM_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
+  upload.single('image'),
   h(ctrl.updateRoomMaster, 'updateRoomMaster')
 )
 

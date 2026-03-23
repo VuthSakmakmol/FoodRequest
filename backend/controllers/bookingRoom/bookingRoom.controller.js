@@ -605,7 +605,6 @@ async function getAvailability(req, res, next) {
     const bookingQuery = {
       bookingDate: s(date),
       overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-      $or: [{ roomStatus: 'APPROVED' }, { materialStatus: 'APPROVED' }],
     }
 
     if (s(excludeId)) {
@@ -617,7 +616,17 @@ async function getAvailability(req, res, next) {
       BookingRoomMaterial.find({ isActive: true }).sort({ name: 1 }).lean(),
       BookingRoom.find(bookingQuery)
         .select(
-          'timeStart timeEnd roomRequired roomCode roomName roomStatus materialRequired materials materialStatus'
+          [
+            'timeStart',
+            'timeEnd',
+            'roomRequired',
+            'roomCode',
+            'roomName',
+            'roomStatus',
+            'materialRequired',
+            'materials',
+            'materialStatus',
+          ].join(' ')
         )
         .lean(),
     ])
@@ -633,14 +642,15 @@ async function getAvailability(req, res, next) {
     )
 
     const usedMaterialMap = {}
+
     for (const row of overlapRows) {
-      if (!(row.materialRequired && up(row.materialStatus) === 'APPROVED')) continue
+      if (!row.materialRequired || up(row.materialStatus) !== 'APPROVED') continue
 
       for (const item of arr(row.materials)) {
         const code = up(item?.materialCode)
         const qty = Number(item?.qty || 0)
         if (!code || qty <= 0) continue
-        usedMaterialMap[code] = (usedMaterialMap[code] || 0) + qty
+        usedMaterialMap[code] = Number(usedMaterialMap[code] || 0) + qty
       }
     }
 
@@ -649,19 +659,25 @@ async function getAvailability(req, res, next) {
       timeStart: s(timeStart),
       timeEnd: s(timeEnd),
       excludeId: s(excludeId),
+
       rooms: rooms.map((r) => {
         const blocked = busyRoomCodes.has(up(r.code))
+
         return {
           _id: r._id,
           code: s(r.code),
           name: s(r.name),
+          capacity: Number(r.capacity || 0),
+          imageUrl: r.hasImage ? `/api/public/booking-room/rooms/${r._id}/image` : '',
           isAvailable: !blocked,
-          status: blocked ? 'BOOKED' : 'AVAILABLE',
+          status: blocked ? 'UNAVAILABLE' : 'AVAILABLE',
         }
       }),
+
       materials: materials.map((m) => {
-        const usedQty = Number(usedMaterialMap[up(m.code)] || 0)
+        const code = up(m.code)
         const totalQty = Number(m.totalQty || 0)
+        const usedQty = Number(usedMaterialMap[code] || 0)
         const availableQty = Math.max(0, totalQty - usedQty)
 
         return {
@@ -672,7 +688,7 @@ async function getAvailability(req, res, next) {
           usedQty,
           availableQty,
           isAvailable: availableQty > 0,
-          status: availableQty > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
+          status: availableQty > 0 ? 'AVAILABLE' : 'UNAVAILABLE',
         }
       }),
     })

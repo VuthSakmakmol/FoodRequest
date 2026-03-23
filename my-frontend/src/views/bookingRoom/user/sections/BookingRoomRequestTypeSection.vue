@@ -9,13 +9,11 @@ const props = defineProps({
     required: true,
   },
 
-  // rooms from parent / availability API
   BOOKING_ROOM_NAMES: {
     type: Array,
     default: () => [],
   },
 
-  // materials from parent / availability API
   BOOKING_ROOM_MATERIALS: {
     type: Array,
     default: () => [],
@@ -42,7 +40,29 @@ function arr(v) {
 function toMinutes(hhmm) {
   const [h, m] = String(hhmm || '').split(':').map(Number)
   if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN
-  return (h * 60) + m
+  return h * 60 + m
+}
+
+function toNum(v, fallback = 0) {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function roomCapacity(room) {
+  return Math.max(0, toNum(room?.capacity, 0))
+}
+
+function resolveImage(url) {
+  const raw = s(url)
+  if (!raw) return ''
+
+  if (/^https?:\/\//i.test(raw)) return raw
+
+  const base =
+    import.meta.env.VITE_API_BASE ||
+    window.location.origin
+
+  return `${base.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`
 }
 
 const canShowAvailability = computed(() => {
@@ -106,7 +126,7 @@ function toggleMaterialRequired() {
 }
 
 function roomAvailabilityLabel(room) {
-  return room?.isAvailable === false ? 'NOT AVAILABLE' : 'AVAILABLE'
+  return room?.isAvailable === false ? 'UNAVAILABLE' : 'AVAILABLE'
 }
 
 function roomAvailabilityClass(room) {
@@ -195,7 +215,6 @@ function materialQtyText(code) {
   return found ? Number(found.qty || 0) : 0
 }
 
-/* auto clear selected room if it becomes unavailable after date/time change */
 watch(
   activeRooms,
   (rooms) => {
@@ -211,7 +230,6 @@ watch(
   { deep: true }
 )
 
-/* auto adjust material selection if availability changes */
 watch(
   activeMaterials,
   (materials) => {
@@ -238,7 +256,6 @@ watch(
   { deep: true }
 )
 
-/* clear selection when user turns off the section */
 watch(
   () => props.form.roomRequired,
   (on) => {
@@ -259,7 +276,6 @@ watch(
   }
 )
 
-/* also clear room/material if date/time is not ready */
 watch(
   canShowAvailability,
   (ok) => {
@@ -379,59 +395,116 @@ watch(
                 No active rooms found.
               </div>
 
-              <div v-else class="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-3">
+              <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
                 <button
                   v-for="room in activeRooms"
                   :key="room._id"
                   type="button"
-                  class="h-20 rounded-2xl border p-2 text-left transition"
+                  class="group overflow-hidden rounded-2xl border text-left transition"
                   :class="[
                     isRoomOn(room)
-                      ? 'border-sky-500 bg-sky-50 ring-1 ring-sky-400 dark:border-sky-600 dark:bg-sky-950/20'
+                      ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-300 dark:border-sky-600 dark:bg-sky-950/20 dark:ring-sky-800'
                       : room.isAvailable === false
-                        ? 'cursor-not-allowed border-rose-200 bg-rose-50 opacity-80 dark:border-rose-900/40 dark:bg-rose-950/20'
-                        : 'border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40 dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-sky-700 dark:hover:bg-sky-950/10'
+                        ? 'cursor-not-allowed border-rose-200 bg-rose-50 opacity-85 dark:border-rose-900/40 dark:bg-rose-950/20'
+                        : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-sky-700'
                   ]"
                   :disabled="!props.form.roomRequired || !canShowAvailability || room.isAvailable === false"
                   @click="onSelectRoom(room)"
                 >
-                  <div class="flex h-full flex-col justify-between">
-                    <div class="min-w-0">
-                      <div
-                        class="truncate text-[12px] font-bold"
-                        :class="room.isAvailable === false
-                          ? 'text-rose-700 dark:text-rose-300'
-                          : 'text-slate-800 dark:text-slate-100'"
-                      >
-                        {{ room.name || room.code }}
-                      </div>
+                  <div class="relative">
+                    <div
+                      v-if="resolveImage(room.imageUrl)"
+                      class="h-32 w-full overflow-hidden border-b border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"
+                    >
+                      <img
+                        :src="resolveImage(room.imageUrl)"
+                        :alt="room.name || 'Room image'"
+                        class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                      />
+                    </div>
 
-                      <div
-                        class="truncate text-[10px]"
-                        :class="room.isAvailable === false
-                          ? 'text-rose-500 dark:text-rose-400'
-                          : 'text-slate-500 dark:text-slate-400'"
-                      >
-                        {{ room.code || '—' }}
+                    <div
+                      v-else
+                      class="flex h-32 w-full items-center justify-center border-b border-slate-200
+                             bg-gradient-to-br from-slate-100 via-slate-50 to-sky-50
+                             dark:border-slate-700 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800"
+                    >
+                      <div class="text-center">
+                        <div
+                          class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl
+                                 bg-white text-sky-600 shadow-sm dark:bg-slate-800 dark:text-sky-400"
+                        >
+                          <i class="fa-solid fa-door-open text-lg" />
+                        </div>
+                        <div class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                          No Room Image
+                        </div>
                       </div>
                     </div>
 
-                    <div class="flex items-center justify-between gap-1">
+                    <div class="absolute right-2 top-2 flex items-center gap-2">
                       <span
-                        class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold"
+                        class="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold shadow-sm backdrop-blur"
                         :class="roomAvailabilityClass(room)"
                       >
                         <i v-if="room.isAvailable === false" class="fa-solid fa-lock text-[9px]" />
                         {{ roomAvailabilityLabel(room) }}
                       </span>
 
-                      <i
+                      <span
                         v-if="isRoomOn(room)"
-                        class="fa-solid fa-circle-check text-[12px] text-sky-500"
-                      />
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500 text-white shadow"
+                      >
+                        <i class="fa-solid fa-check text-[11px]" />
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="space-y-3 p-3">
+                    <div class="min-w-0">
+                      <div
+                        class="truncate text-[18px] font-extrabold leading-tight"
+                        :class="room.isAvailable === false
+                          ? 'text-rose-700 dark:text-rose-300'
+                          : 'text-slate-800 dark:text-slate-100'"
+                      >
+                        {{ room.name || 'Unnamed Room' }}
+                      </div>
+
+                      <div
+                        class="mt-1 flex flex-wrap items-center gap-2 text-[11px]"
+                        :class="room.isAvailable === false
+                          ? 'text-rose-500 dark:text-rose-400'
+                          : 'text-slate-500 dark:text-slate-400'"
+                      >
+                        <span class="inline-flex items-center gap-1">
+                          <i class="fa-solid fa-user-group text-[10px]" />
+                          {{ roomCapacity(room) || 0 }} pax
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </button>
+              </div>
+
+              <div
+                v-if="props.form.roomRequired && props.form.roomName && canShowAvailability"
+                class="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5
+                       dark:border-sky-900/40 dark:bg-sky-950/20"
+              >
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">
+                  Selected Room
+                </div>
+
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <span
+                    class="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white px-2.5 py-1 text-[11px]
+                           font-medium text-sky-800 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-200"
+                  >
+                    <i class="fa-solid fa-door-open text-[10px]" />
+                    {{ props.form.roomName || '—' }}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
