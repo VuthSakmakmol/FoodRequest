@@ -92,6 +92,23 @@ const BookingRoomSchema = new mongoose.Schema(
     timeStart: { type: String, required: true, trim: true }, // HH:mm
     timeEnd: { type: String, required: true, trim: true }, // HH:mm
 
+    recurringId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'BookingRoomRecurring',
+      default: null,
+      index: true,
+    },
+    isRecurring: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    recurringIndex: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     /* request detail */
     meetingTitle: { type: String, default: '', trim: true },
     purpose: { type: String, default: '', trim: true },
@@ -178,6 +195,8 @@ BookingRoomSchema.index({ roomName: 1, bookingDate: 1, roomStatus: 1 })
 BookingRoomSchema.index({ bookingDate: 1, overallStatus: 1 })
 BookingRoomSchema.index({ roomStatus: 1, materialStatus: 1, overallStatus: 1 })
 BookingRoomSchema.index({ 'materials.materialCode': 1, bookingDate: 1, materialStatus: 1 })
+BookingRoomSchema.index({ recurringId: 1, bookingDate: 1 })
+BookingRoomSchema.index({ employeeId: 1, recurringId: 1 })
 
 function emptyApproval() {
   return {

@@ -11,6 +11,7 @@ import { searchBookingRoomEmployees } from '@/utils/bookingRoom.api'
 import BookingRoomRequesterSection from './sections/BookingRoomRequesterSection.vue'
 import BookingRoomDetailSection from './sections/BookingRoomDetailSection.vue'
 import BookingRoomRequestTypeSection from './sections/BookingRoomRequestTypeSection.vue'
+import BookingRoomRecurringSection from './sections/BookingRoomRecurringSection.vue'
 
 defineOptions({ name: 'PublicBookingRoomRequest' })
 
@@ -35,6 +36,9 @@ const form = ref({
   contactNumber: '',
 
   bookingDate: dayjs().format('YYYY-MM-DD'),
+  endDate: dayjs().format('YYYY-MM-DD'),
+  recurring: false,
+
   timeStart: '',
   timeEnd: '',
   timeStartHour: '',
@@ -112,6 +116,9 @@ function resetForm({ keepEmployee = true } = {}) {
     contactNumber: keepEmployee ? s(current?.contactNumber) : '',
 
     bookingDate: dayjs().format('YYYY-MM-DD'),
+    endDate: dayjs().format('YYYY-MM-DD'),
+    recurring: false,
+
     timeStart: '',
     timeEnd: '',
     timeStartHour: '',
@@ -316,6 +323,13 @@ function validateForm() {
     e.push('End time must be after start time.')
   }
 
+  if (f.recurring) {
+    if (!s(f.endDate)) e.push('End date is required for recurring booking.')
+    if (s(f.endDate) && dayjs(f.endDate).isBefore(dayjs(f.bookingDate), 'day')) {
+      e.push('End date must be the same or after booking date.')
+    }
+  }
+
   if (!f.roomRequired && !f.materialRequired) {
     e.push('Please choose at least room or material.')
   }
@@ -357,6 +371,7 @@ async function submit() {
     const payload = {
       employeeId: s(form.value.employeeId),
       bookingDate: s(form.value.bookingDate),
+      endDate: form.value.recurring ? s(form.value.endDate) : '',
       timeStart: s(form.value.timeStart),
       timeEnd: s(form.value.timeEnd),
       meetingTitle: compactText(form.value.meetingTitle),
@@ -380,12 +395,18 @@ async function submit() {
         : [],
     }
 
-    await api.post('/public/booking-room', payload)
+    if (form.value.recurring) {
+      await api.post('/public/booking-room/recurring', payload)
+    } else {
+      await api.post('/public/booking-room', payload)
+    }
 
     showToast({
       type: 'success',
       title: 'Submitted',
-      message: 'Your meeting room request has been submitted.',
+      message: form.value.recurring
+        ? 'Your recurring meeting room request has been submitted.'
+        : 'Your meeting room request has been submitted.',
     })
 
     resetForm({ keepEmployee: true })
@@ -532,6 +553,10 @@ onBeforeUnmount(() => {
                 @load-availability="loadAvailability"
               />
             </div>
+          </div>
+
+          <div>
+            <BookingRoomRecurringSection :form="form" />
           </div>
 
           <div>

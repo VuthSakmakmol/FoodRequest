@@ -6,6 +6,7 @@ const BookingRoom = require('../../models/bookingRoom/BookingRoom')
 const BookingRoomResource = require('../../models/bookingRoom/BookingRoomResource')
 const BookingRoomMaterial = require('../../models/bookingRoom/BookingRoomMaterial')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
+const BookingRoomRecurring = require('../../models/bookingRoom/BookingRoomRecurring')
 
 const {
   broadcastBookingRoomRequest,
@@ -773,6 +774,209 @@ async function createBooking(req, res, next) {
   }
 }
 
+async function createRecurringBooking(req, res, next) {
+  try {
+    const payload = req.body || {}
+    const employeeId = parseEmployeeId(req, payload)
+    if (!employeeId) throw createError(400, 'employeeId is required.')
+
+    const bookingDate = s(payload.bookingDate)
+    const endDate = s(payload.endDate)
+
+    if (!isValidDate(bookingDate)) {
+      throw createError(400, 'Invalid bookingDate (YYYY-MM-DD).')
+    }
+
+    if (!isValidDate(endDate)) {
+      throw createError(400, 'Invalid endDate (YYYY-MM-DD).')
+    }
+
+    if (endDate < bookingDate) {
+      throw createError(400, 'endDate must be the same or after bookingDate.')
+    }
+
+    const start = new Date(`${bookingDate}T00:00:00`)
+    const end = new Date(`${endDate}T00:00:00`)
+
+    const bookingDates = []
+    const cur = new Date(start)
+
+    while (cur <= end) {
+      const y = cur.getFullYear()
+      const m = String(cur.getMonth() + 1).padStart(2, '0')
+      const d = String(cur.getDate()).padStart(2, '0')
+      bookingDates.push(`${y}-${m}-${d}`)
+      cur.setDate(cur.getDate() + 1)
+    }
+
+    if (!bookingDates.length) {
+      throw createError(400, 'No recurring dates generated.')
+    }
+
+    if (bookingDates.length > 31) {
+      throw createError(400, 'Maximum 31 booking dates per recurring request.')
+    }
+
+    const employeeSnapshot = await buildEmployeeSnapshot(employeeId)
+    const actor = pickIdentityFrom(req)
+
+    const createdDocs = []
+    const conflicts = []
+    let firstNormalized = null
+
+    for (let i = 0; i < bookingDates.length; i += 1) {
+      const oneDate = bookingDates[i]
+      const rowPayload = {
+        ...payload,
+        bookingDate: oneDate,
+      }
+
+      validateBasePayload(rowPayload)
+      const normalized = await normalizeRequestPayload(rowPayload)
+
+      if (!firstNormalized) firstNormalized = normalized
+
+      if (normalized.roomRequired) {
+        try {
+          await assertRoomApprovalConflict({
+            bookingDate: normalized.bookingDate,
+            timeStart: normalized.timeStart,
+            timeEnd: normalized.timeEnd,
+            roomCode: normalized.roomCode,
+          })
+        } catch (err) {
+          conflicts.push({
+            bookingDate: oneDate,
+            type: 'ROOM',
+            message: err.message || 'Room conflict.',
+          })
+        }
+      }
+
+      if (normalized.materialRequired) {
+        try {
+          await assertMaterialApprovalConflict({
+            bookingDate: normalized.bookingDate,
+            timeStart: normalized.timeStart,
+            timeEnd: normalized.timeEnd,
+            materials: normalized.materials,
+          })
+        } catch (err) {
+          conflicts.push({
+            bookingDate: oneDate,
+            type: 'MATERIAL',
+            message: err.message || 'Material conflict.',
+          })
+        }
+      }
+    }
+
+    if (conflicts.length) {
+      throw createError(409, 'Some selected dates have conflicts.', { conflicts })
+    }
+
+    const recurringDoc = await BookingRoomRecurring.create({
+      employeeId,
+      employee: employeeSnapshot,
+
+      bookingDates,
+
+      timeStart: firstNormalized.timeStart,
+      timeEnd: firstNormalized.timeEnd,
+
+      meetingTitle: firstNormalized.meetingTitle,
+      purpose: firstNormalized.purpose,
+      participantEstimate: firstNormalized.participantEstimate,
+      note: firstNormalized.note,
+      needCoffeeBreak: firstNormalized.needCoffeeBreak,
+
+      roomRequired: firstNormalized.roomRequired,
+      roomId: firstNormalized.roomId,
+      roomCode: firstNormalized.roomCode,
+      roomName: firstNormalized.roomName,
+      room: firstNormalized.room,
+
+      materialRequired: firstNormalized.materialRequired,
+      materials: firstNormalized.materials,
+
+      overallStatus: 'PENDING',
+      submittedVia: 'PUBLIC_FORM',
+
+      requesterLoginId: actor.loginId,
+      createdByLoginId: actor.loginId,
+
+      childBookingIds: [],
+      totalOccurrences: bookingDates.length,
+    })
+
+    for (let i = 0; i < bookingDates.length; i += 1) {
+      const oneDate = bookingDates[i]
+      const rowPayload = {
+        ...payload,
+        bookingDate: oneDate,
+      }
+
+      const normalized = await normalizeRequestPayload(rowPayload)
+
+      const doc = await BookingRoom.create({
+        employeeId,
+        employee: employeeSnapshot,
+
+        recurringId: recurringDoc._id,
+        isRecurring: true,
+        recurringIndex: i + 1,
+
+        bookingDate: normalized.bookingDate,
+        timeStart: normalized.timeStart,
+        timeEnd: normalized.timeEnd,
+
+        meetingTitle: normalized.meetingTitle,
+        purpose: normalized.purpose,
+        participantEstimate: normalized.participantEstimate,
+        note: normalized.note,
+        needCoffeeBreak: normalized.needCoffeeBreak,
+
+        roomRequired: normalized.roomRequired,
+        roomId: normalized.roomId,
+        roomCode: normalized.roomCode,
+        roomName: normalized.roomName,
+        room: normalized.room,
+
+        materialRequired: normalized.materialRequired,
+        materials: normalized.materials,
+
+        roomStatus: normalized.roomRequired ? 'PENDING' : 'NOT_REQUIRED',
+        materialStatus: normalized.materialRequired ? 'PENDING' : 'NOT_REQUIRED',
+        overallStatus: 'PENDING',
+
+        submittedVia: 'PUBLIC_FORM',
+        cancelReason: '',
+      })
+
+      createdDocs.push(doc)
+    }
+
+    recurringDoc.childBookingIds = createdDocs.map((x) => x._id)
+    recurringDoc.totalOccurrences = createdDocs.length
+    recurringDoc.updatedAt = new Date()
+    await recurringDoc.save()
+
+    for (const doc of createdDocs) {
+      emitBookingRoom(req, doc, 'bookingroom:req:created')
+      emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
+    }
+
+    return res.status(201).json({
+      ok: true,
+      recurringId: recurringDoc._id,
+      totalOccurrences: createdDocs.length,
+      bookings: createdDocs,
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 async function listSchedulePublic(req, res, next) {
   try {
     const { date, roomCode, roomName, material, showPending } = req.query || {}
@@ -1057,6 +1261,7 @@ async function exportAdminExcel(req, res, next) {
 
 module.exports = {
   createBooking,
+  createRecurringBooking,
   listSchedulePublic,
   listMyBookings,
   updateBooking,

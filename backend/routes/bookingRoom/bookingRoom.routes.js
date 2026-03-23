@@ -4,6 +4,7 @@ const router = express.Router()
 
 const bookingCtrl = require('../../controllers/bookingRoom/bookingRoom.controller')
 const { requireAuth, requireRole } = require('../../middlewares/auth')
+const BookingRoomRecurring = require('../../models/bookingRoom/BookingRoomRecurring')
 
 // ✅ all below require login
 router.use(requireAuth)

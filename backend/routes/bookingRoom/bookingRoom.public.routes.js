@@ -6,6 +6,8 @@ const roomAdminCtrl = require('../../controllers/bookingRoom/RoomAdmin.controlle
 const materialAdminCtrl = require('../../controllers/bookingRoom/MaterialAdmin.controller')
 
 router.post('/booking-room', bookingCtrl.createBooking)
+router.post('/booking-room/recurring', bookingCtrl.createRecurringBooking)
+
 router.get('/booking-room/schedule', bookingCtrl.listSchedulePublic)
 
 router.get('/booking-room/rooms/active', roomAdminCtrl.listActiveRooms)
