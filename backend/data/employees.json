@@ -14,7 +14,7 @@
     "department": "Management Office",
     "position": "Infrastructor Manager",
     "contactNumber": "070 825 643",
-    "telegramChatId": "",
+    "telegramChatId": "22222222222222222222",
     "isActive": true
   },
     {
@@ -2237,6 +2237,15 @@
     "position": "Planning Supervisor",
     "contactNumber": "",
     "telegramChatId": "6479988060",
+    "isActive": true
+  },
+    {
+    "employeeId": "12345678",
+    "name": "Test Employee",
+    "department": "Production Planning",
+    "position": "Planning Supervisor",
+    "contactNumber": "",
+    "telegramChatId": "7163451169",
     "isActive": true
   }
 
