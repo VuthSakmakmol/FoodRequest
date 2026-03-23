@@ -11,13 +11,8 @@ const props = defineProps({
   },
 })
 
-/*
-  Parent should listen with:
-  @load-availability="loadAvailability"
-*/
 const emit = defineEmits(['load-availability'])
 
-/* ───────── Time options ───────── */
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
 const MINUTES = ['00', '30']
 
@@ -30,7 +25,6 @@ function combineTime(h, m) {
   return h && m ? `${h}:${m}` : ''
 }
 
-/* ───────── Min booking date = today ───────── */
 const minBookingDate = computed(() => dayjs().format('YYYY-MM-DD'))
 
 function clampBookingDate(val) {
@@ -41,7 +35,6 @@ function clampBookingDate(val) {
   return d.format('YYYY-MM-DD')
 }
 
-/* ───────── Ask parent to refresh room/material availability ───────── */
 function triggerAvailability() {
   emit('load-availability')
 }
@@ -51,7 +44,6 @@ function onBookingDateChange() {
   triggerAvailability()
 }
 
-/* ───────── Clamp date if user somehow sets past date ───────── */
 watch(
   () => props.form.bookingDate,
   (val) => {
@@ -64,7 +56,6 @@ watch(
   }
 )
 
-/* ───────── Sync split time fields from HH:mm ───────── */
 watch(
   () => props.form.timeStart,
   (val) => {
@@ -85,7 +76,6 @@ watch(
   { immediate: true }
 )
 
-/* ───────── Build HH:mm from split fields ───────── */
 watch(
   [() => props.form.timeStartHour, () => props.form.timeStartMinute],
   ([h, m]) => {
@@ -100,7 +90,6 @@ watch(
   }
 )
 
-/* ───────── Default minute when hour selected ───────── */
 watch(() => props.form.timeStartHour, (h) => {
   if (h && !props.form.timeStartMinute) props.form.timeStartMinute = '00'
 })
@@ -109,7 +98,6 @@ watch(() => props.form.timeEndHour, (h) => {
   if (h && !props.form.timeEndMinute) props.form.timeEndMinute = '00'
 })
 
-/* ───────── Inline hint only, no toast ───────── */
 const timeError = computed(() => {
   if (!props.form.timeStart || !props.form.timeEnd) return ''
   const s = toMinutes(props.form.timeStart)
@@ -118,11 +106,6 @@ const timeError = computed(() => {
   return ''
 })
 
-/*
-  React immediately whenever date/time changes.
-  Parent will refresh availability and room cards can become
-  "NOT AVAILABLE" + disabled immediately.
-*/
 watch(
   [() => props.form.bookingDate, () => props.form.timeStart, () => props.form.timeEnd],
   () => {
@@ -309,10 +292,10 @@ onMounted(() => {
 
               <div class="space-y-1 xl:col-span-6">
                 <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-                  Requirement Note
+                  Note
                 </label>
                 <input
-                  v-model="props.form.requirementNote"
+                  v-model="props.form.note"
                   type="text"
                   placeholder="Optional note"
                   class="block w-full rounded-xl border border-slate-300 dark:border-slate-600

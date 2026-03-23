@@ -1,4 +1,4 @@
-//backend/models/bookingRoom/BookingRoom.js
+// backend/models/bookingRoom/BookingRoom.js
 const mongoose = require('mongoose')
 
 function safeStr(v) {
@@ -47,11 +47,14 @@ const ApprovalActionSchema = new mongoose.Schema(
 
 /* ─────────────────────────────
  * room snapshot
- * store both id/code/name for future-proof history
  * ───────────────────────────── */
 const RequestedRoomSchema = new mongoose.Schema(
   {
-    roomId: { type: mongoose.Schema.Types.ObjectId, default: null, ref: 'BookingRoomResource' },
+    roomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      ref: 'BookingRoomResource',
+    },
     roomCode: { type: String, default: '', trim: true, uppercase: true },
     roomName: { type: String, default: '', trim: true },
   },
@@ -60,11 +63,14 @@ const RequestedRoomSchema = new mongoose.Schema(
 
 /* ─────────────────────────────
  * material snapshot
- * supports quantity
  * ───────────────────────────── */
 const RequestedMaterialSchema = new mongoose.Schema(
   {
-    materialId: { type: mongoose.Schema.Types.ObjectId, default: null, ref: 'BookingRoomMaterial' },
+    materialId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      ref: 'BookingRoomMaterial',
+    },
     materialCode: { type: String, required: true, trim: true, uppercase: true },
     materialName: { type: String, default: '', trim: true },
     qty: { type: Number, required: true, min: 1, default: 1 },
@@ -84,29 +90,33 @@ const BookingRoomSchema = new mongoose.Schema(
     /* booking time */
     bookingDate: { type: String, required: true, trim: true, index: true }, // YYYY-MM-DD
     timeStart: { type: String, required: true, trim: true }, // HH:mm
-    timeEnd: { type: String, required: true, trim: true },   // HH:mm
+    timeEnd: { type: String, required: true, trim: true }, // HH:mm
 
     /* request detail */
     meetingTitle: { type: String, default: '', trim: true },
     purpose: { type: String, default: '', trim: true },
     participantEstimate: { type: Number, default: 1, min: 1 },
-    requirementNote: { type: String, default: '', trim: true },
+    note: { type: String, default: '', trim: true },
+    needCoffeeBreak: { type: Boolean, default: false },
 
     /* room section */
     roomRequired: { type: Boolean, default: false, index: true },
 
-    // legacy/simple direct fields kept for easier compatibility with old controller/frontend
-    roomId: { type: mongoose.Schema.Types.ObjectId, default: null, ref: 'BookingRoomResource', index: true },
+    // legacy/simple direct fields kept for easier compatibility
+    roomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      ref: 'BookingRoomResource',
+      index: true,
+    },
     roomCode: { type: String, default: '', trim: true, uppercase: true, index: true },
     roomName: { type: String, default: '', trim: true, index: true },
 
-    // full room snapshot
+    // room snapshot
     room: { type: RequestedRoomSchema, default: null },
 
     /* material section */
     materialRequired: { type: Boolean, default: false, index: true },
-
-    // new structure with qty
     materials: {
       type: [RequestedMaterialSchema],
       default: [],
@@ -169,9 +179,6 @@ BookingRoomSchema.index({ bookingDate: 1, overallStatus: 1 })
 BookingRoomSchema.index({ roomStatus: 1, materialStatus: 1, overallStatus: 1 })
 BookingRoomSchema.index({ 'materials.materialCode': 1, bookingDate: 1, materialStatus: 1 })
 
-/* ─────────────────────────────
- * helper
- * ───────────────────────────── */
 function emptyApproval() {
   return {
     byLoginId: '',
@@ -207,9 +214,6 @@ function deriveOverallStatus(doc) {
   return 'PENDING'
 }
 
-/* ─────────────────────────────
- * normalization helpers
- * ───────────────────────────── */
 function normalizeRoomFields(doc) {
   const roomObj = doc.room && typeof doc.room === 'object' ? doc.room : {}
 
@@ -272,9 +276,6 @@ function normalizeMaterialItems(items) {
   return normalized
 }
 
-/* ─────────────────────────────
- * validation + normalization
- * ───────────────────────────── */
 BookingRoomSchema.pre('validate', function (next) {
   try {
     this.employeeId = safeStr(this.employeeId)
@@ -283,7 +284,8 @@ BookingRoomSchema.pre('validate', function (next) {
     this.timeEnd = safeStr(this.timeEnd)
     this.meetingTitle = safeStr(this.meetingTitle)
     this.purpose = safeStr(this.purpose)
-    this.requirementNote = safeStr(this.requirementNote)
+    this.note = safeStr(this.note)
+    this.needCoffeeBreak = !!this.needCoffeeBreak
     this.cancelReason = safeStr(this.cancelReason)
 
     if (!this.employee || !safeStr(this.employee.employeeId)) {
@@ -304,7 +306,6 @@ BookingRoomSchema.pre('validate', function (next) {
       }
     }
 
-    /* room */
     normalizeRoomFields(this)
 
     if (!this.roomRequired) {
@@ -314,6 +315,7 @@ BookingRoomSchema.pre('validate', function (next) {
       this.room = null
       this.roomStatus = 'NOT_REQUIRED'
       this.roomApproval = emptyApproval()
+      this.needCoffeeBreak = false
     } else {
       if (!this.roomCode && !this.roomName) {
         return next(new Error('roomCode or roomName is required when roomRequired is true.'))
@@ -324,7 +326,6 @@ BookingRoomSchema.pre('validate', function (next) {
       }
     }
 
-    /* materials */
     this.materials = normalizeMaterialItems(this.materials)
 
     if (!this.materialRequired) {
@@ -354,9 +355,6 @@ BookingRoomSchema.pre('validate', function (next) {
   }
 })
 
-/* ─────────────────────────────
- * instance methods
- * ───────────────────────────── */
 BookingRoomSchema.methods.hasAnyApprovedSection = function () {
   return up(this.roomStatus) === 'APPROVED' || up(this.materialStatus) === 'APPROVED'
 }
@@ -372,9 +370,6 @@ BookingRoomSchema.methods.recomputeOverallStatus = function () {
   return this.overallStatus
 }
 
-/* ─────────────────────────────
- * statics
- * ───────────────────────────── */
 BookingRoomSchema.statics.ROOM_STATUS = ROOM_STATUS
 BookingRoomSchema.statics.MATERIAL_STATUS = MATERIAL_STATUS
 BookingRoomSchema.statics.OVERALL_STATUS = OVERALL_STATUS

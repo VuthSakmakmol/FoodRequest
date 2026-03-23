@@ -55,13 +55,9 @@ function roomCapacity(room) {
 function resolveImage(url) {
   const raw = s(url)
   if (!raw) return ''
-
   if (/^https?:\/\//i.test(raw)) return raw
 
-  const base =
-    import.meta.env.VITE_API_BASE ||
-    window.location.origin
-
+  const base = import.meta.env.VITE_API_BASE || window.location.origin
   return `${base.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`
 }
 
@@ -104,7 +100,7 @@ function requestTypeText() {
   if (props.form.roomRequired && props.form.materialRequired) return 'Room + Material'
   if (props.form.roomRequired) return 'Room Only'
   if (props.form.materialRequired) return 'Material Only'
-  return '—'
+  return 'Not selected'
 }
 
 function toggleRoomRequired() {
@@ -114,6 +110,7 @@ function toggleRoomRequired() {
     props.form.roomId = ''
     props.form.roomCode = ''
     props.form.roomName = ''
+    props.form.needCoffeeBreak = false
   }
 }
 
@@ -151,12 +148,14 @@ function onSelectRoom(room) {
     props.form.roomId = ''
     props.form.roomCode = ''
     props.form.roomName = ''
+    props.form.needCoffeeBreak = false
     return
   }
 
   props.form.roomId = s(room._id)
   props.form.roomCode = up(room.code)
   props.form.roomName = s(room.name)
+  props.form.needCoffeeBreak = false
 }
 
 function toggleMaterial(item) {
@@ -225,6 +224,7 @@ watch(
       props.form.roomId = ''
       props.form.roomCode = ''
       props.form.roomName = ''
+      props.form.needCoffeeBreak = false
     }
   },
   { deep: true }
@@ -263,6 +263,7 @@ watch(
       props.form.roomId = ''
       props.form.roomCode = ''
       props.form.roomName = ''
+      props.form.needCoffeeBreak = false
     }
   }
 )
@@ -281,10 +282,13 @@ watch(
   (ok) => {
     if (ok) return
 
+    props.form.roomRequired = false
+    props.form.materialRequired = false
     props.form.roomId = ''
     props.form.roomCode = ''
     props.form.roomName = ''
     props.form.materials = []
+    props.form.needCoffeeBreak = false
   }
 )
 </script>
@@ -330,346 +334,375 @@ watch(
         class="rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm
                dark:border-slate-700 dark:bg-slate-950/90"
       >
-        <div class="grid gap-3 xl:grid-cols-12">
-          <!-- Room -->
+        <div
+          v-if="!canShowAvailability"
+          class="rounded-2xl border border-dashed border-amber-300 bg-amber-50 px-4 py-6 text-center
+                 text-[13px] text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-300"
+        >
+          Please select booking date and time first.
+        </div>
+
+        <div v-else class="grid gap-3 xl:grid-cols-12">
           <div
             class="rounded-xl border border-slate-200 bg-white/90 p-3
                    dark:border-slate-700 dark:bg-slate-950/70 xl:col-span-6"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
-                  <i class="fa-solid fa-door-open text-[12px] text-sky-500" />
-                  <h3
-                    class="text-[11px] font-semibold uppercase tracking-[0.2em]
-                           text-slate-600 dark:text-slate-300"
-                  >
-                    Meeting Room
-                  </h3>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                class="inline-flex min-w-[116px] items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                :class="props.form.roomRequired
-                  ? 'border-sky-500 bg-sky-500 text-white'
-                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
-                @click="toggleRoomRequired"
-              >
-                <i
-                  class="fa-solid"
-                  :class="props.form.roomRequired ? 'fa-toggle-on' : 'fa-toggle-off'"
-                />
-                {{ props.form.roomRequired ? 'Required' : 'Off' }}
-              </button>
-            </div>
-
-            <div class="mt-3">
-              <div class="mb-2 flex items-center justify-between gap-2">
-                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-100">
-                  Rooms
-                </label>
-
-                <span
-                  v-if="loadingAvailability && canShowAvailability"
-                  class="text-[11px] text-slate-500 dark:text-slate-400"
-                >
-                  Checking...
-                </span>
-              </div>
-
-              <div
-                v-if="!canShowAvailability"
-                class="rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-4 text-center text-[12px]
-                       text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-300"
-              >
-                Please select booking date and time first to check available room and material.
-              </div>
-
-              <div
-                v-else-if="!activeRooms.length"
-                class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-[12px]
-                       text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400"
-              >
-                No active rooms found.
-              </div>
-
-              <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
-                <button
-                  v-for="room in activeRooms"
-                  :key="room._id"
-                  type="button"
-                  class="group overflow-hidden rounded-2xl border text-left transition"
-                  :class="[
-                    isRoomOn(room)
-                      ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-300 dark:border-sky-600 dark:bg-sky-950/20 dark:ring-sky-800'
-                      : room.isAvailable === false
-                        ? 'cursor-not-allowed border-rose-200 bg-rose-50 opacity-85 dark:border-rose-900/40 dark:bg-rose-950/20'
-                        : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-sky-700'
-                  ]"
-                  :disabled="!props.form.roomRequired || !canShowAvailability || room.isAvailable === false"
-                  @click="onSelectRoom(room)"
-                >
-                  <div class="relative">
-                    <div
-                      v-if="resolveImage(room.imageUrl)"
-                      class="h-32 w-full overflow-hidden border-b border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"
+            <button
+              type="button"
+              class="w-full rounded-2xl border p-4 text-left transition"
+              :class="props.form.roomRequired
+                ? 'border-sky-500 bg-sky-50 shadow-sm dark:border-sky-700 dark:bg-sky-950/20'
+                : 'border-slate-200 bg-white hover:border-sky-300 hover:shadow-sm dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-sky-700'"
+              @click="toggleRoomRequired"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex h-9 w-9 items-center justify-center rounded-xl
+                             bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
                     >
-                      <img
-                        :src="resolveImage(room.imageUrl)"
-                        :alt="room.name || 'Room image'"
-                        class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
-                      />
-                    </div>
+                      <i class="fa-solid fa-door-open" />
+                    </span>
 
-                    <div
-                      v-else
-                      class="flex h-32 w-full items-center justify-center border-b border-slate-200
-                             bg-gradient-to-br from-slate-100 via-slate-50 to-sky-50
-                             dark:border-slate-700 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800"
-                    >
-                      <div class="text-center">
-                        <div
-                          class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl
-                                 bg-white text-sky-600 shadow-sm dark:bg-slate-800 dark:text-sky-400"
-                        >
-                          <i class="fa-solid fa-door-open text-lg" />
-                        </div>
-                        <div class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                          No Room Image
-                        </div>
+                    <div>
+                      <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100">
+                        Need to book Room?
                       </div>
-                    </div>
-
-                    <div class="absolute right-2 top-2 flex items-center gap-2">
-                      <span
-                        class="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold shadow-sm backdrop-blur"
-                        :class="roomAvailabilityClass(room)"
-                      >
-                        <i v-if="room.isAvailable === false" class="fa-solid fa-lock text-[9px]" />
-                        {{ roomAvailabilityLabel(room) }}
-                      </span>
-
-                      <span
-                        v-if="isRoomOn(room)"
-                        class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500 text-white shadow"
-                      >
-                        <i class="fa-solid fa-check text-[11px]" />
-                      </span>
+                      <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        Click to choose meeting room
+                      </div>
                     </div>
                   </div>
+                </div>
 
-                  <div class="space-y-3 p-3">
-                    <div class="min-w-0">
+                <span
+                  class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold"
+                  :class="props.form.roomRequired
+                    ? 'border-sky-500 bg-sky-500 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'"
+                >
+                  <i class="fa-solid" :class="props.form.roomRequired ? 'fa-check' : 'fa-plus'" />
+                  {{ props.form.roomRequired ? 'Selected' : 'Require' }}
+                </span>
+              </div>
+            </button>
+
+            <transition
+              enter-active-class="transition duration-200 ease-out"
+              enter-from-class="opacity-0 -translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition duration-150 ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-1"
+            >
+              <div v-if="props.form.roomRequired" class="mt-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+                    Available Rooms
+                  </label>
+
+                  <span
+                    v-if="loadingAvailability"
+                    class="text-[11px] text-slate-500 dark:text-slate-400"
+                  >
+                    Checking...
+                  </span>
+                </div>
+
+                <div
+                  v-if="!activeRooms.length"
+                  class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-[12px]
+                         text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400"
+                >
+                  No active rooms found.
+                </div>
+
+                <div v-else class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <button
+                    v-for="room in activeRooms"
+                    :key="room._id"
+                    type="button"
+                    class="group overflow-hidden rounded-2xl border text-left transition"
+                    :class="[
+                      isRoomOn(room)
+                        ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-300 dark:border-sky-600 dark:bg-sky-950/20 dark:ring-sky-800'
+                        : room.isAvailable === false
+                          ? 'cursor-not-allowed border-rose-200 bg-rose-50 opacity-85 dark:border-rose-900/40 dark:bg-rose-950/20'
+                          : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-sky-700'
+                    ]"
+                    :disabled="room.isAvailable === false"
+                    @click="onSelectRoom(room)"
+                  >
+                    <div class="relative">
                       <div
-                        class="truncate text-[18px] font-extrabold leading-tight"
-                        :class="room.isAvailable === false
-                          ? 'text-rose-700 dark:text-rose-300'
-                          : 'text-slate-800 dark:text-slate-100'"
+                        v-if="resolveImage(room.imageUrl)"
+                        class="h-32 w-full overflow-hidden border-b border-slate-200 bg-slate-100 dark:border-slate-700 dark:bg-slate-800"
                       >
-                        {{ room.name || 'Unnamed Room' }}
+                        <img
+                          :src="resolveImage(room.imageUrl)"
+                          :alt="room.name || 'Room image'"
+                          class="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
+                        />
                       </div>
 
                       <div
-                        class="mt-1 flex flex-wrap items-center gap-2 text-[11px]"
-                        :class="room.isAvailable === false
-                          ? 'text-rose-500 dark:text-rose-400'
-                          : 'text-slate-500 dark:text-slate-400'"
+                        v-else
+                        class="flex h-32 w-full items-center justify-center border-b border-slate-200
+                               bg-gradient-to-br from-slate-100 via-slate-50 to-sky-50
+                               dark:border-slate-700 dark:from-slate-800 dark:via-slate-900 dark:to-slate-800"
                       >
-                        <span class="inline-flex items-center gap-1">
-                          <i class="fa-solid fa-user-group text-[10px]" />
-                          {{ roomCapacity(room) || 0 }} pax
+                        <div class="text-center">
+                          <div
+                            class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl
+                                   bg-white text-sky-600 shadow-sm dark:bg-slate-800 dark:text-sky-400"
+                          >
+                            <i class="fa-solid fa-door-open text-lg" />
+                          </div>
+                          <div class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                            No Room Image
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="absolute right-2 top-2 flex items-center gap-2">
+                        <span
+                          class="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold shadow-sm backdrop-blur"
+                          :class="roomAvailabilityClass(room)"
+                        >
+                          <i v-if="room.isAvailable === false" class="fa-solid fa-lock text-[9px]" />
+                          {{ roomAvailabilityLabel(room) }}
+                        </span>
+
+                        <span
+                          v-if="isRoomOn(room)"
+                          class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-sky-500 text-white shadow"
+                        >
+                          <i class="fa-solid fa-check text-[11px]" />
                         </span>
                       </div>
                     </div>
-                  </div>
-                </button>
-              </div>
 
-              <div
-                v-if="props.form.roomRequired && props.form.roomName && canShowAvailability"
-                class="mt-3 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2.5
-                       dark:border-sky-900/40 dark:bg-sky-950/20"
-              >
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">
-                  Selected Room
-                </div>
+                    <div class="space-y-3 p-3">
+                      <div class="min-w-0">
+                        <div
+                          class="truncate text-[18px] font-extrabold leading-tight"
+                          :class="room.isAvailable === false
+                            ? 'text-rose-700 dark:text-rose-300'
+                            : 'text-slate-800 dark:text-slate-100'"
+                        >
+                          {{ room.name || 'Unnamed Room' }}
+                        </div>
 
-                <div class="mt-2 flex flex-wrap items-center gap-2">
-                  <span
-                    class="inline-flex items-center gap-1 rounded-full border border-sky-200 bg-white px-2.5 py-1 text-[11px]
-                           font-medium text-sky-800 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-200"
-                  >
-                    <i class="fa-solid fa-door-open text-[10px]" />
-                    {{ props.form.roomName || '—' }}
-                  </span>
+                        <div
+                          class="mt-1 flex flex-wrap items-center gap-2 text-[11px]"
+                          :class="room.isAvailable === false
+                            ? 'text-rose-500 dark:text-rose-400'
+                            : 'text-slate-500 dark:text-slate-400'"
+                        >
+                          <span class="inline-flex items-center gap-1">
+                            <i class="fa-solid fa-user-group text-[10px]" />
+                            {{ roomCapacity(room) || 0 }} pax
+                          </span>
+                        </div>
+
+                        <div
+                          v-if="isRoomOn(room)"
+                          class="mt-3"
+                        >
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                            :class="props.form.needCoffeeBreak
+                              ? 'border-amber-500 bg-amber-500 text-white'
+                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                            @click.stop="props.form.needCoffeeBreak = !props.form.needCoffeeBreak"
+                          >
+                            <i class="fa-solid fa-mug-hot" />
+                            Need Coffee Break?
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
                 </div>
               </div>
-            </div>
+            </transition>
           </div>
 
-          <!-- Material -->
           <div
             class="rounded-xl border border-slate-200 bg-white/90 p-3
                    dark:border-slate-700 dark:bg-slate-950/70 xl:col-span-6"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex items-center gap-2">
-                  <i class="fa-solid fa-tv text-[12px] text-sky-500" />
-                  <h3
-                    class="text-[11px] font-semibold uppercase tracking-[0.2em]
-                           text-slate-600 dark:text-slate-300"
-                  >
-                    IT Material
-                  </h3>
+            <button
+              type="button"
+              class="w-full rounded-2xl border p-4 text-left transition"
+              :class="props.form.materialRequired
+                ? 'border-sky-500 bg-sky-50 shadow-sm dark:border-sky-700 dark:bg-sky-950/20'
+                : 'border-slate-200 bg-white hover:border-sky-300 hover:shadow-sm dark:border-slate-700 dark:bg-slate-900/60 dark:hover:border-sky-700'"
+              @click="toggleMaterialRequired"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="inline-flex h-9 w-9 items-center justify-center rounded-xl
+                             bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+                    >
+                      <i class="fa-solid fa-tv" />
+                    </span>
+
+                    <div>
+                      <div class="text-[13px] font-bold text-slate-900 dark:text-slate-100">
+                        Need to book IT Material?
+                      </div>
+                      <div class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        Click to choose equipment you need
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <button
-                type="button"
-                class="inline-flex min-w-[116px] items-center justify-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                :class="props.form.materialRequired
-                  ? 'border-sky-500 bg-sky-500 text-white'
-                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
-                @click="toggleMaterialRequired"
-              >
-                <i
-                  class="fa-solid"
-                  :class="props.form.materialRequired ? 'fa-toggle-on' : 'fa-toggle-off'"
-                />
-                {{ props.form.materialRequired ? 'Required' : 'Off' }}
-              </button>
-            </div>
-
-            <div class="mt-3 space-y-2">
-              <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-100">
-                Materials
-              </label>
-
-              <div
-                v-if="!canShowAvailability"
-                class="rounded-xl border border-dashed border-amber-300 bg-amber-50 px-3 py-4 text-center text-[12px]
-                       text-amber-700 dark:border-amber-800/50 dark:bg-amber-950/20 dark:text-amber-300"
-              >
-                Please select booking date and time first to check available room and material.
-              </div>
-
-              <div
-                v-else-if="!activeMaterials.length"
-                class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-[12px]
-                       text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400"
-              >
-                No active materials found.
-              </div>
-
-              <div v-else class="grid gap-2 sm:grid-cols-2">
-                <div
-                  v-for="item in activeMaterials"
-                  :key="item._id"
-                  class="rounded-xl border p-2.5 transition"
-                  :class="isMaterialOn(item.code)
-                    ? 'border-sky-400 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/20'
-                    : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/60'"
+                <span
+                  class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold"
+                  :class="props.form.materialRequired
+                    ? 'border-sky-500 bg-sky-500 text-white'
+                    : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'"
                 >
-                  <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2">
-                        <button
-                          type="button"
-                          class="inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] transition"
-                          :class="isMaterialOn(item.code)
-                            ? 'border-sky-500 bg-sky-500 text-white'
-                            : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'"
-                          :disabled="!props.form.materialRequired || !canShowAvailability || Number(item.availableQty ?? item.totalQty ?? 0) <= 0"
-                          @click="toggleMaterial(item)"
-                        >
-                          <i
-                            class="fa-solid"
-                            :class="isMaterialOn(item.code) ? 'fa-check' : 'fa-plus'"
-                          />
-                        </button>
+                  <i class="fa-solid" :class="props.form.materialRequired ? 'fa-check' : 'fa-plus'" />
+                  {{ props.form.materialRequired ? 'Selected' : 'Require' }}
+                </span>
+              </div>
+            </button>
 
-                        <div class="min-w-0">
-                          <div class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">
-                            {{ item.name || item.code }}
-                          </div>
-                          <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                            {{ item.code }}
+            <transition
+              enter-active-class="transition duration-200 ease-out"
+              enter-from-class="opacity-0 -translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition duration-150 ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-1"
+            >
+              <div v-if="props.form.materialRequired" class="mt-3 space-y-2">
+                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-100">
+                  Available IT Materials
+                </label>
+
+                <div
+                  v-if="!activeMaterials.length"
+                  class="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-4 text-center text-[12px]
+                         text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400"
+                >
+                  No active materials found.
+                </div>
+
+                <div v-else class="grid gap-2 sm:grid-cols-2">
+                  <div
+                    v-for="item in activeMaterials"
+                    :key="item._id"
+                    class="rounded-xl border p-2.5 transition"
+                    :class="isMaterialOn(item.code)
+                      ? 'border-sky-400 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/20'
+                      : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/60'"
+                  >
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                          <button
+                            type="button"
+                            class="inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] transition"
+                            :class="isMaterialOn(item.code)
+                              ? 'border-sky-500 bg-sky-500 text-white'
+                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'"
+                            :disabled="Number(item.availableQty ?? item.totalQty ?? 0) <= 0"
+                            @click="toggleMaterial(item)"
+                          >
+                            <i
+                              class="fa-solid"
+                              :class="isMaterialOn(item.code) ? 'fa-check' : 'fa-plus'"
+                            />
+                          </button>
+
+                          <div class="min-w-0">
+                            <div class="truncate text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                              {{ item.name || item.code }}
+                            </div>
+                            <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                              {{ item.code }}
+                            </div>
                           </div>
                         </div>
                       </div>
+
+                      <div
+                        v-if="isMaterialOn(item.code)"
+                        class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-1
+                               dark:border-slate-700 dark:bg-slate-950"
+                      >
+                        <button
+                          type="button"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-[11px]
+                                 text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                          @click="decreaseQty(item)"
+                        >
+                          <i class="fa-solid fa-minus" />
+                        </button>
+
+                        <span class="min-w-[24px] text-center text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                          {{ materialQtyText(item.code) }}
+                        </span>
+
+                        <button
+                          type="button"
+                          class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-[11px]
+                                 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50
+                                 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                          :disabled="materialQtyText(item.code) >= Number(item.availableQty ?? item.totalQty ?? 0)"
+                          @click="increaseQty(item)"
+                        >
+                          <i class="fa-solid fa-plus" />
+                        </button>
+                      </div>
                     </div>
 
-                    <div
-                      v-if="isMaterialOn(item.code)"
-                      class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-1
-                             dark:border-slate-700 dark:bg-slate-950"
-                    >
-                      <button
-                        type="button"
-                        class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-[11px]
-                               text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                        @click="decreaseQty(item)"
+                    <div class="mt-2 flex items-center justify-between gap-2">
+                      <span
+                        class="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold"
+                        :class="materialAvailabilityClass(item)"
                       >
-                        <i class="fa-solid fa-minus" />
-                      </button>
-
-                      <span class="min-w-[24px] text-center text-[12px] font-semibold text-slate-800 dark:text-slate-100">
-                        {{ materialQtyText(item.code) }}
+                        {{ Number(item.availableQty ?? item.totalQty ?? 0) > 0 ? 'AVAILABLE' : 'OUT OF STOCK' }}
                       </span>
 
-                      <button
-                        type="button"
-                        class="inline-flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-[11px]
-                               text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50
-                               dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                        :disabled="materialQtyText(item.code) >= Number(item.availableQty ?? item.totalQty ?? 0)"
-                        @click="increaseQty(item)"
-                      >
-                        <i class="fa-solid fa-plus" />
-                      </button>
+                      <span class="text-[11px] text-slate-600 dark:text-slate-300">
+                        {{ Number(item.availableQty ?? item.totalQty ?? 0) }}/{{ Number(item.totalQty || 0) }}
+                      </span>
                     </div>
                   </div>
+                </div>
 
-                  <div class="mt-2 flex items-center justify-between gap-2">
+                <div
+                  v-if="props.form.materials?.length"
+                  class="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2
+                         dark:border-emerald-900/40 dark:bg-emerald-950/20"
+                >
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+                    Selected Materials
+                  </div>
+
+                  <div class="mt-2 flex flex-wrap gap-2">
                     <span
-                      class="inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold"
-                      :class="materialAvailabilityClass(item)"
+                      v-for="item in props.form.materials"
+                      :key="item.materialCode"
+                      class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px]
+                             font-medium text-emerald-800 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-200"
                     >
-                      {{ Number(item.availableQty ?? item.totalQty ?? 0) > 0 ? 'AVAILABLE' : 'OUT OF STOCK' }}
-                    </span>
-
-                    <span class="text-[11px] text-slate-600 dark:text-slate-300">
-                      {{ Number(item.availableQty ?? item.totalQty ?? 0) }}/{{ Number(item.totalQty || 0) }}
+                      <i class="fa-solid fa-paperclip text-[10px]" />
+                      {{ item.materialName || item.materialCode }} x{{ Number(item.qty || 0) }}
                     </span>
                   </div>
                 </div>
               </div>
-            </div>
-
-            <div
-              v-if="props.form.materialRequired && props.form.materials?.length && canShowAvailability"
-              class="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2
-                     dark:border-emerald-900/40 dark:bg-emerald-950/20"
-            >
-              <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
-                Selected Materials
-              </div>
-
-              <div class="mt-2 flex flex-wrap gap-2">
-                <span
-                  v-for="item in props.form.materials"
-                  :key="item.materialCode"
-                  class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px]
-                         font-medium text-emerald-800 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-200"
-                >
-                  <i class="fa-solid fa-paperclip text-[10px]" />
-                  {{ item.materialName || item.materialCode }} x{{ Number(item.qty || 0) }}
-                </span>
-              </div>
-            </div>
+            </transition>
           </div>
         </div>
       </div>

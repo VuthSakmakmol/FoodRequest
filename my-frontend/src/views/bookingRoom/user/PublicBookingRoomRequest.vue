@@ -44,15 +44,17 @@ const form = ref({
 
   meetingTitle: '',
   participantEstimate: 1,
-  requirementNote: '',
+  note: '',
 
-  roomRequired: true,
+  roomRequired: false,
   roomId: '',
   roomCode: '',
   roomName: '',
 
   materialRequired: false,
   materials: [],
+
+  needCoffeeBreak: false,
 })
 
 const errors = ref([])
@@ -119,15 +121,17 @@ function resetForm({ keepEmployee = true } = {}) {
 
     meetingTitle: '',
     participantEstimate: 1,
-    requirementNote: '',
+    note: '',
 
-    roomRequired: true,
+    roomRequired: false,
     roomId: '',
     roomCode: '',
     roomName: '',
 
     materialRequired: false,
     materials: [],
+
+    needCoffeeBreak: false,
   }
 
   activeRooms.value = []
@@ -185,7 +189,6 @@ function selectEmployee(emp) {
   }
 }
 
-/* fallback when time not fully chosen yet */
 async function loadActiveMastersOnly({ silent = false } = {}) {
   try {
     if (!silent) loadingAvailability.value = true
@@ -358,7 +361,8 @@ async function submit() {
       timeEnd: s(form.value.timeEnd),
       meetingTitle: compactText(form.value.meetingTitle),
       participantEstimate: Number(form.value.participantEstimate || 1),
-      requirementNote: compactText(form.value.requirementNote),
+      note: compactText(form.value.note),
+      needCoffeeBreak: form.value.roomRequired ? !!form.value.needCoffeeBreak : false,
 
       roomRequired: !!form.value.roomRequired,
       roomId: form.value.roomRequired ? (form.value.roomId || null) : null,
@@ -543,7 +547,11 @@ onBeforeUnmount(() => {
             <div class="text-slate-500 dark:text-slate-400">
               Please review requester, booking detail, and request type before submitting.
             </div>
-            <div class="flex gap-2">
+            <div class="flex items-center gap-2">
+              <span class="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 sm:inline-flex">
+                {{ requestTypeLabel }}
+              </span>
+
               <button
                 class="ui-btn ui-btn-primary"
                 type="button"

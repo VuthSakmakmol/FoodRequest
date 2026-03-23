@@ -394,7 +394,8 @@ async function normalizeRequestPayload(payload) {
     meetingTitle: s(payload.meetingTitle),
     purpose: s(payload.purpose || ''),
     participantEstimate: Math.max(1, Number(payload.participantEstimate || 1)),
-    requirementNote: s(payload.requirementNote),
+    note: s(payload.note),
+    needCoffeeBreak: roomRequired ? !!payload.needCoffeeBreak : false,
 
     roomRequired,
     roomId: room.roomId,
@@ -576,7 +577,7 @@ function buildAdminFilter({
       { 'employee.position': new RegExp(term, 'i') },
       { meetingTitle: new RegExp(term, 'i') },
       { purpose: new RegExp(term, 'i') },
-      { requirementNote: new RegExp(term, 'i') },
+      { note: new RegExp(term, 'i') },
       { roomName: new RegExp(term, 'i') },
       { roomCode: new RegExp(term, 'i') },
       { 'materials.materialName': new RegExp(term, 'i') },
@@ -740,7 +741,8 @@ async function createBooking(req, res, next) {
       meetingTitle: normalized.meetingTitle,
       purpose: normalized.purpose,
       participantEstimate: normalized.participantEstimate,
-      requirementNote: normalized.requirementNote,
+      note: normalized.note,
+      needCoffeeBreak: normalized.needCoffeeBreak,
 
       roomRequired: normalized.roomRequired,
       roomId: normalized.roomId,
@@ -875,7 +877,8 @@ async function updateBooking(req, res, next) {
     doc.meetingTitle = normalized.meetingTitle
     doc.purpose = normalized.purpose
     doc.participantEstimate = normalized.participantEstimate
-    doc.requirementNote = normalized.requirementNote
+    doc.note = normalized.note
+    doc.needCoffeeBreak = normalized.needCoffeeBreak
 
     doc.roomRequired = normalized.roomRequired
     doc.roomId = normalized.roomId
@@ -1004,7 +1007,8 @@ async function exportAdminExcel(req, res, next) {
       MeetingTitle: s(b.meetingTitle),
       Purpose: s(b.purpose),
       ParticipantEstimate: Number(b.participantEstimate || 0),
-      RequirementNote: s(b.requirementNote),
+      Note: s(b.note),
+      NeedCoffeeBreak: b.needCoffeeBreak ? 'YES' : 'NO',
 
       RoomRequired: b.roomRequired ? 'YES' : 'NO',
       RoomCode: s(b.roomCode),
