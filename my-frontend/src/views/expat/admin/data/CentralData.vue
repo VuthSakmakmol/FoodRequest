@@ -59,15 +59,17 @@ function fmtDT(iso) {
   const d = dayjs(v)
   return d.isValid() ? d.format('YYYY-MM-DD HH:mm') : '—'
 }
-
 function compactText(v) {
   return String(v || '').replace(/\s+/g, ' ').trim()
 }
-function briefText(v, max = 120) {
+function briefText(v, max = 140) {
   const t = compactText(v)
   if (!t) return '—'
   if (t.length <= max) return t
   return `${t.slice(0, max).trimEnd()}…`
+}
+function rowNo(index) {
+  return skip.value + index + 1
 }
 
 function moduleIcon(mod) {
@@ -90,6 +92,24 @@ function badgeClassForModule(mod) {
     return 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/35 dark:text-emerald-200 dark:ring-emerald-900/45'
   }
   return 'bg-slate-50 text-slate-700 ring-slate-200 dark:bg-slate-950/35 dark:text-slate-200 dark:ring-slate-800/55'
+}
+
+function stageBadgeClass(stage) {
+  const x = up(stage)
+  if (x === 'MANAGER') return 'ui-badge ui-badge-info'
+  if (x === 'GM') return 'ui-badge ui-badge-warning'
+  if (x === 'COO') return 'ui-badge ui-badge-success'
+  if (x === 'FINAL') return 'ui-badge'
+  return 'ui-badge'
+}
+
+function statusBadgeClass(status) {
+  const x = up(status)
+  if (x === 'APPROVED') return 'ui-badge ui-badge-success'
+  if (x === 'REJECTED') return 'ui-badge ui-badge-danger'
+  if (x === 'CANCELLED') return 'ui-badge'
+  if (x.startsWith('PENDING')) return 'ui-badge ui-badge-warning'
+  return 'ui-badge'
 }
 
 /* summary badges */
@@ -118,7 +138,7 @@ async function fetchCentral() {
     rows.value = Array.isArray(data?.rows) ? data.rows : []
     total.value = Number(data?.total || 0)
   } catch (e) {
-    showToast({ type: 'error', message: 'Failed to load Central Data' })
+    showToast({ type: 'error', message: 'Failed to load report' })
   } finally {
     loading.value = false
   }
@@ -193,7 +213,7 @@ async function exportExcel() {
     }))
 
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), 'Central Data')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), 'Report')
 
     const legend = [
       { Key: 'Module', Meaning: 'LEAVE / FORGET_SCAN / SWAP_DAY' },
@@ -203,7 +223,7 @@ async function exportExcel() {
     ]
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(legend), 'Legend')
 
-    XLSX.writeFile(wb, `central_data_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`)
+    XLSX.writeFile(wb, `report_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`)
     showToast({ type: 'success', message: 'Excel exported' })
   } catch (e) {
     showToast({ type: 'error', message: 'Export failed' })
@@ -232,7 +252,7 @@ onBeforeUnmount(() => {
           <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
-                <div class="text-[16px] font-extrabold text-white">Central Data</div>
+                <div class="text-[16px] font-extrabold text-white">Report</div>
                 <span
                   class="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-extrabold text-white ring-1 ring-inset ring-white/20"
                 >
@@ -301,7 +321,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee / name / dept / summary..."
+                    placeholder="Employee / name / dept / request ID / summary..."
                     class="w-full min-w-0 bg-transparent text-white placeholder:text-white/60 outline-none"
                   />
                 </div>
@@ -345,6 +365,7 @@ onBeforeUnmount(() => {
                   <option value="GM_AND_COO">GM_AND_COO</option>
                   <option value="MANAGER_ONLY">MANAGER_ONLY</option>
                   <option value="GM_ONLY">GM_ONLY</option>
+                  <option value="COO_ONLY">COO_ONLY</option>
                 </select>
               </div>
 
@@ -382,99 +403,145 @@ onBeforeUnmount(() => {
           <!-- DESKTOP TABLE -->
           <div v-if="!isMobile" class="mt-0">
             <div class="ui-table-wrap ui-scrollbar overflow-x-auto overflow-y-hidden">
-              <table class="ui-table min-w-[1400px]">
+              <table class="ui-table min-w-[2800px]">
                 <thead>
                   <tr>
+                    <th class="ui-th w-[80px]">No</th>
                     <th class="ui-th w-[160px]">Module</th>
+                    <th class="ui-th w-[180px]">Request ID</th>
                     <th class="ui-th w-[120px]">Emp ID</th>
-                    <th class="ui-th w-[240px] text-left">Name</th>
-                    <th class="ui-th w-[180px]">Dept</th>
-                    <th class="ui-th w-[200px]">Mode</th>
-                    <th class="ui-th w-[220px]">Status / Stage</th>
-                    <th class="ui-th w-[240px]">Date</th>
-                    <th class="ui-th w-[520px] text-left">Summary</th>
+                    <th class="ui-th w-[220px] text-left">Employee Name</th>
+                    <th class="ui-th w-[180px] text-left">Department</th>
+                    <th class="ui-th w-[180px]">Approval Mode</th>
+                    <th class="ui-th w-[180px]">Status</th>
+                    <th class="ui-th w-[120px]">Stage</th>
+                    <th class="ui-th w-[120px]">Date From</th>
+                    <th class="ui-th w-[120px]">Date To</th>
+                    <th class="ui-th w-[360px] text-left">Summary</th>
+                    <th class="ui-th w-[360px] text-left">Reason</th>
+                    <th class="ui-th w-[170px]">Created At</th>
+                    <th class="ui-th w-[170px]">Updated At</th>
+                    <th class="ui-th w-[180px]">Manager Decision At</th>
+                    <th class="ui-th w-[180px]">GM Decision At</th>
+                    <th class="ui-th w-[180px]">COO Decision At</th>
                   </tr>
                 </thead>
 
                 <tbody>
                   <tr v-if="loading">
-                    <td colspan="8" class="ui-td py-8 text-center opacity-70">
+                    <td colspan="18" class="ui-td py-8 text-center opacity-70">
                       <i class="fa-solid fa-circle-notch fa-spin mr-2"></i>
                       Loading...
                     </td>
                   </tr>
 
                   <tr v-else-if="!rows.length">
-                    <td colspan="8" class="ui-td py-8 text-center opacity-70">No data</td>
+                    <td colspan="18" class="ui-td py-8 text-center opacity-70">No data</td>
                   </tr>
 
                   <tr
                     v-else
-                    v-for="r in rows"
+                    v-for="(r, index) in rows"
                     :key="r.module + ':' + r.requestId"
                     class="ui-tr-hover"
                   >
+                    <td class="ui-td whitespace-nowrap font-semibold">
+                      {{ rowNo(index) }}
+                    </td>
+
                     <td class="ui-td">
                       <span
                         class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ring-1 whitespace-nowrap"
                         :class="badgeClassForModule(r.module)"
                       >
                         <i class="fa-solid" :class="moduleIcon(r.module)"></i>
-                        {{ r.module }}
+                        {{ r.module || '—' }}
                       </span>
                     </td>
 
-                    <td class="ui-td whitespace-nowrap font-medium">{{ r.employeeId || '—' }}</td>
+                    <td class="ui-td whitespace-nowrap font-medium">
+                      {{ r.requestId || '—' }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap font-medium">
+                      {{ r.employeeId || '—' }}
+                    </td>
 
                     <td class="ui-td text-left">
-                      <div class="truncate font-extrabold text-slate-900 dark:text-slate-50">
+                      <div class="font-extrabold text-slate-900 dark:text-slate-50">
                         {{ r.employeeName || '—' }}
                       </div>
                     </td>
 
-                    <td class="ui-td whitespace-nowrap">{{ r.department || '—' }}</td>
+                    <td class="ui-td text-left">
+                      {{ r.department || '—' }}
+                    </td>
 
-                    <td class="ui-td text-xs font-semibold whitespace-nowrap">
+                    <td class="ui-td whitespace-nowrap text-xs font-semibold">
                       {{ r.approvalMode || '—' }}
                     </td>
 
                     <td class="ui-td">
-                      <div class="whitespace-nowrap font-semibold">{{ r.status || '—' }}</div>
-                      <div class="whitespace-nowrap text-xs opacity-70">Stage: {{ r.stage || '—' }}</div>
+                      <span :class="statusBadgeClass(r.status)">
+                        {{ r.status || '—' }}
+                      </span>
                     </td>
 
                     <td class="ui-td">
-                      <div class="whitespace-nowrap">{{ fmtDate(r.dateFrom) }}</div>
-                      <div
-                        v-if="r.dateTo && r.dateTo !== r.dateFrom"
-                        class="whitespace-nowrap text-xs opacity-70"
-                      >
-                        → {{ fmtDate(r.dateTo) }}
+                      <span :class="stageBadgeClass(r.stage)">
+                        {{ r.stage || '—' }}
+                      </span>
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDate(r.dateFrom) }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDate(r.dateTo) }}
+                    </td>
+
+                    <td class="ui-td text-left">
+                      <div class="line-clamp-3 font-medium">
+                        {{ briefText(r.summary, 220) }}
                       </div>
                     </td>
 
                     <td class="ui-td text-left">
-                      <div class="line-clamp-2 font-medium">
-                        {{ r.summary || '—' }}
+                      <div class="line-clamp-3 text-sm opacity-80">
+                        {{ briefText(r.reason, 220) }}
                       </div>
-                      <div v-if="r.reason" class="line-clamp-2 mt-0.5 text-xs opacity-70">
-                        {{ r.reason }}
-                      </div>
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDT(r.createdAt) }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDT(r.updatedAt) }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDT(r.managerDecisionAt) }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDT(r.gmDecisionAt) }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap">
+                      {{ fmtDT(r.cooDecisionAt) }}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
-
-            <!-- <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-              Tip: You can scroll the table left/right to see all columns.
-            </div> -->
           </div>
 
           <!-- MOBILE CARDS -->
           <div v-else class="mt-0 space-y-2">
             <div
-              v-for="r in rows"
+              v-for="(r, index) in rows"
               :key="r.module + ':' + r.requestId"
               class="rounded-2xl border border-slate-200/60 bg-white/70 p-3 dark:border-slate-800/60 dark:bg-slate-950/40"
             >
@@ -484,42 +551,95 @@ onBeforeUnmount(() => {
                   :class="badgeClassForModule(r.module)"
                 >
                   <i class="fa-solid" :class="moduleIcon(r.module)"></i>
-                  {{ r.module }}
+                  {{ r.module || '—' }}
                 </span>
 
-                <div class="text-right text-xs opacity-70">
-                  <div class="font-semibold">{{ r.status || '—' }}</div>
-                  <div>Stage: {{ r.stage || '—' }}</div>
+                <div class="text-right text-xs">
+                  <div class="font-semibold text-slate-700 dark:text-slate-200">
+                    #{{ rowNo(index) }}
+                  </div>
+                  <div class="mt-1">
+                    <span :class="statusBadgeClass(r.status)">
+                      {{ r.status || '—' }}
+                    </span>
+                  </div>
                 </div>
               </div>
 
-              <div class="mt-2">
-                <div class="font-medium text-slate-900 dark:text-slate-50">
-                  {{ r.employeeId || '—' }} — {{ r.employeeName || '—' }}
+              <div class="mt-3 grid grid-cols-1 gap-2 text-sm">
+                <div>
+                  <div class="text-xs opacity-70">Request ID</div>
+                  <div class="font-medium break-all">{{ r.requestId || '—' }}</div>
                 </div>
-                <div class="text-xs opacity-70">{{ r.department || '—' }}</div>
-              </div>
 
-              <div class="mt-2 text-sm">
-                <div class="text-xs opacity-70">Mode</div>
-                <div class="font-semibold">{{ r.approvalMode || '—' }}</div>
-              </div>
-
-              <div class="mt-2 text-sm">
-                <div class="text-xs opacity-70">Date</div>
-                <div class="font-medium">
-                  {{ fmtDate(r.dateFrom) }}
-                  <span v-if="r.dateTo && r.dateTo !== r.dateFrom" class="opacity-80">
-                    → {{ fmtDate(r.dateTo) }}
-                  </span>
+                <div>
+                  <div class="text-xs opacity-70">Employee</div>
+                  <div class="font-semibold text-slate-900 dark:text-slate-50">
+                    {{ r.employeeId || '—' }} — {{ r.employeeName || '—' }}
+                  </div>
+                  <div class="text-xs opacity-70">{{ r.department || '—' }}</div>
                 </div>
-              </div>
 
-              <div class="mt-2 text-sm">
-                <div class="text-xs opacity-70">Summary</div>
-                <div class="font-medium">{{ r.summary || '—' }}</div>
-                <div v-if="r.reason" class="line-clamp-3 mt-1 text-xs opacity-70">
-                  {{ r.reason }}
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <div class="text-xs opacity-70">Approval Mode</div>
+                    <div class="font-medium">{{ r.approvalMode || '—' }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-70">Stage</div>
+                    <div>
+                      <span :class="stageBadgeClass(r.stage)">
+                        {{ r.stage || '—' }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <div class="text-xs opacity-70">Date From</div>
+                    <div class="font-medium">{{ fmtDate(r.dateFrom) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-70">Date To</div>
+                    <div class="font-medium">{{ fmtDate(r.dateTo) }}</div>
+                  </div>
+                </div>
+
+                <div>
+                  <div class="text-xs opacity-70">Summary</div>
+                  <div class="font-medium">{{ r.summary || '—' }}</div>
+                </div>
+
+                <div>
+                  <div class="text-xs opacity-70">Reason</div>
+                  <div class="text-sm">{{ r.reason || '—' }}</div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                  <div>
+                    <div class="text-xs opacity-70">Created At</div>
+                    <div class="font-medium">{{ fmtDT(r.createdAt) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-70">Updated At</div>
+                    <div class="font-medium">{{ fmtDT(r.updatedAt) }}</div>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2">
+                  <div>
+                    <div class="text-xs opacity-70">Manager Decision At</div>
+                    <div class="font-medium">{{ fmtDT(r.managerDecisionAt) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-70">GM Decision At</div>
+                    <div class="font-medium">{{ fmtDT(r.gmDecisionAt) }}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs opacity-70">COO Decision At</div>
+                    <div class="font-medium">{{ fmtDT(r.cooDecisionAt) }}</div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -541,8 +661,9 @@ onBeforeUnmount(() => {
                   {{ opt }}
                 </option>
               </select>
+
               <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                Page {{ page }} / {{ totalPages }}
+                Showing {{ rows.length }} of {{ total }} • Page {{ page }} / {{ totalPages }}
               </span>
             </div>
 

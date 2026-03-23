@@ -10,12 +10,7 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const {
   broadcastBookingRoomRequest,
   broadcastBookingRoomAvailability,
-  broadcastBookingRoomMaster,
-  broadcastBookingRoomMastersChanged,
 } = require('../../utils/bookingRoom.realtime')
-
-let User = null
-try { User = require('../../models/User') } catch { User = null }
 
 /* ───────────────── notify (Telegram) ───────────────── */
 let notify = null
@@ -60,15 +55,11 @@ function isValidTime(hhmm) {
 
 function toMinutes(hhmm) {
   const [h, m] = s(hhmm).split(':').map(Number)
-  return (h * 60) + m
+  return h * 60 + m
 }
 
 function overlaps(startA, endA, startB, endB) {
   return startA < endB && startB < endA
-}
-
-function nowPPDate() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' })
 }
 
 function safeId(v) {
@@ -115,16 +106,6 @@ function pickIdentityFrom(req) {
   }
 }
 
-function canRoomAdmin(req) {
-  const { roles } = pickIdentityFrom(req)
-  return roles.includes('ROOM_ADMIN') || roles.includes('ADMIN') || roles.includes('ROOT_ADMIN')
-}
-
-function canMaterialAdmin(req) {
-  const { roles } = pickIdentityFrom(req)
-  return roles.includes('MATERIAL_ADMIN') || roles.includes('ADMIN') || roles.includes('ROOT_ADMIN')
-}
-
 function canAdminView(req) {
   const { roles } = pickIdentityFrom(req)
   return roles.some((r) =>
@@ -156,26 +137,6 @@ function emitBookingRoomAvailability(req, payload, event = 'bookingroom:availabi
   }
 }
 
-function emitBookingRoomMaster(req, payload, event) {
-  try {
-    const io = getIo(req)
-    if (!io || !event) return
-    broadcastBookingRoomMaster(io, payload, event)
-  } catch (e) {
-    console.warn('⚠️ booking room master realtime emit failed:', e?.message)
-  }
-}
-
-function emitBookingRoomMastersChanged(req, payload = {}, event = 'bookingroom:masters:changed') {
-  try {
-    const io = getIo(req)
-    if (!io) return
-    broadcastBookingRoomMastersChanged(io, payload, event)
-  } catch (e) {
-    console.warn('⚠️ booking room masters changed emit failed:', e?.message)
-  }
-}
-
 async function notifySafe(type, payload = {}) {
   try {
     if (!notify) return
@@ -194,7 +155,6 @@ async function notifySafe(type, payload = {}) {
       return
     }
 
-    // requester updated request; usually avoid spamming approvers again
     if (kind === 'BOOKING_ROOM_UPDATED') {
       await safeNotify(notify?.notifyBookingUpdatedToEmployee, doc)
       return
@@ -203,17 +163,6 @@ async function notifySafe(type, payload = {}) {
     if (kind === 'BOOKING_ROOM_CANCELLED') {
       await safeNotify(notify?.notifyBookingCancelledToEmployee, doc)
       return
-    }
-
-    if (kind === 'BOOKING_ROOM_ROOM_DECISION') {
-      await safeNotify(notify?.notifyRoomDecisionToEmployee, doc)
-      await safeNotify(notify?.notifyCurrentApprover, doc)
-      return
-    }
-
-    if (kind === 'BOOKING_ROOM_MATERIAL_DECISION') {
-      await safeNotify(notify?.notifyMaterialDecisionToEmployee, doc)
-      await safeNotify(notify?.notifyCurrentApprover, doc)
     }
   } catch (e) {
     console.warn('⚠️ notifySafe failed:', e?.message)
@@ -265,11 +214,11 @@ function validateBasePayload(payload) {
 function parseEmployeeId(req, payload = {}) {
   return s(
     payload.employeeId ||
-    req.body?.employeeId ||
-    req.query?.employeeId ||
-    req.headers['x-employee-id'] ||
-    req.user?.employeeId ||
-    ''
+      req.body?.employeeId ||
+      req.query?.employeeId ||
+      req.headers['x-employee-id'] ||
+      req.user?.employeeId ||
+      ''
   )
 }
 
@@ -315,8 +264,8 @@ async function findActiveMaterialMastersByCodes(codes = []) {
 
 function normalizeRawMaterialPayload(v) {
   const rawItems = arr(v)
-
   const out = []
+
   for (const item of rawItems) {
     if (typeof item === 'string') {
       const code = up(item)
@@ -464,7 +413,13 @@ async function normalizeRequestPayload(payload) {
   }
 }
 
-async function assertRoomApprovalConflict({ bookingDate, timeStart, timeEnd, roomCode, excludeId = null }) {
+async function assertRoomApprovalConflict({
+  bookingDate,
+  timeStart,
+  timeEnd,
+  roomCode,
+  excludeId = null,
+}) {
   if (!s(roomCode)) return
 
   const startMin = toMinutes(timeStart)
@@ -494,7 +449,13 @@ async function assertRoomApprovalConflict({ bookingDate, timeStart, timeEnd, roo
   }
 }
 
-async function assertMaterialApprovalConflict({ bookingDate, timeStart, timeEnd, materials = [], excludeId = null }) {
+async function assertMaterialApprovalConflict({
+  bookingDate,
+  timeStart,
+  timeEnd,
+  materials = [],
+  excludeId = null,
+}) {
   const wants = arr(materials)
     .map((x) => ({
       materialCode: up(x?.materialCode),
@@ -569,123 +530,6 @@ async function assertMaterialApprovalConflict({ bookingDate, timeStart, timeEnd,
   }
 }
 
-async function assertRoomMasterCanDeactivate({ roomDoc, excludePast = true }) {
-  if (!roomDoc?._id) return
-
-  const query = {
-    roomRequired: true,
-    roomStatus: 'APPROVED',
-    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-    $or: [
-      { roomId: roomDoc._id },
-      { roomCode: up(roomDoc.code) },
-      { roomName: s(roomDoc.name) },
-    ],
-  }
-
-  if (excludePast) {
-    query.bookingDate = { $gte: nowPPDate() }
-  }
-
-  const exists = await BookingRoom.findOne(query)
-    .select('_id bookingDate timeStart timeEnd roomName roomCode')
-    .lean()
-
-  if (exists) {
-    throw createError(
-      409,
-      `Cannot deactivate room "${s(roomDoc.name) || up(roomDoc.code)}" because it is used by approved booking ${s(exists.bookingDate)} ${s(exists.timeStart)}-${s(exists.timeEnd)}.`
-    )
-  }
-}
-
-async function assertMaterialMasterCanDeactivate({ materialDoc, excludePast = true }) {
-  if (!materialDoc?._id) return
-
-  const query = {
-    materialRequired: true,
-    materialStatus: 'APPROVED',
-    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-    'materials.materialCode': up(materialDoc.code),
-  }
-
-  if (excludePast) {
-    query.bookingDate = { $gte: nowPPDate() }
-  }
-
-  const exists = await BookingRoom.findOne(query)
-    .select('_id bookingDate timeStart timeEnd materials')
-    .lean()
-
-  if (exists) {
-    throw createError(
-      409,
-      `Cannot deactivate material "${s(materialDoc.name) || up(materialDoc.code)}" because it is used by approved booking ${s(exists.bookingDate)} ${s(exists.timeStart)}-${s(exists.timeEnd)}.`
-    )
-  }
-}
-
-async function assertMaterialMasterQtyCanShrink({ materialDoc, nextTotalQty }) {
-  const code = up(materialDoc?.code)
-  if (!code) return
-
-  const rows = await BookingRoom.find({
-    bookingDate: { $gte: nowPPDate() },
-    materialRequired: true,
-    materialStatus: 'APPROVED',
-    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-    'materials.materialCode': code,
-  })
-    .select('bookingDate timeStart timeEnd materials')
-    .lean()
-
-  if (!rows.length) return
-
-  const byDate = new Map()
-
-  for (const row of rows) {
-    const date = s(row.bookingDate)
-    if (!date) continue
-
-    let qty = 0
-    for (const item of arr(row.materials)) {
-      if (up(item?.materialCode) === code) {
-        qty += Math.max(0, Number(item?.qty || 0))
-      }
-    }
-    if (qty <= 0) continue
-
-    if (!byDate.has(date)) byDate.set(date, [])
-    byDate.get(date).push(
-      { t: toMinutes(row.timeStart), delta: +qty, kind: 'start' },
-      { t: toMinutes(row.timeEnd), delta: -qty, kind: 'end' }
-    )
-  }
-
-  let maxUsed = 0
-
-  for (const events of byDate.values()) {
-    events.sort((a, b) => {
-      if (a.t !== b.t) return a.t - b.t
-      if (a.kind === b.kind) return 0
-      return a.kind === 'end' ? -1 : 1
-    })
-
-    let running = 0
-    for (const ev of events) {
-      running += ev.delta
-      if (running > maxUsed) maxUsed = running
-    }
-  }
-
-  if (Number(nextTotalQty) < maxUsed) {
-    throw createError(
-      409,
-      `Cannot reduce material "${s(materialDoc?.name) || code}" stock to ${Number(nextTotalQty)} because approved future bookings require up to ${maxUsed} at the same time.`
-    )
-  }
-}
-
 function buildAdminFilter({
   date,
   dateFrom,
@@ -743,30 +587,6 @@ function buildAdminFilter({
   return filter
 }
 
-async function listActiveRooms(_req, res, next) {
-  try {
-    const rows = await BookingRoomResource.find({ isActive: true })
-      .sort({ name: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listActiveMaterials(_req, res, next) {
-  try {
-    const rows = await BookingRoomMaterial.find({ isActive: true })
-      .sort({ name: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
 async function getAvailability(req, res, next) {
   try {
     const { date, timeStart, timeEnd, excludeId = '' } = req.query || {}
@@ -785,10 +605,7 @@ async function getAvailability(req, res, next) {
     const bookingQuery = {
       bookingDate: s(date),
       overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-      $or: [
-        { roomStatus: 'APPROVED' },
-        { materialStatus: 'APPROVED' },
-      ],
+      $or: [{ roomStatus: 'APPROVED' }, { materialStatus: 'APPROVED' }],
     }
 
     if (s(excludeId)) {
@@ -799,7 +616,9 @@ async function getAvailability(req, res, next) {
       BookingRoomResource.find({ isActive: true }).sort({ name: 1 }).lean(),
       BookingRoomMaterial.find({ isActive: true }).sort({ name: 1 }).lean(),
       BookingRoom.find(bookingQuery)
-        .select('timeStart timeEnd roomRequired roomCode roomName roomStatus materialRequired materials materialStatus')
+        .select(
+          'timeStart timeEnd roomRequired roomCode roomName roomStatus materialRequired materials materialStatus'
+        )
         .lean(),
     ])
 
@@ -954,10 +773,7 @@ async function listSchedulePublic(req, res, next) {
     if (String(showPending || '').toLowerCase() === 'true') {
       filter.overallStatus = { $ne: 'CANCELLED' }
     } else {
-      filter.$or = [
-        { roomStatus: 'APPROVED' },
-        { materialStatus: 'APPROVED' },
-      ]
+      filter.$or = [{ roomStatus: 'APPROVED' }, { materialStatus: 'APPROVED' }]
       filter.overallStatus = { $ne: 'CANCELLED' }
     }
 
@@ -1102,7 +918,8 @@ async function cancelBooking(req, res, next) {
       throw createError(400, 'This request can no longer be cancelled.')
     }
 
-    if (doc.bookingDate < nowPPDate()) {
+    const todayPP = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Phnom_Penh' })
+    if (doc.bookingDate < todayPP) {
       throw createError(400, 'Cannot cancel a past booking.')
     }
 
@@ -1115,7 +932,6 @@ async function cancelBooking(req, res, next) {
     doc.overallStatus = 'CANCELLED'
     doc.cancelReason = cancelReason
 
-    // optional cleanup for better downstream state consistency
     if (doc.roomRequired && up(doc.roomStatus) === 'PENDING') doc.roomStatus = 'REJECTED'
     if (doc.materialRequired && up(doc.materialStatus) === 'PENDING') doc.materialStatus = 'REJECTED'
 
@@ -1127,182 +943,6 @@ async function cancelBooking(req, res, next) {
     await notifySafe('BOOKING_ROOM_CANCELLED', { bookingId: doc._id })
 
     return res.json({ ok: true, overallStatus: doc.overallStatus })
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listRoomInbox(req, res, next) {
-  try {
-    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { scope = 'ACTIONABLE' } = req.query || {}
-    const filter = { roomRequired: true }
-
-    if (up(scope) === 'ALL') {
-      filter.roomStatus = { $in: ['PENDING', 'APPROVED', 'REJECTED'] }
-      filter.overallStatus = { $ne: 'CANCELLED' }
-    } else {
-      filter.roomStatus = 'PENDING'
-      filter.overallStatus = { $ne: 'CANCELLED' }
-    }
-
-    const rows = await BookingRoom.find(filter)
-      .sort({ bookingDate: 1, timeStart: 1, createdAt: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listMaterialInbox(req, res, next) {
-  try {
-    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { scope = 'ACTIONABLE' } = req.query || {}
-    const filter = { materialRequired: true }
-
-    if (up(scope) === 'ALL') {
-      filter.materialStatus = { $in: ['PENDING', 'APPROVED', 'REJECTED'] }
-      filter.overallStatus = { $ne: 'CANCELLED' }
-    } else {
-      filter.materialStatus = 'PENDING'
-      filter.overallStatus = { $ne: 'CANCELLED' }
-    }
-
-    const rows = await BookingRoom.find(filter)
-      .sort({ bookingDate: 1, timeStart: 1, createdAt: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function roomDecision(req, res, next) {
-  try {
-    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { id } = req.params
-    const { decision, note = '' } = req.body || {}
-
-    const normalizedDecision = up(decision)
-    if (!['APPROVED', 'REJECTED'].includes(normalizedDecision)) {
-      throw createError(400, 'decision must be APPROVED or REJECTED.')
-    }
-
-    if (normalizedDecision === 'REJECTED' && !s(note)) {
-      throw createError(400, 'Reject reason is required.')
-    }
-
-    const doc = await BookingRoom.findById(id)
-    if (!doc) throw createError(404, 'Booking not found.')
-
-    if (!doc.roomRequired) throw createError(400, 'This booking does not require room approval.')
-    if (up(doc.overallStatus) === 'CANCELLED') throw createError(400, 'Cancelled booking cannot be decided.')
-    if (up(doc.roomStatus) !== 'PENDING') {
-      throw createError(400, `Room decision already completed: ${doc.roomStatus}`)
-    }
-
-    if (normalizedDecision === 'APPROVED') {
-      await assertRoomApprovalConflict({
-        bookingDate: doc.bookingDate,
-        timeStart: doc.timeStart,
-        timeEnd: doc.timeEnd,
-        roomCode: doc.roomCode,
-        excludeId: doc._id,
-      })
-    }
-
-    const actor = pickIdentityFrom(req)
-
-    doc.roomStatus = normalizedDecision
-    doc.roomApproval = {
-      byLoginId: actor.loginId,
-      byName: actor.name,
-      decision: normalizedDecision,
-      note: s(note),
-      decidedAt: new Date(),
-    }
-
-    doc.overallStatus = deriveOverallStatus(doc)
-    doc.updatedAt = new Date()
-    await doc.save()
-
-    emitBookingRoom(req, doc, 'bookingroom:req:updated')
-    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
-    await notifySafe('BOOKING_ROOM_ROOM_DECISION', {
-      bookingId: doc._id,
-      decision: normalizedDecision,
-    })
-
-    return res.json(doc)
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function materialDecision(req, res, next) {
-  try {
-    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { id } = req.params
-    const { decision, note = '' } = req.body || {}
-
-    const normalizedDecision = up(decision)
-    if (!['APPROVED', 'REJECTED'].includes(normalizedDecision)) {
-      throw createError(400, 'decision must be APPROVED or REJECTED.')
-    }
-
-    if (normalizedDecision === 'REJECTED' && !s(note)) {
-      throw createError(400, 'Reject reason is required.')
-    }
-
-    const doc = await BookingRoom.findById(id)
-    if (!doc) throw createError(404, 'Booking not found.')
-
-    if (!doc.materialRequired) throw createError(400, 'This booking does not require material approval.')
-    if (up(doc.overallStatus) === 'CANCELLED') throw createError(400, 'Cancelled booking cannot be decided.')
-    if (up(doc.materialStatus) !== 'PENDING') {
-      throw createError(400, `Material decision already completed: ${doc.materialStatus}`)
-    }
-
-    if (normalizedDecision === 'APPROVED') {
-      await assertMaterialApprovalConflict({
-        bookingDate: doc.bookingDate,
-        timeStart: doc.timeStart,
-        timeEnd: doc.timeEnd,
-        materials: doc.materials,
-        excludeId: doc._id,
-      })
-    }
-
-    const actor = pickIdentityFrom(req)
-
-    doc.materialStatus = normalizedDecision
-    doc.materialApproval = {
-      byLoginId: actor.loginId,
-      byName: actor.name,
-      decision: normalizedDecision,
-      note: s(note),
-      decidedAt: new Date(),
-    }
-
-    doc.overallStatus = deriveOverallStatus(doc)
-    doc.updatedAt = new Date()
-    await doc.save()
-
-    emitBookingRoom(req, doc, 'bookingroom:req:updated')
-    emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
-    await notifySafe('BOOKING_ROOM_MATERIAL_DECISION', {
-      bookingId: doc._id,
-      decision: normalizedDecision,
-    })
-
-    return res.json(doc)
   } catch (err) {
     next(err)
   }
@@ -1357,7 +997,9 @@ async function exportAdminExcel(req, res, next) {
       RoomDecisionBy: s(b.roomApproval?.byName) || s(b.roomApproval?.byLoginId),
       RoomDecision: s(b.roomApproval?.decision),
       RoomDecisionNote: s(b.roomApproval?.note),
-      RoomDecidedAt: b.roomApproval?.decidedAt ? new Date(b.roomApproval.decidedAt).toISOString() : '',
+      RoomDecidedAt: b.roomApproval?.decidedAt
+        ? new Date(b.roomApproval.decidedAt).toISOString()
+        : '',
 
       MaterialRequired: b.materialRequired ? 'YES' : 'NO',
       Materials: materialItemsToText(b.materials),
@@ -1365,7 +1007,9 @@ async function exportAdminExcel(req, res, next) {
       MaterialDecisionBy: s(b.materialApproval?.byName) || s(b.materialApproval?.byLoginId),
       MaterialDecision: s(b.materialApproval?.decision),
       MaterialDecisionNote: s(b.materialApproval?.note),
-      MaterialDecidedAt: b.materialApproval?.decidedAt ? new Date(b.materialApproval.decidedAt).toISOString() : '',
+      MaterialDecidedAt: b.materialApproval?.decidedAt
+        ? new Date(b.materialApproval.decidedAt).toISOString()
+        : '',
 
       OverallStatus: s(b.overallStatus),
       SubmittedVia: s(b.submittedVia),
@@ -1380,422 +1024,12 @@ async function exportAdminExcel(req, res, next) {
     XLSX.utils.book_append_sheet(wb, ws, 'BookingRoom')
     const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'buffer' })
 
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
     res.setHeader('Content-Disposition', 'attachment; filename="booking-room.xlsx"')
     return res.status(200).send(buf)
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listRoomAdmins(_req, res, next) {
-  try {
-    if (!User) return res.json([])
-
-    const rows = await User.find({
-      isActive: true,
-      roles: 'ROOM_ADMIN',
-    })
-      .select('loginId name role roles')
-      .sort({ loginId: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listMaterialAdmins(_req, res, next) {
-  try {
-    if (!User) return res.json([])
-
-    const rows = await User.find({
-      isActive: true,
-      roles: 'MATERIAL_ADMIN',
-    })
-      .select('loginId name role roles')
-      .sort({ loginId: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listRoomMasters(req, res, next) {
-  try {
-    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { active = 'ALL', q = '' } = req.query || {}
-    const filter = {}
-
-    if (up(active) === 'ACTIVE') filter.isActive = true
-    else if (up(active) === 'INACTIVE') filter.isActive = false
-
-    const term = s(q)
-    if (term) {
-      filter.$or = [
-        { code: new RegExp(term, 'i') },
-        { name: new RegExp(term, 'i') },
-      ]
-    }
-
-    const rows = await BookingRoomResource.find(filter)
-      .sort({ isActive: -1, name: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function createRoomMaster(req, res, next) {
-  try {
-    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
-
-    const payload = req.body || {}
-    const code = up(payload.code).replace(/\s+/g, '_')
-    const name = s(payload.name)
-    const isActive = payload.isActive !== false
-
-    if (!code) throw createError(400, 'code is required.')
-    if (!name) throw createError(400, 'name is required.')
-
-    const dup = await BookingRoomResource.findOne({
-      $or: [{ code }, { name }],
-    }).lean()
-
-    if (dup) {
-      throw createError(409, 'Room code or room name already exists.')
-    }
-
-    const doc = await BookingRoomResource.create({
-      code,
-      name,
-      isActive,
-    })
-
-    emitBookingRoomMaster(req, {
-      _id: String(doc._id),
-      type: 'ROOM',
-      action: 'CREATED',
-      room: doc,
-    }, 'bookingroom:room-master:created')
-
-    emitBookingRoomMastersChanged(req, {
-      _id: String(doc._id),
-      type: 'ROOM',
-      action: 'CREATED',
-    })
-
-    return res.status(201).json(doc)
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function updateRoomMaster(req, res, next) {
-  try {
-    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { id } = req.params
-    const payload = req.body || {}
-
-    const doc = await BookingRoomResource.findById(id)
-    if (!doc) throw createError(404, 'Room not found.')
-
-    const nextCode = payload.code != null ? up(payload.code).replace(/\s+/g, '_') : up(doc.code)
-    const nextName = payload.name != null ? s(payload.name) : s(doc.name)
-    const nextIsActive = payload.isActive != null ? !!payload.isActive : !!doc.isActive
-
-    if (!nextCode) throw createError(400, 'code is required.')
-    if (!nextName) throw createError(400, 'name is required.')
-
-    const dup = await BookingRoomResource.findOne({
-      _id: { $ne: doc._id },
-      $or: [{ code: nextCode }, { name: nextName }],
-    }).lean()
-
-    if (dup) {
-      throw createError(409, 'Room code or room name already exists.')
-    }
-
-    if (doc.isActive && !nextIsActive) {
-      await assertRoomMasterCanDeactivate({
-        roomDoc: doc,
-        excludePast: true,
-      })
-    }
-
-    doc.code = nextCode
-    doc.name = nextName
-    doc.isActive = nextIsActive
-
-    await doc.save()
-
-    emitBookingRoomMaster(req, {
-      _id: String(doc._id),
-      type: 'ROOM',
-      action: 'UPDATED',
-      room: doc,
-    }, 'bookingroom:room-master:updated')
-
-    emitBookingRoomMastersChanged(req, {
-      _id: String(doc._id),
-      type: 'ROOM',
-      action: 'UPDATED',
-    })
-
-    emitBookingRoomAvailability(req, {
-      type: 'ROOM',
-      action: 'UPDATED',
-      roomId: String(doc._id),
-      code: s(doc.code),
-    }, 'bookingroom:availability:changed')
-
-    return res.json(doc)
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function deleteRoomMaster(req, res, next) {
-  try {
-    if (!canRoomAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { id } = req.params
-    const doc = await BookingRoomResource.findById(id)
-    if (!doc) throw createError(404, 'Room not found.')
-
-    await assertRoomMasterCanDeactivate({
-      roomDoc: doc,
-      excludePast: true,
-    })
-
-    doc.isActive = false
-    await doc.save()
-
-    emitBookingRoomMaster(req, {
-      _id: String(doc._id),
-      type: 'ROOM',
-      action: 'DELETED',
-      room: doc,
-    }, 'bookingroom:room-master:deleted')
-
-    emitBookingRoomMastersChanged(req, {
-      _id: String(doc._id),
-      type: 'ROOM',
-      action: 'DELETED',
-    })
-
-    emitBookingRoomAvailability(req, {
-      type: 'ROOM',
-      action: 'DELETED',
-      roomId: String(doc._id),
-      code: s(doc.code),
-    }, 'bookingroom:availability:changed')
-
-    return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function listMaterialMasters(req, res, next) {
-  try {
-    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { active = 'ALL', q = '' } = req.query || {}
-    const filter = {}
-
-    if (up(active) === 'ACTIVE') filter.isActive = true
-    else if (up(active) === 'INACTIVE') filter.isActive = false
-
-    const term = s(q)
-    if (term) {
-      filter.$or = [
-        { code: new RegExp(term, 'i') },
-        { name: new RegExp(term, 'i') },
-      ]
-    }
-
-    const rows = await BookingRoomMaterial.find(filter)
-      .sort({ isActive: -1, name: 1 })
-      .lean()
-
-    return res.json(rows || [])
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function createMaterialMaster(req, res, next) {
-  try {
-    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
-
-    const payload = req.body || {}
-    const code = up(payload.code).replace(/\s+/g, '_')
-    const name = s(payload.name)
-    const totalQty = Math.max(0, Number(payload.totalQty || 0))
-    const isActive = payload.isActive !== false
-
-    if (!code) throw createError(400, 'code is required.')
-    if (!name) throw createError(400, 'name is required.')
-    if (!Number.isFinite(totalQty) || totalQty < 0) throw createError(400, 'totalQty must be >= 0.')
-
-    const dup = await BookingRoomMaterial.findOne({
-      $or: [{ code }, { name }],
-    }).lean()
-
-    if (dup) {
-      throw createError(409, 'Material code or material name already exists.')
-    }
-
-    const doc = await BookingRoomMaterial.create({
-      code,
-      name,
-      totalQty,
-      isActive,
-    })
-
-    emitBookingRoomMaster(req, {
-      _id: String(doc._id),
-      type: 'MATERIAL',
-      action: 'CREATED',
-      material: doc,
-    }, 'bookingroom:material-master:created')
-
-    emitBookingRoomMastersChanged(req, {
-      _id: String(doc._id),
-      type: 'MATERIAL',
-      action: 'CREATED',
-    })
-
-    return res.status(201).json(doc)
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function updateMaterialMaster(req, res, next) {
-  try {
-    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { id } = req.params
-    const payload = req.body || {}
-
-    const doc = await BookingRoomMaterial.findById(id)
-    if (!doc) throw createError(404, 'Material not found.')
-
-    const nextCode = payload.code != null ? up(payload.code).replace(/\s+/g, '_') : up(doc.code)
-    const nextName = payload.name != null ? s(payload.name) : s(doc.name)
-    const nextTotalQty = payload.totalQty != null
-      ? Math.max(0, Number(payload.totalQty || 0))
-      : Number(doc.totalQty || 0)
-    const nextIsActive = payload.isActive != null ? !!payload.isActive : !!doc.isActive
-
-    if (!nextCode) throw createError(400, 'code is required.')
-    if (!nextName) throw createError(400, 'name is required.')
-    if (!Number.isFinite(nextTotalQty) || nextTotalQty < 0) {
-      throw createError(400, 'totalQty must be >= 0.')
-    }
-
-    const dup = await BookingRoomMaterial.findOne({
-      _id: { $ne: doc._id },
-      $or: [{ code: nextCode }, { name: nextName }],
-    }).lean()
-
-    if (dup) {
-      throw createError(409, 'Material code or material name already exists.')
-    }
-
-    if (nextTotalQty < Number(doc.totalQty || 0)) {
-      await assertMaterialMasterQtyCanShrink({
-        materialDoc: doc,
-        nextTotalQty,
-      })
-    }
-
-    if (doc.isActive && !nextIsActive) {
-      await assertMaterialMasterCanDeactivate({
-        materialDoc: doc,
-        excludePast: true,
-      })
-    }
-
-    doc.code = nextCode
-    doc.name = nextName
-    doc.totalQty = nextTotalQty
-    doc.isActive = nextIsActive
-
-    await doc.save()
-
-    emitBookingRoomMaster(req, {
-      _id: String(doc._id),
-      type: 'MATERIAL',
-      action: 'UPDATED',
-      material: doc,
-    }, 'bookingroom:material-master:updated')
-
-    emitBookingRoomMastersChanged(req, {
-      _id: String(doc._id),
-      type: 'MATERIAL',
-      action: 'UPDATED',
-    })
-
-    emitBookingRoomAvailability(req, {
-      type: 'MATERIAL',
-      action: 'UPDATED',
-      materialId: String(doc._id),
-      code: s(doc.code),
-    }, 'bookingroom:availability:changed')
-
-    return res.json(doc)
-  } catch (err) {
-    next(err)
-  }
-}
-
-async function deleteMaterialMaster(req, res, next) {
-  try {
-    if (!canMaterialAdmin(req)) throw createError(403, 'Forbidden')
-
-    const { id } = req.params
-    const doc = await BookingRoomMaterial.findById(id)
-    if (!doc) throw createError(404, 'Material not found.')
-
-    await assertMaterialMasterCanDeactivate({
-      materialDoc: doc,
-      excludePast: true,
-    })
-
-    doc.isActive = false
-    await doc.save()
-
-    emitBookingRoomMaster(req, {
-      _id: String(doc._id),
-      type: 'MATERIAL',
-      action: 'DELETED',
-      material: doc,
-    }, 'bookingroom:material-master:deleted')
-
-    emitBookingRoomMastersChanged(req, {
-      _id: String(doc._id),
-      type: 'MATERIAL',
-      action: 'DELETED',
-    })
-
-    emitBookingRoomAvailability(req, {
-      type: 'MATERIAL',
-      action: 'DELETED',
-      materialId: String(doc._id),
-      code: s(doc.code),
-    }, 'bookingroom:availability:changed')
-
-    return res.json({ ok: true, _id: doc._id, isActive: doc.isActive })
   } catch (err) {
     next(err)
   }
@@ -1807,29 +1041,7 @@ module.exports = {
   listMyBookings,
   updateBooking,
   cancelBooking,
-
-  listRoomInbox,
-  listMaterialInbox,
-  roomDecision,
-  materialDecision,
-
   listAdmin,
   exportAdminExcel,
-
-  listRoomAdmins,
-  listMaterialAdmins,
-
-  listActiveRooms,
-  listActiveMaterials,
   getAvailability,
-
-  listRoomMasters,
-  createRoomMaster,
-  updateRoomMaster,
-  deleteRoomMaster,
-
-  listMaterialMasters,
-  createMaterialMaster,
-  updateMaterialMaster,
-  deleteMaterialMaster,
 }

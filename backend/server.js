@@ -196,7 +196,11 @@ app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
 
 // ========================== Booking Room ==========================
+
+app.use('/api/public', require('./routes/bookingRoom/bookingRoom.public.routes'))
 app.use('/api', require('./routes/bookingRoom/bookingRoom.routes'))
+app.use('/api/booking-room', require('./routes/bookingRoom/AdminRoom.routes'))
+app.use('/api/booking-room', require('./routes/bookingRoom/AdminMaterial.routes'))
 
 // ====================================== Holiday =================================
 app.use('/api/public', require('./routes/public-holidays.routes'))
