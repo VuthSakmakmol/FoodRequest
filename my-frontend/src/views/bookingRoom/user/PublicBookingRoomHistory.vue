@@ -268,6 +268,77 @@ function syncEditItem() {
   }
 }
 
+const employeeQuery = ref('')
+const employeePickerOpen = ref(false)
+
+const filteredEmployees = computed(() => {
+  const q = s(employeeQuery.value).toLowerCase()
+  const list = Array.isArray(employees.value) ? employees.value : []
+
+  const result = !q
+    ? list
+    : list.filter((emp) => {
+        const hay = [
+          emp?.employeeId,
+          emp?.name,
+          emp?.department,
+          emp?.position,
+        ]
+          .map((x) => String(x || '').toLowerCase())
+          .join(' ')
+        return hay.includes(q)
+      })
+
+  return result.slice(0, 8)
+})
+
+const selectedEmployeeLabel = computed(() => {
+  const found = employees.value.find((emp) => s(emp.employeeId) === s(employeeId.value))
+  if (!found) return ''
+  return `${found.employeeId} - ${found.name}`
+})
+
+watch(employeeId, (val) => {
+  if (!s(val)) {
+    employeeQuery.value = ''
+    return
+  }
+  employeeQuery.value = selectedEmployeeLabel.value
+})
+
+function openEmployeePicker() {
+  employeePickerOpen.value = true
+}
+
+function closeEmployeePicker() {
+  setTimeout(() => {
+    employeePickerOpen.value = false
+  }, 120)
+}
+
+function onEmployeeInput() {
+  employeePickerOpen.value = true
+
+  if (!s(employeeQuery.value)) {
+    employeeId.value = ''
+  }
+}
+
+async function pickEmployee(emp) {
+  employeeId.value = s(emp?.employeeId)
+  employeeQuery.value = `${emp?.employeeId || ''} - ${emp?.name || ''}`
+  employeePickerOpen.value = false
+  await onEmployeeChanged()
+}
+
+function clearEmployeePick() {
+  employeeId.value = ''
+  employeeQuery.value = ''
+  employeePickerOpen.value = false
+  localStorage.setItem('bookingRoomEmployeeId', '')
+  rows.value = []
+}
+
 function upsertRow(doc) {
   if (!doc?._id) return
 
@@ -372,9 +443,10 @@ async function onEmployeeChanged() {
   localStorage.setItem('bookingRoomEmployeeId', employeeId.value || '')
 
   if (s(employeeId.value)) {
-    try {
-      await subscribeEmployeeIfNeeded(employeeId.value)
-    } catch {}
+    const found = employees.value.find((emp) => s(emp.employeeId) === s(employeeId.value))
+    if (found) {
+      employeeQuery.value = `${found.employeeId} - ${found.name}`
+    }
   }
 
   await fetchData()
@@ -839,18 +911,75 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div>
+              <div class="relative">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Requester</label>
-                <select
-                  v-model="employeeId"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
-                  @change="onEmployeeChanged"
+
+                <div class="relative">
+                  <input
+                    v-model="employeeQuery"
+                    type="text"
+                    placeholder="Search employee ID or name..."
+                    class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 pr-16 text-[11px] text-white outline-none placeholder:text-white/70"
+                    @focus="openEmployeePicker"
+                    @input="onEmployeeInput"
+                    @blur="closeEmployeePicker"
+                  />
+
+                  <div class="absolute inset-y-0 right-2 flex items-center gap-1">
+                    <button
+                      v-if="employeeQuery"
+                      type="button"
+                      class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/10 text-white/80 hover:bg-white/20"
+                      @mousedown.prevent="clearEmployeePick"
+                    >
+                      <i class="fa-solid fa-xmark text-[10px]" />
+                    </button>
+
+                    <span class="text-white/70">
+                      <i class="fa-solid fa-user text-[10px]" />
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  v-if="employeePickerOpen"
+                  class="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900"
                 >
-                  <option value="">Select employee</option>
-                  <option v-for="emp in employees" :key="emp.employeeId" :value="emp.employeeId">
-                    {{ emp.employeeId }} - {{ emp.name }}
-                  </option>
-                </select>
+                  <div v-if="loadingEmployees" class="px-3 py-2 text-[11px] text-slate-500 dark:text-slate-400">
+                    Loading employees...
+                  </div>
+
+                  <template v-else>
+                    <button
+                      v-for="emp in filteredEmployees"
+                      :key="emp.employeeId"
+                      type="button"
+                      class="flex w-full items-start justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left text-[11px] hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/70"
+                      @mousedown.prevent="pickEmployee(emp)"
+                    >
+                      <div class="min-w-0">
+                        <div class="truncate font-semibold text-slate-800 dark:text-slate-100">
+                          {{ emp.employeeId }} - {{ emp.name }}
+                        </div>
+                        <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">
+                          {{ emp.department || '—' }}{{ emp.position ? ` • ${emp.position}` : '' }}
+                        </div>
+                      </div>
+
+                      <i
+                        v-if="employeeId === emp.employeeId"
+                        class="fa-solid fa-check mt-0.5 text-[10px] text-emerald-500"
+                      />
+                    </button>
+
+                    <div
+                      v-if="!filteredEmployees.length"
+                      class="px-3 py-2 text-[11px] text-slate-500 dark:text-slate-400"
+                    >
+                      No employee found.
+                    </div>
+                  </template>
+                </div>
               </div>
 
               <div>
@@ -1026,7 +1155,6 @@ onBeforeUnmount(() => {
                 <table class="ui-table">
                   <thead>
                     <tr>
-                      <th class="ui-th">Created</th>
                       <th class="ui-th">Booking Date</th>
                       <th class="ui-th">Time</th>
                       <th class="ui-th">Title</th>
@@ -1040,15 +1168,12 @@ onBeforeUnmount(() => {
 
                   <tbody>
                     <tr v-if="!pagedRows.length">
-                      <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                      <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                         No meeting room requests found.
                       </td>
                     </tr>
 
                     <tr v-for="item in pagedRows" :key="item._id" class="ui-tr-hover">
-                      <td class="ui-td whitespace-nowrap">
-                        {{ fmtDateTime(item.createdAt) }}
-                      </td>
 
                       <td class="ui-td whitespace-nowrap">
                         {{ fmtDate(item.bookingDate) }}
@@ -1146,10 +1271,6 @@ onBeforeUnmount(() => {
                   <select v-model="perPage" class="ui-select !py-1.5 !text-[11px] !rounded-full">
                     <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
                   </select>
-
-                  <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ processedRows.length }} request(s)
-                  </span>
                 </div>
 
                 <div class="flex items-center justify-end gap-1">
