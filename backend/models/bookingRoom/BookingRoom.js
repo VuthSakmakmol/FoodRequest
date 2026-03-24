@@ -115,6 +115,8 @@ const BookingRoomSchema = new mongoose.Schema(
     participantEstimate: { type: Number, default: 1, min: 1 },
     note: { type: String, default: '', trim: true },
     needCoffeeBreak: { type: Boolean, default: false },
+    needNameOnTable: { type: Boolean, default: false },
+    needWifiPassword: { type: Boolean, default: false },
 
     /* room section */
     roomRequired: { type: Boolean, default: false, index: true },
@@ -305,6 +307,8 @@ BookingRoomSchema.pre('validate', function (next) {
     this.purpose = safeStr(this.purpose)
     this.note = safeStr(this.note)
     this.needCoffeeBreak = !!this.needCoffeeBreak
+    this.needNameOnTable = !!this.needNameOnTable
+    this.needWifiPassword = !!this.needWifiPassword
     this.cancelReason = safeStr(this.cancelReason)
 
     if (!this.employee || !safeStr(this.employee.employeeId)) {
@@ -335,6 +339,8 @@ BookingRoomSchema.pre('validate', function (next) {
       this.roomStatus = 'NOT_REQUIRED'
       this.roomApproval = emptyApproval()
       this.needCoffeeBreak = false
+      this.needNameOnTable = false
+      this.needWifiPassword = false
     } else {
       if (!this.roomCode && !this.roomName) {
         return next(new Error('roomCode or roomName is required when roomRequired is true.'))

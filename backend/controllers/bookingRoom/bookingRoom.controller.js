@@ -398,6 +398,8 @@ async function normalizeRequestPayload(payload) {
     participantEstimate: Math.max(1, Number(payload.participantEstimate || 1)),
     note: s(payload.note),
     needCoffeeBreak: roomRequired ? !!payload.needCoffeeBreak : false,
+    needNameOnTable: roomRequired ? !!payload.needNameOnTable : false,
+    needWifiPassword: roomRequired ? !!payload.needWifiPassword : false,
 
     roomRequired,
     roomId: room.roomId,
@@ -745,6 +747,8 @@ async function createBooking(req, res, next) {
       participantEstimate: normalized.participantEstimate,
       note: normalized.note,
       needCoffeeBreak: normalized.needCoffeeBreak,
+      needNameOnTable: normalized.needNameOnTable,
+      needWifiPassword: normalized.needWifiPassword,
 
       roomRequired: normalized.roomRequired,
       roomId: normalized.roomId,
@@ -906,6 +910,8 @@ async function createRecurringBooking(req, res, next) {
       participantEstimate: firstNormalized.participantEstimate,
       note: firstNormalized.note,
       needCoffeeBreak: firstNormalized.needCoffeeBreak,
+      needNameOnTable: firstNormalized.needNameOnTable,
+      needWifiPassword: firstNormalized.needWifiPassword,
 
       roomRequired: firstNormalized.roomRequired,
       roomId: firstNormalized.roomId,
@@ -952,6 +958,8 @@ async function createRecurringBooking(req, res, next) {
         participantEstimate: normalized.participantEstimate,
         note: normalized.note,
         needCoffeeBreak: normalized.needCoffeeBreak,
+        needNameOnTable: normalized.needNameOnTable,
+        needWifiPassword: normalized.needWifiPassword,
 
         roomRequired: normalized.roomRequired,
         roomId: normalized.roomId,
@@ -1102,6 +1110,8 @@ async function updateBooking(req, res, next) {
     doc.participantEstimate = normalized.participantEstimate
     doc.note = normalized.note
     doc.needCoffeeBreak = normalized.needCoffeeBreak
+    doc.needNameOnTable = normalized.needNameOnTable
+    doc.needWifiPassword = normalized.needWifiPassword
 
     doc.roomRequired = normalized.roomRequired
     doc.roomId = normalized.roomId
@@ -1232,6 +1242,8 @@ async function exportAdminExcel(req, res, next) {
       ParticipantEstimate: Number(b.participantEstimate || 0),
       Note: s(b.note),
       NeedCoffeeBreak: b.needCoffeeBreak ? 'YES' : 'NO',
+      NeedNameOnTable: b.needNameOnTable ? 'YES' : 'NO',
+      NeedWifiPassword: b.needWifiPassword ? 'YES' : 'NO',
 
       RoomRequired: b.roomRequired ? 'YES' : 'NO',
       RoomCode: s(b.roomCode),
