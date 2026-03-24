@@ -29,16 +29,13 @@ const iconMap = {
         class="rounded-xl border shadow-lg px-4 py-3 flex items-start gap-3"
         :class="typeClasses[t.type] || typeClasses.info"
       >
-        <!-- Icon -->
         <i :class="[iconMap[t.type] || iconMap.info, 'mt-1 text-lg']"></i>
 
-        <!-- Content -->
-        <div class="flex-1">
-          <p class="text-sm font-medium">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium whitespace-pre-line break-words">
             {{ t.message || t.title }}
           </p>
 
-          <!-- Optional Action Button -->
           <button
             v-if="t.action"
             type="button"
@@ -49,7 +46,6 @@ const iconMap = {
           </button>
         </div>
 
-        <!-- Close -->
         <button
           type="button"
           class="ml-2 opacity-80 hover:opacity-100"

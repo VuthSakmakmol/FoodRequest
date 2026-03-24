@@ -277,7 +277,7 @@ function validateAndNormalizeRequest({
 
   const workingDates = enumerateWorkingDates(s, e)
   const workingCount = workingDates.length
-  if (!workingCount || !workingCount <= 0) {
+  if (workingCount <= 0) {
     return { ok: false, message: 'Invalid date range (no working days).' }
   }
 

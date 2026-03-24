@@ -293,7 +293,14 @@ async function fetchHolidays() {
   try {
     loadingHolidays.value = true
     const res = await api.get('/leave/holidays')
-    const items = Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : []
+    const items = Array.isArray(res.data?.items)
+      ? res.data.items
+      : Array.isArray(res.data?.holidays)
+        ? res.data.holidays
+        : Array.isArray(res.data)
+          ? res.data
+          : []
+
     holidaySet.value = new Set(items.map((x) => String(x || '').trim()).filter(Boolean))
   } catch (e) {
     console.warn('fetchHolidays failed, fallback to Sunday-only', e?.message)

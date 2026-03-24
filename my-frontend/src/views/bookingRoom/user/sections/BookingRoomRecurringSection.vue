@@ -13,6 +13,10 @@ const props = defineProps({
     type: Number,
     default: 31,
   },
+  holidayDates: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 function s(v) {
@@ -39,11 +43,32 @@ function clampEndDate() {
   props.form.endDate = end.format('YYYY-MM-DD')
 }
 
+function holidaySet() {
+  return new Set(
+    (Array.isArray(props.holidayDates) ? props.holidayDates : [])
+      .map((x) => s(x))
+      .filter(Boolean)
+  )
+}
+
+function isSunday(dateStr) {
+  return dayjs(dateStr).day() === 0
+}
+
+function isHolidayOnly(dateStr) {
+  return holidaySet().has(s(dateStr))
+}
+
+function isBlockedDate(dateStr) {
+  return isSunday(dateStr) || isHolidayOnly(dateStr)
+}
+
 watch(
   () => props.form.recurring,
   (on) => {
     if (!on) return
     if (!props.form.endDate) props.form.endDate = props.form.bookingDate || ''
+    if (typeof props.form.skipHoliday !== 'boolean') props.form.skipHoliday = true
     clampEndDate()
   },
   { immediate: true }
@@ -73,7 +98,7 @@ const maxEndDate = computed(() => {
     .format('YYYY-MM-DD')
 })
 
-const previewDates = computed(() => {
+const allDates = computed(() => {
   if (!props.form.recurring || !props.form.bookingDate || !props.form.endDate) return []
 
   const out = []
@@ -88,7 +113,24 @@ const previewDates = computed(() => {
   return out
 })
 
+const previewDates = computed(() => {
+  if (!props.form.skipHoliday) return allDates.value
+  return allDates.value.filter((d) => !isBlockedDate(d))
+})
+
+const skippedDates = computed(() => {
+  if (!props.form.skipHoliday) return []
+
+  return allDates.value
+    .filter((d) => isBlockedDate(d))
+    .map((d) => ({
+      date: d,
+      reason: isSunday(d) ? 'Sunday' : 'Holiday',
+    }))
+})
+
 const totalDays = computed(() => previewDates.value.length)
+const totalAllDays = computed(() => allDates.value.length)
 </script>
 
 <template>
@@ -98,7 +140,7 @@ const totalDays = computed(() => previewDates.value.length)
   >
     <header
       class="flex items-center justify-between rounded-t-2xl border-b border-slate-200
-             bg-gradient-to-r from-emerald-600 via-teal-500 to-cyan-500 px-4 py-3 text-white
+             bg-gradient-to-r from-sky-700 via-sky-500 to-indigo-400 px-4 py-2.5 text-white
              dark:border-slate-700"
     >
       <div class="flex items-center gap-3">
@@ -177,6 +219,64 @@ const totalDays = computed(() => previewDates.value.length)
           </div>
         </div>
 
+        <div
+          class="rounded-2xl border border-slate-200 bg-slate-50 p-3
+                 dark:border-slate-700 dark:bg-slate-800/60"
+        >
+          <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div class="text-[12px] font-bold text-slate-700 dark:text-slate-100">
+                Skip Sunday & Holiday
+              </div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                Turn on to ignore Sunday and public holiday dates when creating recurring bookings.
+              </div>
+            </div>
+
+            <label class="inline-flex items-center gap-2 text-[12px] font-semibold">
+              <span>{{ form.skipHoliday ? 'Skip' : 'Create all days' }}</span>
+              <button
+                type="button"
+                class="relative inline-flex h-6 w-11 items-center rounded-full transition"
+                :class="form.skipHoliday ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'"
+                @click="form.skipHoliday = !form.skipHoliday"
+              >
+                <span
+                  class="inline-block h-5 w-5 transform rounded-full bg-white shadow transition"
+                  :class="form.skipHoliday ? 'translate-x-5' : 'translate-x-1'"
+                />
+              </button>
+            </label>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2 text-[11px]">
+            <span
+              class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-1
+                     font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-300"
+            >
+              <i class="fa-solid fa-check" />
+              To create: {{ totalDays }}
+            </span>
+
+            <span
+              class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1
+                     font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+            >
+              <i class="fa-solid fa-calendar-days" />
+              Total range: {{ totalAllDays }}
+            </span>
+
+            <span
+              v-if="form.skipHoliday && skippedDates.length"
+              class="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-white px-2.5 py-1
+                     font-semibold text-amber-700 dark:border-amber-700 dark:bg-slate-900 dark:text-amber-300"
+            >
+              <i class="fa-solid fa-ban" />
+              Skipped: {{ skippedDates.length }}
+            </span>
+          </div>
+        </div>
+
         <div class="space-y-2">
           <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
             Preview Dates
@@ -202,6 +302,28 @@ const totalDays = computed(() => previewDates.value.length)
               class="text-[11px] text-slate-500 dark:text-slate-400"
             >
               No preview yet
+            </span>
+          </div>
+        </div>
+
+        <div v-if="form.skipHoliday && skippedDates.length" class="space-y-2">
+          <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+            Skipped Dates
+          </label>
+
+          <div
+            class="flex flex-wrap gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3
+                   dark:border-amber-800 dark:bg-amber-950/20"
+          >
+            <span
+              v-for="item in skippedDates"
+              :key="`${item.date}-${item.reason}`"
+              class="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-white px-3 py-1.5
+                     text-[11px] font-semibold text-amber-700
+                     dark:border-amber-700 dark:bg-slate-900 dark:text-amber-300"
+            >
+              <i class="fa-solid fa-ban text-[10px]" />
+              {{ item.date }} · {{ item.reason }}
             </span>
           </div>
         </div>

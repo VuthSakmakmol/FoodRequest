@@ -58,7 +58,7 @@
     "department": "Management Production",
     "position": "Factory Manager",
     "contactNumber": "017 922 956",
-    "telegramChatId": "",
+    "telegramChatId": "8797296058",
     "isActive": true
   },
     {
@@ -67,7 +67,7 @@
     "department": "Management Production",
     "position": "Technician Supervisor",
     "contactNumber": "096 881 7649",
-    "telegramChatId": "",
+    "telegramChatId": "5357557374",
     "isActive": true
   },
     {
@@ -76,7 +76,7 @@
     "department": "Management Production",
     "position": "Heat Transfer Supervisor",
     "contactNumber": "096 8316562",
-    "telegramChatId": "",
+    "telegramChatId": "5595310369",
     "isActive": true
   },
     {
@@ -121,7 +121,7 @@
     "department": "Management Production",
     "position": "Cutting Manager",
     "contactNumber": "0969462652",
-    "telegramChatId": "",
+    "telegramChatId": "6109633363",
     "isActive": true
   },
     {
@@ -148,7 +148,7 @@
     "department": "Management Production",
     "position": "Planning Supervisor",
     "contactNumber": "089 645 200",
-    "telegramChatId": "",
+    "telegramChatId": "5229581265",
     "isActive": true
   },
     {
@@ -166,7 +166,7 @@
     "department": "Management Production",
     "position": "Technician Supervisor",
     "contactNumber": "017 245 475",
-    "telegramChatId": "",
+    "telegramChatId": "5117955080",
     "isActive": true
   },
     {
@@ -175,7 +175,7 @@
     "department": "Management Production",
     "position": "Technician Supervisor",
     "contactNumber": "081 491 431",
-    "telegramChatId": "",
+    "telegramChatId": "8292584090",
     "isActive": true
   },
     {
@@ -193,7 +193,7 @@
     "department": "Management Production",
     "position": "Mechanic Supervisor",
     "contactNumber": "096 420 5783",
-    "telegramChatId": "",
+    "telegramChatId": "8473536290",
     "isActive": true
   },
     {
@@ -256,7 +256,7 @@
     "department": "Management Production",
     "position": "IE Manager",
     "contactNumber": "016833827",
-    "telegramChatId": "",
+    "telegramChatId": "8205966268",
     "isActive": true
   },
     {
@@ -283,7 +283,7 @@
     "department": "Management Production",
     "position": "Bonding Leader",
     "contactNumber": "0966915161",
-    "telegramChatId": "",
+    "telegramChatId": "7722858679",
     "isActive": true
   },
     {
@@ -427,7 +427,7 @@
     "department": "Management Production",
     "position": "Technician Supervisor",
     "contactNumber": "097 237 2294",
-    "telegramChatId": "",
+    "telegramChatId": "954788284",
     "isActive": true
   },
   {
@@ -454,15 +454,6 @@
     "department": "Management Office",
     "position": "",
     "contactNumber": "0",
-    "telegramChatId": "",
-    "isActive": true
-  },
-  {
-    "employeeId": "52210006",
-    "name": "ARTPHONGSA PRAPAPHAN",
-    "department": "Management Office",
-    "position": "",
-    "contactNumber": "061840031",
     "telegramChatId": "",
     "isActive": true
   },

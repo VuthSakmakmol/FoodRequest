@@ -27,6 +27,9 @@ const selectedEmployee = ref(null)
 
 const activeRooms = ref([])
 const activeMaterials = ref([])
+const holidayDates = ref([])
+
+let availabilityRefreshTimer = null
 
 const form = ref({
   employeeId: '',
@@ -38,6 +41,7 @@ const form = ref({
   bookingDate: dayjs().format('YYYY-MM-DD'),
   endDate: dayjs().format('YYYY-MM-DD'),
   recurring: false,
+  skipHoliday: true,
 
   timeStart: '',
   timeEnd: '',
@@ -61,10 +65,6 @@ const form = ref({
   needCoffeeBreak: false,
 })
 
-const errors = ref([])
-
-let availabilityRefreshTimer = null
-
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -79,7 +79,77 @@ function compactText(v) {
 
 function toMinutes(hhmm) {
   const [h, m] = String(hhmm || '').split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return NaN
   return (h * 60) + m
+}
+
+function formatLines(list = [], title = 'Please check:') {
+  const rows = Array.isArray(list)
+    ? list.map((x) => s(x)).filter(Boolean)
+    : []
+
+  if (!rows.length) return title
+  return `${title}\n• ${rows.join('\n• ')}`
+}
+
+function extractBackendMessage(error, fallback = 'Unable to process request.') {
+  const data = error?.response?.data || {}
+
+  const lines = []
+
+  if (Array.isArray(data?.errors)) {
+    for (const item of data.errors) {
+      if (typeof item === 'string') {
+        const text = s(item)
+        if (text) lines.push(text)
+      } else if (item && typeof item === 'object') {
+        const text = s(item.message || item.msg || item.reason)
+        if (text) lines.push(text)
+      }
+    }
+  }
+
+  if (Array.isArray(data?.details)) {
+    for (const item of data.details) {
+      if (typeof item === 'string') {
+        const text = s(item)
+        if (text) lines.push(text)
+      } else if (item && typeof item === 'object') {
+        const text = s(item.message || item.msg || item.reason)
+        if (text) lines.push(text)
+      }
+    }
+  }
+
+  const mainMessage =
+    s(data?.message) ||
+    s(data?.error) ||
+    s(data?.reason) ||
+    s(error?.message)
+
+  const unique = []
+  const seen = new Set()
+
+  for (const line of lines) {
+    const key = line.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    unique.push(line)
+  }
+
+  if (mainMessage && unique.length) {
+    const mainKey = mainMessage.toLowerCase()
+    const filtered = unique.filter((x) => x.toLowerCase() !== mainKey)
+    if (filtered.length) {
+      return `${mainMessage}\n• ${filtered.join('\n• ')}`
+    }
+    return mainMessage
+  }
+
+  if (mainMessage) return mainMessage
+  if (unique.length === 1) return unique[0]
+  if (unique.length > 1) return `• ${unique.join('\n• ')}`
+  return fallback
 }
 
 function syncLegacyTimeParts() {
@@ -118,6 +188,7 @@ function resetForm({ keepEmployee = true } = {}) {
     bookingDate: dayjs().format('YYYY-MM-DD'),
     endDate: dayjs().format('YYYY-MM-DD'),
     recurring: false,
+    skipHoliday: true,
 
     timeStart: '',
     timeEnd: '',
@@ -143,7 +214,6 @@ function resetForm({ keepEmployee = true } = {}) {
 
   activeRooms.value = []
   activeMaterials.value = []
-  errors.value = []
 }
 
 async function loadEmployees(q = '') {
@@ -163,10 +233,22 @@ async function loadEmployees(q = '') {
   } catch (e) {
     showToast({
       type: 'error',
-      message: e?.response?.data?.message || 'Failed to load employee list.',
+      message: extractBackendMessage(e, 'Failed to load employee list.'),
     })
   } finally {
     loadingEmployees.value = false
+  }
+}
+
+async function loadHolidayDates() {
+  try {
+    const res = await api.get('/public/holidays')
+    holidayDates.value = Array.isArray(res?.data?.holidays)
+      ? res.data.holidays.map((x) => s(x)).filter(Boolean)
+      : []
+  } catch (e) {
+    holidayDates.value = []
+    console.error('Failed to load holidays:', e)
   }
 }
 
@@ -233,7 +315,7 @@ async function loadActiveMastersOnly({ silent = false } = {}) {
 
     showToast({
       type: 'error',
-      message: e?.response?.data?.message || 'Failed to load room/material list.',
+      message: extractBackendMessage(e, 'Failed to load room/material list.'),
     })
   } finally {
     if (!silent) loadingAvailability.value = false
@@ -293,7 +375,7 @@ async function loadAvailability({ silent = false } = {}) {
     if (!silent) {
       showToast({
         type: 'error',
-        message: e?.response?.data?.message || 'Failed to check availability.',
+        message: extractBackendMessage(e, 'Failed to check availability.'),
       })
     }
     activeRooms.value = []
@@ -348,7 +430,6 @@ function validateForm() {
     e.push('Participant estimate must be greater than 0.')
   }
 
-  errors.value = e
   return e
 }
 
@@ -359,8 +440,7 @@ async function submit() {
   if (e.length) {
     showToast({
       type: 'warning',
-      title: 'Please check the form',
-      message: 'Some required fields are missing or invalid.',
+      message: formatLines(e, 'Please check the following:'),
     })
     return
   }
@@ -372,6 +452,7 @@ async function submit() {
       employeeId: s(form.value.employeeId),
       bookingDate: s(form.value.bookingDate),
       endDate: form.value.recurring ? s(form.value.endDate) : '',
+      skipHoliday: !!form.value.skipHoliday,
       timeStart: s(form.value.timeStart),
       timeEnd: s(form.value.timeEnd),
       meetingTitle: compactText(form.value.meetingTitle),
@@ -418,7 +499,7 @@ async function submit() {
     showToast({
       type: 'error',
       title: 'Submit failed',
-      message: e?.response?.data?.message || 'Unable to submit request.',
+      message: extractBackendMessage(e, 'Unable to submit request.'),
     })
   } finally {
     submitting.value = false
@@ -457,7 +538,11 @@ function onReqUpdated() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadEmployees(), loadActiveMastersOnly()])
+  await Promise.all([
+    loadEmployees(),
+    loadActiveMastersOnly(),
+    loadHolidayDates(),
+  ])
 
   const savedId = localStorage.getItem('bookingRoomEmployeeId') || ''
   if (savedId) {
@@ -527,16 +612,6 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="space-y-3 p-3">
-          <div
-            v-if="errors.length"
-            class="rounded-xl border border-rose-300 bg-rose-50 p-3 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/30 dark:text-rose-200"
-          >
-            <div class="mb-1 font-extrabold">Please check the following:</div>
-            <ul class="list-disc space-y-0.5 pl-4">
-              <li v-for="(e, idx) in errors" :key="idx">{{ e }}</li>
-            </ul>
-          </div>
-
           <div class="grid gap-3 xl:grid-cols-12">
             <div class="xl:col-span-4">
               <BookingRoomRequesterSection
@@ -556,7 +631,10 @@ onBeforeUnmount(() => {
           </div>
 
           <div>
-            <BookingRoomRecurringSection :form="form" />
+            <BookingRoomRecurringSection
+              :form="form"
+              :holiday-dates="holidayDates"
+            />
           </div>
 
           <div>
@@ -568,12 +646,17 @@ onBeforeUnmount(() => {
             />
           </div>
 
-          <div class="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-[11px] dark:border-slate-800">
+          <div
+            class="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-[11px] dark:border-slate-800"
+          >
             <div class="text-slate-500 dark:text-slate-400">
               Please review requester, booking detail, and request type before submitting.
             </div>
+
             <div class="flex items-center gap-2">
-              <span class="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 sm:inline-flex">
+              <span
+                class="hidden rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 sm:inline-flex"
+              >
                 {{ requestTypeLabel }}
               </span>
 

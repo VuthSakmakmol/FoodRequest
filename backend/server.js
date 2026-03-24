@@ -1,4 +1,3 @@
-// backend/server.js
 require('dotenv').config()
 
 const http = require('http')
@@ -15,6 +14,12 @@ const {
   startLeaveContractReminderJob,
   stopLeaveContractReminderJob,
 } = require('./jobs/leave.contractReminder.job')
+
+const {
+  startLeaveBalanceRecalculateJob,
+  stopLeaveBalanceRecalculateJob,
+} = require('./jobs/leave.balanceRecalculate.job')
+
 const { startTelegramPolling, stopTelegramPolling } = require('./services/telegram.polling')
 const { registerSocket, attachDebugEndpoints } = require('./utils/realtime')
 
@@ -74,7 +79,7 @@ app.use(compression())
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ limit: '5mb', extended: true }))
 
-/* ───────────────── DEBUG: request logger (VERY IMPORTANT) ───────────────── */
+/* ───────────────── DEBUG: request logger ───────────────── */
 app.use((req, _res, next) => {
   console.log(
     `\n[REQ] ${req.method} ${req.originalUrl} | origin=${req.headers.origin || ''} | auth=${
@@ -99,7 +104,7 @@ app.use(
   })
 )
 
-/* ───────────────── HTTP + Socket.IO (CREATE EARLY) ───────────────── */
+/* ───────────────── HTTP + Socket.IO ───────────────── */
 const server = http.createServer(app)
 
 const ioCors = hasWildcard
@@ -122,70 +127,44 @@ const io = new Server(server, {
 registerSocket(io)
 app.set('io', io)
 
-/* ✅ attach io to req BEFORE routes */
 app.use((req, _res, next) => {
   req.io = io
   next()
 })
 
-/* optional debug endpoints */
 attachDebugEndpoints(app)
 
 /* ───────────────── Routes ───────────────── */
-/**
- * ✅ IMPORTANT:
- * Auth must be PUBLIC and mounted EARLY.
- * If something blocks /api/auth/login with Forbidden, it means you have a global requireRole somewhere else.
- */
 console.log('[BOOT] Mounting routes...')
 
-// ✅ Auth (PUBLIC)
 app.use('/api/auth', require('./routes/auth.routes'))
 
-// ========================== Leave module ==========================
-
-// Leave Requests
+// Leave
 app.use('/api/leave/requests', require('./routes/leave/leaveRequest.routes'))
-
-// Leave types
 app.use('/api/leave', require('./routes/leave/leaveType-expat.routes'))
-
-// User profiles (self/team)
 app.use('/api/leave/user', require('./routes/leave/leaveProfile.user.routes'))
-
-// Admin leave
 app.use('/api/admin/leave', require('./routes/leave/leaveAdmin.routes'))
-
-app.use('/api/leave', require('./routes/leave/leaveUser.routes'))       // ✅ user endpoints
-
+app.use('/api/leave', require('./routes/leave/leaveUser.routes'))
 app.use('/api/admin/leave/types', require('./routes/leave/leaveType-admin.routes'))
-
-// Reports + signatures
 app.use('/api/admin/leave', require('./routes/leave/leaveReport-admin.routes'))
-
 app.use('/api/admin', require('./routes/files/signature.admin.routes'))
-
 app.use('/api/leave', require('./routes/leave/leave.public.routes'))
-
-// Swap Working Day (Requests + Evidence)
 app.use('/api/leave', require('./routes/leave/swapWorkingDay.routes'))
-
 app.use('/api/leave', require('./routes/forgetScan/forgetScan.routes'))
-
 app.use('/api/leave', require('./routes/leave/centralReport.routes'))
 
-// ========================== Public ==========================
+// Public
 app.use('/api/public', require('./routes/public-directory.routes'))
 app.use('/api/public', require('./routes/food/food-public.routes'))
 
-// ========================== Food ==========================
+// Food
 app.use('/api/admin', require('./routes/food/food-admin.routes'))
 app.use('/api/chef/food-requests', require('./routes/food/food-chef.routes'))
 
 // Static uploads
 app.use('/uploads', express.static(path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads')))
 
-// ========================== Transportation ==========================
+// Transportation
 app.use('/api/car-bookings', require('./routes/transportation/carBooking.routes'))
 app.use('/api/public/transport', require('./routes/transportation/carBooking.public.routes'))
 app.use('/api/admin/car-bookings', require('./routes/transportation/carBooking-admin.routes'))
@@ -194,14 +173,13 @@ app.use('/api/driver', require('./routes/transportation/carBooking-driver.routes
 app.use('/api/messenger', require('./routes/transportation/carBooking-messenger.routes'))
 app.use('/api/transport/recurring', require('./routes/transportation/carBooking-recurring.routes'))
 
-// ========================== Booking Room ==========================
-
+// Booking Room
 app.use('/api/public', require('./routes/bookingRoom/bookingRoom.public.routes'))
 app.use('/api', require('./routes/bookingRoom/bookingRoom.routes'))
 app.use('/api/booking-room', require('./routes/bookingRoom/AdminRoom.routes'))
 app.use('/api/booking-room', require('./routes/bookingRoom/AdminMaterial.routes'))
 
-// ====================================== Holiday =================================
+// Holiday
 app.use('/api/public', require('./routes/public-holidays.routes'))
 
 /* ───────────────── 404 for API ───────────────── */
@@ -246,6 +224,14 @@ const PORT = Number(process.env.PORT || 4333)
       console.log('ℹ️ Telegram polling disabled')
     }
 
+    server.on('error', (err) => {
+      if (err?.code === 'EADDRINUSE') {
+        console.error(`❌ Port ${PORT} is already in use`)
+        process.exit(1)
+      }
+      throw err
+    })
+
     server.listen(PORT, () => {
       const proto = forceHTTPS ? 'https' : 'http'
       console.log(`🚀 Server listening on ${proto}://0.0.0.0:${PORT}`)
@@ -253,6 +239,9 @@ const PORT = Number(process.env.PORT || 4333)
 
       startLeaveContractReminderJob()
       console.log('✅ Leave contract reminder job started')
+
+      startLeaveBalanceRecalculateJob()
+      console.log('✅ Leave balance recalculate job started')
     })
 
     const shutdown = async (sig) => {
@@ -260,6 +249,10 @@ const PORT = Number(process.env.PORT || 4333)
 
       try {
         stopLeaveContractReminderJob()
+      } catch (_) {}
+
+      try {
+        stopLeaveBalanceRecalculateJob()
       } catch (_) {}
 
       try {

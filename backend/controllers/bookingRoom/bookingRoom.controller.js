@@ -7,6 +7,7 @@ const BookingRoomResource = require('../../models/bookingRoom/BookingRoomResourc
 const BookingRoomMaterial = require('../../models/bookingRoom/BookingRoomMaterial')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const BookingRoomRecurring = require('../../models/bookingRoom/BookingRoomRecurring')
+const { isHoliday } = require('../../utils/holidays')
 
 const {
   broadcastBookingRoomRequest,
@@ -799,18 +800,29 @@ async function createRecurringBooking(req, res, next) {
     const end = new Date(`${endDate}T00:00:00`)
 
     const bookingDates = []
+    const skippedDates = []
     const cur = new Date(start)
 
     while (cur <= end) {
       const y = cur.getFullYear()
       const m = String(cur.getMonth() + 1).padStart(2, '0')
       const d = String(cur.getDate()).padStart(2, '0')
-      bookingDates.push(`${y}-${m}-${d}`)
+      const oneDate = `${y}-${m}-${d}`
+
+      if (isHoliday(oneDate)) {
+        skippedDates.push({
+          bookingDate: oneDate,
+          reason: 'HOLIDAY_OR_SUNDAY',
+        })
+      } else {
+        bookingDates.push(oneDate)
+      }
+
       cur.setDate(cur.getDate() + 1)
     }
 
     if (!bookingDates.length) {
-      throw createError(400, 'No recurring dates generated.')
+      throw createError(400, 'No valid recurring dates generated after skipping Sunday/holidays.')
     }
 
     if (bookingDates.length > 31) {
@@ -872,7 +884,12 @@ async function createRecurringBooking(req, res, next) {
     }
 
     if (conflicts.length) {
-      throw createError(409, 'Some selected dates have conflicts.', { conflicts })
+      return res.status(409).json({
+        message: 'Some selected dates have conflicts.',
+        conflicts,
+        skippedDates,
+        validBookingDates: bookingDates,
+      })
     }
 
     const recurringDoc = await BookingRoomRecurring.create({
@@ -970,6 +987,8 @@ async function createRecurringBooking(req, res, next) {
       ok: true,
       recurringId: recurringDoc._id,
       totalOccurrences: createdDocs.length,
+      skippedDates,
+      validBookingDates: bookingDates,
       bookings: createdDocs,
     })
   } catch (err) {

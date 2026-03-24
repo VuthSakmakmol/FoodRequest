@@ -160,6 +160,51 @@ onMounted(() => {
         <div class="space-y-4">
           <section class="space-y-2">
             <div class="flex items-center gap-2">
+              <i class="fa-solid fa-clipboard-list text-[12px] text-sky-500" />
+              <h3
+                class="text-[11px] font-semibold uppercase tracking-[0.22em]
+                       text-slate-500 dark:text-slate-400"
+              >
+                Meeting Information
+              </h3>
+            </div>
+
+            <div class="grid gap-3 xl:grid-cols-12">
+              <div class="space-y-1 xl:col-span-8">
+                <label class="block text-[13px] font-bold text-slate-700 dark:text-slate-200">
+                  Meeting Title
+                  <span class="ml-1 text-rose-500">*</span>
+                </label>
+                <input
+                  v-model="props.form.meetingTitle"
+                  type="text"
+                  placeholder="Example: Weekly Production Meeting"
+                  class="block w-full rounded-xl border border-slate-300 dark:border-slate-600
+                         bg-white px-3 py-2.5 text-[13px]
+                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                         focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+
+              <div class="space-y-1 xl:col-span-4">
+                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
+                  Note
+                </label>
+                <input
+                  v-model="props.form.note"
+                  type="text"
+                  placeholder="Optional note"
+                  class="block w-full rounded-xl border border-slate-300 dark:border-slate-600
+                         bg-white px-3 py-2.5 text-[13px]
+                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
+                         focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section class="space-y-2">
+            <div class="flex items-center gap-2">
               <i class="fa-solid fa-clock text-[12px] text-sky-500" />
               <h3
                 class="text-[11px] font-semibold uppercase tracking-[0.22em]
@@ -173,6 +218,7 @@ onMounted(() => {
               <div class="space-y-1 xl:col-span-3">
                 <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
                   Booking Date
+                  <span class="ml-1 text-rose-500">*</span>
                 </label>
                 <input
                   v-model="props.form.bookingDate"
@@ -189,6 +235,7 @@ onMounted(() => {
               <div class="space-y-1 xl:col-span-3">
                 <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
                   Start Time
+                  <span class="ml-1 text-rose-500">*</span>
                 </label>
                 <div class="grid grid-cols-2 gap-2">
                   <select
@@ -222,6 +269,7 @@ onMounted(() => {
               <div class="space-y-1 xl:col-span-3">
                 <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
                   End Time
+                  <span class="ml-1 text-rose-500">*</span>
                 </label>
                 <div class="grid grid-cols-2 gap-2">
                   <select
@@ -255,6 +303,7 @@ onMounted(() => {
               <div class="space-y-1 xl:col-span-3">
                 <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
                   Participants
+                  <span class="ml-1 text-rose-500">*</span>
                 </label>
                 <input
                   v-model.number="props.form.participantEstimate"
@@ -271,40 +320,6 @@ onMounted(() => {
             <p v-if="timeError" class="text-[11px] text-red-500 dark:text-red-300">
               {{ timeError }}
             </p>
-          </section>
-
-          <section class="space-y-2">
-            <div class="grid gap-3 xl:grid-cols-12">
-              <div class="space-y-1 xl:col-span-6">
-                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-                  Meeting Title
-                </label>
-                <input
-                  v-model="props.form.meetingTitle"
-                  type="text"
-                  placeholder="Example: Weekly Production Meeting"
-                  class="block w-full rounded-xl border border-slate-300 dark:border-slate-600
-                         bg-white px-3 py-2 text-[13px]
-                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
-                         focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                />
-              </div>
-
-              <div class="space-y-1 xl:col-span-6">
-                <label class="block text-[11px] font-semibold text-slate-700 dark:text-slate-200">
-                  Note
-                </label>
-                <input
-                  v-model="props.form.note"
-                  type="text"
-                  placeholder="Optional note"
-                  class="block w-full rounded-xl border border-slate-300 dark:border-slate-600
-                         bg-white px-3 py-2 text-[13px]
-                         text-slate-900 dark:bg-slate-900 dark:text-slate-100
-                         focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                />
-              </div>
-            </div>
           </section>
         </div>
       </div>

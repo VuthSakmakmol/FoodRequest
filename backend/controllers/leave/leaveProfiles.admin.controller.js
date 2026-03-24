@@ -37,7 +37,7 @@ const User = require('../../models/User')
 
 const { computeBalances } = require('../../utils/leave.rules')
 const { broadcastLeaveProfile } = require('../../utils/leave.realtime')
-
+const { recalculateOneProfile } = require('../../services/leave/leave.recalculate.service')
 /* ───────────────── helpers ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
@@ -340,37 +340,12 @@ function decorateProfileForResponse(profilePlain = {}) {
   }
 }
 
-// ✅ recompute based on latest contract start date, not blindly on "today"
-// ✅ save RAW balances only (do not apply carry here)
 async function recomputeAndSaveBalances(profileDoc) {
-  const employeeId = s(profileDoc.employeeId)
-
-  const approved = await LeaveRequest.find({ employeeId, status: 'APPROVED' })
-    .sort({ startDate: 1 })
-    .lean()
-
-  const profilePlain = profileDoc.toObject ? profileDoc.toObject() : profileDoc
-  const latest = latestContract(profileDoc.contracts || [])
-
-  const asOfDate = isValidYMD(latest?.startDate)
-    ? ymdToUTCDate(latest.startDate)
-    : new Date()
-
-  const snap = computeBalances(profilePlain, approved, asOfDate, {
-    asOfYMD: isValidYMD(latest?.startDate) ? s(latest.startDate) : undefined,
-    contractNo: latest?.contractNo || undefined,
+  return recalculateOneProfile(profileDoc, {
+    asOfDate: new Date(),
+    save: true,
+    log: false,
   })
-
-  const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
-  const nextAsOf = s(snap?.meta?.asOfYMD || profileDoc.balancesAsOf || '')
-  const nextEnd = s(snap?.meta?.contractYear?.endDate || profileDoc.contractEndDate || '')
-
-  profileDoc.balances = nextBalances
-  if (nextAsOf) profileDoc.balancesAsOf = nextAsOf
-  if (nextEnd) profileDoc.contractEndDate = nextEnd
-
-  await profileDoc.save()
-  return profileDoc
 }
 
 /* ─────────────────────────────────────────────────────────────
