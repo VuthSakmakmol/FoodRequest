@@ -1,19 +1,6 @@
-<!-- src/views/expat/GmLeaveInbox.vue
-  ✅ Same UI system as ManagerLeaveInbox.vue (ui-page / ui-card / ui-hero-gradient / ui-table)
-  ✅ Edge-to-edge (no wasted edges)
-  ✅ Responsive: mobile cards + desktop table
-  ✅ Filters: search + requested date range + expat id
-  ✅ Actions: Export XLSX only (ONE button)
-  ✅ Approve + Reject buttons (GM action)
-  ✅ Custom confirm modal (no SweetAlert)
-  ✅ Attachments: READ-ONLY (GM preview/download like ManagerLeaveInbox.vue)
-  ✅ Fix 401 preview: axios blob -> blob URL (Authorization header included)
-  ✅ AUTO close modal on success
-  ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
-  ✅ NEW: show Approval Mode chip in mobile + desktop
--->
+<!-- src/views/expat/GmLeaveInbox.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
@@ -26,28 +13,36 @@ defineOptions({ name: 'GmLeaveInbox' })
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ───────── responsive flag ───────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── STATE ───────── */
 const loading = ref(false)
+const loadingMore = ref(false)
 const rows = ref([])
+const hasMore = ref(true)
+
+const page = ref(1)
+const limit = ref(10)
+
+const statusFilter = ref('PENDING_GM')
 
 const search = ref('')
-const fromDate = ref('') // Requested at (createdAt)
-const toDate = ref('') // Requested at (createdAt)
-const employeeFilter = ref('') // optional expat id filter
+const fromDate = ref('')
+const toDate = ref('')
+const employeeFilter = ref('')
 
-/* Pagination */
-const page = ref(1)
-const perPage = ref(20)
-const perPageOptions = [20, 50, 100, 'All']
+const totalLoaded = computed(() => rows.value.length)
+const filteredCount = computed(() => filteredRows.value.length)
 
-/* ───────── helpers ───────── */
+const bottomSentinel = ref(null)
+let bottomObserver = null
+let searchTimer = null
+let refreshTimer = null
+const offHandlers = []
+
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -75,7 +70,6 @@ function statusChipClasses(status) {
       return 'bg-emerald-100 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/40 dark:text-emerald-200 dark:border-emerald-700/80'
     case 'REJECTED':
       return 'bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-900/40 dark:text-rose-200 dark:border-rose-700/80'
-    case 'CANCELLED':
     default:
       return 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800/60 dark:text-slate-200 dark:border-slate-700/80'
   }
@@ -83,15 +77,8 @@ function statusChipClasses(status) {
 
 function modeChipClasses(mode) {
   const m = up(mode)
-
-  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') {
-    return 'ui-badge ui-badge-indigo'
-  }
-
-  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') {
-    return 'ui-badge ui-badge-success'
-  }
-
+  if (m === 'GM_AND_COO' || m === 'MANAGER_AND_COO' || m === 'COO_ONLY') return 'ui-badge ui-badge-indigo'
+  if (m === 'MANAGER_ONLY' || m === 'GM_ONLY') return 'ui-badge ui-badge-success'
   return 'ui-badge ui-badge-info'
 }
 
@@ -105,7 +92,6 @@ function modeLabel(mode) {
   return 'Manager + GM'
 }
 
-/* Sort: GM pending first */
 function statusWeight(st) {
   switch (up(st)) {
     case 'PENDING_GM': return 0
@@ -118,7 +104,6 @@ function statusWeight(st) {
   }
 }
 
-/* Reject info */
 function getRejectReason(row) {
   const gm = s(row?.gmComment)
   const mgr = s(row?.managerComment)
@@ -137,17 +122,45 @@ function clearFilters() {
   employeeFilter.value = ''
   fromDate.value = ''
   toDate.value = ''
+  statusFilter.value = 'PENDING_GM'
 }
 
-/* ───────── API ───────── */
-async function fetchInbox() {
+async function fetchInbox({ reset = false } = {}) {
   try {
-    loading.value = true
-    const res = await api.get('/leave/requests/gm/inbox?scope=ALL')
-    rows.value = (Array.isArray(res.data) ? res.data : []).map((r) => ({
-      ...r,
-      attachments: Array.isArray(r.attachments) ? r.attachments : [],
-    }))
+    if (loading.value || loadingMore.value) return
+    if (!reset && !hasMore.value) return
+
+    if (reset) {
+      loading.value = true
+      rows.value = []
+      page.value = 1
+      hasMore.value = true
+    } else {
+      loadingMore.value = true
+    }
+
+    const params = {
+      status: statusFilter.value,
+      page: page.value,
+      limit: limit.value,
+      keyword: search.value || '',
+      employeeId: employeeFilter.value || '',
+      fromDate: fromDate.value || '',
+      toDate: toDate.value || '',
+    }
+
+    const res = await api.get('/leave/requests/gm/inbox', { params })
+    const payload = res?.data || {}
+    const items = Array.isArray(payload.items) ? payload.items : []
+
+    if (reset) rows.value = items
+    else rows.value.push(...items)
+
+    hasMore.value = !!payload.hasMore
+
+    if (items.length > 0 && payload.hasMore) {
+      page.value += 1
+    }
   } catch (e) {
     console.error('fetchInbox error', e)
     showToast({
@@ -157,17 +170,19 @@ async function fetchInbox() {
     })
   } finally {
     loading.value = false
+    loadingMore.value = false
   }
 }
 
-/* ───────── Filters ───────── */
+async function resetAndFetch() {
+  await fetchInbox({ reset: true })
+  await nextTick()
+  setupInfiniteScroll()
+}
+
 const filteredRows = computed(() => {
   const q = search.value.trim().toLowerCase()
-  const empQ = employeeFilter.value.trim().toLowerCase()
-
   let list = [...rows.value]
-
-  if (empQ) list = list.filter((r) => String(r.employeeId || '').toLowerCase().includes(empQ))
 
   if (q) {
     list = list.filter((r) => {
@@ -185,20 +200,8 @@ const filteredRows = computed(() => {
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
-      return hay.includes(q)
-    })
-  }
 
-  // Date filter by REQUEST DATE (createdAt)
-  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
-  const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
-  if (fromVal !== null || toVal !== null) {
-    list = list.filter((r) => {
-      if (!r.createdAt) return false
-      const t = dayjs(r.createdAt).valueOf()
-      if (fromVal !== null && t < fromVal) return false
-      if (toVal !== null && t > toVal) return false
-      return true
+      return hay.includes(q)
     })
   }
 
@@ -211,30 +214,6 @@ const filteredRows = computed(() => {
   return list
 })
 
-const pagedRows = computed(() => {
-  if (perPage.value === 'All') return filteredRows.value
-  const per = Number(perPage.value || 20)
-  const start = (page.value - 1) * per
-  return filteredRows.value.slice(start, start + per)
-})
-
-const pageCount = computed(() => {
-  if (perPage.value === 'All') return 1
-  const per = Number(perPage.value || 20)
-  return Math.ceil(filteredRows.value.length / per) || 1
-})
-
-const totalCount = computed(() => rows.value.length)
-const filteredCount = computed(() => filteredRows.value.length)
-
-watch(
-  () => [search.value, fromDate.value, toDate.value, employeeFilter.value, perPage.value],
-  () => {
-    page.value = 1
-  }
-)
-
-/* ───────── Export to REAL Excel (.xlsx) (ONE export only) ───────── */
 function safeSheetName(name, fallback = 'Inbox') {
   let x = String(name || '').trim() || fallback
   x = x.replace(/[\\\/\?\*\[\]\:]/g, ' ')
@@ -264,7 +243,7 @@ function buildExportRows(list) {
 
 function exportExcel() {
   try {
-    const list = rows.value
+    const list = filteredRows.value
     if (!list.length) {
       showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
       return
@@ -274,25 +253,15 @@ function exportExcel() {
     const ws = XLSX.utils.json_to_sheet(data)
 
     ws['!cols'] = [
-      { wch: 18 }, // RequestedAt
-      { wch: 12 }, // EmployeeId
-      { wch: 24 }, // EmployeeName
-      { wch: 18 }, // Department
-      { wch: 10 }, // LeaveType
-      { wch: 16 }, // ApprovalMode
-      { wch: 12 }, // LeaveStart
-      { wch: 12 }, // LeaveEnd
-      { wch: 10 }, // TotalDays
-      { wch: 16 }, // Status
-      { wch: 18 }, // RejectBy
-      { wch: 50 }, // RejectReason
-      { wch: 60 }, // Reason
+      { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 18 }, { wch: 10 },
+      { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 16 },
+      { wch: 18 }, { wch: 50 }, { wch: 60 },
     ]
 
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, safeSheetName('GM Inbox', 'Inbox'))
 
-    const filename = `GmInbox_ALL_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
+    const filename = `GmInbox_${statusFilter.value || 'ALL'}_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
     XLSX.writeFile(wb, filename)
 
     showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx).' })
@@ -302,10 +271,9 @@ function exportExcel() {
   }
 }
 
-/* ───────── GM Approve / Reject ───────── */
 const deciding = ref(false)
 const decideId = ref('')
-const decideAction = ref('') // 'APPROVE' | 'REJECT'
+const decideAction = ref('')
 const rejectNote = ref('')
 
 const canDecideRow = (row) => up(row?.status) === 'PENDING_GM'
@@ -344,7 +312,9 @@ async function confirmDecision() {
 
   try {
     deciding.value = true
-    await api.post(`/leave/requests/${decideId.value}/gm-decision`, { action, comment })
+    const currentId = decideId.value
+
+    await api.post(`/leave/requests/${currentId}/gm-decision`, { action, comment })
 
     showToast({
       type: 'success',
@@ -353,7 +323,12 @@ async function confirmDecision() {
     })
 
     closeDecisionModal(true)
-    await fetchInbox()
+
+    if (statusFilter.value === 'PENDING_GM') {
+      rows.value = rows.value.filter((r) => r._id !== currentId)
+    } else {
+      await resetAndFetch()
+    }
   } catch (e) {
     console.error('confirmDecision error', e)
     showToast({
@@ -366,7 +341,6 @@ async function confirmDecision() {
   }
 }
 
-/* ───────── Attachments (READ ONLY) ───────── */
 const attOpen = ref(false)
 const attLoading = ref(false)
 const attError = ref('')
@@ -407,7 +381,6 @@ function buildAttContentUrl(requestId, attId) {
   return `/leave/requests/${rid}/attachments/${aid}/content`
 }
 
-/* Preview via blob URL */
 const previewOpen = ref(false)
 const previewUrl = ref('')
 const previewType = ref('')
@@ -517,13 +490,38 @@ function closeAttachments() {
   attError.value = ''
 }
 
-/* ───────── Realtime ───────── */
-const offHandlers = []
-let refreshTimer = null
+function setupInfiniteScroll() {
+  if (typeof window === 'undefined') return
+
+  if (bottomObserver) {
+    bottomObserver.disconnect()
+    bottomObserver = null
+  }
+
+  bottomObserver = new IntersectionObserver(
+    async (entries) => {
+      const entry = entries[0]
+      if (!entry?.isIntersecting) return
+      if (loading.value || loadingMore.value || !hasMore.value) return
+      await fetchInbox()
+    },
+    {
+      root: null,
+      rootMargin: '260px 0px',
+      threshold: 0,
+    }
+  )
+
+  if (bottomSentinel.value) {
+    bottomObserver.observe(bottomSentinel.value)
+  }
+}
 
 function triggerRealtimeRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(() => fetchInbox(), 150)
+  refreshTimer = setTimeout(() => {
+    resetAndFetch()
+  }, 150)
 }
 
 function setupRealtime() {
@@ -542,7 +540,6 @@ function setupRealtime() {
   )
 }
 
-/* ───────── modal UX: body scroll lock + ESC ───────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
   document.body.classList.toggle('overflow-hidden', !!on)
@@ -561,13 +558,25 @@ function onKeydown(e) {
   if (decisionOpen.value) return closeDecisionModal()
 }
 
+watch([statusFilter, employeeFilter, fromDate, toDate], () => {
+  resetAndFetch()
+})
+
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    resetAndFetch()
+  }, 300)
+})
+
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateIsMobile)
     window.addEventListener('keydown', onKeydown)
   }
-  await fetchInbox()
+
+  await resetAndFetch()
   setupRealtime()
 })
 
@@ -577,6 +586,11 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeydown)
   }
   if (refreshTimer) clearTimeout(refreshTimer)
+  if (searchTimer) clearTimeout(searchTimer)
+  if (bottomObserver) {
+    bottomObserver.disconnect()
+    bottomObserver = null
+  }
   offHandlers.forEach((off) => {
     try {
       off && off()
@@ -593,18 +607,32 @@ onBeforeUnmount(() => {
     <div class="w-full">
       <div class="ui-card rounded-none border-x-0 border-t-0">
         <div class="ui-hero-gradient">
-          <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1 min-w-[240px]">
               <p class="text-[15px] font-extrabold">GM Inbox</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Loaded: {{ totalLoaded }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span class="ui-badge ui-badge-indigo">Default: PENDING_GM</span>
               </div>
             </div>
 
             <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[260px] max-w-sm">
+              <div class="min-w-[170px] max-w-[210px]">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Status</label>
+                  <select v-model="statusFilter" class="ui-select">
+                    <option value="PENDING_GM">PENDING_GM</option>
+                    <option value="ALL">ALL</option>
+                    <option value="APPROVED">APPROVED</option>
+                    <option value="REJECTED">REJECTED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                    <option value="PENDING_MANAGER_VIEW">PENDING_MANAGER_VIEW</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="min-w-[240px] max-w-sm">
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Search</label>
                   <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
@@ -650,8 +678,7 @@ onBeforeUnmount(() => {
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"
                   @click="exportExcel()"
-                  :disabled="loading || !rows.length"
-                  title="Export ALL rows"
+                  :disabled="loading || !filteredRows.length"
                 >
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
@@ -664,13 +691,34 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Mobile header -->
           <div v-else class="space-y-3">
             <div>
               <p class="text-[15px] font-extrabold">GM Inbox</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Loaded: {{ totalLoaded }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Scope</label>
+                <select v-model="scope" class="ui-select">
+                  <option value="ACTIONABLE">Actionable</option>
+                  <option value="ALL">All</option>
+                </select>
+              </div>
+
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Status</label>
+                <select v-model="statusFilter" class="ui-select">
+                  <option value="PENDING_GM">Waiting for GM</option>
+                  <option value="ALL">All</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="REJECTED">Rejected</option>
+                  <option value="CANCELLED">Cancelled</option>
+                  <option value="PENDING_MANAGER_VIEW">Manager Waiting</option>
+                </select>
               </div>
             </div>
 
@@ -713,7 +761,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center justify-between">
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-indigo" @click="exportExcel()" :disabled="loading || !rows.length">
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-indigo" @click="exportExcel()" :disabled="loading || !filteredRows.length">
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
@@ -725,7 +773,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Body -->
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div
             v-if="loading && !filteredRows.length"
@@ -735,13 +782,12 @@ onBeforeUnmount(() => {
             Loading GM inbox...
           </div>
 
-          <!-- Mobile cards -->
           <div v-if="isMobile" class="space-y-2">
-            <p v-if="!pagedRows.length && !loading" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
+            <p v-if="!filteredRows.length && !loading" class="py-6 text-center text-[11px] text-slate-500 dark:text-slate-400">
               No leave requests in your GM queue.
             </p>
 
-            <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3">
+            <article v-for="row in filteredRows" :key="row._id" class="ui-card p-3">
               <div class="flex items-start justify-between gap-3">
                 <div class="space-y-1">
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
@@ -799,7 +845,6 @@ onBeforeUnmount(() => {
                   class="ui-btn ui-btn-xs ui-btn-soft"
                   @click="openAttachments(row)"
                   :disabled="loading"
-                  title="View attachments"
                 >
                   <i class="fa-solid fa-paperclip text-[11px]" />
                   <span class="ml-1">{{ row.attachments.length }}</span>
@@ -818,22 +863,8 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table text-left w-full min-w-[1440px]">
-              <colgroup>
-                <col class="w-[150px]" />
-                <col class="w-[260px]" />
-                <col class="w-[92px]" />
-                <col class="w-[160px]" />
-                <col class="w-[130px]" />
-                <col class="w-[80px]" />
-                <col class="w-[170px]" />
-                <col class="w-[92px]" />
-                <col class="w-[96px]" />
-                <col />
-              </colgroup>
-
               <thead>
                 <tr>
                   <th class="ui-th text-left">Requested at</th>
@@ -854,7 +885,7 @@ onBeforeUnmount(() => {
                   <td colspan="10" class="ui-td py-8 text-slate-500 dark:text-slate-400">No leave requests in your GM queue.</td>
                 </tr>
 
-                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover">
+                <tr v-for="row in filteredRows" :key="row._id" class="ui-tr-hover">
                   <td class="ui-td text-left whitespace-nowrap align-top">
                     {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
                   </td>
@@ -888,29 +919,12 @@ onBeforeUnmount(() => {
                     </span>
                   </td>
 
-                  <!-- Files -->
-                  <td class="ui-td align-top text-center">
-                    <button
-                      v-if="row.attachments?.length"
-                      type="button"
-                      class="ui-btn ui-btn-soft ui-btn-xs"
-                      @click="openAttachments(row)"
-                      :disabled="loading"
-                      title="Preview attachments"
-                    >
-                      <i class="fa-solid fa-paperclip text-[11px]" />
-                      <span class="ml-1">{{ row.attachments.length }}</span>
-                    </button>
-                    <span v-else class="text-[11px] text-slate-400">—</span>
-                  </td>
-
-                  <!-- Actions -->
                   <td class="ui-td align-top text-center">
                     <div v-if="canDecideRow(row)" class="flex items-center justify-center gap-2">
-                      <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
+                      <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
                         <i class="fa-solid fa-circle-check text-[11px]" />
                       </button>
-                      <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)" title="Reject">
+                      <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
                         <i class="fa-solid fa-circle-xmark text-[11px]" />
                       </button>
                     </div>
@@ -924,39 +938,55 @@ onBeforeUnmount(() => {
                       class="ui-btn ui-btn-soft ui-btn-xs"
                       @click="openAttachments(row)"
                       :disabled="loading"
-                      title="Preview attachments"
                     >
                       <i class="fa-solid fa-paperclip text-[11px]" />
                       <span class="ml-1">{{ row.attachments.length }}</span>
                     </button>
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
+
+                  <td class="ui-td align-top">
+                    <div class="reason-cell text-[12px] text-slate-700 dark:text-slate-200">
+                      {{ row.reason || '—' }}
+                    </div>
+
+                    <div
+                      v-if="up(row.status) === 'REJECTED' && getRejectReason(row)"
+                      class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                    >
+                      <span class="font-extrabold">{{ rejectedByLabel(row) }}:</span>
+                      <span class="ml-1">{{ getRejectReason(row) }}</span>
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <!-- Pagination -->
-          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
-            <div class="flex items-center gap-2">
-              <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
-                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-              </select>
+          <div class="mt-3 ui-divider pt-3">
+            <div
+              v-if="loadingMore"
+              class="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-center text-[11px] text-sky-700
+                     dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
+            >
+              Loading more...
             </div>
 
-            <div class="flex items-center justify-end gap-1">
-              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
-              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
-              <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
-              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">Next</button>
-              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
-            </div>
+            <p
+              v-else-if="!hasMore && filteredRows.length"
+              class="text-center text-[11px] text-slate-500 dark:text-slate-400"
+            >
+              End of list
+            </p>
+
+            <div ref="bottomSentinel" class="h-6 w-full"></div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Confirm modal -->
+    <!-- confirm modal -->
     <div v-if="decisionOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal()" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1014,7 +1044,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Attachments modal -->
+    <!-- attachments modal -->
     <div v-if="attOpen" class="fixed inset-0 z-[70]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeAttachments" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1094,7 +1124,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Inline preview -->
       <div v-if="previewOpen" class="fixed inset-0 z-[80]">
         <div class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm" @click="closePreview" />
         <div class="absolute inset-0 flex items-center justify-center p-3">
