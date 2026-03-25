@@ -494,27 +494,49 @@ Base Tokens (Light/Dark)
     color: rgb(var(--ui-muted) / 0.95);
   }
 
-  /* ✅ Date input (fixed gradient) */
   .ui-date {
-    @apply w-full border px-3 py-2 text-[12px] outline-none transition;
-    border-radius: var(--ui-r-sm);
-    background: linear-gradient(
-      90deg,
-      rgb(var(--btn-primary) / 0.95),
-      rgb(var(--btn-primary-2) / 0.95)
-    );
-    border-color: rgba(255, 255, 255, 0.28);
-    color: rgba(255, 255, 255, 0.95);
-  }
+  @apply w-full border px-3 py-2 text-[16px] outline-none transition;
+  min-width: 0;
+  min-height: 44px;
+  border-radius: var(--ui-r-sm);
+  background: linear-gradient(
+    90deg,
+    rgb(var(--btn-primary) / 0.95),
+    rgb(var(--btn-primary-2) / 0.95)
+  );
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.95);
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.95);
+}
+
   .ui-date:focus {
     border-color: rgba(255, 255, 255, 0.35);
     box-shadow: 0 0 0 3px rgb(var(--ui-ring) / 0.22);
   }
+
+  .ui-date::-webkit-date-and-time-value {
+    text-align: left;
+    min-height: 1.25rem;
+  }
+
+  .ui-date::-webkit-datetime-edit,
+  .ui-date::-webkit-datetime-edit-fields-wrapper,
+  .ui-date::-webkit-datetime-edit-text,
+  .ui-date::-webkit-datetime-edit-month-field,
+  .ui-date::-webkit-datetime-edit-day-field,
+  .ui-date::-webkit-datetime-edit-year-field {
+    color: rgba(255, 255, 255, 0.95);
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.95);
+  }
+
   .ui-date::-webkit-calendar-picker-indicator {
     opacity: 1;
     cursor: pointer;
     filter: invert(1) brightness(1.15);
   }
+
   .dark .ui-date::-webkit-calendar-picker-indicator {
     filter: invert(1) brightness(1.2);
   }

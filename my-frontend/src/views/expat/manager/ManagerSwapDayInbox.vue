@@ -1,20 +1,4 @@
-<!-- src/views/coo/ManagerSwapDayInbox.vue
-  ✅ FULL CODE (NO ATTACHMENTS VERSION)
-  ✅ Works with new approval modes:
-     - MANAGER_ONLY   ✅ included in Manager inbox, approve -> APPROVED
-     - MANAGER_AND_GM ✅ included
-     - MANAGER_AND_COO ✅ included
-  ❌ Not shown here because manager not involved:
-     - GM_ONLY
-     - GM_AND_COO
-     - COO_ONLY
-  ✅ Admin viewers can VIEW only (no decisions)
-  ✅ Real manager can approve/reject only when status=PENDING_MANAGER
-  ✅ Bulk approve/reject (manager only)
-  ✅ Excel export (xlsx)
-  ✅ Realtime: swap:req:created / swap:req:updated
-  ✅ NEW: Approval Mode shown in mobile / desktop / detail / export
--->
+<!-- src/views/coo/ManagerSwapDayInbox.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -47,6 +31,8 @@ const rows = ref([])
 
 const search = ref('')
 const statusFilter = ref('ALL')
+const dateFrom = ref('')
+const dateTo = ref('')
 
 /* pagination */
 const page = ref(1)
@@ -83,6 +69,9 @@ const isAdminViewer = computed(() =>
   roles.value.includes('LEAVE_ADMIN') || roles.value.includes('ADMIN') || roles.value.includes('ROOT_ADMIN')
 )
 const isRealManager = computed(() => roles.value.includes('LEAVE_MANAGER'))
+
+/* hide row action buttons while bulk selection mode is active */
+const hideInlineRowActions = computed(() => selectedCount.value > 0)
 
 /* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
 const COL_WIDTH = {
@@ -122,6 +111,10 @@ function fmtDateTime(v) {
 function fmtYmd(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD')
+}
+function toYmd(v) {
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD') : ''
 }
 
 function statusBadgeUiClass(x) {
@@ -208,7 +201,23 @@ async function fetchInbox() {
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
-  if (statusFilter.value !== 'ALL') list = list.filter((r) => up(r.status) === up(statusFilter.value))
+  if (statusFilter.value !== 'ALL') {
+    list = list.filter((r) => up(r.status) === up(statusFilter.value))
+  }
+
+  if (dateFrom.value) {
+    list = list.filter((r) => {
+      const ymd = toYmd(r.createdAt)
+      return ymd && ymd >= dateFrom.value
+    })
+  }
+
+  if (dateTo.value) {
+    list = list.filter((r) => {
+      const ymd = toYmd(r.createdAt)
+      return ymd && ymd <= dateTo.value
+    })
+  }
 
   const q = search.value.trim().toLowerCase()
   if (q) {
@@ -226,6 +235,8 @@ const filteredRows = computed(() => {
         r.offEndDate,
         r.approvalMode,
         modeLabel(r.approvalMode),
+        r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+        r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD') : '',
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -389,7 +400,7 @@ function toggleSelectAll() {
 
 /* clear selection when filters/pagination inputs change */
 watch(
-  () => [search.value, statusFilter.value, perPage.value],
+  () => [search.value, statusFilter.value, dateFrom.value, dateTo.value, perPage.value],
   () => {
     page.value = 1
     clearSelection()
@@ -466,7 +477,9 @@ function upsertRow(doc) {
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
 
-  if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
+  if (viewItem.value?._id && String(viewItem.value._id) === id) {
+    viewItem.value = { ...viewItem.value, ...doc }
+  }
 
   const updated = up(doc?.status)
   if (updated !== 'PENDING_MANAGER') {
@@ -487,6 +500,8 @@ function onSwapUpdated(doc) {
 function clearFilters() {
   search.value = ''
   statusFilter.value = 'ALL'
+  dateFrom.value = ''
+  dateTo.value = ''
   perPage.value = 20
   page.value = 1
   clearSelection()
@@ -587,43 +602,18 @@ onBeforeUnmount(() => {
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
-          <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-            <div class="min-w-[240px]">
-              <div class="text-[15px] font-extrabold">Manager Inbox · Swap Working Day</div>
-              <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
-                <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
-                <span v-if="selectedCount" class="ui-badge ui-badge-warning">Selected: {{ selectedCount }}</span>
-              </div>
-            </div>
-
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[260px] max-w-xs">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
-                  <input
-                    v-model="search"
-                    type="text"
-                    placeholder="Employee, reason, status, mode..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
-                  />
+          <div v-if="!isMobile" class="space-y-4">
+            <div class="flex flex-wrap items-end justify-between gap-4">
+              <div class="min-w-[240px]">
+                <div class="text-[15px] font-extrabold">Manager Inbox · Swap Working Day</div>
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                  <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                  <span v-if="selectedCount" class="ui-badge ui-badge-warning">Selected: {{ selectedCount }}</span>
                 </div>
               </div>
 
-              <div class="min-w-[180px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
-                    {{ label }}
-                  </option>
-                </select>
-              </div>
-
-              <div class="flex items-center gap-2">
+              <div class="flex items-center justify-end gap-2">
                 <template v-if="isRealManager && !isAdminViewer">
                   <button
                     class="ui-btn ui-btn-sm ui-btn-soft"
@@ -684,6 +674,51 @@ onBeforeUnmount(() => {
                 </button>
               </div>
             </div>
+
+            <div class="grid w-full gap-2 md:grid-cols-[minmax(180px,220px)_120px_140px_140px] md:items-end">
+              <div class="min-w-0">
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
+                <div class="flex min-h-[40px] items-center rounded-xl border border-white/25 bg-white/10 px-2.5 text-[16px] md:min-h-[36px] md:px-2 md:text-[13px]">
+                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80 md:text-[11px]" />
+                  <input
+                    v-model="search"
+                    type="text"
+                    placeholder="Employee, reason..."
+                    class="w-full min-w-0 bg-transparent text-[16px] text-white outline-none placeholder:text-white/70 md:text-[13px]"
+                  />
+                </div>
+              </div>
+
+              <div class="min-w-0">
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
+                <select
+                  v-model="statusFilter"
+                  class="w-full min-w-0 min-h-[40px] rounded-xl border border-white/25 bg-white/10 px-2.5 text-[16px] text-white outline-none md:min-h-[36px] md:px-2 md:text-[13px]"
+                >
+                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
+                    {{ label }}
+                  </option>
+                </select>
+              </div>
+
+              <div class="min-w-0">
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+                <input
+                  v-model="dateFrom"
+                  type="date"
+                  class="ui-date min-h-[40px] px-2.5 text-[16px] md:min-h-[36px] md:px-2 md:text-[13px]"
+                />
+              </div>
+
+              <div class="min-w-0">
+                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+                <input
+                  v-model="dateTo"
+                  type="date"
+                  class="ui-date min-h-[40px] px-2.5 text-[16px] md:min-h-[36px] md:px-2 md:text-[13px]"
+                />
+              </div>
+            </div>
           </div>
 
           <!-- Mobile header -->
@@ -698,29 +733,49 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="space-y-2">
-              <div>
+              <div class="min-w-0">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
+                <div class="flex min-h-[44px] items-center rounded-xl border border-white/25 bg-white/10 px-3 text-[16px]">
                   <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
                   <input
                     v-model="search"
                     type="text"
                     placeholder="Employee, reason, status, mode..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
+                    class="w-full min-w-0 bg-transparent text-[16px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
               </div>
 
-              <div>
+              <div class="min-w-0">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
                 <select
                   v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
+                  class="w-full min-w-0 min-h-[44px] rounded-xl border border-white/25 bg-white/10 px-3 text-[16px] text-white outline-none"
                 >
                   <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
                     {{ label }}
                   </option>
                 </select>
+              </div>
+
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div class="min-w-0">
+                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+                  <input
+                    v-model="dateFrom"
+                    type="date"
+                    class="ui-date min-h-[44px] text-[16px]"
+                  />
+                </div>
+
+                <div class="min-w-0">
+                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+                  <input
+                    v-model="dateTo"
+                    type="date"
+                    class="ui-date min-h-[44px] text-[16px]"
+                  />
+                </div>
               </div>
 
               <div class="flex flex-wrap items-center justify-end gap-2">
@@ -736,6 +791,16 @@ onBeforeUnmount(() => {
 
                   <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
                     Reject ({{ selectedCount }})
+                  </button>
+
+                  <button
+                    v-if="selectedCount"
+                    class="ui-btn ui-btn-sm ui-btn-ghost"
+                    type="button"
+                    :disabled="loading || deciding"
+                    @click="clearSelection"
+                  >
+                    Clear Select
                   </button>
                 </template>
 
@@ -761,7 +826,7 @@ onBeforeUnmount(() => {
 
         <!-- BODY -->
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
-          <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
+          <div v-if="loading && !filteredRows.length" class="ui-skeleton mb-2 h-14 w-full" />
 
           <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
@@ -769,7 +834,7 @@ onBeforeUnmount(() => {
               No items found.
             </div>
 
-            <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
+            <article v-for="row in pagedRows" :key="row._id" class="ui-card cursor-pointer p-3" @click="openView(row)">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 space-y-1">
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
@@ -777,11 +842,11 @@ onBeforeUnmount(() => {
                     <span class="font-extrabold text-slate-900 dark:text-slate-50">{{ fmtDateTime(row.createdAt) }}</span>
                   </div>
 
-                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                  <div class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
                     {{ row.employeeName || row.name || row.employeeId || '—' }}
                   </div>
 
-                  <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">
                     ID: {{ row.employeeId || '—' }}
                   </div>
 
@@ -790,7 +855,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="shrink-0 text-right space-y-1 flex items-start gap-2">
+                <div class="shrink-0 flex items-start gap-2 text-right space-y-1">
                   <span :class="statusBadgeUiClass(row.status)">
                     {{ STATUS_LABEL[row.status] || row.status }}
                   </span>
@@ -831,7 +896,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-3 flex items-center justify-end gap-2" @click.stop>
-                <template v-if="canDecide(row)">
+                <template v-if="canDecide(row) && !hideInlineRowActions">
                   <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
                     <i class="fa-solid fa-circle-check text-[12px]" />
                   </button>
@@ -899,10 +964,10 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <div class="font-extrabold text-slate-900 dark:text-slate-50 truncate">
+                    <div class="truncate font-extrabold text-slate-900 dark:text-slate-50">
                       {{ row.employeeName || row.name || row.employeeId || '—' }}
                     </div>
-                    <div class="text-[10px] text-slate-500 dark:text-slate-400 truncate">ID: {{ row.employeeId || '—' }}</div>
+                    <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">ID: {{ row.employeeId || '—' }}</div>
                   </td>
 
                   <td class="ui-td">
@@ -923,7 +988,7 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">
-                      <template v-if="canDecide(row)">
+                      <template v-if="canDecide(row) && !hideInlineRowActions">
                         <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn" :disabled="loading || deciding" @click="openApprove(row)" title="Approve">
                           <i class="fa-solid fa-circle-check text-[12px]" />
                         </button>
@@ -944,7 +1009,7 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Pagination -->
-          <div class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+          <div class="ui-divider mt-3 flex flex-col gap-2 pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-2">
               <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
                 <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
@@ -965,11 +1030,11 @@ onBeforeUnmount(() => {
 
     <!-- DETAILS MODAL -->
     <div v-if="viewOpen" class="ui-modal-backdrop">
-      <div class="ui-modal p-0 overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+      <div class="ui-modal overflow-hidden p-0">
+        <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <div class="min-w-0">
             <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Swap Request Details</div>
-            <div class="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">
               {{ viewItem?.employeeName || viewItem?.name || '—' }} · {{ fmtDateTime(viewItem?.createdAt) }}
             </div>
           </div>
@@ -980,7 +1045,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <div class="p-4 space-y-3">
+        <div class="space-y-3 p-4">
           <div class="ui-frame p-3">
             <div class="grid gap-3 md:grid-cols-2">
               <div>
@@ -1024,7 +1089,7 @@ onBeforeUnmount(() => {
 
           <div class="ui-card p-3">
             <div class="ui-section-title">Reason</div>
-            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+            <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
               {{ viewItem?.reason || '—' }}
             </div>
           </div>
@@ -1035,7 +1100,7 @@ onBeforeUnmount(() => {
               <div
                 v-for="(step, idx) in (Array.isArray(viewItem?.approvals) ? viewItem.approvals : [])"
                 :key="idx"
-                class="ui-frame p-2 flex items-center justify-between text-[11px]"
+                class="ui-frame flex items-center justify-between p-2 text-[11px]"
               >
                 <div class="font-extrabold text-slate-700 dark:text-slate-200">
                   {{ step.level }} · {{ step.loginId }}
@@ -1058,7 +1123,7 @@ onBeforeUnmount(() => {
 
           <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
             <div class="ui-section-title text-rose-600 dark:text-rose-400">Rejected Reason</div>
-            <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">
+            <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
               {{ getRejectedReason(viewItem) }}
             </div>
           </div>
@@ -1066,7 +1131,7 @@ onBeforeUnmount(() => {
           <div class="flex justify-end gap-2 pt-1">
             <button class="ui-btn ui-btn-ghost" type="button" @click="closeView">Close</button>
 
-            <template v-if="canDecide(viewItem)">
+            <template v-if="canDecide(viewItem) && !hideInlineRowActions">
               <button class="ui-btn ui-btn-rose" type="button" @click="openReject(viewItem)">Reject</button>
               <button class="ui-btn ui-btn-emerald" type="button" @click="openApprove(viewItem)">Approve</button>
             </template>
@@ -1100,7 +1165,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="mt-3 ui-field">
+        <div class="ui-field mt-3">
           <textarea
             v-model="decisionNote"
             rows="3"
@@ -1151,7 +1216,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="mt-3 ui-field">
+        <div class="ui-field mt-3">
           <textarea
             v-model="bulkDecisionNote"
             rows="3"

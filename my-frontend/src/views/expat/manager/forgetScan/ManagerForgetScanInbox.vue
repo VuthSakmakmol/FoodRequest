@@ -1,19 +1,4 @@
-<!-- src/views/expat/manager/forgetScan/ManagerForgetScanInbox.vue
-  ✅ SAME STYLE as ManagerSwapDayInbox (ui-* tokens, hero bar, filters, pagination, view modal, decision modal)
-  ✅ Default filter = PENDING_MANAGER
-  ✅ Always fetch scope=ALL (like swap-day), filter controls what shown
-  ✅ Export Excel (xlsx)
-  ✅ Realtime ready (SwapDay baseline):
-      - forgetscan:req:created
-      - forgetscan:req:updated
-  ✅ NEW: Approver Mode shown in:
-      - mobile card
-      - desktop table
-      - detail modal
-      - excel export
-      - search
--->
-
+<!-- src/views/expat/manager/forgetScan/ManagerForgetScanInbox.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -23,7 +8,7 @@ import { useAuth } from '@/store/auth'
 
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
-// ✅ Excel export
+// Excel export
 import * as XLSX from 'xlsx'
 
 defineOptions({ name: 'ManagerForgetScanInbox' })
@@ -45,6 +30,8 @@ const rows = ref([])
 
 const search = ref('')
 const statusFilter = ref('ALL')
+const dateFrom = ref('')
+const dateTo = ref('')
 
 /* pagination */
 const page = ref(1)
@@ -111,7 +98,7 @@ function uniqUpper(arr) {
   return [...new Set((arr || []).map((x) => up(x)).filter(Boolean))]
 }
 
-// ✅ supports new forgotTypes[] + fallback old forgotType + forgotKey
+// supports new forgotTypes[] + fallback old forgotType + forgotKey
 function getTypesArr(row) {
   const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
   let types = uniqUpper(arr)
@@ -133,7 +120,6 @@ function typesToText(row) {
   return types.map((t) => TYPE_LABEL[t] || t).join(' + ')
 }
 
-// ✅ badge style: both -> info, OUT-only -> indigo, IN-only -> info
 function typeBadgeUiClassByTypes(row) {
   const types = getTypesArr(row)
   const hasIn = types.includes('FORGET_IN')
@@ -157,6 +143,10 @@ function fmtDateTime(v) {
 function fmtYmd(v) {
   if (!v) return '—'
   return dayjs(v).format('YYYY-MM-DD')
+}
+function toYmd(v) {
+  const d = dayjs(v)
+  return d.isValid() ? d.format('YYYY-MM-DD') : ''
 }
 
 function statusBadgeUiClass(x) {
@@ -253,6 +243,20 @@ const filteredRows = computed(() => {
     list = list.filter((r) => up(r.status) === up(statusFilter.value))
   }
 
+  if (dateFrom.value) {
+    list = list.filter((r) => {
+      const ymd = toYmd(r.createdAt)
+      return ymd && ymd >= dateFrom.value
+    })
+  }
+
+  if (dateTo.value) {
+    list = list.filter((r) => {
+      const ymd = toYmd(r.createdAt)
+      return ymd && ymd <= dateTo.value
+    })
+  }
+
   const q = search.value.trim().toLowerCase()
   if (q) {
     list = list.filter((r) => {
@@ -268,6 +272,8 @@ const filteredRows = computed(() => {
         r.forgotKey,
         r.approvalMode,
         modeLabel(r.approvalMode),
+        r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+        r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD') : '',
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
@@ -296,7 +302,7 @@ const pagedRows = computed(() => {
 })
 
 watch(
-  () => [search.value, statusFilter.value, perPage.value],
+  () => [search.value, statusFilter.value, dateFrom.value, dateTo.value, perPage.value],
   () => (page.value = 1)
 )
 
@@ -311,7 +317,9 @@ watch(
 /* clear filters */
 function clearFilters() {
   search.value = ''
-  statusFilter.value = 'PENDING_MANAGER'
+  statusFilter.value = 'ALL'
+  dateFrom.value = ''
+  dateTo.value = ''
   perPage.value = 20
   page.value = 1
 }
@@ -509,39 +517,69 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[260px] max-w-xs">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-2">
+              <div class="min-w-[190px] max-w-[220px]">
+                <div class="ui-field">
+                  <label class="text-[10px] font-extrabold text-white/90">Search</label>
+                  <div class="flex min-h-[36px] items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-2">
+                    <i class="fa-solid fa-magnifying-glass text-[11px] text-white/80" />
+                    <input
+                      v-model="search"
+                      type="text"
+                      placeholder="Employee / reason / status..."
+                      class="w-full bg-transparent text-[13px] text-white outline-none placeholder:text-white/70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div class="min-w-[120px] max-w-[140px]">
+                <div class="ui-field">
+                  <label class="text-[10px] font-extrabold text-white/90">Status</label>
+                  <select
+                    v-model="statusFilter"
+                    class="w-full rounded-xl border border-white/25 bg-white/10 px-2 min-h-[36px] text-[13px] text-white outline-none"
+                  >
+                    <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
+                      {{ label }}
+                    </option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div class="ui-field min-w-0">
+                  <label class="text-[10px] font-extrabold text-white/90">Date From</label>
                   <input
-                    v-model="search"
-                    type="text"
-                    placeholder="Employee, reason, status, mode..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
+                    v-model="dateFrom"
+                    type="date"
+                    class="ui-date w-full min-w-0 md:min-h-[36px] md:px-2 md:text-[13px]"
+                  />
+                </div>
+
+                <div class="ui-field min-w-0">
+                  <label class="text-[10px] font-extrabold text-white/90">Date To</label>
+                  <input
+                    v-model="dateTo"
+                    type="date"
+                    class="ui-date w-full min-w-0 md:min-h-[36px] md:px-2 md:text-[13px]"
                   />
                 </div>
               </div>
 
-              <div class="min-w-[180px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
-                    {{ label }}
-                  </option>
-                </select>
-              </div>
-
               <div class="flex items-center gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox" title="Refresh">
+                <button
+                  class="ui-btn ui-btn-sm ui-btn-soft md:min-h-[36px] md:px-2.5 md:text-[12px]"
+                  type="button"
+                  :disabled="loading"
+                  @click="fetchInbox"
+                  title="Refresh"
+                >
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                 </button>
 
                 <button
-                  class="ui-btn ui-btn-sm ui-btn-soft"
+                  class="ui-btn ui-btn-sm ui-btn-soft md:min-h-[36px] md:px-2.5 md:text-[12px]"
                   type="button"
                   :disabled="loading || exporting"
                   @click="exportExcel"
@@ -551,7 +589,13 @@ onBeforeUnmount(() => {
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear filters">
+                <button
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:min-h-[36px] md:px-2.5 md:text-[12px]"
+                  type="button"
+                  :disabled="loading"
+                  @click="clearFilters"
+                  title="Clear filters"
+                >
                   <i class="fa-solid fa-broom text-[11px]" />
                 </button>
               </div>
@@ -571,7 +615,7 @@ onBeforeUnmount(() => {
             <div class="space-y-2">
               <div>
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
+                <div class="flex min-h-[40px] items-center rounded-xl border border-white/25 bg-white/10 px-2.5 text-[16px]">
                   <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
                   <input
                     v-model="search"
@@ -586,12 +630,32 @@ onBeforeUnmount(() => {
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
                 <select
                   v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
+                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 min-h-[40px] text-[16px] text-white outline-none"
                 >
                   <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
                     {{ label }}
                   </option>
                 </select>
+              </div>
+
+              <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div>
+                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+                  <input
+                    v-model="dateFrom"
+                    type="date"
+                    class="ui-date min-h-[40px] px-2.5 text-[16px]"
+                  />
+                </div>
+
+                <div>
+                  <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+                  <input
+                    v-model="dateTo"
+                    type="date"
+                    class="ui-date min-h-[40px] px-2.5 text-[16px]"
+                  />
+                </div>
               </div>
 
               <div class="flex items-center justify-end gap-2">
@@ -619,7 +683,7 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- ✅ MOBILE CARDS -->
+          <!-- MOBILE CARDS -->
           <div v-if="isMobile" class="space-y-2">
             <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500">
               No items found.
@@ -701,7 +765,7 @@ onBeforeUnmount(() => {
             </article>
           </div>
 
-          <!-- ✅ DESKTOP TABLE -->
+          <!-- DESKTOP TABLE -->
           <div v-else class="ui-table-wrap">
             <table class="ui-table table-fixed w-full min-w-[1220px]">
               <colgroup>
@@ -906,7 +970,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- ✅ Rejected Reason -->
           <div v-if="up(viewItem?.status) === 'REJECTED'" class="ui-card p-3">
             <div class="ui-section-title text-rose-600 dark:text-rose-400">Rejected Reason</div>
             <div class="mt-1 text-[12px] text-slate-700 dark:text-slate-200 whitespace-pre-wrap">

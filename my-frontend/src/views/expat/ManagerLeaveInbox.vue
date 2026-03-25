@@ -203,8 +203,14 @@ const filteredRows = computed(() => {
     })
   }
 
-  const fromVal = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
-  const toVal = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
+  const rawFrom = fromDate.value ? dayjs(fromDate.value).startOf('day').valueOf() : null
+  const rawTo = toDate.value ? dayjs(toDate.value).endOf('day').valueOf() : null
+
+  const fromVal =
+    rawFrom !== null && rawTo !== null ? Math.min(rawFrom, rawTo) : rawFrom ?? rawTo
+
+  const toVal =
+    rawFrom !== null && rawTo !== null ? Math.max(rawFrom, rawTo) : rawTo ?? rawFrom
 
   if (fromVal !== null || toVal !== null) {
     list = list.filter((r) => {
@@ -600,7 +606,7 @@ onBeforeUnmount(() => {
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-            <div class="flex flex-col gap-1 min-w-[240px]">
+            <div class="flex min-w-[240px] flex-col gap-1">
               <p class="text-[15px] font-extrabold">Manager Inbox</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
@@ -608,52 +614,61 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[240px] max-w-xs">
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-2">
+              <div class="min-w-[190px] max-w-[220px]">
                 <div class="ui-field">
-                  <label class="text-[11px] font-extrabold text-white/90">Search</label>
-                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
-                    <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
+                  <label class="text-[10px] font-extrabold text-white/90">Search</label>
+                  <div class="flex min-h-[36px] items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-2">
+                    <i class="fa-solid fa-magnifying-glass text-[11px] text-white/80" />
                     <input
                       v-model="search"
                       type="text"
                       placeholder="Employee / type / mode / reason..."
-                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                      class="w-full bg-transparent text-[13px] text-white outline-none placeholder:text-white/70"
                     />
                   </div>
                 </div>
               </div>
 
-              <div class="min-w-[180px] max-w-[220px]">
+              <div class="min-w-[140px] max-w-[160px]">
                 <div class="ui-field">
-                  <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
-                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
-                    <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
+                  <label class="text-[10px] font-extrabold text-white/90">Employee ID</label>
+                  <div class="flex min-h-[36px] items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-2">
+                    <i class="fa-solid fa-id-badge text-[11px] text-white/80" />
                     <input
                       v-model="employeeFilter"
                       type="text"
                       placeholder="Ex: 51820386"
-                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                      class="w-full bg-transparent text-[13px] text-white outline-none placeholder:text-white/70"
                     />
                   </div>
                 </div>
               </div>
 
-              <div class="flex items-end gap-2">
-                <div class="ui-field w-[150px]">
-                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
-                  <input v-model="fromDate" type="date" class="ui-date" />
+              <div class="grid grid-cols-2 gap-2">
+                <div class="ui-field min-w-0">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested from</label>
+                  <input
+                    v-model="fromDate"
+                    type="date"
+                    class="ui-date w-full min-w-0 md:min-h-[36px] md:px-2 md:text-[13px]"
+                  />
                 </div>
-                <div class="ui-field w-[150px]">
-                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
-                  <input v-model="toDate" type="date" class="ui-date" />
+
+                <div class="ui-field min-w-0">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested to</label>
+                  <input
+                    v-model="toDate"
+                    type="date"
+                    class="ui-date w-full min-w-0 md:min-h-[36px] md:px-2 md:text-[13px]"
+                  />
                 </div>
               </div>
 
               <div class="flex items-center gap-2">
                 <button
                   type="button"
-                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:min-h-[36px] md:px-2.5 md:text-[12px]"
                   @click="exportExcel('FILTERED')"
                   :disabled="loading || !filteredRows.length"
                   title="Export filtered list"
@@ -662,11 +677,23 @@ onBeforeUnmount(() => {
                   Export
                 </button>
 
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-soft" @click="fetchInbox" :disabled="loading" title="Refresh">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-soft md:min-h-[36px] md:px-2.5 md:text-[12px]"
+                  @click="fetchInbox"
+                  :disabled="loading"
+                  title="Refresh"
+                >
                   <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
                 </button>
 
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading" title="Clear filters">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:min-h-[36px] md:px-2.5 md:text-[12px]"
+                  @click="clearFilters"
+                  :disabled="loading"
+                  title="Clear filters"
+                >
                   <i class="fa-solid fa-broom text-[11px]" />
                 </button>
               </div>

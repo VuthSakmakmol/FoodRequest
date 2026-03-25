@@ -552,25 +552,25 @@ onBeforeUnmount(() => {
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div class="text-sm font-extrabold">Forget Scan</div>
 
-            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[260px_200px_170px_170px_auto] md:items-end">
-              <div>
+            <div class="grid w-full gap-2 md:w-auto md:grid-cols-[minmax(220px,1fr)_minmax(160px,200px)_minmax(170px,1fr)_minmax(170px,1fr)_auto] md:items-end">
+              <div class="min-w-0">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
+                <div class="flex min-h-[44px] items-center rounded-xl border border-white/25 bg-white/10 px-3 text-[16px]">
                   <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
                   <input
                     v-model="search"
                     type="text"
                     placeholder="Reason, date, status, mode..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
+                    class="w-full min-w-0 bg-transparent text-[16px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
               </div>
 
-              <div>
+              <div class="min-w-0">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
                 <select
                   v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                  class="w-full min-w-0 min-h-[44px] rounded-xl border border-white/25 bg-white/10 px-3 text-[16px] text-white outline-none"
                 >
                   <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
                     {{ label }}
@@ -578,25 +578,25 @@ onBeforeUnmount(() => {
                 </select>
               </div>
 
-              <div>
+              <div class="min-w-0">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
                 <input
                   v-model="dateFrom"
                   type="date"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                  class="ui-date min-h-[44px] text-[16px]"
                 />
               </div>
 
-              <div>
+              <div class="min-w-0">
                 <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
                 <input
                   v-model="dateTo"
                   type="date"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                  class="ui-date min-h-[44px] text-[16px]"
                 />
               </div>
 
-              <button class="ui-btn ui-btn-primary" type="button" @click="openCreate">
+              <button class="ui-btn ui-btn-primary min-h-[44px]" type="button" @click="openCreate">
                 <i class="fa-solid fa-plus text-[11px]" />
                 New Request
               </button>
