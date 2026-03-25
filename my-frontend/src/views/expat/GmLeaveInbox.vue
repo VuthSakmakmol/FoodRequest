@@ -241,11 +241,26 @@ function buildExportRows(list) {
   }))
 }
 
-function exportExcel() {
+async function exportExcel() {
   try {
-    const list = filteredRows.value
+    const params = {
+      status: statusFilter.value,
+      exportAll: 1,
+      keyword: search.value || '',
+      employeeId: employeeFilter.value || '',
+      fromDate: fromDate.value || '',
+      toDate: toDate.value || '',
+    }
+
+    const res = await api.get('/leave/requests/gm/inbox', { params })
+    const list = Array.isArray(res?.data?.items) ? res.data.items : []
+
     if (!list.length) {
-      showToast({ type: 'warning', title: 'Nothing to export', message: 'No rows available for export.' })
+      showToast({
+        type: 'warning',
+        title: 'Nothing to export',
+        message: 'No rows match the current filters.',
+      })
       return
     }
 
@@ -253,9 +268,19 @@ function exportExcel() {
     const ws = XLSX.utils.json_to_sheet(data)
 
     ws['!cols'] = [
-      { wch: 18 }, { wch: 12 }, { wch: 24 }, { wch: 18 }, { wch: 10 },
-      { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 16 },
-      { wch: 18 }, { wch: 50 }, { wch: 60 },
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 50 },
+      { wch: 60 },
     ]
 
     const wb = XLSX.utils.book_new()
@@ -264,10 +289,18 @@ function exportExcel() {
     const filename = `GmInbox_${statusFilter.value || 'ALL'}_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
     XLSX.writeFile(wb, filename)
 
-    showToast({ type: 'success', title: 'Exported', message: 'Downloaded Excel (.xlsx).' })
+    showToast({
+      type: 'success',
+      title: 'Exported',
+      message: `Downloaded ${list.length} row(s).`,
+    })
   } catch (e) {
     console.error('exportExcel error', e)
-    showToast({ type: 'error', title: 'Export failed', message: 'Unable to export. Please try again.' })
+    showToast({
+      type: 'error',
+      title: 'Export failed',
+      message: e?.response?.data?.message || 'Unable to export. Please try again.',
+    })
   }
 }
 
@@ -306,7 +339,11 @@ async function confirmDecision() {
   const comment = action === 'REJECT' ? rejectNote.value.trim() : ''
 
   if (action === 'REJECT' && !comment) {
-    showToast({ type: 'warning', title: 'Reject reason required', message: 'Please enter a short reason to reject.' })
+    showToast({
+      type: 'warning',
+      title: 'Reject reason required',
+      message: 'Please enter a short reason to reject.',
+    })
     return
   }
 
@@ -611,17 +648,18 @@ onBeforeUnmount(() => {
             <div class="flex flex-col gap-1 min-w-[240px]">
               <p class="text-[15px] font-extrabold">GM Inbox</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Loaded: {{ totalLoaded }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
-                <span class="ui-badge ui-badge-indigo">Default: PENDING_GM</span>
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[170px] max-w-[210px]">
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-1.5 xl:gap-2">
+              <div class="w-[150px]">
                 <div class="ui-field">
-                  <label class="text-[11px] font-extrabold text-white/90">Status</label>
-                  <select v-model="statusFilter" class="ui-select">
+                  <label class="text-[10px] font-extrabold text-white/90">Status</label>
+                  <select
+                    v-model="statusFilter"
+                    class="w-full rounded-xl border border-white/25 bg-white/10 px-2 h-[34px] text-[12px] text-white outline-none"
+                  >
                     <option value="PENDING_GM">PENDING_GM</option>
                     <option value="ALL">ALL</option>
                     <option value="APPROVED">APPROVED</option>
@@ -632,59 +670,48 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="min-w-[240px] max-w-sm">
+              <div class="w-[170px]">
                 <div class="ui-field">
-                  <label class="text-[11px] font-extrabold text-white/90">Search</label>
-                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
-                    <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
+                  <label class="text-[10px] font-extrabold text-white/90">Search</label>
+                  <div class="flex h-[34px] items-center gap-1.5 rounded-xl border border-white/25 bg-white/10 px-2">
+                    <i class="fa-solid fa-magnifying-glass text-[11px] text-white/80" />
                     <input
                       v-model="search"
                       type="text"
-                      placeholder="Employee / type / mode / reason / reject note..."
-                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
+                      placeholder="Employee / type / reason..."
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/65"
                     />
                   </div>
                 </div>
               </div>
-
-              <div class="min-w-[180px] max-w-[220px]">
-                <div class="ui-field">
-                  <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
-                  <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
-                    <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
-                    <input
-                      v-model="employeeFilter"
-                      type="text"
-                      placeholder="Ex: 51820386"
-                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
-                    />
-                  </div>
+              <div class="flex items-end gap-1.5">
+                <div class="ui-field w-[126px]">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
+                </div>
+                <div class="ui-field w-[126px]">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
                 </div>
               </div>
 
-              <div class="flex items-end gap-2">
-                <div class="ui-field w-[150px]">
-                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
-                  <input v-model="fromDate" type="date" class="ui-date" />
-                </div>
-                <div class="ui-field w-[150px]">
-                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
-                  <input v-model="toDate" type="date" class="ui-date" />
-                </div>
-              </div>
-
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-1.5">
                 <button
                   type="button"
-                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
                   @click="exportExcel()"
-                  :disabled="loading || !filteredRows.length"
+                  :disabled="loading"
                 >
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
 
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="clearFilters" :disabled="loading">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]"
+                  @click="clearFilters"
+                  :disabled="loading"
+                >
                   Clear
                 </button>
               </div>
@@ -695,31 +722,20 @@ onBeforeUnmount(() => {
             <div>
               <p class="text-[15px] font-extrabold">GM Inbox</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Loaded: {{ totalLoaded }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
               </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-2">
-              <div class="ui-field">
-                <label class="text-[11px] font-extrabold text-white/90">Scope</label>
-                <select v-model="scope" class="ui-select">
-                  <option value="ACTIONABLE">Actionable</option>
-                  <option value="ALL">All</option>
-                </select>
-              </div>
-
-              <div class="ui-field">
-                <label class="text-[11px] font-extrabold text-white/90">Status</label>
-                <select v-model="statusFilter" class="ui-select">
-                  <option value="PENDING_GM">Waiting for GM</option>
-                  <option value="ALL">All</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="REJECTED">Rejected</option>
-                  <option value="CANCELLED">Cancelled</option>
-                  <option value="PENDING_MANAGER_VIEW">Manager Waiting</option>
-                </select>
-              </div>
+            <div class="ui-field">
+              <label class="text-[11px] font-extrabold text-white/90">Status</label>
+              <select v-model="statusFilter" class="ui-select">
+                <option value="PENDING_GM">PENDING_GM</option>
+                <option value="ALL">ALL</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="REJECTED">REJECTED</option>
+                <option value="CANCELLED">CANCELLED</option>
+                <option value="PENDING_MANAGER_VIEW">PENDING_MANAGER_VIEW</option>
+              </select>
             </div>
 
             <div class="space-y-2">
@@ -730,7 +746,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee / type / mode / reason..."
+                    placeholder="Employee / type / reason..."
                     class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -761,7 +777,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center justify-between">
-                <button type="button" class="ui-btn ui-btn-sm ui-btn-indigo" @click="exportExcel()" :disabled="loading || !filteredRows.length">
+                <button type="button" class="ui-btn ui-btn-sm ui-btn-indigo" @click="exportExcel()" :disabled="loading">
                   <i class="fa-solid fa-file-excel text-[11px]" />
                   Export
                 </button>
@@ -776,8 +792,7 @@ onBeforeUnmount(() => {
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div
             v-if="loading && !filteredRows.length"
-            class="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700
-                   dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
+            class="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
           >
             Loading GM inbox...
           </div>
@@ -831,8 +846,7 @@ onBeforeUnmount(() => {
 
               <div
                 v-if="up(row.status) === 'REJECTED'"
-                class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                       dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
               >
                 <span class="font-extrabold">{{ rejectedByLabel(row) }}:</span>
                 <span class="ml-1">{{ getRejectReason(row) || '—' }}</span>
@@ -952,8 +966,7 @@ onBeforeUnmount(() => {
 
                     <div
                       v-if="up(row.status) === 'REJECTED' && getRejectReason(row)"
-                      class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                             dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
+                      class="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200"
                     >
                       <span class="font-extrabold">{{ rejectedByLabel(row) }}:</span>
                       <span class="ml-1">{{ getRejectReason(row) }}</span>
@@ -967,8 +980,7 @@ onBeforeUnmount(() => {
           <div class="mt-3 ui-divider pt-3">
             <div
               v-if="loadingMore"
-              class="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-center text-[11px] text-sky-700
-                     dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
+              class="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-center text-[11px] text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
             >
               Loading more...
             </div>
@@ -986,7 +998,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- confirm modal -->
     <div v-if="decisionOpen" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal()" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1011,8 +1022,7 @@ onBeforeUnmount(() => {
               <textarea
                 v-model="rejectNote"
                 rows="3"
-                class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-900 outline-none
-                       placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-900 outline-none placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
                 placeholder="Example: Not enough coverage during that period..."
               />
               <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Required.</p>
@@ -1044,7 +1054,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- attachments modal -->
     <div v-if="attOpen" class="fixed inset-0 z-[70]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeAttachments" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
@@ -1068,16 +1077,14 @@ onBeforeUnmount(() => {
           <div class="mt-3">
             <div
               v-if="attLoading"
-              class="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700
-                     dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
+              class="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] text-sky-700 dark:border-sky-700/70 dark:bg-sky-950/40 dark:text-sky-100"
             >
               Loading attachments...
             </div>
 
             <div
               v-else-if="attError"
-              class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                     dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
+              class="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-700/70 dark:bg-rose-950/40 dark:text-rose-100"
             >
               {{ attError }}
             </div>

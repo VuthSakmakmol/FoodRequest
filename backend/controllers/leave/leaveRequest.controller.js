@@ -794,25 +794,18 @@ exports.managerDecision = async (req, res, next) => {
   }
 }
 
-/* ─────────────────────────────────────────────
-   GM INBOX
-   ✅ infinite scroll backend paging
-   ✅ default ACTIONABLE + PENDING_GM
-   ✅ Waiting for GM = ONLY requests GM can decide now
-   ✅ viewer rows (MANAGER_ONLY / PENDING_MANAGER) only appear when status filter asks for them
-───────────────────────────────────────────── */
 exports.listGmInbox = async (req, res, next) => {
   try {
     const me = actorLoginId(req)
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewGmInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || 'ACTIONABLE') // ACTIONABLE | ALL
-    const status = up(req.query?.status || 'PENDING_GM') // default = waiting for GM
+    const status = up(req.query?.status || 'PENDING_GM')
     const keyword = s(req.query?.keyword || '')
     const employeeId = s(req.query?.employeeId || '')
     const fromDate = s(req.query?.fromDate || '')
     const toDate = s(req.query?.toDate || '')
+    const exportAll = ['1', 'true', 'yes'].includes(String(req.query?.exportAll || '').toLowerCase())
 
     const page = Math.max(Number(req.query?.page || 1), 1)
     const limit = Math.min(Math.max(Number(req.query?.limit || 10), 1), 50)
@@ -823,20 +816,17 @@ exports.listGmInbox = async (req, res, next) => {
 
     let baseQuery = {}
 
-    if (isAdminViewer(req)) {
-      if (scope === 'ALL') {
+    if (status === 'PENDING_MANAGER_VIEW') {
+      baseQuery = {
+        approvalMode: viewerMode,
+        status: 'PENDING_MANAGER',
+      }
+    } else if (status === 'ALL') {
+      if (isAdminViewer(req)) {
         baseQuery = {
           approvalMode: { $in: [...actionableModes, viewerMode] },
         }
       } else {
-        // ✅ ACTIONABLE for GM = only real GM queue
-        baseQuery = {
-          approvalMode: { $in: actionableModes },
-          status: 'PENDING_GM',
-        }
-      }
-    } else {
-      if (scope === 'ALL') {
         baseQuery = {
           $or: [
             {
@@ -846,46 +836,28 @@ exports.listGmInbox = async (req, res, next) => {
             },
             {
               approvalMode: viewerMode,
-              // MANAGER_ONLY has no gmLoginId by design
               status: { $in: allowedStatusesForInboxLevel('MANAGER') },
             },
           ],
         }
+      }
+    } else {
+      if (isAdminViewer(req)) {
+        baseQuery = {
+          approvalMode: { $in: actionableModes },
+          status,
+        }
       } else {
-        // ✅ ACTIONABLE for GM = only requests assigned to this GM and waiting GM
         baseQuery = {
           approvalMode: { $in: actionableModes },
           gmLoginId: me,
-          status: 'PENDING_GM',
+          status,
         }
       }
     }
 
     const ands = [baseQuery]
 
-    // extra status filter
-    // PENDING_GM = only true GM waiting items
-    // PENDING_MANAGER_VIEW = optional viewer rows for MANAGER_ONLY
-    if (status && status !== 'ALL') {
-      if (status === 'PENDING_MANAGER_VIEW') {
-        ands.length = 0
-        ands.push(
-          isAdminViewer(req)
-            ? {
-                approvalMode: viewerMode,
-                status: 'PENDING_MANAGER',
-              }
-            : {
-                approvalMode: viewerMode,
-                status: 'PENDING_MANAGER',
-              }
-        )
-      } else if (status !== 'PENDING_GM' || scope === 'ALL') {
-        ands.push({ status })
-      }
-    }
-
-    // request createdAt range filter
     if (fromDate || toDate) {
       const createdAt = {}
       if (fromDate) createdAt.$gte = new Date(`${fromDate}T00:00:00.000Z`)
@@ -893,7 +865,6 @@ exports.listGmInbox = async (req, res, next) => {
       ands.push({ createdAt })
     }
 
-    // employeeId filter
     if (employeeId) {
       ands.push({
         employeeId: { $regex: employeeId, $options: 'i' },
@@ -902,15 +873,15 @@ exports.listGmInbox = async (req, res, next) => {
 
     const query = ands.length === 1 ? ands[0] : { $and: ands }
 
-    let rows = await LeaveRequest.find(query)
-      .sort({ createdAt: -1, _id: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean()
+    let mongoQuery = LeaveRequest.find(query).sort({ createdAt: -1, _id: -1 })
 
+    if (!exportAll) {
+      mongoQuery = mongoQuery.skip(skip).limit(limit)
+    }
+
+    let rows = await mongoQuery.lean()
     rows = await attachEmployeeInfo(rows || [])
 
-    // keep lightweight keyword filter after attachEmployeeInfo
     if (keyword) {
       const q = keyword.toLowerCase()
       rows = rows.filter((r) => {
@@ -933,6 +904,18 @@ exports.listGmInbox = async (req, res, next) => {
       })
     }
 
+    const mapped = rows.map((r) => ({
+      ...r,
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+    }))
+
+    if (exportAll) {
+      return res.json({
+        items: mapped,
+        exportAll: true,
+      })
+    }
+
     const nextRows = await LeaveRequest.find(query)
       .sort({ createdAt: -1, _id: -1 })
       .skip(skip + limit)
@@ -940,10 +923,7 @@ exports.listGmInbox = async (req, res, next) => {
       .lean()
 
     return res.json({
-      items: rows.map((r) => ({
-        ...r,
-        attachments: Array.isArray(r.attachments) ? r.attachments : [],
-      })),
+      items: mapped,
       page,
       limit,
       hasMore: nextRows.length > 0,
