@@ -1,4 +1,3 @@
-<!-- src/views/bookingRoom/user/PublicBookingRoomHistory.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -72,6 +71,10 @@ const editForm = ref({
   roomId: '',
   roomCode: '',
   roomName: '',
+
+  needCoffeeBreak: false,
+  needNameOnTable: false,
+  needWifiPassword: false,
 
   materialRequired: false,
   materials: [],
@@ -185,6 +188,40 @@ function typeBadgeUiClass(item) {
   return 'ui-badge'
 }
 
+function roomServiceItems(item) {
+  const list = []
+  if (item?.needCoffeeBreak) {
+    list.push({
+      key: 'coffee',
+      label: 'Coffee Break',
+      icon: 'fa-mug-hot',
+      tone: 'warning',
+    })
+  }
+  if (item?.needNameOnTable) {
+    list.push({
+      key: 'name-table',
+      label: 'Name on Table',
+      icon: 'fa-id-card',
+      tone: 'info',
+    })
+  }
+  if (item?.needWifiPassword) {
+    list.push({
+      key: 'wifi',
+      label: 'WiFi Password',
+      icon: 'fa-wifi',
+      tone: 'success',
+    })
+  }
+  return list
+}
+
+function roomServiceText(item) {
+  const list = roomServiceItems(item)
+  return list.length ? list.map(x => x.label).join(', ') : 'None'
+}
+
 function materialText(items = []) {
   return (
     arr(items)
@@ -197,6 +234,30 @@ function materialText(items = []) {
       .filter(Boolean)
       .join(', ') || '—'
   )
+}
+
+function normalizedMaterialCards(items = []) {
+  return arr(items)
+    .map((x) => {
+      if (typeof x === 'string') {
+        return {
+          key: x,
+          name: x,
+          code: x,
+          qty: 1,
+        }
+      }
+      const name = s(x?.materialName) || s(x?.materialCode)
+      const code = s(x?.materialCode)
+      const qty = Math.max(1, Number(x?.qty || 1))
+      return {
+        key: `${code || name}-${qty}`,
+        name: name || 'Unnamed Material',
+        code: code || '—',
+        qty,
+      }
+    })
+    .filter(x => s(x.name))
 }
 
 function normalizeMaterialItems(items = []) {
@@ -255,12 +316,16 @@ function syncEditItem() {
       timeEnd: s(found.timeEnd),
       meetingTitle: s(found.meetingTitle),
       participantEstimate: Number(found.participantEstimate || 1),
-      requirementNote: s(found.requirementNote),
+      requirementNote: s(found.requirementNote || found.note),
 
       roomRequired: !!found.roomRequired,
       roomId: s(found.roomId || found.room?._id || ''),
       roomCode: s(found.roomCode || found.room?.roomCode || ''),
       roomName: s(found.roomName || found.room?.roomName || ''),
+
+      needCoffeeBreak: !!found.needCoffeeBreak,
+      needNameOnTable: !!found.needNameOnTable,
+      needWifiPassword: !!found.needWifiPassword,
 
       materialRequired: !!found.materialRequired,
       materials: normalizeMaterialItems(found.materials),
@@ -318,7 +383,6 @@ function closeEmployeePicker() {
 
 function onEmployeeInput() {
   employeePickerOpen.value = true
-
   if (!s(employeeQuery.value)) {
     employeeId.value = ''
   }
@@ -371,6 +435,9 @@ function onEditRoomChange(roomId) {
     editForm.value.roomId = ''
     editForm.value.roomCode = ''
     editForm.value.roomName = ''
+    editForm.value.needCoffeeBreak = false
+    editForm.value.needNameOnTable = false
+    editForm.value.needWifiPassword = false
     return
   }
 
@@ -425,6 +492,27 @@ function decreaseEditMaterialQty(item) {
 
   found.qty = current - 1
 }
+
+watch(
+  () => editForm.value.roomRequired,
+  (on) => {
+    if (on) return
+    editForm.value.roomId = ''
+    editForm.value.roomCode = ''
+    editForm.value.roomName = ''
+    editForm.value.needCoffeeBreak = false
+    editForm.value.needNameOnTable = false
+    editForm.value.needWifiPassword = false
+  }
+)
+
+watch(
+  () => editForm.value.materialRequired,
+  (on) => {
+    if (on) return
+    editForm.value.materials = []
+  }
+)
 
 /* ───────────────── EMPLOYEE PICK ───────────────── */
 async function loadEmployees(q = '') {
@@ -532,8 +620,10 @@ const processedRows = computed(() => {
         r.timeEnd,
         r.meetingTitle,
         r.requirementNote,
+        r.note,
         r.roomName,
         r.roomCode,
+        roomServiceText(r),
         materialText(r.materials),
         r.roomStatus,
         r.materialStatus,
@@ -593,12 +683,16 @@ function openEdit(item) {
     timeEnd: s(item.timeEnd),
     meetingTitle: s(item.meetingTitle),
     participantEstimate: Number(item.participantEstimate || 1),
-    requirementNote: s(item.requirementNote),
+    requirementNote: s(item.requirementNote || item.note),
 
     roomRequired: !!item.roomRequired,
     roomId: s(item.roomId || item.room?._id || ''),
     roomCode: s(item.roomCode || item.room?.roomCode || ''),
     roomName: s(item.roomName || item.room?.roomName || ''),
+
+    needCoffeeBreak: !!item.needCoffeeBreak,
+    needNameOnTable: !!item.needNameOnTable,
+    needWifiPassword: !!item.needWifiPassword,
 
     materialRequired: !!item.materialRequired,
     materials: normalizeMaterialItems(item.materials),
@@ -665,12 +759,15 @@ async function submitEdit() {
       timeEnd: s(editForm.value.timeEnd),
       meetingTitle: compactText(editForm.value.meetingTitle),
       participantEstimate: Number(editForm.value.participantEstimate || 1),
-      requirementNote: compactText(editForm.value.requirementNote),
+      note: compactText(editForm.value.requirementNote),
 
       roomRequired: !!editForm.value.roomRequired,
       roomId: editForm.value.roomRequired ? (editForm.value.roomId || null) : null,
       roomCode: editForm.value.roomRequired ? s(editForm.value.roomCode) : '',
       roomName: editForm.value.roomRequired ? s(editForm.value.roomName) : '',
+      needCoffeeBreak: editForm.value.roomRequired ? !!editForm.value.needCoffeeBreak : false,
+      needNameOnTable: editForm.value.roomRequired ? !!editForm.value.needNameOnTable : false,
+      needWifiPassword: editForm.value.roomRequired ? !!editForm.value.needWifiPassword : false,
 
       materialRequired: !!editForm.value.materialRequired,
       materials: editForm.value.materialRequired
@@ -784,8 +881,6 @@ function onMastersChanged() {
 }
 
 function onAvailabilityChanged(doc) {
-  // Only refresh lightly when user is actively looking at detail/edit
-  // and the change is likely relevant to editable resources.
   if (!(editOpen.value || detailOpen.value)) return
 
   clearTimeout(availabilityRefreshTimer)
@@ -905,7 +1000,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Meeting title, room, material..."
+                    placeholder="Meeting title, room, material, service..."
                     class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -1116,149 +1211,283 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="mt-2 ui-frame p-2">
-                    <div class="flex items-start justify-between gap-2">
-                      <div class="min-w-0">
-                        <div class="ui-label !mb-1">Room</div>
-                        <div class="text-[11px] text-slate-700 dark:text-slate-200">
-                          {{ item.roomRequired ? (item.roomName || '—') : 'Not Required' }}
-                        </div>
-                      </div>
-                      <span :class="sectionBadgeUiClass(item.roomStatus)">
-                        {{ item.roomStatus || '—' }}
-                      </span>
+                    <div class="ui-label !mb-2">Meeting Title</div>
+                    <div class="text-[12px] font-bold text-slate-800 dark:text-slate-100">
+                      {{ item.meetingTitle || '—' }}
                     </div>
                   </div>
 
-                  <div class="mt-2 ui-frame p-2">
-                    <div class="flex items-start justify-between gap-2">
-                      <div class="min-w-0">
-                        <div class="ui-label !mb-1">Material</div>
-                        <div class="text-[11px] text-slate-700 dark:text-slate-200">
-                          {{ item.materialRequired ? materialText(item.materials) : 'Not Required' }}
+                  <div class="mt-2 grid gap-2">
+                    <div class="mini-resource-card">
+                      <div class="mini-resource-head">
+                        <div class="mini-resource-title-wrap">
+                          <span class="mini-resource-icon bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                            <i class="fa-solid fa-door-open" />
+                          </span>
+                          <div>
+                            <div class="mini-resource-title">Room</div>
+                            <div class="mini-resource-sub">
+                              {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : 'Not Required' }}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                      <span :class="sectionBadgeUiClass(item.materialStatus)">
-                        {{ item.materialStatus || '—' }}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div class="mt-2 ui-frame p-2">
-                    <div class="ui-label !mb-1">Meeting Title</div>
-                    <div class="text-[11px] text-slate-700 dark:text-slate-200">{{ item.meetingTitle || '—' }}</div>
+                        <span :class="sectionBadgeUiClass(item.roomStatus)">
+                          {{ item.roomStatus || '—' }}
+                        </span>
+                      </div>
+
+                      <div v-if="item.roomRequired" class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <span
+                          v-for="service in roomServiceItems(item)"
+                          :key="service.key"
+                          class="mini-chip"
+                          :class="{
+                            'mini-chip-warning': service.tone === 'warning',
+                            'mini-chip-info': service.tone === 'info',
+                            'mini-chip-success': service.tone === 'success',
+                          }"
+                        >
+                          <i class="fa-solid" :class="service.icon" />
+                          {{ service.label }}
+                        </span>
+
+                        <span
+                          v-if="!roomServiceItems(item).length"
+                          class="mini-chip"
+                        >
+                          <i class="fa-solid fa-minus" />
+                          No extra service
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="mini-resource-card">
+                      <div class="mini-resource-head">
+                        <div class="mini-resource-title-wrap">
+                          <span class="mini-resource-icon bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                            <i class="fa-solid fa-paperclip" />
+                          </span>
+                          <div>
+                            <div class="mini-resource-title">Material</div>
+                            <div class="mini-resource-sub">
+                              {{ item.materialRequired ? 'Attached items' : 'Not Required' }}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span :class="sectionBadgeUiClass(item.materialStatus)">
+                          {{ item.materialStatus || '—' }}
+                        </span>
+                      </div>
+
+                      <div v-if="item.materialRequired" class="mt-2 flex flex-wrap gap-2">
+                        <span
+                          v-for="material in normalizedMaterialCards(item.materials)"
+                          :key="material.key"
+                          class="mini-chip mini-chip-emerald"
+                        >
+                          <i class="fa-solid fa-paperclip" />
+                          {{ material.name }} x{{ material.qty }}
+                        </span>
+
+                        <span
+                          v-if="!normalizedMaterialCards(item.materials).length"
+                          class="mini-chip"
+                        >
+                          <i class="fa-solid fa-minus" />
+                          No material selected
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <!-- Desktop -->
-              <div v-else class="ui-table-wrap">
-                <table class="ui-table">
-                  <thead>
-                    <tr>
-                      <th class="ui-th">Booking Date</th>
-                      <th class="ui-th">Time</th>
-                      <th class="ui-th">Title</th>
-                      <th class="ui-th">Type</th>
-                      <th class="ui-th">Room</th>
-                      <th class="ui-th">Material</th>
-                      <th class="ui-th">Status</th>
-                      <th class="ui-th text-center">Actions</th>
-                    </tr>
-                  </thead>
+              <div v-else class="history-table-shell">
+                <div class="history-table-scroll">
+                  <table class="ui-table history-table">
+                    <thead>
+                      <tr>
+                        <th class="ui-th min-w-[80px]">Booking Date & Time</th>
+                        <th class="ui-th min-w-[220px]">Title</th>
+                        <th class="ui-th min-w-[120px]">Type</th>
+                        <th class="ui-th min-w-[220px]">Room</th>
+                        <th class="ui-th min-w-[320px]">Material</th>
+                        <th class="ui-th min-w-[140px]">Status</th>
+                        <th class="ui-th min-w-[150px] text-center">Actions</th>
+                      </tr>
+                    </thead>
 
-                  <tbody>
-                    <tr v-if="!pagedRows.length">
-                      <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
-                        No meeting room requests found.
-                      </td>
-                    </tr>
+                    <tbody>
+                      <tr v-if="!pagedRows.length">
+                        <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                          No meeting room requests found.
+                        </td>
+                      </tr>
 
-                    <tr v-for="item in pagedRows" :key="item._id" class="ui-tr-hover">
-
-                      <td class="ui-td whitespace-nowrap">
-                        {{ fmtDate(item.bookingDate) }}
-                      </td>
-
-                      <td class="ui-td whitespace-nowrap">
-                        {{ fmtTime(item.timeStart) }} - {{ fmtTime(item.timeEnd) }}
-                      </td>
-
-                      <td class="ui-td">
-                        <div class="min-w-0">
-                          <div class="truncate font-semibold" :title="item.meetingTitle || '—'">
-                            {{ item.meetingTitle || '—' }}
+                      <tr v-for="item in pagedRows" :key="item._id" class="ui-tr-hover">
+                        <td class="ui-td whitespace-nowrap">
+                          <div class="flex flex-col">
+                            <span class="font-semibold text-slate-900 dark:text-slate-100">
+                              {{ fmtDate(item.bookingDate) }}
+                            </span>
+                            <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                              {{ fmtTime(item.timeStart) }} - {{ fmtTime(item.timeEnd) }}
+                            </span>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td class="ui-td">
-                        <span :class="typeBadgeUiClass(item)">
-                          {{ bookingRoomTypeLabel(item) }}
-                        </span>
-                      </td>
+                        <td class="ui-td">
+                          <div class="min-w-0">
+                            <div
+                              class="font-semibold text-slate-900 dark:text-slate-100"
+                              :title="item.meetingTitle || '—'"
+                            >
+                              {{ item.meetingTitle || '—' }}
+                            </div>
+                            <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                              {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                            </div>
+                          </div>
+                        </td>
 
-                      <td class="ui-td text-center">
-                        <div class="flex flex-col items-center gap-1">
-                          <span class="truncate text-center">
-                            {{ item.roomRequired ? (item.roomName || '—') : 'Not Required' }}
+                        <td class="ui-td">
+                          <span :class="typeBadgeUiClass(item)">
+                            {{ bookingRoomTypeLabel(item) }}
                           </span>
-                          <span :class="sectionBadgeUiClass(item.roomStatus)">{{ item.roomStatus }}</span>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td class="ui-td text-center">
-                        <div class="flex flex-col items-center gap-1">
-                          <span
-                            class="truncate text-center"
-                            :title="item.materialRequired ? materialText(item.materials) : 'Not Required'"
-                          >
-                            {{ item.materialRequired ? materialText(item.materials) : 'Not Required' }}
+                        <td class="ui-td">
+                          <div class="resource-cell-card">
+                            <div class="resource-cell-head">
+                              <div class="resource-cell-main">
+                                <span class="resource-cell-icon resource-cell-icon-room">
+                                  <i class="fa-solid fa-door-open" />
+                                </span>
+                                <div class="min-w-0">
+                                  <div class="resource-cell-title">
+                                    {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : 'Not Required' }}
+                                  </div>
+                                  <div class="resource-cell-sub">Room</div>
+                                </div>
+                              </div>
+
+                              <span :class="sectionBadgeUiClass(item.roomStatus)">
+                                {{ item.roomStatus || '—' }}
+                              </span>
+                            </div>
+
+                            <div v-if="item.roomRequired" class="mt-2  grid grid-cols-1 gap-1.5">
+                              <span
+                                v-for="service in roomServiceItems(item)"
+                                :key="service.key"
+                                class="mini-chip mini-chip-sm"
+                                :class="{
+                                  'mini-chip-warning': service.tone === 'warning',
+                                  'mini-chip-info': service.tone === 'info',
+                                  'mini-chip-success': service.tone === 'success',
+                                }"
+                              >
+                                <i class="fa-solid" :class="service.icon" />
+                                {{ service.label }}
+                              </span>
+
+                              <span
+                                v-if="!roomServiceItems(item).length"
+                                class="mini-chip mini-chip-sm"
+                              >
+                                <i class="fa-solid fa-minus" />
+                                No extra service
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td class="ui-td">
+                          <div class="resource-cell-card">
+                            <div class="resource-cell-head">
+                              <div class="resource-cell-main">
+                                <span class="resource-cell-icon resource-cell-icon-material">
+                                  <i class="fa-solid fa-paperclip" />
+                                </span>
+                                <div class="min-w-0">
+                                  <div class="resource-cell-title">
+                                    {{ item.materialRequired ? 'Attached Items' : 'Not Required' }}
+                                  </div>
+                                  <div class="resource-cell-sub">Material</div>
+                                </div>
+                              </div>
+
+                              <span :class="sectionBadgeUiClass(item.materialStatus)">
+                                {{ item.materialStatus || '—' }}
+                              </span>
+                            </div>
+
+                            <div v-if="item.materialRequired" class="mt-2 flex flex-wrap gap-1.5">
+                              <span
+                                v-for="material in normalizedMaterialCards(item.materials)"
+                                :key="material.key"
+                                class="mini-chip mini-chip-sm mini-chip-emerald"
+                              >
+                                <i class="fa-solid fa-paperclip" />
+                                {{ material.name }} x{{ material.qty }}
+                              </span>
+
+                              <span
+                                v-if="!normalizedMaterialCards(item.materials).length"
+                                class="mini-chip mini-chip-sm"
+                              >
+                                <i class="fa-solid fa-minus" />
+                                No material selected
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td class="ui-td">
+                          <span :class="statusBadgeUiClass(item.overallStatus)">
+                            {{ bookingRoomStatusLabel(item.overallStatus) }}
                           </span>
-                          <span :class="sectionBadgeUiClass(item.materialStatus)">{{ item.materialStatus }}</span>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td class="ui-td">
-                        <span :class="statusBadgeUiClass(item.overallStatus)">
-                          {{ bookingRoomStatusLabel(item.overallStatus) }}
-                        </span>
-                      </td>
+                        <td class="ui-td text-center">
+                          <div class="flex items-center justify-center gap-2">
+                            <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(item)">
+                              <i class="fa-solid fa-eye text-[11px]" />
+                            </button>
 
-                      <td class="ui-td text-center">
-                        <div class="flex items-center justify-center gap-2">
-                          <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(item)">
-                            <i class="fa-solid fa-eye text-[11px]" />
-                          </button>
+                            <button
+                              v-if="canEdit(item)"
+                              class="ui-btn ui-btn-primary ui-btn-xs"
+                              type="button"
+                              @click="openEdit(item)"
+                            >
+                              Edit
+                            </button>
 
-                          <button
-                            v-if="canEdit(item)"
-                            class="ui-btn ui-btn-primary ui-btn-xs"
-                            type="button"
-                            @click="openEdit(item)"
-                          >
-                            Edit
-                          </button>
+                            <button
+                              v-if="canCancel(item)"
+                              class="ui-btn ui-btn-rose ui-btn-xs"
+                              type="button"
+                              @click="askCancel(item)"
+                            >
+                              Cancel
+                            </button>
 
-                          <button
-                            v-if="canCancel(item)"
-                            class="ui-btn ui-btn-rose ui-btn-xs"
-                            type="button"
-                            @click="askCancel(item)"
-                          >
-                            Cancel
-                          </button>
-
-                          <span
-                            v-if="!canEdit(item) && !canCancel(item)"
-                            class="text-[11px] text-slate-400 dark:text-slate-500"
-                          >
-                            —
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                            <span
+                              v-if="!canEdit(item) && !canCancel(item)"
+                              class="text-[11px] text-slate-400 dark:text-slate-500"
+                            >
+                              —
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               <!-- Pagination -->
@@ -1338,54 +1567,128 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="ui-card p-3">
-              <div class="ui-section-title">Meeting Info</div>
-              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
-                <div>
+            <div class="ui-card p-4">
+              <div class="ui-section-title text-[14px]">Meeting Info</div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2 text-[12px]">
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                   <div class="ui-label">Meeting Title</div>
-                  <div class="font-extrabold">{{ detailItem?.meetingTitle || '—' }}</div>
+                  <div class="text-[14px] font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ detailItem?.meetingTitle || '—' }}
+                  </div>
                 </div>
-                <div>
+
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                   <div class="ui-label">Time</div>
-                  <div class="font-extrabold">{{ fmtTime(detailItem?.timeStart) }} - {{ fmtTime(detailItem?.timeEnd) }}</div>
+                  <div class="text-[14px] font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ fmtTime(detailItem?.timeStart) }} - {{ fmtTime(detailItem?.timeEnd) }}
+                  </div>
                 </div>
-                <div>
+
+                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/60">
                   <div class="ui-label">Participant Estimate</div>
-                  <div>{{ detailItem?.participantEstimate || '—' }}</div>
+                  <div class="text-[13px] font-semibold text-slate-800 dark:text-slate-100">
+                    {{ detailItem?.participantEstimate || '—' }}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div class="ui-card p-3">
-              <div class="ui-section-title">Resource Status</div>
-              <div class="mt-2 grid gap-3 md:grid-cols-2 text-[12px]">
-                <div class="ui-frame p-3">
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="font-extrabold">Room</div>
+            <div class="ui-card p-4">
+              <div class="ui-section-title text-[14px]">Room & Material</div>
+
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <div class="resource-detail-card">
+                  <div class="resource-detail-head">
+                    <div class="resource-detail-title-wrap">
+                      <span class="resource-detail-icon resource-detail-icon-room">
+                        <i class="fa-solid fa-door-open" />
+                      </span>
+                      <div>
+                        <div class="resource-detail-title">Room</div>
+                        <div class="resource-detail-name">
+                          {{ detailItem?.roomRequired ? (detailItem?.roomName || 'Unnamed Room') : 'Not Required' }}
+                        </div>
+                      </div>
+                    </div>
+
                     <span :class="sectionBadgeUiClass(detailItem?.roomStatus)">
                       {{ detailItem?.roomStatus || '—' }}
                     </span>
                   </div>
-                  <div class="mt-2 text-slate-700 dark:text-slate-200">
-                    {{ detailItem?.roomRequired ? (detailItem?.roomName || '—') : 'Not Required' }}
+
+                  <div v-if="detailItem?.roomRequired" class="mt-3">
+                    <div class="ui-label">Room Services</div>
+
+                    <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <span
+                        v-for="service in roomServiceItems(detailItem)"
+                        :key="service.key"
+                        class="mini-chip"
+                        :class="{
+                          'mini-chip-warning': service.tone === 'warning',
+                          'mini-chip-info': service.tone === 'info',
+                          'mini-chip-success': service.tone === 'success',
+                        }"
+                      >
+                        <i class="fa-solid" :class="service.icon" />
+                        {{ service.label }}
+                      </span>
+
+                      <span
+                        v-if="!roomServiceItems(detailItem).length"
+                        class="mini-chip"
+                      >
+                        <i class="fa-solid fa-minus" />
+                        No extra service
+                      </span>
+                    </div>
                   </div>
-                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ detailItem?.roomApproval?.note || '—' }}
+
+                  <div class="mt-3 rounded-xl bg-slate-50 p-2.5 text-[11px] text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
+                    {{ detailItem?.roomApproval?.note || 'No room note.' }}
                   </div>
                 </div>
 
-                <div class="ui-frame p-3">
-                  <div class="flex items-center justify-between gap-2">
-                    <div class="font-extrabold">Material</div>
+                <div class="resource-detail-card">
+                  <div class="resource-detail-head">
+                    <div class="resource-detail-title-wrap">
+                      <span class="resource-detail-icon resource-detail-icon-material">
+                        <i class="fa-solid fa-paperclip" />
+                      </span>
+                      <div>
+                        <div class="resource-detail-title">Material</div>
+                        <div class="resource-detail-name">
+                          {{ detailItem?.materialRequired ? 'Attached Items' : 'Not Required' }}
+                        </div>
+                      </div>
+                    </div>
+
                     <span :class="sectionBadgeUiClass(detailItem?.materialStatus)">
                       {{ detailItem?.materialStatus || '—' }}
                     </span>
                   </div>
-                  <div class="mt-2 text-slate-700 dark:text-slate-200">
-                    {{ detailItem?.materialRequired ? materialText(detailItem?.materials) : 'Not Required' }}
+
+                  <div v-if="detailItem?.materialRequired" class="mt-3 flex flex-wrap gap-2">
+                    <span
+                      v-for="material in normalizedMaterialCards(detailItem?.materials)"
+                      :key="material.key"
+                      class="mini-chip mini-chip-emerald"
+                    >
+                      <i class="fa-solid fa-paperclip" />
+                      {{ material.name }} x{{ material.qty }}
+                    </span>
+
+                    <span
+                      v-if="!normalizedMaterialCards(detailItem?.materials).length"
+                      class="mini-chip"
+                    >
+                      <i class="fa-solid fa-minus" />
+                      No material selected
+                    </span>
                   </div>
-                  <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    {{ detailItem?.materialApproval?.note || '—' }}
+
+                  <div class="mt-3 rounded-xl bg-slate-50 p-2.5 text-[11px] text-slate-600 dark:bg-slate-900/60 dark:text-slate-300">
+                    {{ detailItem?.materialApproval?.note || 'No material note.' }}
                   </div>
                 </div>
               </div>
@@ -1394,7 +1697,7 @@ onBeforeUnmount(() => {
             <div class="ui-card p-3">
               <div class="ui-section-title">Note</div>
               <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">
-                {{ detailItem?.requirementNote || '—' }}
+                {{ detailItem?.requirementNote || detailItem?.note || '—' }}
               </div>
             </div>
 
@@ -1420,7 +1723,7 @@ onBeforeUnmount(() => {
             <div class="min-w-0">
               <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Edit Meeting Room Request</div>
               <div class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-                Update booking info, room, and materials before approval is locked.
+                Update booking info, room, room services, and materials before approval is locked.
               </div>
             </div>
 
@@ -1507,6 +1810,51 @@ onBeforeUnmount(() => {
                         {{ room.name }} {{ room.code ? `(${room.code})` : '' }}
                       </option>
                     </select>
+                  </div>
+
+                  <div v-if="editForm.roomRequired" class="mt-3">
+                    <label class="ui-label">Room Services</label>
+
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                        :class="editForm.needCoffeeBreak
+                          ? 'border-amber-500 bg-amber-500 text-white'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                        :disabled="editBusy"
+                        @click="editForm.needCoffeeBreak = !editForm.needCoffeeBreak"
+                      >
+                        <i class="fa-solid fa-mug-hot" />
+                        Coffee Break
+                      </button>
+
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                        :class="editForm.needNameOnTable
+                          ? 'border-indigo-500 bg-indigo-500 text-white'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                        :disabled="editBusy"
+                        @click="editForm.needNameOnTable = !editForm.needNameOnTable"
+                      >
+                        <i class="fa-solid fa-id-card" />
+                        Name on Table
+                      </button>
+
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                        :class="editForm.needWifiPassword
+                          ? 'border-emerald-500 bg-emerald-500 text-white'
+                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                        :disabled="editBusy"
+                        @click="editForm.needWifiPassword = !editForm.needWifiPassword"
+                      >
+                        <i class="fa-solid fa-wifi" />
+                        WiFi Password
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -1626,7 +1974,7 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="ui-field">
-                <label class="ui-label">Requirement Note</label>
+                <label class="ui-label">Note</label>
                 <textarea
                   v-model="editForm.requirementNote"
                   rows="4"
@@ -1693,5 +2041,340 @@ onBeforeUnmount(() => {
 .ui-modal-lg {
   width: min(900px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
+}
+
+/* horizontal scroll fix */
+.history-table-shell {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+.history-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+
+.history-table {
+  min-width: 1520px;
+  width: max-content;
+}
+
+.history-table-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.history-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.55);
+  border-radius: 999px;
+}
+
+.history-table-scroll::-webkit-scrollbar-track {
+  background: rgba(226, 232, 240, 0.55);
+  border-radius: 999px;
+}
+
+.dark .history-table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.8);
+}
+
+.dark .history-table-scroll::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.85);
+}
+
+.mini-resource-card {
+  border: 1px solid rgba(226, 232, 240, 1);
+  background: rgba(248, 250, 252, 0.95);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+.dark .mini-resource-card {
+  border-color: rgba(51, 65, 85, 1);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.mini-resource-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mini-resource-title-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mini-resource-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.mini-resource-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(100 116 139);
+}
+
+.dark .mini-resource-title {
+  color: rgb(148 163 184);
+}
+
+.mini-resource-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: rgb(15 23 42);
+  line-height: 1.35;
+}
+
+.dark .mini-resource-sub {
+  color: rgb(241 245 249);
+}
+
+.resource-cell-card {
+  min-width: 280px;
+  border: 1px solid rgba(226, 232, 240, 1);
+  background: rgba(248, 250, 252, 0.95);
+  border-radius: 16px;
+  padding: 10px;
+}
+
+.dark .resource-cell-card {
+  border-color: rgba(51, 65, 85, 1);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.resource-cell-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.resource-cell-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resource-cell-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.resource-cell-icon-room {
+  background: rgba(224, 242, 254, 1);
+  color: rgba(3, 105, 161, 1);
+}
+
+.resource-cell-icon-material {
+  background: rgba(237, 233, 254, 1);
+  color: rgba(109, 40, 217, 1);
+}
+
+.dark .resource-cell-icon-room {
+  background: rgba(8, 47, 73, 0.55);
+  color: rgba(125, 211, 252, 1);
+}
+
+.dark .resource-cell-icon-material {
+  background: rgba(46, 16, 101, 0.55);
+  color: rgba(196, 181, 253, 1);
+}
+
+.resource-cell-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgb(15 23 42);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.dark .resource-cell-title {
+  color: rgb(241 245 249);
+}
+
+.resource-cell-sub {
+  margin-top: 2px;
+  font-size: 10px;
+  color: rgb(100 116 139);
+}
+
+.dark .resource-cell-sub {
+  color: rgb(148 163 184);
+}
+
+.resource-detail-card {
+  border: 1px solid rgba(226, 232, 240, 1);
+  background: rgba(248, 250, 252, 0.95);
+  border-radius: 18px;
+  padding: 14px;
+}
+
+.dark .resource-detail-card {
+  border-color: rgba(51, 65, 85, 1);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+.resource-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resource-detail-title-wrap {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.resource-detail-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.resource-detail-icon-room {
+  background: rgba(224, 242, 254, 1);
+  color: rgba(3, 105, 161, 1);
+}
+
+.resource-detail-icon-material {
+  background: rgba(237, 233, 254, 1);
+  color: rgba(109, 40, 217, 1);
+}
+
+.dark .resource-detail-icon-room {
+  background: rgba(8, 47, 73, 0.55);
+  color: rgba(125, 211, 252, 1);
+}
+
+.dark .resource-detail-icon-material {
+  background: rgba(46, 16, 101, 0.55);
+  color: rgba(196, 181, 253, 1);
+}
+
+.resource-detail-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgb(100 116 139);
+}
+
+.dark .resource-detail-title {
+  color: rgb(148 163 184);
+}
+
+.resource-detail-name {
+  margin-top: 2px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  color: rgb(15 23 42);
+}
+
+.dark .resource-detail-name {
+  color: rgb(241 245 249);
+}
+
+.mini-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 9999px;
+  border: 1px solid rgba(203, 213, 225, 1);
+  background: white;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgb(51 65 85);
+  white-space: nowrap;
+}
+
+.dark .mini-chip {
+  border-color: rgba(71, 85, 105, 1);
+  background: rgba(15, 23, 42, 1);
+  color: rgb(226 232 240);
+}
+
+.mini-chip-sm {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.mini-chip-warning {
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(255, 251, 235, 1);
+  color: rgba(146, 64, 14, 1);
+}
+
+.dark .mini-chip-warning {
+  border-color: rgba(180, 83, 9, 0.6);
+  background: rgba(69, 26, 3, 0.5);
+  color: rgba(253, 224, 71, 1);
+}
+
+.mini-chip-info {
+  border-color: rgba(129, 140, 248, 0.4);
+  background: rgba(238, 242, 255, 1);
+  color: rgba(55, 48, 163, 1);
+}
+
+.dark .mini-chip-info {
+  border-color: rgba(67, 56, 202, 0.55);
+  background: rgba(30, 27, 75, 0.6);
+  color: rgba(165, 180, 252, 1);
+}
+
+.mini-chip-success {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(236, 253, 245, 1);
+  color: rgba(6, 95, 70, 1);
+}
+
+.dark .mini-chip-success {
+  border-color: rgba(5, 150, 105, 0.5);
+  background: rgba(2, 44, 34, 0.7);
+  color: rgba(110, 231, 183, 1);
+}
+
+.mini-chip-emerald {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(236, 253, 245, 1);
+  color: rgba(6, 95, 70, 1);
+}
+
+.dark .mini-chip-emerald {
+  border-color: rgba(5, 150, 105, 0.5);
+  background: rgba(2, 44, 34, 0.7);
+  color: rgba(110, 231, 183, 1);
 }
 </style>

@@ -26,6 +26,11 @@
 // ✅ Contracts-only carry (contracts[].carry only)
 // ✅ RAW balances stored in DB
 // ✅ Carry applied only for response display
+//
+// ✅ NEW:
+//    - exports.getMyProfile for /leave/profile/me
+//    - shared buildProfileResponseByEmployeeId()
+//    - same profile response shape for admin and user
 
 const bcrypt = require('bcryptjs')
 const createError = require('http-errors')
@@ -38,6 +43,7 @@ const User = require('../../models/User')
 const { computeBalances } = require('../../utils/leave.rules')
 const { broadcastLeaveProfile } = require('../../utils/leave.realtime')
 const { recalculateOneProfile } = require('../../services/leave/leave.recalculate.service')
+
 /* ───────────────── helpers ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
@@ -138,6 +144,37 @@ function validateModeApprovers(mode, { managerLoginId, gmLoginId, cooLoginId }) 
   }
 
   throw createError(400, 'Invalid approvalMode')
+}
+
+async function ensureManagerRole(managerLoginId) {
+  const id = s(managerLoginId)
+  if (!id) return
+  await ensureUserHasRoles(id, ['LEAVE_MANAGER'])
+}
+
+async function profileIsReferencedAsManager({ employeeId, employeeLoginId }) {
+  const candidates = [...new Set([s(employeeId), s(employeeLoginId)].filter(Boolean))]
+  if (!candidates.length) return false
+
+  const found = await LeaveProfile.findOne({
+    managerLoginId: { $in: candidates },
+  }).lean()
+
+  return !!found
+}
+
+async function syncUserRolesForProfile(profileLike) {
+  const employeeId = s(profileLike?.employeeId)
+  const employeeLoginId = s(profileLike?.employeeLoginId)
+
+  if (!employeeLoginId) return null
+
+  const roles = ['LEAVE_USER']
+
+  const isManager = await profileIsReferencedAsManager({ employeeId, employeeLoginId })
+  if (isManager) roles.push('LEAVE_MANAGER')
+
+  return ensureUserHasRoles(employeeLoginId, roles)
 }
 
 function contractEndFromStart(startYMD) {
@@ -277,13 +314,46 @@ async function attachEmployeeDirectory(profilePlain) {
 
   const emp = await EmployeeDirectory.findOne(
     { employeeId },
-    { employeeId: 1, name: 1, fullName: 1, department: 1 }
+    {
+      employeeId: 1,
+      name: 1,
+      fullName: 1,
+      department: 1,
+      position: 1,
+      jobTitle: 1,
+      title: 1,
+      contactNumber: 1,
+      telegramChatId: 1,
+      loginId: 1,
+      isActive: 1,
+    }
   ).lean()
+
+  const name = s(profilePlain?.name || emp?.name || emp?.fullName || '')
+  const department = s(profilePlain?.department || emp?.department || '')
+  const position = s(profilePlain?.position || emp?.position || emp?.jobTitle || emp?.title || '')
+  const contactNumber = s(profilePlain?.contactNumber || emp?.contactNumber || '')
+  const telegramChatId = s(profilePlain?.telegramChatId || emp?.telegramChatId || '')
 
   return {
     ...profilePlain,
-    name: profilePlain?.name || s(emp?.name || emp?.fullName || ''),
-    department: profilePlain?.department || s(emp?.department || ''),
+    name,
+    department,
+    position,
+    contactNumber,
+    telegramChatId,
+    employee: emp
+      ? {
+          employeeId: s(emp.employeeId),
+          loginId: s(emp.loginId),
+          name: s(emp.name || emp.fullName || ''),
+          department: s(emp.department || ''),
+          position: s(emp.position || emp.jobTitle || emp.title || ''),
+          contactNumber: s(emp.contactNumber || ''),
+          telegramChatId: s(emp.telegramChatId || ''),
+          isActive: emp.isActive !== false,
+        }
+      : null,
   }
 }
 
@@ -336,6 +406,9 @@ function decorateProfileForResponse(profilePlain = {}) {
   return {
     ...profilePlain,
     approvalMode: normalizeApprovalMode(profilePlain?.approvalMode),
+    carry: activeCarry,
+    currentContractStartDate: s(profilePlain?.contractDate || latest?.startDate || ''),
+    currentContractEndDate: s(profilePlain?.contractEndDate || latest?.endDate || ''),
     balances: applyCarryToBalancesForDisplay(profilePlain?.balances || [], activeCarry),
   }
 }
@@ -346,6 +419,51 @@ async function recomputeAndSaveBalances(profileDoc) {
     save: true,
     log: false,
   })
+}
+
+/* ───────────────── shared profile resolver ───────────────── */
+async function resolveEmployeeIdFromReq(req) {
+  const loginId = s(req.user?.loginId)
+  const directEmployeeId =
+    s(req.user?.employeeId) ||
+    s(req.auth?.employeeId) ||
+    s(req.headers['x-employee-id'])
+
+  if (directEmployeeId) return directEmployeeId
+
+  if (loginId) {
+    const byProfileLogin = await LeaveProfile.findOne(
+      { employeeLoginId: loginId },
+      { employeeId: 1 }
+    ).lean()
+    if (byProfileLogin?.employeeId) return s(byProfileLogin.employeeId)
+
+    const byUser = await User.findOne(
+      { loginId },
+      { employeeId: 1, loginId: 1 }
+    ).lean()
+    if (byUser?.employeeId) return s(byUser.employeeId)
+
+    const byDirectory = await EmployeeDirectory.findOne(
+      { $or: [{ employeeId: loginId }, { loginId }] },
+      { employeeId: 1 }
+    ).lean()
+    if (byDirectory?.employeeId) return s(byDirectory.employeeId)
+  }
+
+  return ''
+}
+
+async function buildProfileResponseByEmployeeId(employeeId) {
+  const id = s(employeeId)
+  if (!id) throw createError(400, 'employeeId is required')
+
+  const doc = await LeaveProfile.findOne({ employeeId: id })
+  if (!doc) throw createError(404, 'Profile not found')
+
+  let plain = await attachEmployeeDirectory(doc.toObject())
+  plain = decorateProfileForResponse(plain)
+  return plain
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -386,6 +504,7 @@ exports.getProfilesGrouped = async (req, res) => {
       p.employeeId,
       p.name,
       p.department,
+      p.position,
       p.managerLoginId,
       p.gmLoginId,
       p.cooLoginId,
@@ -476,11 +595,20 @@ exports.getProfilesGrouped = async (req, res) => {
 ───────────────────────────────────────────────────────────── */
 exports.getProfileOne = async (req, res) => {
   const employeeId = s(req.params.employeeId)
-  const doc = await LeaveProfile.findOne({ employeeId })
-  if (!doc) throw createError(404, 'Profile not found')
+  const plain = await buildProfileResponseByEmployeeId(employeeId)
+  return res.json(plain)
+}
 
-  let plain = await attachEmployeeDirectory(doc.toObject())
-  plain = decorateProfileForResponse(plain)
+/* ─────────────────────────────────────────────────────────────
+   GET /leave/profile/me
+───────────────────────────────────────────────────────────── */
+exports.getMyProfile = async (req, res) => {
+  const employeeId = await resolveEmployeeIdFromReq(req)
+  if (!employeeId) {
+    throw createError(404, 'Employee profile not found for current user')
+  }
+
+  const plain = await buildProfileResponseByEmployeeId(employeeId)
   return res.json(plain)
 }
 
@@ -559,6 +687,7 @@ exports.createProfileSingle = async (req, res) => {
   })
 
   const saved = await recomputeAndSaveBalances(doc)
+  await syncUserRolesForProfile(saved)
   emitProfile(req, saved, 'leave:profile:created')
 
   let plain = await attachEmployeeDirectory(saved.toObject())
@@ -644,6 +773,7 @@ exports.createManagerWithEmployees = async (req, res) => {
     })
 
     const saved = await recomputeAndSaveBalances(doc)
+    await syncUserRolesForProfile(saved)
     emitProfile(req, saved, 'leave:profile:created')
 
     let plain = await attachEmployeeDirectory(saved.toObject())
@@ -693,6 +823,9 @@ exports.updateProfile = async (req, res) => {
 
   if (body.name !== undefined) doc.name = s(body.name)
   if (body.department !== undefined) doc.department = s(body.department)
+  if (body.position !== undefined) doc.position = s(body.position)
+  if (body.contactNumber !== undefined) doc.contactNumber = s(body.contactNumber)
+  if (body.telegramChatId !== undefined) doc.telegramChatId = s(body.telegramChatId)
   if (body.employeeLoginId !== undefined) doc.employeeLoginId = s(body.employeeLoginId)
 
   setPointersToLatest(doc)
@@ -753,6 +886,7 @@ exports.updateContractCarry = async (req, res) => {
   setPointersToLatest(doc)
 
   const saved = await recomputeAndSaveBalances(doc)
+  await syncUserRolesForProfile(saved)
   emitProfile(req, saved, 'leave:profile:updated')
 
   return res.json({
@@ -800,11 +934,6 @@ exports.renewContract = async (req, res) => {
     .sort({ startDate: 1 })
     .lean()
 
-  /*
-    ✅ IMPORTANT:
-    Build a clean plain object so computeBalances only computes RAW balances
-    for the closing contract.
-  */
   const plainForClose = doc.toObject ? doc.toObject() : { ...doc }
   plainForClose.balances = []
   plainForClose.balancesAsOf = ''
@@ -816,12 +945,6 @@ exports.renewContract = async (req, res) => {
 
   const closeRawBalances = Array.isArray(closeSnap?.balances) ? closeSnap.balances : []
 
-  /*
-    ✅ IMPORTANT:
-    RAW balances do not include current contract carry.
-    Apply the CURRENT closing contract carry first
-    so we get the real final visible remaining.
-  */
   const currentCarry = normalizeCarryObj(latest?.carry || {})
   const closeDisplayBalances = applyCarryToBalancesForDisplay(closeRawBalances, currentCarry)
 
@@ -845,12 +968,6 @@ exports.renewContract = async (req, res) => {
     closingAlRemaining = num(al?.remaining)
   } catch {}
 
-  /*
-    clearUnusedAL = true
-      => clear positive AL, but still carry negative debt
-    clearUnusedAL = false
-      => carry full displayed remaining forward
-  */
   const nextALCarry = clearUnusedAL
     ? (closingAlRemaining < 0 ? closingAlRemaining : 0)
     : closingAlRemaining

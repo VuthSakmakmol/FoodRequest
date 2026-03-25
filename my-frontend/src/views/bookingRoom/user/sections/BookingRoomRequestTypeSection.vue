@@ -111,6 +111,8 @@ function toggleRoomRequired() {
     props.form.roomCode = ''
     props.form.roomName = ''
     props.form.needCoffeeBreak = false
+    props.form.needNameOnTable = false
+    props.form.needWifiPassword = false
   }
 }
 
@@ -149,6 +151,8 @@ function onSelectRoom(room) {
     props.form.roomCode = ''
     props.form.roomName = ''
     props.form.needCoffeeBreak = false
+    props.form.needNameOnTable = false
+    props.form.needWifiPassword = false    
     return
   }
 
@@ -156,6 +160,8 @@ function onSelectRoom(room) {
   props.form.roomCode = up(room.code)
   props.form.roomName = s(room.name)
   props.form.needCoffeeBreak = false
+  props.form.needNameOnTable = false
+  props.form.needWifiPassword = false
 }
 
 function toggleMaterial(item) {
@@ -225,6 +231,8 @@ watch(
       props.form.roomCode = ''
       props.form.roomName = ''
       props.form.needCoffeeBreak = false
+      props.form.needNameOnTable = false
+      props.form.needWifiPassword = false
     }
   },
   { deep: true }
@@ -508,7 +516,7 @@ watch(
 
                         <div
                           v-if="isRoomOn(room)"
-                          class="mt-3"
+                          class="mt-3 flex flex-wrap gap-2"
                         >
                           <button
                             type="button"
@@ -520,6 +528,30 @@ watch(
                           >
                             <i class="fa-solid fa-mug-hot" />
                             Need Coffee Break?
+                          </button>
+
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                            :class="props.form.needNameOnTable
+                              ? 'border-indigo-500 bg-indigo-500 text-white'
+                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                            @click.stop="props.form.needNameOnTable = !props.form.needNameOnTable"
+                          >
+                            <i class="fa-solid fa-id-card" />
+                            Need Name on Table?
+                          </button>
+
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                            :class="props.form.needWifiPassword
+                              ? 'border-emerald-500 bg-emerald-500 text-white'
+                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                            @click.stop="props.form.needWifiPassword = !props.form.needWifiPassword"
+                          >
+                            <i class="fa-solid fa-wifi" />
+                            Need Wifi Password?
                           </button>
                         </div>
                       </div>

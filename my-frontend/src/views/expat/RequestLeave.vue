@@ -26,6 +26,10 @@
      - UI date picker cannot go outside current contract period
      - submit is blocked if selected dates are outside contract period
      - MA auto end is clamped by contract end date
+
+  ✅ IMPORTANT:
+     - backend /leave/profile/me already returns carry-adjusted balances
+     - DO NOT apply carry again in frontend
 -->
 
 <script setup>
@@ -103,7 +107,7 @@ async function fetchLeaveTypes() {
 /* ───────── Profile balances (simple, no contract history UI) ───────── */
 const loadingProfile = ref(false)
 const profileError = ref('')
-const balancesRaw = ref([]) // array of { code, used, remaining, entitlement }
+const balancesRaw = ref([])
 
 /* ✅ employee info */
 const me = ref({
@@ -132,12 +136,13 @@ function extractBalances(profile) {
     (Array.isArray(profile?.leaveBalances) && profile.leaveBalances) ||
     (Array.isArray(profile?.meta?.balances) && profile.meta.balances) ||
     []
+
   return arr
     .map((b) => ({
       code: codeOf(b),
       used: n(b?.used),
       remaining: n(b?.remaining),
-      entitlement: n(b?.entitlement),
+      entitlement: n(b?.yearlyEntitlement ?? b?.entitlement ?? b?.total ?? 0),
     }))
     .filter((b) => !!b.code)
 }
@@ -157,23 +162,6 @@ const typeNameByCode = computed(() => {
 function fullTypeName(code) {
   const c = String(code || '').trim().toUpperCase()
   return typeNameByCode.value[c] || c
-}
-
-/**
- * Apply carry to displayed balances (your rule):
- * - if carry positive => add to remaining
- * - if carry negative => used += abs(carry), remaining -= abs(carry)
- * Remaining clamped >= 0 for display.
- */
-function applyCarryForDisplay(profile, arr) {
-  const carry = profile?.carry || {}
-  return arr.map((b) => {
-    const c = n(carry?.[b.code])
-    if (!c) return { ...b, remaining: Math.max(0, b.remaining) }
-    if (c > 0) return { ...b, remaining: Math.max(0, b.remaining + c) }
-    const abs = Math.abs(c)
-    return { ...b, used: b.used + abs, remaining: Math.max(0, b.remaining - abs) }
-  })
 }
 
 function extractEmployeeInfo(profile) {
@@ -205,10 +193,13 @@ async function fetchMyProfile() {
       endDate: s(profile?.contractEndDate || profile?.currentContractEndDate || ''),
     }
 
+    // ✅ backend already returns carry-adjusted balances
     let arr = extractBalances(profile)
-    arr = applyCarryForDisplay(profile, arr)
 
-    const order = (leaveTypes.value || []).map((t) => String(t.code || '').toUpperCase()).filter(Boolean)
+    const order = (leaveTypes.value || [])
+      .map((t) => String(t.code || '').toUpperCase())
+      .filter(Boolean)
+
     if (order.length) {
       const idx = (c) => {
         const i = order.indexOf(c)
@@ -1006,17 +997,6 @@ onBeforeUnmount(() => {
           <div class="p-3">
             <form class="space-y-2.5" @submit.prevent="submitRequest">
               <div class="ui-card p-3">
-                <!-- <div
-                  v-if="contractInfo.startDate || contractInfo.endDate"
-                  class="mb-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] font-semibold text-sky-800
-                         dark:border-sky-900/40 dark:bg-sky-950/30 dark:text-sky-200"
-                >
-                  Allowed contract period:
-                  <span class="font-mono">{{ contractInfo.startDate || '—' }}</span>
-                  →
-                  <span class="font-mono">{{ contractInfo.endDate || '—' }}</span>
-                </div> -->
-
                 <div class="grid gap-2">
                   <!-- Start row -->
                   <div class="date-row">

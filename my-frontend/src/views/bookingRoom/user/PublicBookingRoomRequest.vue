@@ -63,6 +63,8 @@ const form = ref({
   materials: [],
 
   needCoffeeBreak: false,
+  needNameOnTable: false,
+  needWifiPassword: false,
 })
 
 function s(v) {
@@ -210,6 +212,8 @@ function resetForm({ keepEmployee = true } = {}) {
     materials: [],
 
     needCoffeeBreak: false,
+    needNameOnTable: false,
+    needWifiPassword: false,    
   }
 
   activeRooms.value = []
@@ -459,6 +463,8 @@ async function submit() {
       participantEstimate: Number(form.value.participantEstimate || 1),
       note: compactText(form.value.note),
       needCoffeeBreak: form.value.roomRequired ? !!form.value.needCoffeeBreak : false,
+      needNameOnTable: form.value.roomRequired ? !!form.value.needNameOnTable : false,
+      needWifiPassword: form.value.roomRequired ? !!form.value.needWifiPassword : false,
 
       roomRequired: !!form.value.roomRequired,
       roomId: form.value.roomRequired ? (form.value.roomId || null) : null,
