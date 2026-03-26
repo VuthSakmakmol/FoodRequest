@@ -25,7 +25,6 @@ const router = useRouter()
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ───────────────── STATE ───────────────── */
 const loading = ref(false)
 const rows = ref([])
 
@@ -48,12 +47,10 @@ function updateIsMobile() {
   isMobile.value = window.innerWidth < 768
 }
 
-/* pagination */
 const page = ref(1)
 const perPage = ref(10)
 const perPageOptions = [10, 20, 50, 'All']
 
-/* edit modal */
 const editOpen = ref(false)
 const editBusy = ref(false)
 const editItem = ref(null)
@@ -66,34 +63,27 @@ const editForm = ref({
   meetingTitle: '',
   participantEstimate: 1,
   requirementNote: '',
-
   roomRequired: true,
   roomId: '',
   roomCode: '',
   roomName: '',
-
   needCoffeeBreak: false,
   needNameOnTable: false,
   needWifiPassword: false,
-
   materialRequired: false,
   materials: [],
 })
 
-/* detail modal */
 const detailOpen = ref(false)
 const detailItem = ref(null)
 
-/* cancel */
 const cancelOpen = ref(false)
 const cancelBusy = ref(false)
 const cancelTarget = ref(null)
 const cancelReason = ref('')
 
-/* throttled refresh flag */
 let availabilityRefreshTimer = null
 
-/* ───────────────── CONSTANTS ───────────────── */
 const STATUS_OPTIONS = {
   ALL: 'All',
   PENDING: 'Pending',
@@ -103,7 +93,6 @@ const STATUS_OPTIONS = {
   CANCELLED: 'Cancelled',
 }
 
-/* ───────────────── HELPERS ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -190,30 +179,31 @@ function typeBadgeUiClass(item) {
 
 function roomServiceItems(item) {
   const list = []
+
   if (item?.needCoffeeBreak) {
     list.push({
       key: 'coffee',
       label: 'Coffee Break',
       icon: 'fa-mug-hot',
-      tone: 'warning',
     })
   }
+
   if (item?.needNameOnTable) {
     list.push({
       key: 'name-table',
       label: 'Name on Table',
       icon: 'fa-id-card',
-      tone: 'info',
     })
   }
+
   if (item?.needWifiPassword) {
     list.push({
       key: 'wifi',
       label: 'WiFi Password',
       icon: 'fa-wifi',
-      tone: 'success',
     })
   }
+
   return list
 }
 
@@ -317,16 +307,13 @@ function syncEditItem() {
       meetingTitle: s(found.meetingTitle),
       participantEstimate: Number(found.participantEstimate || 1),
       requirementNote: s(found.requirementNote || found.note),
-
       roomRequired: !!found.roomRequired,
       roomId: s(found.roomId || found.room?._id || ''),
       roomCode: s(found.roomCode || found.room?.roomCode || ''),
       roomName: s(found.roomName || found.room?.roomName || ''),
-
       needCoffeeBreak: !!found.needCoffeeBreak,
       needNameOnTable: !!found.needNameOnTable,
       needWifiPassword: !!found.needWifiPassword,
-
       materialRequired: !!found.materialRequired,
       materials: normalizeMaterialItems(found.materials),
     }
@@ -514,7 +501,6 @@ watch(
   }
 )
 
-/* ───────────────── EMPLOYEE PICK ───────────────── */
 async function loadEmployees(q = '') {
   try {
     loadingEmployees.value = true
@@ -540,7 +526,6 @@ async function onEmployeeChanged() {
   await fetchData()
 }
 
-/* ───────────────── MASTER DATA ───────────────── */
 async function loadMasters({ silent = false } = {}) {
   try {
     if (!silent) loadingMasters.value = true
@@ -578,7 +563,6 @@ async function loadMasters({ silent = false } = {}) {
   }
 }
 
-/* ───────────────── FETCH ───────────────── */
 async function fetchData({ silent = false } = {}) {
   if (!s(employeeId.value)) {
     rows.value = []
@@ -598,7 +582,6 @@ async function fetchData({ silent = false } = {}) {
   }
 }
 
-/* ───────────────── FILTER ───────────────── */
 const processedRows = computed(() => {
   let result = [...rows.value]
 
@@ -657,7 +640,6 @@ watch([search, overallStatus, dateFrom, dateTo, perPage], () => {
   page.value = 1
 })
 
-/* ───────────────── DETAIL ───────────────── */
 function openDetail(item) {
   detailItem.value = item
   detailOpen.value = true
@@ -667,7 +649,6 @@ function closeDetail() {
   detailItem.value = null
 }
 
-/* ───────────────── EDIT ───────────────── */
 function openEdit(item) {
   if (!canEdit(item)) {
     showToast({ type: 'info', message: 'This request can no longer be edited.' })
@@ -793,7 +774,6 @@ async function submitEdit() {
   }
 }
 
-/* ───────────────── CANCEL ───────────────── */
 function askCancel(item) {
   if (!canCancel(item)) {
     showToast({ type: 'info', message: 'This request can no longer be cancelled.' })
@@ -838,7 +818,6 @@ async function confirmCancel() {
   }
 }
 
-/* ───────────────── REALTIME ───────────────── */
 function currentUserLoginId() {
   return s(auth.user?.loginId || auth.user?.id || auth.user?.sub || '')
 }
@@ -898,7 +877,6 @@ function onAvailabilityChanged(doc) {
   }, 250)
 }
 
-/* ───────────────── MODAL UX ───────────────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
   const b = document.body
@@ -917,7 +895,6 @@ function onKeydown(e) {
   if (cancelOpen.value && !cancelBusy.value) cancelOpen.value = false
 }
 
-/* ───────────────── INIT ───────────────── */
 onMounted(async () => {
   updateIsMobile()
   if (typeof window !== 'undefined') {
@@ -989,7 +966,6 @@ onBeforeUnmount(() => {
   <div class="ui-page">
     <div class="ui-container py-2">
       <div class="ui-card overflow-hidden">
-        <!-- Header -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[220px_220px_150px_150px_150px_auto] md:items-end">
@@ -1063,7 +1039,7 @@ onBeforeUnmount(() => {
 
                       <i
                         v-if="employeeId === emp.employeeId"
-                        class="fa-solid fa-check mt-0.5 text-[10px] text-emerald-500"
+                        class="fa-solid fa-check mt-0.5 text-slate-600 dark:text-slate-300"
                       />
                     </button>
 
@@ -1131,7 +1107,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- Body -->
         <div class="p-3">
           <div v-if="loading && !processedRows.length" class="space-y-2">
             <div class="ui-skeleton h-9 w-full" />
@@ -1147,7 +1122,6 @@ onBeforeUnmount(() => {
             </div>
 
             <template v-else>
-              <!-- Mobile -->
               <div v-if="isMobile" class="space-y-2">
                 <div
                   v-if="!pagedRows.length"
@@ -1221,7 +1195,7 @@ onBeforeUnmount(() => {
                     <div class="mini-resource-card">
                       <div class="mini-resource-head">
                         <div class="mini-resource-title-wrap">
-                          <span class="mini-resource-icon bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                          <span class="mini-resource-icon mini-resource-icon-neutral">
                             <i class="fa-solid fa-door-open" />
                           </span>
                           <div>
@@ -1237,16 +1211,11 @@ onBeforeUnmount(() => {
                         </span>
                       </div>
 
-                      <div v-if="item.roomRequired" class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div v-if="item.roomRequired" class="mt-2 service-grid-1">
                         <span
                           v-for="service in roomServiceItems(item)"
                           :key="service.key"
-                          class="mini-chip"
-                          :class="{
-                            'mini-chip-warning': service.tone === 'warning',
-                            'mini-chip-info': service.tone === 'info',
-                            'mini-chip-success': service.tone === 'success',
-                          }"
+                          class="mini-chip mini-chip-green mini-chip-block"
                         >
                           <i class="fa-solid" :class="service.icon" />
                           {{ service.label }}
@@ -1254,7 +1223,7 @@ onBeforeUnmount(() => {
 
                         <span
                           v-if="!roomServiceItems(item).length"
-                          class="mini-chip"
+                          class="mini-chip mini-chip-green mini-chip-block"
                         >
                           <i class="fa-solid fa-minus" />
                           No extra service
@@ -1265,7 +1234,7 @@ onBeforeUnmount(() => {
                     <div class="mini-resource-card">
                       <div class="mini-resource-head">
                         <div class="mini-resource-title-wrap">
-                          <span class="mini-resource-icon bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                          <span class="mini-resource-icon mini-resource-icon-neutral">
                             <i class="fa-solid fa-paperclip" />
                           </span>
                           <div>
@@ -1281,11 +1250,11 @@ onBeforeUnmount(() => {
                         </span>
                       </div>
 
-                      <div v-if="item.materialRequired" class="mt-2 flex flex-wrap gap-2">
+                      <div v-if="item.materialRequired" class="mt-2 service-grid-1">
                         <span
                           v-for="material in normalizedMaterialCards(item.materials)"
                           :key="material.key"
-                          class="mini-chip mini-chip-emerald"
+                          class="mini-chip mini-chip-green mini-chip-block"
                         >
                           <i class="fa-solid fa-paperclip" />
                           {{ material.name }} x{{ material.qty }}
@@ -1293,7 +1262,7 @@ onBeforeUnmount(() => {
 
                         <span
                           v-if="!normalizedMaterialCards(item.materials).length"
-                          class="mini-chip"
+                          class="mini-chip mini-chip-green mini-chip-block"
                         >
                           <i class="fa-solid fa-minus" />
                           No material selected
@@ -1304,19 +1273,18 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Desktop -->
               <div v-else class="history-table-shell">
                 <div class="history-table-scroll">
                   <table class="ui-table history-table">
                     <thead>
                       <tr>
-                        <th class="ui-th min-w-[80px]">Booking Date & Time</th>
-                        <th class="ui-th min-w-[220px]">Title</th>
-                        <th class="ui-th min-w-[120px]">Type</th>
-                        <th class="ui-th min-w-[220px]">Room</th>
-                        <th class="ui-th min-w-[320px]">Material</th>
-                        <th class="ui-th min-w-[140px]">Status</th>
-                        <th class="ui-th min-w-[150px] text-center">Actions</th>
+                        <th class="ui-th col-date">Booking Date & Time</th>
+                        <th class="ui-th col-title">Title</th>
+                        <th class="ui-th col-type">Type</th>
+                        <th class="ui-th col-room">Room</th>
+                        <th class="ui-th col-material">Material</th>
+                        <th class="ui-th col-status">Status</th>
+                        <th class="ui-th col-actions text-center">Actions</th>
                       </tr>
                     </thead>
 
@@ -1328,7 +1296,7 @@ onBeforeUnmount(() => {
                       </tr>
 
                       <tr v-for="item in pagedRows" :key="item._id" class="ui-tr-hover">
-                        <td class="ui-td whitespace-nowrap">
+                        <td class="ui-td whitespace-nowrap align-top">
                           <div class="flex flex-col">
                             <span class="font-semibold text-slate-900 dark:text-slate-100">
                               {{ fmtDate(item.bookingDate) }}
@@ -1339,10 +1307,10 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td">
+                        <td class="ui-td align-top">
                           <div class="min-w-0">
                             <div
-                              class="font-semibold text-slate-900 dark:text-slate-100"
+                              class="font-semibold text-slate-900 dark:text-slate-100 break-words"
                               :title="item.meetingTitle || '—'"
                             >
                               {{ item.meetingTitle || '—' }}
@@ -1353,20 +1321,20 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td">
+                        <td class="ui-td align-top">
                           <span :class="typeBadgeUiClass(item)">
                             {{ bookingRoomTypeLabel(item) }}
                           </span>
                         </td>
 
-                        <td class="ui-td">
+                        <td class="ui-td align-top">
                           <div class="resource-cell-card">
                             <div class="resource-cell-head">
                               <div class="resource-cell-main">
-                                <span class="resource-cell-icon resource-cell-icon-room">
+                                <span class="resource-cell-icon resource-cell-icon-neutral">
                                   <i class="fa-solid fa-door-open" />
                                 </span>
-                                <div class="min-w-0">
+                                <div class="min-w-0 w-full">
                                   <div class="resource-cell-title">
                                     {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : 'Not Required' }}
                                   </div>
@@ -1379,16 +1347,11 @@ onBeforeUnmount(() => {
                               </span>
                             </div>
 
-                            <div v-if="item.roomRequired" class="mt-2  grid grid-cols-1 gap-1.5">
+                            <div v-if="item.roomRequired" class="mt-2 service-grid-1">
                               <span
                                 v-for="service in roomServiceItems(item)"
                                 :key="service.key"
-                                class="mini-chip mini-chip-sm"
-                                :class="{
-                                  'mini-chip-warning': service.tone === 'warning',
-                                  'mini-chip-info': service.tone === 'info',
-                                  'mini-chip-success': service.tone === 'success',
-                                }"
+                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
                               >
                                 <i class="fa-solid" :class="service.icon" />
                                 {{ service.label }}
@@ -1396,7 +1359,7 @@ onBeforeUnmount(() => {
 
                               <span
                                 v-if="!roomServiceItems(item).length"
-                                class="mini-chip mini-chip-sm"
+                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
                               >
                                 <i class="fa-solid fa-minus" />
                                 No extra service
@@ -1405,14 +1368,14 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td">
+                        <td class="ui-td align-top">
                           <div class="resource-cell-card">
                             <div class="resource-cell-head">
                               <div class="resource-cell-main">
-                                <span class="resource-cell-icon resource-cell-icon-material">
+                                <span class="resource-cell-icon resource-cell-icon-neutral">
                                   <i class="fa-solid fa-paperclip" />
                                 </span>
-                                <div class="min-w-0">
+                                <div class="min-w-0 w-full">
                                   <div class="resource-cell-title">
                                     {{ item.materialRequired ? 'Attached Items' : 'Not Required' }}
                                   </div>
@@ -1425,11 +1388,11 @@ onBeforeUnmount(() => {
                               </span>
                             </div>
 
-                            <div v-if="item.materialRequired" class="mt-2 flex flex-wrap gap-1.5">
+                            <div v-if="item.materialRequired" class="mt-2 service-grid-1">
                               <span
                                 v-for="material in normalizedMaterialCards(item.materials)"
                                 :key="material.key"
-                                class="mini-chip mini-chip-sm mini-chip-emerald"
+                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
                               >
                                 <i class="fa-solid fa-paperclip" />
                                 {{ material.name }} x{{ material.qty }}
@@ -1437,7 +1400,7 @@ onBeforeUnmount(() => {
 
                               <span
                                 v-if="!normalizedMaterialCards(item.materials).length"
-                                class="mini-chip mini-chip-sm"
+                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
                               >
                                 <i class="fa-solid fa-minus" />
                                 No material selected
@@ -1446,13 +1409,13 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td">
+                        <td class="ui-td align-top">
                           <span :class="statusBadgeUiClass(item.overallStatus)">
                             {{ bookingRoomStatusLabel(item.overallStatus) }}
                           </span>
                         </td>
 
-                        <td class="ui-td text-center">
+                        <td class="ui-td text-center align-top">
                           <div class="flex items-center justify-center gap-2">
                             <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(item)">
                               <i class="fa-solid fa-eye text-[11px]" />
@@ -1490,7 +1453,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <!-- Pagination -->
               <div
                 v-if="processedRows.length"
                 class="mt-3 flex flex-col gap-2 border-t border-slate-200 pt-2 text-[11px] text-slate-600
@@ -1524,7 +1486,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Detail Modal -->
       <div v-if="detailOpen" class="ui-modal-backdrop" @click.self="closeDetail">
         <div class="ui-modal ui-modal-lg p-0 overflow-hidden">
           <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
@@ -1600,7 +1561,7 @@ onBeforeUnmount(() => {
                 <div class="resource-detail-card">
                   <div class="resource-detail-head">
                     <div class="resource-detail-title-wrap">
-                      <span class="resource-detail-icon resource-detail-icon-room">
+                      <span class="resource-detail-icon resource-detail-icon-neutral">
                         <i class="fa-solid fa-door-open" />
                       </span>
                       <div>
@@ -1619,16 +1580,11 @@ onBeforeUnmount(() => {
                   <div v-if="detailItem?.roomRequired" class="mt-3">
                     <div class="ui-label">Room Services</div>
 
-                    <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div class="mt-2 service-grid-1">
                       <span
                         v-for="service in roomServiceItems(detailItem)"
                         :key="service.key"
-                        class="mini-chip"
-                        :class="{
-                          'mini-chip-warning': service.tone === 'warning',
-                          'mini-chip-info': service.tone === 'info',
-                          'mini-chip-success': service.tone === 'success',
-                        }"
+                        class="mini-chip mini-chip-green mini-chip-block"
                       >
                         <i class="fa-solid" :class="service.icon" />
                         {{ service.label }}
@@ -1636,7 +1592,7 @@ onBeforeUnmount(() => {
 
                       <span
                         v-if="!roomServiceItems(detailItem).length"
-                        class="mini-chip"
+                        class="mini-chip mini-chip-green mini-chip-block"
                       >
                         <i class="fa-solid fa-minus" />
                         No extra service
@@ -1652,7 +1608,7 @@ onBeforeUnmount(() => {
                 <div class="resource-detail-card">
                   <div class="resource-detail-head">
                     <div class="resource-detail-title-wrap">
-                      <span class="resource-detail-icon resource-detail-icon-material">
+                      <span class="resource-detail-icon resource-detail-icon-neutral">
                         <i class="fa-solid fa-paperclip" />
                       </span>
                       <div>
@@ -1668,11 +1624,11 @@ onBeforeUnmount(() => {
                     </span>
                   </div>
 
-                  <div v-if="detailItem?.materialRequired" class="mt-3 flex flex-wrap gap-2">
+                  <div v-if="detailItem?.materialRequired" class="mt-3 service-grid-1">
                     <span
                       v-for="material in normalizedMaterialCards(detailItem?.materials)"
                       :key="material.key"
-                      class="mini-chip mini-chip-emerald"
+                      class="mini-chip mini-chip-green mini-chip-block"
                     >
                       <i class="fa-solid fa-paperclip" />
                       {{ material.name }} x{{ material.qty }}
@@ -1680,7 +1636,7 @@ onBeforeUnmount(() => {
 
                     <span
                       v-if="!normalizedMaterialCards(detailItem?.materials).length"
-                      class="mini-chip"
+                      class="mini-chip mini-chip-green mini-chip-block"
                     >
                       <i class="fa-solid fa-minus" />
                       No material selected
@@ -1716,7 +1672,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Edit Modal -->
       <div v-if="editOpen" class="ui-modal-backdrop">
         <div class="ui-modal ui-modal-xl p-0 overflow-hidden">
           <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
@@ -1815,13 +1770,11 @@ onBeforeUnmount(() => {
                   <div v-if="editForm.roomRequired" class="mt-3">
                     <label class="ui-label">Room Services</label>
 
-                    <div class="mt-2 flex flex-wrap gap-2">
+                    <div class="mt-2 service-grid-1">
                       <button
                         type="button"
-                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                        :class="editForm.needCoffeeBreak
-                          ? 'border-amber-500 bg-amber-500 text-white'
-                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                        class="service-toggle-btn"
+                        :class="editForm.needCoffeeBreak ? 'service-toggle-btn-on' : 'service-toggle-btn-off'"
                         :disabled="editBusy"
                         @click="editForm.needCoffeeBreak = !editForm.needCoffeeBreak"
                       >
@@ -1831,10 +1784,8 @@ onBeforeUnmount(() => {
 
                       <button
                         type="button"
-                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                        :class="editForm.needNameOnTable
-                          ? 'border-indigo-500 bg-indigo-500 text-white'
-                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                        class="service-toggle-btn"
+                        :class="editForm.needNameOnTable ? 'service-toggle-btn-on' : 'service-toggle-btn-off'"
                         :disabled="editBusy"
                         @click="editForm.needNameOnTable = !editForm.needNameOnTable"
                       >
@@ -1844,10 +1795,8 @@ onBeforeUnmount(() => {
 
                       <button
                         type="button"
-                        class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                        :class="editForm.needWifiPassword
-                          ? 'border-emerald-500 bg-emerald-500 text-white'
-                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
+                        class="service-toggle-btn"
+                        :class="editForm.needWifiPassword ? 'service-toggle-btn-on' : 'service-toggle-btn-off'"
                         :disabled="editBusy"
                         @click="editForm.needWifiPassword = !editForm.needWifiPassword"
                       >
@@ -1885,7 +1834,7 @@ onBeforeUnmount(() => {
                         :key="item._id"
                         class="rounded-xl border p-2.5 transition"
                         :class="isEditMaterialOn(item.code)
-                          ? 'border-sky-400 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/20'
+                          ? 'border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-950/20'
                           : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/60'"
                       >
                         <div class="flex items-start justify-between gap-2">
@@ -1895,7 +1844,7 @@ onBeforeUnmount(() => {
                                 type="button"
                                 class="inline-flex h-7 w-7 items-center justify-center rounded-full border text-[11px] transition"
                                 :class="isEditMaterialOn(item.code)
-                                  ? 'border-sky-500 bg-sky-500 text-white'
+                                  ? 'border-emerald-500 bg-emerald-500 text-white'
                                   : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200'"
                                 :disabled="editBusy || !editForm.materialRequired"
                                 @click="toggleEditMaterial(item)"
@@ -1950,19 +1899,18 @@ onBeforeUnmount(() => {
 
                     <div
                       v-if="editForm.materialRequired && editForm.materials?.length"
-                      class="mt-3 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2
-                             dark:border-emerald-900/40 dark:bg-emerald-950/20"
+                      class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2
+                             dark:border-slate-700 dark:bg-slate-900/60"
                     >
-                      <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">
+                      <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700 dark:text-slate-300">
                         Selected Materials
                       </div>
 
-                      <div class="mt-2 flex flex-wrap gap-2">
+                      <div class="mt-2 service-grid-1">
                         <span
                           v-for="item in editForm.materials"
                           :key="item.materialCode"
-                          class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[11px]
-                                 font-medium text-emerald-800 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-200"
+                          class="mini-chip mini-chip-green mini-chip-block"
                         >
                           <i class="fa-solid fa-paperclip text-[10px]" />
                           {{ item.materialName || item.materialCode }} x{{ Number(item.qty || 0) }}
@@ -1999,7 +1947,6 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Cancel Dialog -->
       <ConfirmDialog
         v-model="cancelOpen"
         tone="danger"
@@ -2043,7 +1990,6 @@ onBeforeUnmount(() => {
   max-height: calc(100vh - 16px);
 }
 
-/* horizontal scroll fix */
 .history-table-shell {
   width: 100%;
   max-width: 100%;
@@ -2061,8 +2007,44 @@ onBeforeUnmount(() => {
 }
 
 .history-table {
-  min-width: 1520px;
   width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+}
+
+.col-date {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.col-title {
+  min-width: 180px;
+  width: auto;
+}
+
+.col-type {
+  width: 150px;
+  white-space: nowrap;
+}
+
+.col-room {
+  width: auto;
+  min-width: 170px;
+}
+
+.col-material {
+  width: auto;
+  min-width: 170px;
+}
+
+.col-status {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.col-actions {
+  width: 1%;
+  white-space: nowrap;
 }
 
 .history-table-scroll::-webkit-scrollbar {
@@ -2123,6 +2105,16 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.mini-resource-icon-neutral {
+  background: rgb(241 245 249);
+  color: rgb(71 85 105);
+}
+
+.dark .mini-resource-icon-neutral {
+  background: rgba(51, 65, 85, 0.7);
+  color: rgb(226 232 240);
+}
+
 .mini-resource-title {
   font-size: 11px;
   font-weight: 800;
@@ -2141,6 +2133,8 @@ onBeforeUnmount(() => {
   font-weight: 700;
   color: rgb(15 23 42);
   line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .dark .mini-resource-sub {
@@ -2148,11 +2142,14 @@ onBeforeUnmount(() => {
 }
 
 .resource-cell-card {
-  min-width: 280px;
+  display: inline-block;
+  width: auto;
+  min-width: 150px;
+  max-width: 100%;
   border: 1px solid rgba(226, 232, 240, 1);
   background: rgba(248, 250, 252, 0.95);
   border-radius: 16px;
-  padding: 10px;
+  padding: 8px 10px;
 }
 
 .dark .resource-cell-card {
@@ -2172,6 +2169,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .resource-cell-icon {
@@ -2184,24 +2182,14 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.resource-cell-icon-room {
-  background: rgba(224, 242, 254, 1);
-  color: rgba(3, 105, 161, 1);
+.resource-cell-icon-neutral {
+  background: rgb(241 245 249);
+  color: rgb(71 85 105);
 }
 
-.resource-cell-icon-material {
-  background: rgba(237, 233, 254, 1);
-  color: rgba(109, 40, 217, 1);
-}
-
-.dark .resource-cell-icon-room {
-  background: rgba(8, 47, 73, 0.55);
-  color: rgba(125, 211, 252, 1);
-}
-
-.dark .resource-cell-icon-material {
-  background: rgba(46, 16, 101, 0.55);
-  color: rgba(196, 181, 253, 1);
+.dark .resource-cell-icon-neutral {
+  background: rgba(51, 65, 85, 0.7);
+  color: rgb(226 232 240);
 }
 
 .resource-cell-title {
@@ -2210,6 +2198,7 @@ onBeforeUnmount(() => {
   color: rgb(15 23 42);
   line-height: 1.35;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .dark .resource-cell-title {
@@ -2261,24 +2250,14 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
-.resource-detail-icon-room {
-  background: rgba(224, 242, 254, 1);
-  color: rgba(3, 105, 161, 1);
+.resource-detail-icon-neutral {
+  background: rgb(241 245 249);
+  color: rgb(71 85 105);
 }
 
-.resource-detail-icon-material {
-  background: rgba(237, 233, 254, 1);
-  color: rgba(109, 40, 217, 1);
-}
-
-.dark .resource-detail-icon-room {
-  background: rgba(8, 47, 73, 0.55);
-  color: rgba(125, 211, 252, 1);
-}
-
-.dark .resource-detail-icon-material {
-  background: rgba(46, 16, 101, 0.55);
-  color: rgba(196, 181, 253, 1);
+.dark .resource-detail-icon-neutral {
+  background: rgba(51, 65, 85, 0.7);
+  color: rgb(226 232 240);
 }
 
 .resource-detail-title {
@@ -2299,24 +2278,36 @@ onBeforeUnmount(() => {
   font-weight: 800;
   line-height: 1.35;
   color: rgb(15 23 42);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .dark .resource-detail-name {
   color: rgb(241 245 249);
 }
 
+.service-grid-1 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  min-width: 0;
+}
+
 .mini-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  border-radius: 9999px;
+  max-width: 100%;
+  border-radius: 14px;
   border: 1px solid rgba(203, 213, 225, 1);
   background: white;
   padding: 6px 10px;
   font-size: 11px;
   font-weight: 700;
   color: rgb(51 65 85);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .dark .mini-chip {
@@ -2330,51 +2321,84 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.mini-chip-warning {
-  border-color: rgba(251, 191, 36, 0.45);
-  background: rgba(255, 251, 235, 1);
-  color: rgba(146, 64, 14, 1);
+.mini-chip-block {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
 
-.dark .mini-chip-warning {
-  border-color: rgba(180, 83, 9, 0.6);
-  background: rgba(69, 26, 3, 0.5);
-  color: rgba(253, 224, 71, 1);
+.mini-chip-green {
+  border-color: rgb(134 239 172);
+  background: rgb(240 253 244);
+  color: rgb(22 101 52);
 }
 
-.mini-chip-info {
-  border-color: rgba(129, 140, 248, 0.4);
-  background: rgba(238, 242, 255, 1);
-  color: rgba(55, 48, 163, 1);
+.dark .mini-chip-green {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(20, 83, 45, 0.45);
+  color: rgb(187 247 208);
 }
 
-.dark .mini-chip-info {
-  border-color: rgba(67, 56, 202, 0.55);
-  background: rgba(30, 27, 75, 0.6);
-  color: rgba(165, 180, 252, 1);
+.service-toggle-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  border-radius: 14px;
+  border-width: 1px;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  transition: 0.2s ease;
 }
 
-.mini-chip-success {
-  border-color: rgba(16, 185, 129, 0.35);
-  background: rgba(236, 253, 245, 1);
-  color: rgba(6, 95, 70, 1);
+.service-toggle-btn-on {
+  border-color: rgb(34 197 94);
+  background: rgb(34 197 94);
+  color: white;
 }
 
-.dark .mini-chip-success {
-  border-color: rgba(5, 150, 105, 0.5);
-  background: rgba(2, 44, 34, 0.7);
-  color: rgba(110, 231, 183, 1);
+.service-toggle-btn-off {
+  border-color: rgb(203 213 225);
+  background: white;
+  color: rgb(51 65 85);
 }
 
-.mini-chip-emerald {
-  border-color: rgba(16, 185, 129, 0.35);
-  background: rgba(236, 253, 245, 1);
-  color: rgba(6, 95, 70, 1);
+.service-toggle-btn-off:hover {
+  background: rgb(248 250 252);
 }
 
-.dark .mini-chip-emerald {
-  border-color: rgba(5, 150, 105, 0.5);
-  background: rgba(2, 44, 34, 0.7);
-  color: rgba(110, 231, 183, 1);
+.dark .service-toggle-btn-off {
+  border-color: rgb(71 85 105);
+  background: rgb(15 23 42);
+  color: rgb(226 232 240);
+}
+
+.dark .service-toggle-btn-off:hover {
+  background: rgb(30 41 59);
+}
+
+.dark .service-toggle-btn-on {
+  border-color: rgba(34, 197, 94, 0.7);
+  background: rgba(22, 163, 74, 0.95);
+  color: white;
+}
+
+@media (max-width: 1279px) {
+  .col-room,
+  .col-material {
+    min-width: 160px;
+  }
+
+  .resource-cell-card {
+    min-width: 145px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .history-table {
+    min-width: 920px;
+  }
 }
 </style>

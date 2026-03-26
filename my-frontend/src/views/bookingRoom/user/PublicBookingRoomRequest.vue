@@ -637,18 +637,18 @@ onBeforeUnmount(() => {
           </div>
 
           <div>
-            <BookingRoomRecurringSection
-              :form="form"
-              :holiday-dates="holidayDates"
-            />
-          </div>
-
-          <div>
             <BookingRoomRequestTypeSection
               :form="form"
               :BOOKING_ROOM_NAMES="activeRooms"
               :BOOKING_ROOM_MATERIALS="activeMaterials"
               :loading-availability="loadingAvailability"
+            />
+          </div>
+
+                    <div>
+            <BookingRoomRecurringSection
+              :form="form"
+              :holiday-dates="holidayDates"
             />
           </div>
 
