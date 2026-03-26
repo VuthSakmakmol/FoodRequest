@@ -36,10 +36,12 @@ const roomOptions = ref([])
 const materialOptions = ref([])
 const loadingMasters = ref(false)
 
+const todayYmd = dayjs().format('YYYY-MM-DD')
+
 const search = ref('')
 const overallStatus = ref('ALL')
-const dateFrom = ref('')
-const dateTo = ref('')
+const dateFrom = ref(todayYmd)
+const dateTo = ref(todayYmd)
 
 const isMobile = ref(false)
 function updateIsMobile() {
@@ -175,6 +177,39 @@ function typeBadgeUiClass(item) {
   if (hasRoom) return 'ui-badge ui-badge-success'
   if (hasMaterial) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
+}
+
+function currentUserLoginId() {
+  return s(auth.user?.loginId || auth.user?.id || auth.user?.sub || '')
+}
+
+function isMine(doc) {
+  if (!doc?._id) return false
+
+  const rowEmpId = s(doc.employeeId)
+  const rowRequester =
+    s(doc.requesterLoginId) ||
+    s(doc.createdByLoginId) ||
+    s(doc.employeeLoginId)
+
+  return (
+    (rowEmpId && rowEmpId === s(employeeId.value)) ||
+    (rowRequester && rowRequester === currentUserLoginId())
+  )
+}
+
+function requesterLabel(item) {
+  if (!item) return '—'
+
+  return (
+    s(item.requesterName) ||
+    s(item.employeeName) ||
+    s(item.employee?.name) ||
+    s(item.requesterLoginId) ||
+    s(item.createdByLoginId) ||
+    s(item.employeeId) ||
+    '—'
+  )
 }
 
 function roomServiceItems(item) {
@@ -331,10 +366,10 @@ const filteredEmployees = computed(() => {
     ? list
     : list.filter((emp) => {
         const hay = [
-          emp?.employeeId,
-          emp?.name,
-          emp?.department,
-          emp?.position,
+          emp.employeeId,
+          emp.name,
+          emp.department,
+          emp.position,
         ]
           .map((x) => String(x || '').toLowerCase())
           .join(' ')
@@ -597,6 +632,9 @@ const processedRows = computed(() => {
       const hay = [
         r.employeeId,
         r.employee?.name,
+        r.requesterName,
+        r.employeeName,
+        requesterLabel(r),
         r.employee?.department,
         r.bookingDate,
         r.timeStart,
@@ -818,25 +856,6 @@ async function confirmCancel() {
   }
 }
 
-function currentUserLoginId() {
-  return s(auth.user?.loginId || auth.user?.id || auth.user?.sub || '')
-}
-
-function isMine(doc) {
-  if (!doc?._id) return false
-
-  const rowEmpId = s(doc.employeeId)
-  const rowRequester =
-    s(doc.requesterLoginId) ||
-    s(doc.createdByLoginId) ||
-    s(doc.employeeLoginId)
-
-  return (
-    (rowEmpId && rowEmpId === s(employeeId.value)) ||
-    (rowRequester && rowRequester === currentUserLoginId())
-  )
-}
-
 function onReqCreated(doc) {
   if (!isMine(doc)) return
   upsertRow(doc)
@@ -976,7 +995,7 @@ onBeforeUnmount(() => {
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Meeting title, room, material, service..."
+                    placeholder="Meeting title, room, material, requester..."
                     class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
@@ -1185,6 +1204,13 @@ onBeforeUnmount(() => {
                   </div>
 
                   <div class="mt-2 ui-frame p-2">
+                    <div class="ui-label !mb-1">Requester</div>
+                    <div class="text-[12px] font-bold text-slate-800 dark:text-slate-100">
+                      {{ requesterLabel(item) }}
+                    </div>
+                  </div>
+
+                  <div class="mt-2 ui-frame p-2">
                     <div class="ui-label !mb-2">Meeting Title</div>
                     <div class="text-[12px] font-bold text-slate-800 dark:text-slate-100">
                       {{ item.meetingTitle || '—' }}
@@ -1279,6 +1305,7 @@ onBeforeUnmount(() => {
                     <thead>
                       <tr>
                         <th class="ui-th col-date">Booking Date & Time</th>
+                        <th class="ui-th col-requester">Requester</th>
                         <th class="ui-th col-title">Title</th>
                         <th class="ui-th col-type">Type</th>
                         <th class="ui-th col-room">Room</th>
@@ -1290,7 +1317,7 @@ onBeforeUnmount(() => {
 
                     <tbody>
                       <tr v-if="!pagedRows.length">
-                        <td colspan="7" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                        <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                           No meeting room requests found.
                         </td>
                       </tr>
@@ -1304,6 +1331,17 @@ onBeforeUnmount(() => {
                             <span class="text-[11px] text-slate-500 dark:text-slate-400">
                               {{ fmtTime(item.timeStart) }} - {{ fmtTime(item.timeEnd) }}
                             </span>
+                          </div>
+                        </td>
+
+                        <td class="ui-td align-top">
+                          <div class="min-w-0">
+                            <div class="font-semibold text-slate-900 dark:text-slate-100 break-words">
+                              {{ requesterLabel(item) }}
+                            </div>
+                            <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                              {{ item.employeeId || '—' }}
+                            </div>
                           </div>
                         </td>
 
@@ -1504,7 +1542,7 @@ onBeforeUnmount(() => {
 
           <div class="p-4 space-y-3">
             <div class="ui-frame p-3">
-              <div class="grid gap-3 md:grid-cols-3">
+              <div class="grid gap-3 md:grid-cols-4">
                 <div>
                   <div class="ui-label">Overall Status</div>
                   <span :class="statusBadgeUiClass(detailItem?.overallStatus)">
@@ -1517,6 +1555,13 @@ onBeforeUnmount(() => {
                   <span :class="typeBadgeUiClass(detailItem)">
                     {{ bookingRoomTypeLabel(detailItem) }}
                   </span>
+                </div>
+
+                <div>
+                  <div class="ui-label">Requester</div>
+                  <div class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                    {{ requesterLabel(detailItem) }}
+                  </div>
                 </div>
 
                 <div class="md:text-right">
@@ -2017,6 +2062,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.col-requester {
+  min-width: 140px;
+  width: 160px;
+}
+
 .col-title {
   min-width: 180px;
   width: auto;
@@ -2398,7 +2448,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1023px) {
   .history-table {
-    min-width: 920px;
+    min-width: 1060px;
   }
 }
 </style>
