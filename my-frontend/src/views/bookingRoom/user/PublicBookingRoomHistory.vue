@@ -1,3 +1,4 @@
+<!-- src/views/bookingRoom/user/PublicBookingRoomHistory.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
@@ -1227,7 +1228,7 @@ onBeforeUnmount(() => {
                           <div>
                             <div class="mini-resource-title">Room</div>
                             <div class="mini-resource-sub">
-                              {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : 'Not Required' }}
+                              {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : '' }}
                             </div>
                           </div>
                         </div>
@@ -1266,7 +1267,6 @@ onBeforeUnmount(() => {
                           <div>
                             <div class="mini-resource-title">Material</div>
                             <div class="mini-resource-sub">
-                              {{ item.materialRequired ? 'Attached items' : 'Not Required' }}
                             </div>
                           </div>
                         </div>
@@ -1304,27 +1304,27 @@ onBeforeUnmount(() => {
                   <table class="ui-table history-table">
                     <thead>
                       <tr>
-                        <th class="ui-th col-date">Booking Date & Time</th>
-                        <th class="ui-th col-requester">Requester</th>
-                        <th class="ui-th col-title">Title</th>
-                        <th class="ui-th col-type">Type</th>
-                        <th class="ui-th col-room">Room</th>
-                        <th class="ui-th col-material">Material</th>
-                        <th class="ui-th col-status">Status</th>
+                        <th class="ui-th col-date text-center">Booking Date & Time</th>
+                        <th class="ui-th col-requester text-center">Requester</th>
+                        <th class="ui-th col-title text-center">Title</th>
+                        <th class="ui-th col-type text-center">Type</th>
+                        <th class="ui-th col-room text-center">Room</th>
+                        <th class="ui-th col-material text-center">Material</th>
+                        <th class="ui-th col-status text-center">Status</th>
                         <th class="ui-th col-actions text-center">Actions</th>
                       </tr>
                     </thead>
 
                     <tbody>
                       <tr v-if="!pagedRows.length">
-                        <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                        <td colspan="8" class="ui-td py-8 text-center text-slate-500 dark:text-slate-400">
                           No meeting room requests found.
                         </td>
                       </tr>
 
                       <tr v-for="item in pagedRows" :key="item._id" class="ui-tr-hover">
-                        <td class="ui-td whitespace-nowrap align-top">
-                          <div class="flex flex-col">
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex flex-col items-center justify-center text-center">
                             <span class="font-semibold text-slate-900 dark:text-slate-100">
                               {{ fmtDate(item.bookingDate) }}
                             </span>
@@ -1334,8 +1334,8 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td align-top">
-                          <div class="min-w-0">
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex flex-col items-center justify-center text-center">
                             <div class="font-semibold text-slate-900 dark:text-slate-100 break-words">
                               {{ requesterLabel(item) }}
                             </div>
@@ -1345,8 +1345,8 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td align-top">
-                          <div class="min-w-0">
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex flex-col items-center justify-center text-center">
                             <div
                               class="font-semibold text-slate-900 dark:text-slate-100 break-words"
                               :title="item.meetingTitle || '—'"
@@ -1359,101 +1359,100 @@ onBeforeUnmount(() => {
                           </div>
                         </td>
 
-                        <td class="ui-td align-top">
-                          <span :class="typeBadgeUiClass(item)">
-                            {{ bookingRoomTypeLabel(item) }}
-                          </span>
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex items-center justify-center">
+                            <span :class="typeBadgeUiClass(item)">
+                              {{ bookingRoomTypeLabel(item) }}
+                            </span>
+                          </div>
                         </td>
 
-                        <td class="ui-td align-top">
-                          <div class="resource-cell-card">
-                            <div class="resource-cell-head">
-                              <div class="resource-cell-main">
-                                <span class="resource-cell-icon resource-cell-icon-neutral">
-                                  <i class="fa-solid fa-door-open" />
-                                </span>
-                                <div class="min-w-0 w-full">
-                                  <div class="resource-cell-title">
-                                    {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : 'Not Required' }}
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex justify-center">
+                            <div class="resource-cell-card resource-cell-card-centered">
+                              <div class="resource-cell-head resource-cell-head-centered">
+                                <div class="resource-cell-main resource-cell-main-centered">
+                                  <div class="min-w-0 w-full">
+                                    <div class="resource-cell-title text-center">
+                                      {{ item.roomRequired ? (item.roomName || 'Unnamed Room') : '' }}
+                                    </div>
                                   </div>
-                                  <div class="resource-cell-sub">Room</div>
                                 </div>
+
+                                <span :class="sectionBadgeUiClass(item.roomStatus)">
+                                  {{ item.roomStatus || '—' }}
+                                </span>
                               </div>
 
-                              <span :class="sectionBadgeUiClass(item.roomStatus)">
-                                {{ item.roomStatus || '—' }}
-                              </span>
-                            </div>
+                              <div v-if="item.roomRequired" class="mt-2 service-grid-1">
+                                <span
+                                  v-for="service in roomServiceItems(item)"
+                                  :key="service.key"
+                                  class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                                >
+                                  <i class="fa-solid" :class="service.icon" />
+                                  {{ service.label }}
+                                </span>
 
-                            <div v-if="item.roomRequired" class="mt-2 service-grid-1">
-                              <span
-                                v-for="service in roomServiceItems(item)"
-                                :key="service.key"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
-                              >
-                                <i class="fa-solid" :class="service.icon" />
-                                {{ service.label }}
-                              </span>
-
-                              <span
-                                v-if="!roomServiceItems(item).length"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
-                              >
-                                <i class="fa-solid fa-minus" />
-                                No extra service
-                              </span>
+                                <span
+                                  v-if="!roomServiceItems(item).length"
+                                  class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                                >
+                                  <i class="fa-solid fa-minus" />
+                                  No extra service
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </td>
 
-                        <td class="ui-td align-top">
-                          <div class="resource-cell-card">
-                            <div class="resource-cell-head">
-                              <div class="resource-cell-main">
-                                <span class="resource-cell-icon resource-cell-icon-neutral">
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex justify-center">
+                            <div class="resource-cell-card resource-cell-card-centered">
+                              <div class="resource-cell-head resource-cell-head-centered">
+                                <div class="resource-cell-main resource-cell-main-centered">
+                                  <div class="min-w-0 w-full">
+                                    <div class="resource-cell-title text-center">
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <span :class="sectionBadgeUiClass(item.materialStatus)">
+                                  {{ item.materialStatus || '—' }}
+                                </span>
+                              </div>
+
+                              <div v-if="item.materialRequired" class="mt-2 service-grid-1">
+                                <span
+                                  v-for="material in normalizedMaterialCards(item.materials)"
+                                  :key="material.key"
+                                  class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                                >
                                   <i class="fa-solid fa-paperclip" />
+                                  {{ material.name }} x{{ material.qty }}
                                 </span>
-                                <div class="min-w-0 w-full">
-                                  <div class="resource-cell-title">
-                                    {{ item.materialRequired ? 'Attached Items' : 'Not Required' }}
-                                  </div>
-                                  <div class="resource-cell-sub">Material</div>
-                                </div>
+
+                                <span
+                                  v-if="!normalizedMaterialCards(item.materials).length"
+                                  class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                                >
+                                  <i class="fa-solid fa-minus" />
+                                  No material selected
+                                </span>
                               </div>
-
-                              <span :class="sectionBadgeUiClass(item.materialStatus)">
-                                {{ item.materialStatus || '—' }}
-                              </span>
-                            </div>
-
-                            <div v-if="item.materialRequired" class="mt-2 service-grid-1">
-                              <span
-                                v-for="material in normalizedMaterialCards(item.materials)"
-                                :key="material.key"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
-                              >
-                                <i class="fa-solid fa-paperclip" />
-                                {{ material.name }} x{{ material.qty }}
-                              </span>
-
-                              <span
-                                v-if="!normalizedMaterialCards(item.materials).length"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block"
-                              >
-                                <i class="fa-solid fa-minus" />
-                                No material selected
-                              </span>
                             </div>
                           </div>
                         </td>
 
-                        <td class="ui-td align-top">
-                          <span :class="statusBadgeUiClass(item.overallStatus)">
-                            {{ bookingRoomStatusLabel(item.overallStatus) }}
-                          </span>
+                        <td class="ui-td align-middle text-center">
+                          <div class="flex items-center justify-center">
+                            <span :class="statusBadgeUiClass(item.overallStatus)">
+                              {{ bookingRoomStatusLabel(item.overallStatus) }}
+                            </span>
+                          </div>
                         </td>
 
-                        <td class="ui-td text-center align-top">
+                        <td class="ui-td text-center align-middle">
                           <div class="flex items-center justify-center gap-2">
                             <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(item)">
                               <i class="fa-solid fa-eye text-[11px]" />
@@ -2207,11 +2206,23 @@ onBeforeUnmount(() => {
   background: rgba(15, 23, 42, 0.7);
 }
 
+.resource-cell-card-centered {
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .resource-cell-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.resource-cell-head-centered {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  text-align: center;
 }
 
 .resource-cell-main {
@@ -2220,6 +2231,11 @@ onBeforeUnmount(() => {
   gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.resource-cell-main-centered {
+  justify-content: center;
+  text-align: center;
 }
 
 .resource-cell-icon {
@@ -2375,6 +2391,11 @@ onBeforeUnmount(() => {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+}
+
+.mini-chip-centered {
+  justify-content: center;
+  text-align: center;
 }
 
 .mini-chip-green {

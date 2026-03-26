@@ -5,7 +5,6 @@ const axios = require('axios')
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || ''
 const DEBUG = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
-const SILENT_DM = String(process.env.TELEGRAM_SILENT_DM || 'false').toLowerCase() === 'true'
 
 function dlog(...args) {
   if (DEBUG) console.log('[TG]', ...args)
@@ -34,7 +33,7 @@ async function sendDM(chatId, text, opts = {}) {
       text: msg,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      disable_notification: SILENT_DM,
+      disable_notification: false, // force normal alert notification
       ...(opts || {}),
     }
 

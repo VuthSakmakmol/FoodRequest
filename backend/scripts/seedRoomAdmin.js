@@ -126,7 +126,7 @@ async function upsertUser({
     await mongoose.connect(MONGO_URI, {})
     console.log('✅ Connected to MongoDB')
 
-    const defaultPwd = process.env.USER_DEFAULT_PASSWORD || '123456'
+    const defaultPwd = process.env.USER_DEFAULT_PASSWORD || 'Password@12345678'
 
     const roomAdmins = [
       {
@@ -134,7 +134,7 @@ async function upsertUser({
         name: 'Room Admin',
         role: 'ROOM_ADMIN',
         password: process.env.ROOM_ADMIN_PASSWORD || defaultPwd,
-        telegramChatId: process.env.ROOM_ADMIN_TG_CHAT_ID || '7163451169',
+        telegramChatId: process.env.ROOM_ADMIN_TG_CHAT_ID || '1055055243',
       },
     ]
 
