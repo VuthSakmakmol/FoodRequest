@@ -1010,6 +1010,7 @@ exports.gmDecision = async (req, res, next) => {
 
 /* ─────────────────────────────────────────────
    COO INBOX
+   ✅ same backend pagination style as GM inbox
 ───────────────────────────────────────────── */
 exports.listCooInbox = async (req, res, next) => {
   try {
@@ -1017,45 +1018,148 @@ exports.listCooInbox = async (req, res, next) => {
     if (!me && !isAdminViewer(req)) throw createError(400, 'Missing user identity')
     if (!canViewCooInbox(req)) throw createError(403, 'Forbidden')
 
-    const scope = up(req.query?.scope || '')
+    const status = up(req.query?.status || 'PENDING_COO')
+    const keyword = s(req.query?.keyword || '')
+    const employeeId = s(req.query?.employeeId || '')
+    const fromDate = s(req.query?.fromDate || '')
+    const toDate = s(req.query?.toDate || '')
+    const exportAll = ['1', 'true', 'yes'].includes(String(req.query?.exportAll || '').toLowerCase())
+
+    const page = Math.max(Number(req.query?.page || 1), 1)
+    const limit = Math.min(Math.max(Number(req.query?.limit || 10), 1), 50)
+    const skip = (page - 1) * limit
+
     const actionableModes = ['MANAGER_AND_COO', 'GM_AND_COO', 'COO_ONLY']
     const viewerMode = 'GM_ONLY'
 
-    const query = isAdminViewer(req)
-      ? scope === 'ALL'
-        ? {
-            approvalMode: { $in: [...actionableModes, viewerMode] },
-          }
-        : {
-            $or: [
-              { approvalMode: { $in: actionableModes }, status: 'PENDING_COO' },
-              { approvalMode: viewerMode, status: 'PENDING_GM' }, // ✅ viewer pending
-            ],
-          }
-      : scope === 'ALL'
-        ? {
-            $or: [
-              {
-                approvalMode: { $in: actionableModes },
-                cooLoginId: me,
-                status: { $in: allowedStatusesForInboxLevel('COO') },
-              },
-              {
-                approvalMode: viewerMode,
-                // ✅ cooLoginId is empty in GM_ONLY (your model clears it), so do NOT filter by cooLoginId
-                status: { $in: allowedStatusesForInboxLevel('GM') }, // ✅ include PENDING_GM + history
-              },
-            ],
-          }
-        : {
-            $or: [
-              { approvalMode: { $in: actionableModes }, cooLoginId: me, status: 'PENDING_COO' },
-              { approvalMode: viewerMode, status: 'PENDING_GM' }, // ✅ viewer pending
-            ],
-          }
+    let baseQuery = {}
 
-    const rows = await LeaveRequest.find(query).sort({ createdAt: -1 }).lean()
-    return res.json(await attachEmployeeInfo(rows || []))
+    // viewer queue from GM_ONLY flow
+    if (status === 'PENDING_GM_VIEW') {
+      baseQuery = {
+        approvalMode: viewerMode,
+        status: 'PENDING_GM',
+      }
+    } else if (status === 'ALL') {
+      if (isAdminViewer(req)) {
+        baseQuery = {
+          approvalMode: { $in: [...actionableModes, viewerMode] },
+        }
+      } else {
+        baseQuery = {
+          $or: [
+            {
+              approvalMode: { $in: actionableModes },
+              cooLoginId: me,
+              status: { $in: allowedStatusesForInboxLevel('COO') },
+            },
+            {
+              approvalMode: viewerMode,
+              // GM_ONLY clears cooLoginId, so do not filter by cooLoginId here
+              status: { $in: allowedStatusesForInboxLevel('GM') },
+            },
+          ],
+        }
+      }
+    } else {
+      if (isAdminViewer(req)) {
+        baseQuery = status === 'PENDING_COO'
+          ? {
+              approvalMode: { $in: actionableModes },
+              status: 'PENDING_COO',
+            }
+          : {
+              approvalMode: { $in: actionableModes },
+              status,
+            }
+      } else {
+        baseQuery = status === 'PENDING_COO'
+          ? {
+              approvalMode: { $in: actionableModes },
+              cooLoginId: me,
+              status: 'PENDING_COO',
+            }
+          : {
+              approvalMode: { $in: actionableModes },
+              cooLoginId: me,
+              status,
+            }
+      }
+    }
+
+    const ands = [baseQuery]
+
+    if (fromDate || toDate) {
+      const createdAt = {}
+      if (fromDate) createdAt.$gte = new Date(`${fromDate}T00:00:00.000Z`)
+      if (toDate) createdAt.$lte = new Date(`${toDate}T23:59:59.999Z`)
+      ands.push({ createdAt })
+    }
+
+    if (employeeId) {
+      ands.push({
+        employeeId: { $regex: employeeId, $options: 'i' },
+      })
+    }
+
+    const query = ands.length === 1 ? ands[0] : { $and: ands }
+
+    let mongoQuery = LeaveRequest.find(query).sort({ createdAt: -1, _id: -1 })
+
+    if (!exportAll) {
+      mongoQuery = mongoQuery.skip(skip).limit(limit)
+    }
+
+    let rows = await mongoQuery.lean()
+    rows = await attachEmployeeInfo(rows || [])
+
+    if (keyword) {
+      const q = keyword.toLowerCase()
+      rows = rows.filter((r) => {
+        const hay = [
+          r.employeeId,
+          r.employeeName,
+          r.department,
+          r.leaveTypeCode,
+          r.reason,
+          r.status,
+          r.approvalMode,
+          r.cooComment,
+          r.gmComment,
+          r.managerComment,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+
+        return hay.includes(q)
+      })
+    }
+
+    const mapped = rows.map((r) => ({
+      ...r,
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+    }))
+
+    if (exportAll) {
+      return res.json({
+        items: mapped,
+        exportAll: true,
+      })
+    }
+
+    const nextRows = await LeaveRequest.find(query)
+      .sort({ createdAt: -1, _id: -1 })
+      .skip(skip + limit)
+      .limit(1)
+      .lean()
+
+    return res.json({
+      items: mapped,
+      page,
+      limit,
+      hasMore: nextRows.length > 0,
+    })
   } catch (e) {
     next(e)
   }
