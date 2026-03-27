@@ -35,8 +35,8 @@ const CORE = {
     name: '',
     role: 'LEAVE_GM',
     password: process.env.LEAVE_GM_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
-    telegramChatId: '1805934121',
-    // telegramChatId: '7163451169',
+    // telegramChatId: '1805934121',
+    telegramChatId: '7163451169',
   },
 
   // ✅ NEW: COO (final approver)

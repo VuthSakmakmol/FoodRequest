@@ -5,6 +5,7 @@
   ✅ NO attachments (Swap Working Day no longer uses evidence)
   ✅ Excel export (NO attachments column)
   ✅ NEW: show Approval Mode in mobile + desktop + detail modal + export
+  ✅ NEW: fromDate / toDate filter pattern like GM inbox
 -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
@@ -38,6 +39,8 @@ const rows = ref([])
 
 const search = ref('')
 const statusFilter = ref('ALL')
+const fromDate = ref('')
+const toDate = ref('')
 
 /* pagination */
 const page = ref(1)
@@ -68,7 +71,7 @@ const exporting = ref(false)
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const one = auth.user?.role ? [auth.user.role] : []
-  return [...new Set([...raw, ...one].map((r) => String(r || '').trim().toUpperCase()))]
+  return [...new Set([...raw, ...one].map((r) => String(r || '').trim().toUpperCase()).filter(Boolean))]
 })
 
 const isAdminViewer = computed(() =>
@@ -189,11 +192,29 @@ function getRejectedReason(row) {
   return '—'
 }
 
+function overlapsDateRange(row) {
+  const from = s(fromDate.value)
+  const to = s(toDate.value)
+  if (!from && !to) return true
+
+  const start = s(row?.requestStartDate)
+  const end = s(row?.requestEndDate) || start
+  if (!start) return false
+
+  if (from && end < from) return false
+  if (to && start > to) return false
+  return true
+}
+
 /* ───────────────── FETCH ───────────────── */
 async function fetchInbox() {
   try {
     loading.value = true
-    const res = await api.get('/leave/swap-working-day/coo/inbox?scope=ALL')
+    const params = { scope: 'ALL' }
+    if (fromDate.value) params.fromDate = fromDate.value
+    if (toDate.value) params.toDate = toDate.value
+
+    const res = await api.get('/leave/swap-working-day/coo/inbox', { params })
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load COO inbox' })
@@ -205,6 +226,10 @@ async function fetchInbox() {
 /* ───────────────── FILTER ───────────────── */
 const filteredRows = computed(() => {
   let list = [...rows.value]
+
+  if (fromDate.value || toDate.value) {
+    list = list.filter((r) => overlapsDateRange(r))
+  }
 
   if (statusFilter.value !== 'ALL') {
     list = list.filter((r) => up(r.status) === up(statusFilter.value))
@@ -383,10 +408,18 @@ function toggleSelectAll() {
 
 /* clear selection when filters/pagination inputs change */
 watch(
-  () => [search.value, statusFilter.value, perPage.value],
+  () => [search.value, statusFilter.value, perPage.value, fromDate.value, toDate.value],
   () => {
     page.value = 1
     clearSelection()
+  }
+)
+
+/* auto re-fetch on date change */
+watch(
+  () => [fromDate.value, toDate.value],
+  () => {
+    fetchInbox()
   }
 )
 
@@ -480,6 +513,8 @@ function onSwapUpdated(doc) {
 function clearFilters() {
   search.value = ''
   statusFilter.value = 'ALL'
+  fromDate.value = ''
+  toDate.value = ''
   perPage.value = 20
   page.value = 1
   clearSelection()
@@ -561,8 +596,8 @@ onBeforeUnmount(() => {
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-            <div class="min-w-[240px]">
-              <div class="text-[15px] font-extrabold">COO Inbox · Swap Working Day</div>
+            <div class="flex flex-col gap-1 min-w-[240px]">
+              <p class="text-[15px] font-extrabold">COO Inbox · Swap Working Day</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -570,36 +605,52 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[260px] max-w-xs">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
-                  <input
-                    v-model="search"
-                    type="text"
-                    placeholder="Employee, reason, mode, status..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
-                  />
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-1.5 xl:gap-2">
+              <div class="w-[150px]">
+                <div class="ui-field">
+                  <label class="text-[10px] font-extrabold text-white/90">Status</label>
+                  <select
+                    v-model="statusFilter"
+                    class="w-full rounded-xl border border-white/25 bg-white/10 px-2 h-[34px] text-[12px] text-white outline-none"
+                  >
+                    <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
+                      {{ label }}
+                    </option>
+                  </select>
                 </div>
               </div>
 
-              <div class="min-w-[180px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
-                    {{ label }}
-                  </option>
-                </select>
+              <div class="w-[170px]">
+                <div class="ui-field">
+                  <label class="text-[10px] font-extrabold text-white/90">Search</label>
+                  <div class="flex h-[34px] items-center gap-1.5 rounded-xl border border-white/25 bg-white/10 px-2">
+                    <i class="fa-solid fa-magnifying-glass text-[11px] text-white/80" />
+                    <input
+                      v-model="search"
+                      type="text"
+                      placeholder="Employee / reason / mode..."
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/65"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div class="flex items-center gap-2">
+              <div class="flex items-end gap-1.5">
+                <div class="ui-field w-[126px]">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
+                </div>
+
+                <div class="ui-field w-[126px]">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5">
                 <template v-if="isRealCoo && !isAdminViewer">
                   <button
-                    class="ui-btn ui-btn-sm ui-btn-soft"
+                    class="ui-btn ui-btn-sm ui-btn-soft md:h-[34px] md:px-2 md:text-[11px]"
                     type="button"
                     :disabled="loading || deciding || !selectableRows.length"
                     @click="toggleSelectAll"
@@ -609,32 +660,55 @@ onBeforeUnmount(() => {
                     <span class="ml-1">{{ selectedCount }}</span>
                   </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-emerald" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkApprove">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-emerald md:h-[34px] md:px-2 md:text-[11px]"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkApprove"
+                  >
                     <i class="fa-solid fa-circle-check text-[11px]" />
                     Approve ({{ selectedCount }})
                   </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
+                  <button
+                    class="ui-btn ui-btn-sm ui-btn-rose md:h-[34px] md:px-2 md:text-[11px]"
+                    type="button"
+                    :disabled="loading || deciding || !selectedCount"
+                    @click="openBulkReject"
+                  >
                     <i class="fa-solid fa-circle-xmark text-[11px]" />
                     Reject ({{ selectedCount }})
                   </button>
-
-                  <button v-if="selectedCount" class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading || deciding" @click="clearSelection" title="Clear selection">
-                    <i class="fa-solid fa-xmark text-[11px]" />
-                  </button>
                 </template>
 
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox" title="Refresh">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
+                  @click="fetchInbox"
+                  :disabled="loading"
+                >
                   <i class="fa-solid fa-rotate-right text-[11px]" />
+                  Refresh
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel" title="Export to Excel">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
+                  @click="exportExcel"
+                  :disabled="loading || exporting"
+                >
                   <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
+                  Export
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear filters">
-                  <i class="fa-solid fa-broom text-[11px]" />
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]"
+                  @click="clearFilters"
+                  :disabled="loading"
+                >
+                  Clear
                 </button>
               </div>
             </div>
@@ -643,7 +717,7 @@ onBeforeUnmount(() => {
           <!-- Mobile header -->
           <div v-else class="space-y-3">
             <div>
-              <div class="text-[15px] font-extrabold">COO Inbox · Swap Working Day</div>
+              <p class="text-[15px] font-extrabold">COO Inbox · Swap Working Day</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
@@ -651,63 +725,95 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
+            <div class="ui-field">
+              <label class="text-[11px] font-extrabold text-white/90">Status</label>
+              <select v-model="statusFilter" class="ui-select">
+                <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
+                  {{ label }}
+                </option>
+              </select>
+            </div>
+
             <div class="space-y-2">
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Search</label>
+                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, mode, status..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
+                    placeholder="Employee / reason / mode..."
+                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
               </div>
 
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, key) in STATUS_LABEL" :key="key" :value="key">
-                    {{ label }}
-                  </option>
-                </select>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date" />
+                </div>
+
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date" />
+                </div>
               </div>
 
-              <div class="flex flex-wrap items-center justify-end gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
                 <template v-if="isRealCoo && !isAdminViewer">
-                  <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || deciding || !selectableRows.length" @click="toggleSelectAll">
-                    <i class="fa-solid fa-check-double text-[11px]" />
-                    Select ({{ selectedCount }})
-                  </button>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      class="ui-btn ui-btn-sm ui-btn-soft"
+                      type="button"
+                      :disabled="loading || deciding || !selectableRows.length"
+                      @click="toggleSelectAll"
+                    >
+                      <i class="fa-solid fa-check-double text-[11px]" />
+                      Select ({{ selectedCount }})
+                    </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-emerald" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkApprove">
-                    Approve ({{ selectedCount }})
-                  </button>
+                    <button
+                      class="ui-btn ui-btn-sm ui-btn-emerald"
+                      type="button"
+                      :disabled="loading || deciding || !selectedCount"
+                      @click="openBulkApprove"
+                    >
+                      Approve ({{ selectedCount }})
+                    </button>
 
-                  <button class="ui-btn ui-btn-sm ui-btn-rose" type="button" :disabled="loading || deciding || !selectedCount" @click="openBulkReject">
-                    Reject ({{ selectedCount }})
-                  </button>
+                    <button
+                      class="ui-btn ui-btn-sm ui-btn-rose"
+                      type="button"
+                      :disabled="loading || deciding || !selectedCount"
+                      @click="openBulkReject"
+                    >
+                      Reject ({{ selectedCount }})
+                    </button>
+                  </div>
                 </template>
 
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox">
-                  <i class="fa-solid fa-rotate-right text-[11px]" />
-                  Refresh
-                </button>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-sm ui-btn-indigo"
+                    @click="exportExcel"
+                    :disabled="loading || exporting"
+                  >
+                    <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
+                    <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
+                    Export
+                  </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel">
-                  <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
-                  <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
-                  Excel
-                </button>
-
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters">
-                  <i class="fa-solid fa-broom text-[11px]" />
-                  Clear
-                </button>
+                  <button
+                    type="button"
+                    class="ui-btn ui-btn-sm ui-btn-ghost"
+                    @click="clearFilters"
+                    :disabled="loading"
+                  >
+                    Clear
+                  </button>
+                </div>
               </div>
             </div>
           </div>

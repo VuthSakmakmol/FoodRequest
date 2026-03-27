@@ -14,6 +14,7 @@
      - forgetscan:req:created
      - forgetscan:req:updated
   ✅ NEW: Approver mode shown in mobile / desktop / detail / export
+  ✅ NEW: Date range filter pattern (fromDate / toDate) same as GM inbox standard
 -->
 
 <script setup>
@@ -46,7 +47,9 @@ const deciding = ref(false)
 const rows = ref([])
 
 const search = ref('')
-const statusFilter = ref('ALL') // ✅ IMPORTANT: allow MANAGER_ONLY to appear
+const statusFilter = ref('PENDING_GM') 
+const fromDate = ref('')
+const toDate = ref('')
 
 /* pagination */
 const page = ref(1)
@@ -242,11 +245,25 @@ function getRejectedReason(row) {
   return '—'
 }
 
+function isWithinDateRange(forgotDate) {
+  const d = s(forgotDate)
+  if (!d) return !fromDate.value && !toDate.value
+
+  if (fromDate.value && d < fromDate.value) return false
+  if (toDate.value && d > toDate.value) return false
+  return true
+}
+
 /* ───────────────── FETCH ───────────────── */
 async function fetchInbox() {
   try {
     loading.value = true
-    const res = await api.get('/leave/forget-scan/gm/inbox?scope=ALL')
+
+    const params = { scope: 'ALL' }
+    if (fromDate.value) params.fromDate = fromDate.value
+    if (toDate.value) params.toDate = toDate.value
+
+    const res = await api.get('/leave/forget-scan/gm/inbox', { params })
     rows.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     console.error('fetchInbox error', e)
@@ -262,6 +279,11 @@ const filteredRows = computed(() => {
 
   // ✅ IMPORTANT: keep GM-visible modes (action + FYI)
   list = list.filter((r) => GM_VISIBLE_MODES.includes(up(r?.approvalMode)))
+
+  // date range filter
+  if (fromDate.value || toDate.value) {
+    list = list.filter((r) => isWithinDateRange(r?.forgotDate))
+  }
 
   // status filter
   if (statusFilter.value !== 'ALL') {
@@ -315,7 +337,7 @@ const pagedRows = computed(() => {
 })
 
 watch(
-  () => [search.value, statusFilter.value, perPage.value],
+  () => [search.value, statusFilter.value, perPage.value, fromDate.value, toDate.value],
   () => (page.value = 1)
 )
 
@@ -327,10 +349,20 @@ watch(
   }
 )
 
+/* auto refetch when date range changes */
+watch(
+  () => [fromDate.value, toDate.value],
+  () => {
+    fetchInbox()
+  }
+)
+
 /* clear filters */
 function clearFilters() {
   search.value = ''
   statusFilter.value = 'ALL'
+  fromDate.value = ''
+  toDate.value = ''
   perPage.value = 20
   page.value = 1
 }
@@ -531,61 +563,85 @@ onBeforeUnmount(() => {
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
-            <div class="min-w-[240px]">
-              <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
-              <div class="mt-1 text-[11px] text-white/80">
-                Modes: GM_AND_COO, GM_ONLY, MANAGER_AND_GM, MANAGER_ONLY (FYI)
-              </div>
+            <div class="flex flex-col gap-1 min-w-[240px]">
+              <p class="text-[15px] font-extrabold">GM Inbox · Forget Scan</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
               </div>
             </div>
 
-            <div class="flex flex-1 flex-wrap items-end justify-end gap-3">
-              <div class="min-w-[260px] max-w-xs">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
-                  <input
-                    v-model="search"
-                    type="text"
-                    placeholder="Employee, reason, status, mode..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
-                  />
+            <div class="flex flex-1 flex-wrap items-end justify-end gap-1.5 xl:gap-2">
+              <div class="w-[150px]">
+                <div class="ui-field">
+                  <label class="text-[10px] font-extrabold text-white/90">Status</label>
+                  <select
+                    v-model="statusFilter"
+                    class="w-full rounded-xl border border-white/25 bg-white/10 px-2 h-[34px] text-[12px] text-white outline-none"
+                  >
+                    <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
+                      {{ label }}
+                    </option>
+                  </select>
                 </div>
               </div>
 
-              <div class="min-w-[200px]">
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
-                    {{ label }}
-                  </option>
-                </select>
+              <div class="w-[170px]">
+                <div class="ui-field">
+                  <label class="text-[10px] font-extrabold text-white/90">Search</label>
+                  <div class="flex h-[34px] items-center gap-1.5 rounded-xl border border-white/25 bg-white/10 px-2">
+                    <i class="fa-solid fa-magnifying-glass text-[11px] text-white/80" />
+                    <input
+                      v-model="search"
+                      type="text"
+                      placeholder="Employee / type / reason..."
+                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/65"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div class="flex items-center gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox" title="Refresh">
+              <div class="flex items-end gap-1.5">
+                <div class="ui-field w-[126px]">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
+                </div>
+
+                <div class="ui-field w-[126px]">
+                  <label class="text-[10px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
+                  @click="fetchInbox"
+                  :disabled="loading"
+                >
                   <i class="fa-solid fa-rotate-right text-[11px]" />
+                  Refresh
                 </button>
 
                 <button
-                  class="ui-btn ui-btn-sm ui-btn-soft"
                   type="button"
-                  :disabled="loading || exporting"
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
                   @click="exportExcel"
-                  title="Export to Excel"
+                  :disabled="loading || exporting"
                 >
                   <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
+                  Export
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters" title="Clear filters">
-                  <i class="fa-solid fa-broom text-[11px]" />
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]"
+                  @click="clearFilters"
+                  :disabled="loading"
+                >
+                  Clear
                 </button>
               </div>
             </div>
@@ -594,56 +650,66 @@ onBeforeUnmount(() => {
           <!-- Mobile header -->
           <div v-else class="space-y-3">
             <div>
-              <div class="text-[15px] font-extrabold">GM Inbox · Forget Scan</div>
-              <div class="mt-1 text-[11px] text-white/80">
-                Modes: GM_AND_COO, GM_ONLY, MANAGER_AND_GM, MANAGER_ONLY (FYI)
-              </div>
+              <p class="text-[15px] font-extrabold">GM Inbox · Forget Scan</p>
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
               </div>
             </div>
 
+            <div class="ui-field">
+              <label class="text-[11px] font-extrabold text-white/90">Status</label>
+              <select v-model="statusFilter" class="ui-select">
+                <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
+                  {{ label }}
+                </option>
+              </select>
+            </div>
+
             <div class="space-y-2">
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px]">
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
+              <div class="ui-field">
+                <label class="text-[11px] font-extrabold text-white/90">Search</label>
+                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
+                  <i class="fa-solid fa-magnifying-glass text-[12px] text-white/80" />
                   <input
                     v-model="search"
                     type="text"
-                    placeholder="Employee, reason, status, mode..."
-                    class="w-full bg-transparent text-white outline-none placeholder:text-white/70"
+                    placeholder="Employee / type / reason..."
+                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
                   />
                 </div>
               </div>
 
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Status</label>
-                <select
-                  v-model="statusFilter"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-[11px] text-white outline-none"
-                >
-                  <option v-for="(label, k) in STATUS_LABEL" :key="k" :value="k">
-                    {{ label }}
-                  </option>
-                </select>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
+                  <input v-model="fromDate" type="date" class="ui-date" />
+                </div>
+
+                <div class="ui-field">
+                  <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
+                  <input v-model="toDate" type="date" class="ui-date" />
+                </div>
               </div>
 
-              <div class="flex items-center justify-end gap-2">
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchInbox">
-                  <i class="fa-solid fa-rotate-right text-[11px]" />
-                  Refresh
-                </button>
-
-                <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel">
+              <div class="flex items-center justify-between">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-indigo"
+                  @click="exportExcel"
+                  :disabled="loading || exporting"
+                >
                   <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
-                  Excel
+                  Export
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters">
-                  <i class="fa-solid fa-broom text-[11px]" />
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost"
+                  @click="clearFilters"
+                  :disabled="loading"
+                >
                   Clear
                 </button>
               </div>

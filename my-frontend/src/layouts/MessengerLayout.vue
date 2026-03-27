@@ -6,8 +6,8 @@ import { useAuth } from '@/store/auth'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()
-const route  = useRoute()
-const auth   = useAuth()
+const route = useRoute()
+const auth = useAuth()
 
 /* ───────── Toast (shared) ───────── */
 const { toasts, removeToast } = useToast()
@@ -22,8 +22,8 @@ const groups = [
     header: 'Messenger',
     icon: 'fa-solid fa-motorcycle',
     children: [
-      { label: 'Your Assignments', icon: 'fa-solid fa-list-check',       to: { name: 'messenger-assignment' } },
-      { label: 'Calendar',         icon: 'fa-regular fa-calendar-days', to: { name: 'messenger-calendar' } },
+      { label: 'Your Assignments', icon: 'fa-solid fa-list-check', to: { name: 'messenger-assignment' } },
+      { label: 'Calendar', icon: 'fa-regular fa-calendar-days', to: { name: 'messenger-calendar' } },
     ],
   },
 ]
@@ -60,7 +60,9 @@ function isActive(it) {
 
 function handleSectionClick(key) {
   const wasOpen = open[key]
-  Object.keys(open).forEach(k => { open[k] = false })
+  Object.keys(open).forEach(k => {
+    open[k] = false
+  })
   open[key] = !wasOpen
 }
 
@@ -77,15 +79,15 @@ function toggleAuth() {
 
 <template>
   <div
-    class="flex h-screen w-screen overflow-hidden bg-slate-50 text-slate-900
+    class="flex h-[100dvh] w-screen overflow-hidden bg-slate-50 text-slate-900
            dark:bg-slate-950 dark:text-slate-50"
   >
     <!-- Global toast stack -->
-    <div class="fixed top-4 right-4 z-50 flex max-w-xs flex-col gap-2">
+    <div class="fixed right-4 top-4 z-50 flex max-w-xs flex-col gap-2">
       <div
         v-for="t in toasts"
         :key="t.id"
-        class="flex gap-2 rounded-xl border px-3.5 py-2.5 text-sm shadow-xl bg-slate-900/95"
+        class="flex gap-2 rounded-xl border bg-slate-900/95 px-3.5 py-2.5 text-sm shadow-xl"
         :class="{
           'border-emerald-400/70 text-emerald-100': t.type === 'success',
           'border-red-400/70 text-red-100': t.type === 'error',
@@ -121,7 +123,7 @@ function toggleAuth() {
       <!-- Top mini bar -->
       <div
         class="flex items-center justify-between border-b border-slate-300 px-2 py-2
-               text-[13px] font-semibold tracking-wide uppercase
+               text-[13px] font-semibold uppercase tracking-wide
                dark:border-slate-800"
       >
         <button
@@ -151,7 +153,6 @@ function toggleAuth() {
             :key="g.key"
             class="px-1"
           >
-            <!-- Section header -->
             <button
               type="button"
               class="mt-1 flex w-full items-center justify-between rounded-md px-1.5 py-1.5
@@ -170,7 +171,6 @@ function toggleAuth() {
               ></i>
             </button>
 
-            <!-- Children -->
             <div
               v-show="open[g.key]"
               class="mt-0.5 space-y-0.5 pb-1"
@@ -179,8 +179,8 @@ function toggleAuth() {
                 v-for="it in g.children"
                 :key="it.label"
                 type="button"
-                class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px]
-                       transition border"
+                class="flex w-full items-center gap-2 rounded-md border px-3 py-1.5 text-[12px]
+                       transition"
                 :class="isActive(it)
                   ? 'bg-[oklch(60%_0.118_184.704)] text-white border-[oklch(60%_0.118_184.704)]'
                   : 'text-slate-700 border-slate-300 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800'"
@@ -239,7 +239,7 @@ function toggleAuth() {
     <transition name="fade">
       <aside
         v-if="sidebarOpen"
-        class="fixed inset-y-0 left-0 z-30 flex w-64 flex-col border-r border-slate-300 bg-white
+        class="fixed inset-y-0 left-0 z-30 flex h-[100dvh] w-64 flex-col border-r border-slate-300 bg-white
                text-sm shadow-lg dark:border-slate-800 dark:bg-slate-950/95 md:hidden"
       >
         <div
@@ -291,8 +291,8 @@ function toggleAuth() {
                   v-for="it in g.children"
                   :key="it.label + '-m'"
                   type="button"
-                  class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-[12px]
-                         transition border"
+                  class="flex w-full items-center gap-2 rounded-md border px-3 py-1.5 text-[12px]
+                         transition"
                   :class="isActive(it)
                     ? 'bg-[oklch(60%_0.118_184.704)] text-white border-[oklch(60%_0.118_184.704)]'
                     : 'text-slate-700 border-slate-300 hover:bg-slate-100 dark:text-slate-300 dark:border-slate-700 dark:hover:bg-slate-800'"
@@ -341,11 +341,11 @@ function toggleAuth() {
     </transition>
 
     <!-- Main column -->
-    <div class="flex flex-1 flex-col">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
       <!-- Top bar -->
       <header
-        class="flex items-center justify-between border-b border-slate-300 bg-white/90
-               px-2 py-1.5 text-[13px] shadow-sm
+        class="sticky top-0 z-20 flex items-center justify-between border-b border-slate-300 bg-white/90
+               px-2 py-1.5 text-[13px] shadow-sm backdrop-blur
                dark:border-slate-800 dark:bg-slate-950/95"
       >
         <div class="flex items-center gap-2">
@@ -393,9 +393,8 @@ function toggleAuth() {
 
       <!-- Content -->
       <main
-        class="flex-1 overflow-auto bg-slate-50
-               px-1 py-1 text-sm
-               dark:bg-slate-950"
+        class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-slate-50
+               px-1 py-1 text-sm dark:bg-slate-950"
       >
         <router-view />
       </main>
