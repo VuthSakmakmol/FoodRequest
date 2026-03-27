@@ -35,6 +35,18 @@ async function safeNotify(fn, ...args) {
 
 const OVERALL_NON_BLOCKING_STATUSES = ['REJECTED', 'CANCELLED']
 
+const ROOM_BLOCKING_STATUSES = ['PENDING', 'APPROVED', 'PARTIAL_APPROVED']
+const MATERIAL_BLOCKING_STATUSES = ['PENDING', 'APPROVED', 'PARTIAL_APPROVED']
+
+function isBlockingRoomStatus(status) {
+  return ROOM_BLOCKING_STATUSES.includes(up(status))
+}
+
+function isBlockingMaterialStatus(status) {
+  return MATERIAL_BLOCKING_STATUSES.includes(up(status))
+}
+
+
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -418,7 +430,7 @@ async function normalizeRequestPayload(payload) {
   }
 }
 
-async function assertRoomApprovalConflict({
+async function assertRoomQueueConflict({
   bookingDate,
   timeStart,
   timeEnd,
@@ -434,7 +446,6 @@ async function assertRoomApprovalConflict({
     bookingDate,
     roomRequired: true,
     roomCode: up(roomCode),
-    roomStatus: 'APPROVED',
     overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
   }
 
@@ -444,17 +455,27 @@ async function assertRoomApprovalConflict({
     .select('timeStart timeEnd roomCode roomName roomStatus overallStatus')
     .lean()
 
-  const conflicted = rows.some((row) =>
-    overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
-  )
+  const conflictedRow = rows.find((row) => {
+    if (!isBlockingRoomStatus(row.roomStatus)) return false
 
-  if (conflicted) {
-    const roomLabel = s(rows[0]?.roomName) || s(roomCode)
-    throw createError(409, `Room "${roomLabel}" is already approved for this time slot.`)
+    return overlaps(
+      startMin,
+      endMin,
+      toMinutes(row.timeStart),
+      toMinutes(row.timeEnd)
+    )
+  })
+
+  if (conflictedRow) {
+    const roomLabel = s(conflictedRow.roomName) || s(roomCode)
+    throw createError(
+      409,
+      `Room "${roomLabel}" is already reserved for this time slot.`
+    )
   }
 }
 
-async function assertMaterialApprovalConflict({
+async function assertMaterialQueueConflict({
   bookingDate,
   timeStart,
   timeEnd,
@@ -495,7 +516,6 @@ async function assertMaterialApprovalConflict({
   const query = {
     bookingDate,
     materialRequired: true,
-    materialStatus: 'APPROVED',
     overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
     'materials.materialCode': { $in: codes },
   }
@@ -509,14 +529,21 @@ async function assertMaterialApprovalConflict({
   const usedMap = {}
 
   for (const row of rows) {
-    const timeConflict = overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
+    if (!isBlockingMaterialStatus(row.materialStatus)) continue
+
+    const timeConflict = overlaps(
+      startMin,
+      endMin,
+      toMinutes(row.timeStart),
+      toMinutes(row.timeEnd)
+    )
     if (!timeConflict) continue
 
     for (const item of arr(row.materials)) {
       const code = up(item?.materialCode)
       const qty = Number(item?.qty || 0)
       if (!code || qty <= 0) continue
-      usedMap[code] = (usedMap[code] || 0) + qty
+      usedMap[code] = Number(usedMap[code] || 0) + qty
     }
   }
 
@@ -631,6 +658,7 @@ async function getAvailability(req, res, next) {
             'materialRequired',
             'materials',
             'materialStatus',
+            'overallStatus',
           ].join(' ')
         )
         .lean(),
@@ -642,14 +670,14 @@ async function getAvailability(req, res, next) {
 
     const busyRoomCodes = new Set(
       overlapRows
-        .filter((x) => x.roomRequired && up(x.roomStatus) === 'APPROVED' && s(x.roomCode))
+        .filter((x) => x.roomRequired && isBlockingRoomStatus(x.roomStatus) && s(x.roomCode))
         .map((x) => up(x.roomCode))
     )
 
     const usedMaterialMap = {}
 
     for (const row of overlapRows) {
-      if (!row.materialRequired || up(row.materialStatus) !== 'APPROVED') continue
+      if (!row.materialRequired || !isBlockingMaterialStatus(row.materialStatus)) continue
 
       for (const item of arr(row.materials)) {
         const code = up(item?.materialCode)
@@ -714,7 +742,7 @@ async function createBooking(req, res, next) {
     const actor = pickIdentityFrom(req)
 
     if (normalized.roomRequired) {
-      await assertRoomApprovalConflict({
+      await assertRoomQueueConflict({
         bookingDate: normalized.bookingDate,
         timeStart: normalized.timeStart,
         timeEnd: normalized.timeEnd,
@@ -723,7 +751,7 @@ async function createBooking(req, res, next) {
     }
 
     if (normalized.materialRequired) {
-      await assertMaterialApprovalConflict({
+      await assertMaterialQueueConflict({
         bookingDate: normalized.bookingDate,
         timeStart: normalized.timeStart,
         timeEnd: normalized.timeEnd,
@@ -854,7 +882,7 @@ async function createRecurringBooking(req, res, next) {
 
       if (normalized.roomRequired) {
         try {
-          await assertRoomApprovalConflict({
+          await assertRoomQueueConflict({
             bookingDate: normalized.bookingDate,
             timeStart: normalized.timeStart,
             timeEnd: normalized.timeEnd,
@@ -871,7 +899,7 @@ async function createRecurringBooking(req, res, next) {
 
       if (normalized.materialRequired) {
         try {
-          await assertMaterialApprovalConflict({
+          await assertMaterialQueueConflict({
             bookingDate: normalized.bookingDate,
             timeStart: normalized.timeStart,
             timeEnd: normalized.timeEnd,
@@ -1077,7 +1105,7 @@ async function updateBooking(req, res, next) {
     const normalized = await normalizeRequestPayload(payload)
 
     if (normalized.roomRequired) {
-      await assertRoomApprovalConflict({
+      await assertRoomQueueConflict({
         bookingDate: normalized.bookingDate,
         timeStart: normalized.timeStart,
         timeEnd: normalized.timeEnd,
@@ -1087,7 +1115,7 @@ async function updateBooking(req, res, next) {
     }
 
     if (normalized.materialRequired) {
-      await assertMaterialApprovalConflict({
+      await assertMaterialQueueConflict({
         bookingDate: normalized.bookingDate,
         timeStart: normalized.timeStart,
         timeEnd: normalized.timeEnd,
@@ -1126,8 +1154,21 @@ async function updateBooking(req, res, next) {
     doc.materialStatus = normalized.materialRequired ? 'PENDING' : 'NOT_REQUIRED'
     doc.overallStatus = deriveOverallStatus(doc)
 
-    doc.roomApproval = { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
-    doc.materialApproval = { byLoginId: '', byName: '', decision: '', note: '', decidedAt: null }
+    doc.roomApproval = {
+      byLoginId: '',
+      byName: '',
+      decision: '',
+      note: '',
+      decidedAt: null,
+    }
+
+    doc.materialApproval = {
+      byLoginId: '',
+      byName: '',
+      decision: '',
+      note: '',
+      decidedAt: null,
+    }
 
     doc.updatedAt = new Date()
     await doc.save()

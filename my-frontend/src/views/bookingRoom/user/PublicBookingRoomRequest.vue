@@ -493,8 +493,8 @@ async function submit() {
       type: 'success',
       title: 'Submitted',
       message: form.value.recurring
-        ? 'Your recurring meeting room request has been submitted.'
-        : 'Your meeting room request has been submitted.',
+        ? 'Your recurring booking request has been submitted and reserved in queue.'
+        : 'Your booking request has been submitted and reserved in queue.',
     })
 
     resetForm({ keepEmployee: true })
