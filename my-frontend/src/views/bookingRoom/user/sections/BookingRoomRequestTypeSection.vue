@@ -1,3 +1,4 @@
+<!-- src/views/bookingRoom/user/sections/BookingRoomRequestTypeSection.vue -->
 <script setup>
 import { computed, watch } from 'vue'
 

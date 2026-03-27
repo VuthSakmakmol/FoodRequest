@@ -1,3 +1,4 @@
+<!-- src/views/bookingRoom/user/sections/BookingRoomDetailSection.vue -->
 <script setup>
 import { computed, watch, onMounted } from 'vue'
 import dayjs from 'dayjs'

@@ -1,3 +1,4 @@
+<!-- src/views/bookingRoom/user/PublicBookingRoomRequest.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'

@@ -1,3 +1,4 @@
+<!-- src/views/bookingRoom/user/sections/BookingRoomRecurringSection.vue -->
 <script setup>
 import { computed, watch } from 'vue'
 import dayjs from 'dayjs'
