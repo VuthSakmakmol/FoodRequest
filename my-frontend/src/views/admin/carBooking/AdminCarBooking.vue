@@ -1,4 +1,3 @@
-<!-- src/views/admin/carbooking/AdminCarBooking.vue -->
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
@@ -6,20 +5,30 @@ import dayjs from 'dayjs'
 import api from '@/utils/api'
 import socket, { subscribeRoleIfNeeded } from '@/utils/socket'
 import { useToast } from '@/composables/useToast'
+import { CAR_BOOKING_PURPOSES } from '@/constants/carBookingOptions'
+
+import CarBookingFilters from './components/CarBookingFilters.vue'
+import CarBookingDesktopTable from './components/CarBookingDesktopTable.vue'
+import CarBookingMobileList from './components/CarBookingMobileList.vue'
+import CarBookingPagination from './components/CarBookingPagination.vue'
+import CarBookingEditModal from './components/CarBookingEditModal.vue'
+import CarBookingAssignModal from './components/CarBookingAssignModal.vue'
+import CarBookingDetailModal from './components/CarBookingDetailModal.vue'
+import CarBookingConfirmModal from './components/CarBookingConfirmModal.vue'
 
 defineOptions({ name: 'AdminCarBooking' })
 
 const route = useRoute()
 const { showToast } = useToast()
 
-/* ───────── Responsive (no Vuetify) ───────── */
+/* responsive */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────── Base state ───────── */
+/* base state */
 const loading = ref(false)
 const error = ref('')
 const rows = ref([])
@@ -28,28 +37,19 @@ const selectedDate = ref(dayjs().format('YYYY-MM-DD'))
 const statusFilter = ref('ALL')
 const categoryFilter = ref('ALL')
 const qSearch = ref('')
+const updating = ref({})
 
-const updating = ref({}) // { [bookingId]: boolean }
-
-/* ✅ Export range (backend supports dateFrom/dateTo) */
 const exportFrom = ref(selectedDate.value)
 const exportTo = ref(selectedDate.value)
 
 watch(selectedDate, (d) => {
-  // keep default export range aligned to selected day
   exportFrom.value = d
   exportTo.value = d
 })
 
-/* focus from calendar (highlight row/card) */
 const focusId = computed(() => String(route.query.focus || ''))
 
-/* ───────── Workflow transitions (aligned with driver/backend) ───────── */
-/**
- * Main path:
- * PENDING → ACCEPTED → ON_ROAD → ARRIVING → COMEBACK → COMPLETED
- * DELAYED/CANCELLED are side branches.
- */
+/* workflow */
 const ALLOWED_NEXT = {
   PENDING: ['ACCEPTED', 'CANCELLED'],
   ACCEPTED: ['ON_ROAD', 'DELAYED', 'CANCELLED'],
@@ -62,39 +62,20 @@ const ALLOWED_NEXT = {
 }
 const nextStatuses = (from) => ALLOWED_NEXT[String(from || '').toUpperCase()] || []
 
-/**
- * ✅ Admin “force complete” button
- * Only show when:
- * - Has assignee
- * - Not CANCELLED / COMPLETED already
- */
-const canForceComplete = (item) => {
-  const st = String(item?.status || '').toUpperCase()
-  if (!item?._id) return false
-  if (st === 'CANCELLED' || st === 'COMPLETED') return false
-  return hasAssignee(item)
-}
-
-/* Time helpers for edit dialog */
 const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
 const MINUTES = ['00', '30']
+const PER_PAGE_OPTIONS = [10, 20, 50]
 
-/* Helpers */
-const canChangeStatus = (item, nextStatus) => {
-  const s = String(nextStatus || '').toUpperCase()
-  if (s === 'CANCELLED') return true
-  return hasAssignee(item)
-}
-
+/* helpers */
 const API_ORIGIN = (api.defaults.baseURL || '').replace(/\/api\/?$/, '').replace(/\/$/, '')
 const absUrl = (u) =>
   !u ? '' : /^https?:\/\//i.test(u) ? u : `${API_ORIGIN}${u.startsWith('/') ? '' : '/'}${u}`
-const openTicket = (u) => {
+
+function openTicket(u) {
   const url = absUrl(u)
   if (url) window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-/* Destinations */
 function prettyStops(stops = []) {
   if (!stops.length) return '—'
   return stops
@@ -102,34 +83,49 @@ function prettyStops(stops = []) {
     .join(' → ')
 }
 
-/* Assignee helpers */
-const assigneeName = (it) => {
+function assigneeName(it) {
   if (!it?.assignment) return ''
   if (it?.category === 'Messenger') {
     return it.assignment.messengerName || it.assignment.messengerId || ''
   }
   return it.assignment.driverName || it.assignment.driverId || ''
 }
-const hasAssignee = (it) => {
+
+function hasAssignee(it) {
   if (!it?.assignment) return false
   if (it.category === 'Messenger') return !!it.assignment.messengerId
   return !!it.assignment.driverId
 }
 
-/* role helpers */
-const assignedRoleOf = (it) => (String(it?.category || '') === 'Messenger' ? 'MESSENGER' : 'DRIVER')
-const assignedLoginIdOf = (it) => {
-  if (!it?.assignment) return ''
-  return assignedRoleOf(it) === 'MESSENGER' ? (it.assignment.messengerId || '') : (it.assignment.driverId || '')
+function assignedRoleOf(it) {
+  return String(it?.category || '') === 'Messenger' ? 'MESSENGER' : 'DRIVER'
 }
-const assignedNameOf = (it) => {
+function assignedLoginIdOf(it) {
+  if (!it?.assignment) return ''
+  return assignedRoleOf(it) === 'MESSENGER'
+    ? (it.assignment.messengerId || '')
+    : (it.assignment.driverId || '')
+}
+function assignedNameOf(it) {
   if (!it?.assignment) return ''
   return assignedRoleOf(it) === 'MESSENGER'
     ? (it.assignment.messengerName || it.assignment.messengerId || '')
     : (it.assignment.driverName || it.assignment.driverId || '')
 }
 
-/* ───────── Status / badges (Tailwind) ───────── */
+function canChangeStatus(item, nextStatus) {
+  const s = String(nextStatus || '').toUpperCase()
+  if (s === 'CANCELLED') return true
+  return hasAssignee(item)
+}
+
+function canForceComplete(item) {
+  const st = String(item?.status || '').toUpperCase()
+  if (!item?._id) return false
+  if (st === 'CANCELLED' || st === 'COMPLETED') return false
+  return hasAssignee(item)
+}
+
 const STATUS_BADGE_CLASS = {
   PENDING: 'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900',
   ACCEPTED: 'bg-sky-500 text-white',
@@ -140,30 +136,38 @@ const STATUS_BADGE_CLASS = {
   DELAYED: 'bg-amber-400 text-slate-900',
   CANCELLED: 'bg-red-500 text-white',
 }
-const statusBadgeClass = (s) =>
-  STATUS_BADGE_CLASS[String(s || '').toUpperCase()] ||
-  'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900'
+function statusBadgeClass(s) {
+  return (
+    STATUS_BADGE_CLASS[String(s || '').toUpperCase()] ||
+    'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900'
+  )
+}
 
 const ACK_BADGE_CLASS = {
   PENDING: 'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50',
   ACCEPTED: 'bg-emerald-500 text-white',
   DECLINED: 'bg-red-500 text-white',
 }
-const ackBadgeClass = (s) =>
-  ACK_BADGE_CLASS[String(s || '').toUpperCase()] ||
-  'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50'
+function ackBadgeClass(s) {
+  return (
+    ACK_BADGE_CLASS[String(s || '').toUpperCase()] ||
+    'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50'
+  )
+}
 
-/** Driver / messenger response label for current booking */
-const responseLabel = (item) => {
+function responseLabel(item) {
   if (!item || !item.assignment) return 'PENDING'
   if (item.category === 'Messenger') return item.assignment.messengerAck || 'PENDING'
   return item.assignment.driverAck || 'PENDING'
 }
 
-const categoryBadgeClass = (cat) => (cat === 'Messenger' ? 'bg-orange-500 text-white' : 'bg-indigo-500 text-white')
-const paxDisplay = (p) => (p ?? 1)
+function categoryBadgeClass(cat) {
+  return cat === 'Messenger' ? 'bg-orange-500 text-white' : 'bg-indigo-500 text-white'
+}
+function paxDisplay(p) {
+  return p ?? 1
+}
 
-/* ───────── Status action button appearance ───────── */
 const STATUS_ACTION_BTN_CLASS = {
   PENDING: 'border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100',
   ACCEPTED: 'border-sky-500 bg-sky-50 text-sky-700 hover:bg-sky-100',
@@ -174,15 +178,16 @@ const STATUS_ACTION_BTN_CLASS = {
   DELAYED: 'border-amber-500 bg-amber-50 text-amber-700 hover:bg-amber-100',
   CANCELLED: 'border-rose-500 bg-rose-50 text-rose-700 hover:bg-rose-100',
 }
-const statusButtonClass = (s) => {
-  const base = 'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors'
+function statusButtonClass(s) {
+  const base =
+    'inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors'
   const variant =
     STATUS_ACTION_BTN_CLASS[String(s || '').toUpperCase()] ||
     'border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100'
   return `${base} ${variant}`
 }
 
-/* ───────── Search / filter / sort ───────── */
+/* filter + paging */
 const filtered = computed(() => {
   const term = qSearch.value.trim().toLowerCase()
   return (rows.value || [])
@@ -208,15 +213,12 @@ const filtered = computed(() => {
     .sort((a, b) => (a.timeStart || '').localeCompare(b.timeStart || ''))
 })
 
-/* ───────── Pagination ───────── */
 const page = ref(1)
 const itemsPerPage = ref(10)
-const PER_PAGE_OPTIONS = [10, 20, 50]
 
 const totalItems = computed(() => filtered.value.length)
 const pageCount = computed(() => {
   const per = itemsPerPage.value || 10
-  if (per <= 0) return 1
   return Math.max(1, Math.ceil(totalItems.value / per) || 1)
 })
 const visibleRows = computed(() => {
@@ -224,14 +226,12 @@ const visibleRows = computed(() => {
   const start = (page.value - 1) * per
   return filtered.value.slice(start, start + per)
 })
-const rangeStart = computed(() => (totalItems.value ? (page.value - 1) * (itemsPerPage.value || 10) + 1 : 0))
-const rangeEnd = computed(() => Math.min(page.value * (itemsPerPage.value || 10), totalItems.value))
 
 watch([filtered, itemsPerPage], () => {
   if (page.value > pageCount.value) page.value = pageCount.value
 })
 
-/* ───────── API load ───────── */
+/* load */
 async function loadSchedule() {
   loading.value = true
   error.value = ''
@@ -255,7 +255,7 @@ async function loadSchedule() {
   }
 }
 
-/* ───────── Realtime socket handlers ───────── */
+/* realtime */
 function onCreated(doc) {
   if (doc?.tripDate && selectedDate.value && doc.tripDate !== selectedDate.value) return
   loadSchedule()
@@ -275,7 +275,6 @@ function onAssigned(p) {
 
   if (action === 'UNASSIGN') {
     const unassignRole = role || (p?.messengerId === '' ? 'MESSENGER' : 'DRIVER')
-
     if (unassignRole === 'MESSENGER') {
       it.assignment.messengerId = ''
       it.assignment.messengerName = ''
@@ -306,7 +305,6 @@ function onAssigned(p) {
   if (p.status) it.status = p.status
   else if (it.status === 'PENDING') it.status = 'ACCEPTED'
 }
-
 function onDriverAck(p) {
   const it = rows.value.find((x) => String(x._id) === String(p?.bookingId))
   if (!it) return
@@ -320,8 +318,12 @@ function onMessengerAck(p) {
   if (!it) return
   const resp = String(p?.response || '').toUpperCase()
   it.assignment = { ...(it.assignment || {}), messengerAck: resp, messengerAckAt: p?.at }
-  if (it.category === 'Messenger' && resp === 'ACCEPTED' && String(it.status).toUpperCase() === 'PENDING') it.status = 'ACCEPTED'
-  if (it.category === 'Messenger' && resp === 'DECLINED' && String(it.status).toUpperCase() === 'ACCEPTED') it.status = 'PENDING'
+  if (it.category === 'Messenger' && resp === 'ACCEPTED' && String(it.status).toUpperCase() === 'PENDING') {
+    it.status = 'ACCEPTED'
+  }
+  if (it.category === 'Messenger' && resp === 'DECLINED' && String(it.status).toUpperCase() === 'ACCEPTED') {
+    it.status = 'PENDING'
+  }
 }
 function onUpdated(p) {
   const it = rows.value.find((x) => String(x._id) === String(p?.bookingId))
@@ -334,7 +336,7 @@ function onDeleted(p) {
   rows.value = rows.value.filter((x) => String(x._id) !== id)
 }
 
-/* ───────── Details modal ───────── */
+/* detail */
 const detailOpen = ref(false)
 const detailItem = ref(null)
 function showDetails(item) {
@@ -343,19 +345,18 @@ function showDetails(item) {
   detailOpen.value = true
 }
 
-/* ───────── Assign flow ───────── */
+/* assign */
 const assignOpen = ref(false)
 const assignTarget = ref(null)
 const assignLoading = ref(false)
 const assignError = ref('')
-
 const assignRole = ref('DRIVER')
 const assignLockedRole = ref('DRIVER')
 const people = ref([])
 const selectedLoginId = ref('')
-
 const busyMap = ref(new Map())
-const isBusy = (loginId) => {
+
+function isBusy(loginId) {
   const v = busyMap.value.get(String(loginId))
   if (!v) return false
   const st = String(v.status || '').toUpperCase()
@@ -394,12 +395,7 @@ async function loadPeopleAndAvailability(item) {
 
   try {
     const { data } = await api.get('/admin/availability/assignees', {
-      params: {
-        role,
-        date: item.tripDate,
-        start: item.timeStart,
-        end: item.timeEnd,
-      },
+      params: { role, date: item.tripDate, start: item.timeStart, end: item.timeEnd },
     })
     const m = new Map()
     if (Array.isArray(data)) {
@@ -462,11 +458,12 @@ async function submitAssign() {
 
   try {
     const role = String(assignRole.value || 'DRIVER').toUpperCase()
-
     const payload = {
       role,
       status: 'ACCEPTED',
-      ...(role === 'MESSENGER' ? { messengerId: selectedLoginId.value } : { driverId: selectedLoginId.value }),
+      ...(role === 'MESSENGER'
+        ? { messengerId: selectedLoginId.value }
+        : { driverId: selectedLoginId.value }),
     }
 
     await api.post(`/admin/car-bookings/${assignTarget.value._id}/assign`, payload)
@@ -478,11 +475,11 @@ async function submitAssign() {
       if (!it.assignment) it.assignment = {}
       if (role === 'MESSENGER') {
         it.assignment.messengerId = selectedLoginId.value
-        it.assignment.messengerName = person?.name || it.assignment.messengerName || ''
+        it.assignment.messengerName = person?.name || ''
         it.assignment.messengerAck = 'PENDING'
       } else {
         it.assignment.driverId = selectedLoginId.value
-        it.assignment.driverName = person?.name || it.assignment.driverName || ''
+        it.assignment.driverName = person?.name || ''
         it.assignment.driverAck = 'PENDING'
       }
       it.status = 'ACCEPTED'
@@ -498,20 +495,15 @@ async function submitAssign() {
   }
 }
 
-/* ───────── Cancel confirm modal (CANCEL + optional Unassign) ───────── */
+/* cancel */
 const cancelConfirmOpen = ref(false)
 const cancelTarget = ref(null)
-
-const cancelAssignedLoginId = computed(() => assignedLoginIdOf(cancelTarget.value))
-const cancelAssignedName = computed(() => assignedNameOf(cancelTarget.value))
-const cancelAssignedRole = computed(() => assignedRoleOf(cancelTarget.value))
 
 function requestCancel(item) {
   closeAllModals()
   cancelTarget.value = item
   cancelConfirmOpen.value = true
 }
-
 function closeCancelConfirm() {
   cancelConfirmOpen.value = false
   cancelTarget.value = null
@@ -523,9 +515,10 @@ async function confirmCancel() {
   await updateStatus(it, 'CANCELLED')
 }
 
-/* ───────── Status update ───────── */
+/* status */
 async function updateStatus(item, nextStatus) {
   if (!item?._id || !nextStatus) return
+
   const allowed = nextStatuses(item.status)
   if (!allowed.includes(nextStatus)) {
     const msg = `Cannot change from ${item.status} to ${nextStatus}`
@@ -549,7 +542,7 @@ async function updateStatus(item, nextStatus) {
   }
 }
 
-/* ───────── Force complete (skip steps) ───────── */
+/* force complete */
 const forceConfirmOpen = ref(false)
 const forceTarget = ref(null)
 
@@ -558,7 +551,6 @@ function requestForceComplete(item) {
   forceTarget.value = item
   forceConfirmOpen.value = true
 }
-
 function closeForceConfirm() {
   forceConfirmOpen.value = false
   forceTarget.value = null
@@ -569,7 +561,6 @@ async function confirmForceComplete() {
   await forceComplete(forceTarget.value)
   forceTarget.value = null
 }
-
 async function forceComplete(item) {
   if (!item?._id) return
   if (!canForceComplete(item)) {
@@ -585,12 +576,7 @@ async function forceComplete(item) {
       status: 'COMPLETED',
       forceComplete: true,
     })
-
-    showToast({
-      type: 'success',
-      title: 'Completed',
-      message: `Force completed: ${prev} → COMPLETED`,
-    })
+    showToast({ type: 'success', title: 'Completed', message: `Force completed: ${prev} → COMPLETED` })
   } catch (e) {
     await loadSchedule()
     const msg = e?.response?.data?.message || e?.message || 'Force complete failed'
@@ -600,7 +586,7 @@ async function forceComplete(item) {
   }
 }
 
-/* ───────── Edit schedule (date / time / category) ───────── */
+/* edit */
 const editOpen = ref(false)
 const editTarget = ref(null)
 const editForm = ref({
@@ -610,6 +596,7 @@ const editForm = ref({
   timeEndHour: '',
   timeEndMinute: '',
   category: 'Car',
+  purpose: '',
 })
 const editLoading = ref(false)
 const editError = ref('')
@@ -629,6 +616,7 @@ function openEditDialog(item) {
     timeEndHour: eh,
     timeEndMinute: em,
     category: item.category || 'Car',
+    purpose: item.purpose || '',
   }
 
   editOpen.value = true
@@ -654,6 +642,7 @@ async function saveEdit() {
     timeStart,
     timeEnd,
     category: editForm.value.category,
+    purpose: editForm.value.purpose,
   }
 
   const scheduleChanged =
@@ -674,6 +663,7 @@ async function saveEdit() {
       it.timeStart = payload.timeStart
       it.timeEnd = payload.timeEnd
       it.category = payload.category
+      it.purpose = payload.purpose
     }
 
     if (needReopen) {
@@ -693,7 +683,11 @@ async function saveEdit() {
     editOpen.value = false
     await loadSchedule()
 
-    showToast({ type: 'success', title: 'Schedule updated', message: 'Booking schedule has been updated.' })
+    showToast({
+      type: 'success',
+      title: 'Schedule updated',
+      message: 'Booking schedule has been updated.',
+    })
   } catch (e) {
     editError.value = e?.response?.data?.message || e?.message || 'Failed to update schedule'
     showToast({ type: 'error', title: 'Update failed', message: editError.value })
@@ -702,7 +696,7 @@ async function saveEdit() {
   }
 }
 
-/* ───────── Export Excel ───────── */
+/* export */
 function buildQuery(params = {}) {
   const sp = new URLSearchParams()
   Object.entries(params).forEach(([k, v]) => {
@@ -717,10 +711,8 @@ function normalizeRange(from, to) {
   const f = String(from || '').trim()
   const t = String(to || '').trim()
   if (!f && !t) return { date: selectedDate.value }
-  // if one side missing, treat as single day
   const ff = f || t
   const tt = t || f
-  // if user reversed, swap
   if (ff && tt && ff > tt) return { dateFrom: tt, dateTo: ff }
   return { dateFrom: ff, dateTo: tt }
 }
@@ -728,7 +720,6 @@ function normalizeRange(from, to) {
 async function exportExcel() {
   try {
     const range = normalizeRange(exportFrom.value, exportTo.value)
-
     const params = {
       ...range,
       status: statusFilter.value,
@@ -764,16 +755,12 @@ async function exportExcel() {
   }
 }
 
-/* ───────── Unassign confirm modal (GLOBAL, not nested) ───────── */
+/* unassign */
 const unassignConfirmOpen = ref(false)
 const unassignLoading = ref(false)
 const unassignError = ref('')
-
-const unassignTarget = ref(null) // booking
-const unassignRole = ref('DRIVER') // DRIVER | MESSENGER
-
-const unassignAssignedLoginId = computed(() => assignedLoginIdOf(unassignTarget.value))
-const unassignAssignedName = computed(() => assignedNameOf(unassignTarget.value))
+const unassignTarget = ref(null)
+const unassignRole = ref('DRIVER')
 
 function requestUnassignFor(item) {
   if (!item?._id) return
@@ -782,12 +769,10 @@ function requestUnassignFor(item) {
   unassignRole.value = assignedRoleOf(item)
   unassignConfirmOpen.value = true
 }
-
 function closeUnassignConfirm() {
   unassignConfirmOpen.value = false
   unassignTarget.value = null
 }
-
 async function confirmUnassign() {
   if (!unassignTarget.value?._id) return
 
@@ -797,10 +782,8 @@ async function confirmUnassign() {
   unassignError.value = ''
   try {
     const payload = role === 'MESSENGER' ? { role, messengerId: '' } : { role, driverId: '' }
-
     await api.post(`/admin/car-bookings/${unassignTarget.value._id}/assign`, payload)
 
-    // update local immediately
     const it = rows.value.find((x) => String(x._id) === String(unassignTarget.value._id))
     if (it) {
       if (!it.assignment) it.assignment = {}
@@ -822,7 +805,6 @@ async function confirmUnassign() {
 
     unassignConfirmOpen.value = false
     unassignTarget.value = null
-
     showToast({
       type: 'success',
       title: 'Unassigned',
@@ -836,7 +818,7 @@ async function confirmUnassign() {
   }
 }
 
-/* ───────── Modal UX patches: close-all + scroll lock + ESC close ───────── */
+/* modal common */
 function closeAllModals() {
   unassignConfirmOpen.value = false
   cancelConfirmOpen.value = false
@@ -885,9 +867,9 @@ function onKeyDown(e) {
   if (e.key === 'Escape') closeTopModal()
 }
 
+/* lifecycle */
 watch(isAnyModalOpen, (open) => lockBodyScroll(open), { immediate: true })
 
-/* ───────── Lifecycle ───────── */
 onMounted(() => {
   updateIsMobile()
   if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
@@ -947,7 +929,6 @@ watch(
 <template>
   <div class="px-1 py-1 sm:px-0 text-slate-900 dark:text-slate-100 admin-car-page">
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
-      <!-- Header bar -->
       <div
         class="rounded-t-2xl border-b border-slate-200 bg-gradient-to-r
                from-[#0f719e] via-[#b3b4df] to-[#ae9aea]
@@ -968,112 +949,20 @@ watch(
         </div>
       </div>
 
-      <!-- Filters row -->
-      <div
-        class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50
-               px-2 py-2 sm:px-3 dark:border-slate-700 dark:bg-slate-900/80"
-      >
-        <input
-          v-model="selectedDate"
-          type="date"
-          class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-        />
+      <CarBookingFilters
+        v-model:selectedDate="selectedDate"
+        v-model:statusFilter="statusFilter"
+        v-model:categoryFilter="categoryFilter"
+        v-model:qSearch="qSearch"
+        v-model:itemsPerPage="itemsPerPage"
+        v-model:exportFrom="exportFrom"
+        v-model:exportTo="exportTo"
+        :loading="loading"
+        :per-page-options="PER_PAGE_OPTIONS"
+        @refresh="loadSchedule"
+        @export="exportExcel"
+      />
 
-        <select
-          v-model="statusFilter"
-          class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-        >
-          <option value="ALL">All statuses</option>
-          <option value="PENDING">PENDING</option>
-          <option value="ACCEPTED">ACCEPTED</option>
-          <option value="ON_ROAD">ON_ROAD</option>
-          <option value="ARRIVING">ARRIVING</option>
-          <option value="COMEBACK">COMEBACK</option>
-          <option value="COMPLETED">COMPLETED</option>
-          <option value="DELAYED">DELAYED</option>
-          <option value="CANCELLED">CANCELLED</option>
-        </select>
-
-        <select
-          v-model="categoryFilter"
-          class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-        >
-          <option value="ALL">All categories</option>
-          <option value="Car">Car</option>
-          <option value="Messenger">Messenger</option>
-        </select>
-
-        <input
-          v-model="qSearch"
-          type="text"
-          placeholder="Search requester / purpose / destination / assignee / response"
-          class="h-8 w-full max-w-xs flex-1 rounded-lg border border-slate-300 bg-white px-2 text-xs
-                 text-slate-900 placeholder-slate-400
-                 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder-slate-500"
-        />
-
-        <select
-          v-model.number="itemsPerPage"
-          class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                 outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-        >
-          <option v-for="opt in PER_PAGE_OPTIONS" :key="opt" :value="opt">{{ opt }}/page</option>
-        </select>
-
-        <button
-          type="button"
-          class="inline-flex h-8 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-          :disabled="loading"
-          @click="loadSchedule"
-        >
-          <span
-            v-if="loading"
-            class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-slate-500 border-t-transparent"
-          />
-          Refresh
-        </button>
-
-        <!-- ✅ Export range (optional) -->
-        <div class="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300">
-          <span class="hidden sm:inline">Export:</span>
-          <input
-            v-model="exportFrom"
-            type="date"
-            class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                   outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500
-                   dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-          />
-          <span>→</span>
-          <input
-            v-model="exportTo"
-            type="date"
-            class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                   outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500
-                   dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-          />
-        </div>
-
-        <button
-          type="button"
-          class="inline-flex h-8 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500
-                disabled:opacity-60 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-          :disabled="loading"
-          @click="exportExcel"
-        >
-          Export Excel
-        </button>
-      </div>
-
-      <!-- Error banner -->
       <div
         v-if="error"
         class="mx-3 mt-2 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
@@ -1082,1130 +971,131 @@ watch(
         {{ error }}
       </div>
 
-      <!-- Content -->
       <div class="px-2 py-2 sm:px-3 sm:py-3">
-        <!-- MOBILE -->
-        <div v-if="isMobile" class="mobile-list">
-          <div
-            v-if="loading"
-            class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500
-                   dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-          >
-            Loading bookings…
-          </div>
+        <CarBookingMobileList
+          v-if="isMobile"
+          :loading="loading"
+          :rows="visibleRows"
+          :selected-date="selectedDate"
+          :focus-id="focusId"
+          :updating="updating"
+          :next-statuses="nextStatuses"
+          :can-change-status="canChangeStatus"
+          :can-force-complete="canForceComplete"
+          :status-badge-class="statusBadgeClass"
+          :ack-badge-class="ackBadgeClass"
+          :status-button-class="statusButtonClass"
+          :pretty-stops="prettyStops"
+          :assignee-name="assigneeName"
+          :response-label="responseLabel"
+          :pax-display="paxDisplay"
+          @open-ticket="openTicket"
+          @edit="openEditDialog"
+          @assign="openAssignDialog"
+          @details="showDetails"
+          @cancel="requestCancel"
+          @status="updateStatus"
+          @force-complete="requestForceComplete"
+        />
 
-          <div v-else-if="!visibleRows.length" class="py-4 text-center text-xs text-slate-500 dark:text-slate-400">
-            No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
-          </div>
+        <CarBookingDesktopTable
+          v-else
+          :loading="loading"
+          :rows="visibleRows"
+          :selected-date="selectedDate"
+          :focus-id="focusId"
+          :updating="updating"
+          :next-statuses="nextStatuses"
+          :can-change-status="canChangeStatus"
+          :can-force-complete="canForceComplete"
+          :status-badge-class="statusBadgeClass"
+          :ack-badge-class="ackBadgeClass"
+          :status-button-class="statusButtonClass"
+          :category-badge-class="categoryBadgeClass"
+          :pretty-stops="prettyStops"
+          :assignee-name="assigneeName"
+          :response-label="responseLabel"
+          :pax-display="paxDisplay"
+          @open-ticket="openTicket"
+          @edit="openEditDialog"
+          @assign="openAssignDialog"
+          @details="showDetails"
+          @cancel="requestCancel"
+          @status="updateStatus"
+          @force-complete="requestForceComplete"
+        />
 
-          <div
-            v-else
-            v-for="item in visibleRows"
-            :key="item._id"
-            class="booking-card"
-            :class="{ 'ring-2 ring-amber-400': focusId === String(item._id) }"
-          >
-            <div class="bc-top">
-              <div>
-                <div class="bc-date">{{ item.tripDate || selectedDate }}</div>
-                <div class="bc-time mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
-              </div>
-
-              <span
-                class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                :class="statusBadgeClass(item.status)"
-              >
-                {{ item.status }}
-              </span>
-            </div>
-
-            <div class="bc-middle">
-              <div class="bc-requester">
-                <div class="bc-req-name">{{ item.employee?.name || '—' }}</div>
-                <div class="bc-req-meta text-[11px] text-slate-500 dark:text-slate-400">
-                  {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
-                </div>
-              </div>
-
-              <div class="bc-assignee">
-                <span
-                  v-if="assigneeName(item)"
-                  class="assignee-chip inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                  :class="item.category === 'Messenger' ? 'bg-orange-500 text-white' : 'bg-indigo-500 text-white'"
-                >
-                  {{ assigneeName(item) }}
-                </span>
-                <span
-                  v-else
-                  class="assignee-chip inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-100"
-                >
-                  Unassigned
-                </span>
-              </div>
-            </div>
-
-            <div class="bc-body">
-              <div class="lbl">Destination</div>
-              <div class="bc-itinerary">
-                {{ prettyStops(item.stops) }}
-                <button
-                  v-if="item.ticketUrl"
-                  type="button"
-                  class="ml-2 inline-flex items-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100
-                         dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                  @click.stop="openTicket(item.ticketUrl)"
-                >
-                  Ticket
-                </button>
-              </div>
-
-              <div class="lbl mt-2">Purpose</div>
-              <div class="purpose-text-mobile">{{ item.purpose || '—' }}</div>
-
-              <div class="lbl mt-2">Driver / Messenger response</div>
-              <div>
-                <span
-                  class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                  :class="ackBadgeClass(responseLabel(item))"
-                >
-                  {{ responseLabel(item) }}
-                </span>
-              </div>
-            </div>
-
-            <div class="bc-bottom">
-              <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                Pax: <strong>{{ paxDisplay(item.passengers) }}</strong>
-              </div>
-
-              <div class="bc-actions">
-                <button
-                  type="button"
-                  class="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300"
-                  @click.stop="openEditDialog(item)"
-                >
-                  Edit
-                </button>
-
-                <button
-                  v-for="s in nextStatuses(item.status)"
-                  :key="s"
-                  type="button"
-                  :class="[statusButtonClass(s), 'disabled:opacity-50']"
-                  :disabled="!canChangeStatus(item, s) || !!updating[item._id]"
-                  @click.stop="String(s).toUpperCase() === 'CANCELLED' ? requestCancel(item) : updateStatus(item, s)"
-                >
-                  {{ s }}
-                </button>
-
-                <button
-                  v-if="canForceComplete(item)"
-                  type="button"
-                  class="inline-flex items-center rounded-full border border-green-500 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50
-                         dark:border-green-500 dark:bg-green-900/30 dark:text-green-200 dark:hover:bg-green-900/40"
-                  :disabled="!!updating[item._id]"
-                  @click.stop="requestForceComplete(item)"
-                >
-                  COMPLETE
-                </button>
-
-                <button
-                  type="button"
-                  class="text-[11px] font-semibold text-emerald-700 hover:underline dark:text-emerald-300"
-                  @click.stop="openAssignDialog(item)"
-                >
-                  Assign
-                </button>
-
-                <button
-                  type="button"
-                  class="text-[11px] font-semibold text-slate-700 hover:underline dark:text-slate-200"
-                  @click.stop="showDetails(item)"
-                >
-                  Details
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Pagination -->
-          <div class="table-footer mt-2 border-t border-slate-200 dark:border-slate-700 dark:bg-slate-900/90">
-            <div class="tf-left text-[11px] text-slate-600 dark:text-slate-300">{{ page }} / {{ pageCount }}</div>
-            <div class="tf-middle" />
-            <div class="tf-right flex items-center gap-1">
-              <button
-                type="button"
-                class="rounded border border-slate-300 px-2 py-1 text-[11px] disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                :disabled="page <= 1"
-                @click="page > 1 && (page = page - 1)"
-              >
-                Prev
-              </button>
-              <button
-                type="button"
-                class="rounded border border-slate-300 px-2 py-1 text-[11px] disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                :disabled="page >= pageCount"
-                @click="page < pageCount && (page = page + 1)"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- DESKTOP -->
-        <div v-else class="overflow-x-auto">
-          <table class="min-w-full border-collapse text-[13px]">
-            <thead>
-              <tr class="bg-slate-100 dark:bg-slate-800">
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Time</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Category</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Requester</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Destination</th>
-                <th class="border border-slate-300 px-2 py-2 text-center font-semibold dark:border-slate-700">Pax</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Purpose</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Assigned</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Driver / Messenger Resp.</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Status</th>
-                <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700 w-72">Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              <tr v-if="loading" class="bg-white dark:bg-slate-900">
-                <td colspan="10" class="border border-slate-300 px-2 py-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
-                  Loading bookings…
-                </td>
-              </tr>
-
-              <template v-else>
-                <template v-for="item in visibleRows" :key="item._id">
-                  <tr
-                    :class="[
-                      'bg-white hover:bg-sky-50 transition-colors dark:bg-slate-900 dark:hover:bg-slate-800',
-                      item.tripDate === selectedDate ? 'bg-amber-50/60 dark:bg-amber-900/40' : '',
-                      focusId === String(item._id) ? 'ring-2 ring-amber-400' : '',
-                    ]"
-                  >
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <div class="mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="categoryBadgeClass(item.category)">
-                        {{ item.category || 'Car' }}
-                      </span>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <div class="font-semibold">{{ item.employee?.name || '—' }}</div>
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                        {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
-                      </div>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <div class="text-[12px]">
-                        {{ prettyStops(item.stops) }}
-                        <button
-                          v-if="item.ticketUrl"
-                          type="button"
-                          class="ml-2 inline-flex items-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100
-                                 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                          @click.stop="openTicket(item.ticketUrl)"
-                        >
-                          Ticket
-                        </button>
-                      </div>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 text-center align-top dark:border-slate-700">
-                      {{ paxDisplay(item.passengers) }}
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <div class="text-[12px]">{{ item.purpose || '—' }}</div>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <span
-                        v-if="assigneeName(item)"
-                        class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold assignee-chip"
-                        :class="item.category === 'Messenger' ? 'bg-orange-500 text-white' : 'bg-indigo-500 text-white'"
-                      >
-                        {{ assigneeName(item) }}
-                      </span>
-                      <span
-                        v-else
-                        class="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-100 assignee-chip"
-                      >
-                        Unassigned
-                      </span>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="ackBadgeClass(responseLabel(item))">
-                        {{ responseLabel(item) }}
-                      </span>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="statusBadgeClass(item.status)">
-                        {{ item.status }}
-                      </span>
-                    </td>
-
-                    <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-                      <div class="mb-1 flex flex-wrap gap-1">
-                        <button
-                          v-for="s in nextStatuses(item.status)"
-                          :key="s"
-                          type="button"
-                          :class="[statusButtonClass(s), 'disabled:opacity-50']"
-                          :disabled="!canChangeStatus(item, s) || !!updating[item._id]"
-                          @click="String(s).toUpperCase() === 'CANCELLED' ? requestCancel(item) : updateStatus(item, s)"
-                        >
-                          {{ s }}
-                        </button>
-
-                        <button
-                          v-if="canForceComplete(item)"
-                          type="button"
-                          class="inline-flex items-center rounded-full border border-green-500 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50
-                                 dark:border-green-500 dark:bg-green-900/30 dark:text-green-200 dark:hover:bg-green-900/40"
-                          :disabled="!!updating[item._id]"
-                          @click="requestForceComplete(item)"
-                        >
-                          COMPLETE
-                        </button>
-                      </div>
-
-                      <div class="mt-1 flex flex-wrap gap-2 text-[11px]">
-                        <button type="button" class="font-semibold text-sky-700 hover:underline dark:text-sky-300" @click="openEditDialog(item)">
-                          Edit
-                        </button>
-                        <button type="button" class="font-semibold text-emerald-700 hover:underline dark:text-emerald-300" @click="openAssignDialog(item)">
-                          Assign
-                        </button>
-                        <button type="button" class="font-semibold text-slate-700 hover:underline dark:text-slate-200" @click="showDetails(item)">
-                          Details
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </template>
-
-                <tr v-if="!visibleRows.length">
-                  <td colspan="10" class="border border-slate-300 px-2 py-4 text-center text-xs text-slate-500 dark:border-slate-700 dark:text-slate-300">
-                    No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-
-          <!-- Pagination -->
-          <div class="table-footer border-t border-slate-200 dark:border-slate-700 dark:bg-slate-900/90">
-            <div class="tf-left text-[11px] text-slate-600 dark:text-slate-300">
-              Page {{ page }} / {{ pageCount }}
-              <!-- <span v-if="totalItems === 0">0</span>
-              <span v-else>{{ rangeStart }} – {{ rangeEnd }}</span>
-              of {{ totalItems }} -->
-            </div>
-            <div class="tf-middle" />
-            <div class="tf-right flex items-center gap-1">
-              <button
-                type="button"
-                class="rounded border border-slate-300 px-2 py-1 text-[11px] disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                :disabled="page <= 1"
-                @click="page > 1 && (page = page - 1)"
-              >
-                Prev
-              </button>
-              <button
-                type="button"
-                class="rounded border border-slate-300 px-2 py-1 text-[11px] disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-                :disabled="page >= pageCount"
-                @click="page < pageCount && (page = page + 1)"
-              >
-                Next
-              </button>
-            </div>
-          </div>
-        </div>
+        <CarBookingPagination
+          :page="page"
+          :page-count="pageCount"
+          @prev="page > 1 && (page = page - 1)"
+          @next="page < pageCount && (page = page + 1)"
+        />
       </div>
     </div>
 
-    <!-- ✅ Cancel confirm modal -->
-    <transition name="fade">
-      <div v-if="cancelConfirmOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeCancelConfirm">
-        <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-col gap-1">
-              <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Cancel this booking?</div>
-              <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                Are you sure you want to mark this booking as
-                <span class="font-semibold text-rose-600 dark:text-rose-400">CANCELLED</span>?
-              </div>
-            </div>
-            <button
-              type="button"
-              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="closeCancelConfirm"
-            >
-              ✕
-            </button>
-          </div>
+    <CarBookingEditModal
+      v-model:open="editOpen"
+      v-model:form="editForm"
+      :hours="HOURS"
+      :minutes="MINUTES"
+      :purposes="CAR_BOOKING_PURPOSES"
+      :loading="editLoading"
+      :error="editError"
+      @save="saveEdit"
+    />
 
-          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-800/50">
-            <div class="font-semibold text-slate-800 dark:text-slate-100">
-              {{ cancelTarget?.employee?.name || '—' }}
-              • {{ cancelTarget?.tripDate || '—' }}
-              • {{ cancelTarget?.timeStart || '—' }}–{{ cancelTarget?.timeEnd || '—' }}
-            </div>
-            <div class="mt-1 text-slate-600 dark:text-slate-300">{{ prettyStops(cancelTarget?.stops || []) }}</div>
-          </div>
+    <CarBookingAssignModal
+      v-model:open="assignOpen"
+      v-model:assignRole="assignRole"
+      v-model:selectedLoginId="selectedLoginId"
+      :locked-role="assignLockedRole"
+      :people="people"
+      :busy-map="busyMap"
+      :loading="assignLoading"
+      :error="assignError"
+      @save="submitAssign"
+    />
 
-          <div class="mt-4 flex items-center justify-between gap-2 text-[11px]">
-            <div class="flex items-center gap-2">
-              <div v-if="cancelAssignedLoginId" class="text-slate-600 dark:text-slate-300">
-                Current:
-                <span class="font-semibold">{{ cancelAssignedName }}</span>
-                <span class="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-100">
-                  {{ cancelAssignedRole }}
-                </span>
-              </div>
+    <CarBookingDetailModal
+      v-model:open="detailOpen"
+      :item="detailItem"
+      :pretty-stops="prettyStops"
+      :assignee-name="assigneeName"
+      :response-label="responseLabel"
+      :status-badge-class="statusBadgeClass"
+      :ack-badge-class="ackBadgeClass"
+      @open-ticket="openTicket"
+      @unassign="requestUnassignFor"
+    />
 
-              <button
-                v-if="cancelAssignedLoginId"
-                type="button"
-                class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
-                      dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
-                :disabled="unassignLoading"
-                @click="requestUnassignFor(cancelTarget)"
-              >
-                Unassign
-              </button>
-            </div>
+    <CarBookingConfirmModal
+      v-model:open="cancelConfirmOpen"
+      title="Cancel booking"
+      message="Are you sure you want to cancel this booking?"
+      confirm-text="Yes, cancel"
+      confirm-class="border-red-500 bg-red-600 text-white hover:bg-red-500"
+      @confirm="confirmCancel"
+    />
 
-            <div class="flex justify-end gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
-                      dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                @click="closeCancelConfirm"
-              >
-                Back
-              </button>
+    <CarBookingConfirmModal
+      v-model:open="forceConfirmOpen"
+      title="Force complete booking"
+      message="Are you sure you want to mark this booking as COMPLETED?"
+      confirm-text="Yes, complete"
+      confirm-class="border-green-500 bg-green-600 text-white hover:bg-green-500"
+      @confirm="confirmForceComplete"
+    />
 
-              <button
-                type="button"
-                class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
-                      dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
-                :disabled="!cancelTarget?._id || !!updating[cancelTarget?._id]"
-                @click="confirmCancel"
-              >
-                Yes, cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- ✅ Unassign confirm modal -->
-    <transition name="fade">
-      <div
-        v-if="unassignConfirmOpen"
-        class="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 px-4"
-        @click.self="closeUnassignConfirm"
-      >
-        <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-col gap-1">
-              <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Unassign {{ unassignRole }}</div>
-              <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                Remove <span class="font-semibold">{{ unassignAssignedName || '—' }}</span> from this booking?
-              </div>
-            </div>
-            <button
-              type="button"
-              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                    dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="closeUnassignConfirm"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div
-            v-if="unassignError"
-            class="mt-3 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                   dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
-          >
-            {{ unassignError }}
-          </div>
-
-          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-800/50">
-            <div class="font-semibold text-slate-800 dark:text-slate-100">
-              {{ unassignTarget?.employee?.name || '—' }}
-              • {{ unassignTarget?.tripDate || '—' }}
-              • {{ unassignTarget?.timeStart || '—' }}–{{ unassignTarget?.timeEnd || '—' }}
-            </div>
-            <div class="mt-1 text-slate-600 dark:text-slate-300">{{ prettyStops(unassignTarget?.stops || []) }}</div>
-          </div>
-
-          <div class="mt-4 flex justify-end gap-2 text-[11px]">
-            <button
-              type="button"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
-                    dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="closeUnassignConfirm"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              class="rounded-lg border border-rose-500 bg-rose-600 px-3 py-1.5 font-semibold text-white hover:bg-rose-500 disabled:opacity-60
-                    dark:border-rose-500 dark:bg-rose-600 dark:hover:bg-rose-500"
-              :disabled="unassignLoading || !unassignAssignedLoginId"
-              @click="confirmUnassign"
-            >
-              <span v-if="unassignLoading" class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-white/70 border-t-transparent" />
-              Yes, unassign
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- ✅ Force complete confirm modal -->
-    <transition name="fade">
-      <div v-if="forceConfirmOpen" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4" @click.self="closeForceConfirm">
-        <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-col gap-1">
-              <div class="text-sm font-semibold text-slate-900 dark:text-slate-50">Force complete?</div>
-              <div class="text-[11px] text-slate-600 dark:text-slate-300">
-                This will mark the booking as <span class="font-semibold text-green-600 dark:text-green-400">COMPLETED</span>
-                even if some steps were skipped.
-              </div>
-            </div>
-            <button
-              type="button"
-              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="closeForceConfirm"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] dark:border-slate-700 dark:bg-slate-800/50">
-            <div class="font-semibold text-slate-800 dark:text-slate-100">
-              {{ forceTarget?.employee?.name || '—' }}
-              • {{ forceTarget?.tripDate || '—' }}
-              • {{ forceTarget?.timeStart || '—' }}–{{ forceTarget?.timeEnd || '—' }}
-            </div>
-            <div class="mt-1 text-slate-600 dark:text-slate-300">{{ prettyStops(forceTarget?.stops || []) }}</div>
-          </div>
-
-          <div class="mt-4 flex justify-end gap-2 text-[11px]">
-            <button
-              type="button"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="closeForceConfirm"
-            >
-              Cancel
-            </button>
-
-            <button
-              type="button"
-              class="rounded-lg border border-green-500 bg-green-600 px-3 py-1.5 font-semibold text-white hover:bg-green-500 disabled:opacity-60
-                     dark:border-green-500 dark:bg-green-600 dark:hover:bg-green-500"
-              :disabled="!forceTarget?._id || !!updating[forceTarget?._id]"
-              @click="confirmForceComplete"
-            >
-              Yes, complete
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Details modal -->
-    <transition name="fade">
-      <div v-if="detailOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4" @click.self="detailOpen = false">
-        <div class="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-col gap-1">
-              <div class="flex items-center gap-2">
-                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="categoryBadgeClass(detailItem?.category || 'Car')">
-                  {{ detailItem?.category || 'Car' }}
-                </span>
-                <span class="mono text-sm text-slate-800 dark:text-slate-100">{{ detailItem?.timeStart }} – {{ detailItem?.timeEnd }}</span>
-              </div>
-              <div class="text-[12px] text-slate-500 dark:text-slate-400">
-                Date: {{ detailItem?.tripDate || '—' }} • Pax: {{ paxDisplay(detailItem?.passengers) }}
-              </div>
-            </div>
-            <button
-              type="button"
-              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="detailOpen = false"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div class="mt-3 grid gap-3 text-xs sm:grid-cols-2">
-            <div>
-              <div class="lbl">Requester</div>
-              <div class="val">
-                {{ detailItem?.employee?.name || '—' }}
-                <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                  {{ detailItem?.employee?.department || '—' }} • ID {{ detailItem?.employeeId }}
-                </div>
-              </div>
-            </div>
-            <div>
-              <div class="lbl">Driver / Messenger response</div>
-              <div class="val">
-                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="ackBadgeClass(responseLabel(detailItem))">
-                  {{ responseLabel(detailItem) }}
-                </span>
-              </div>
-            </div>
-
-            <div class="sm:col-span-2">
-              <div class="lbl">Destination</div>
-              <div class="val">
-                <div v-if="(detailItem?.stops || []).length" class="stops">
-                  <div v-for="(s, i) in detailItem?.stops" :key="i" class="stop">
-                    <span class="text-xs">#{{ i + 1 }}:</span>
-                    <span>{{ s.destination === 'Other' ? (s.destinationOther || 'Other') : s.destination }}</span>
-                    <button
-                      v-if="s.mapLink"
-                      type="button"
-                      class="ml-2 inline-flex items-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100
-                             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                      @click="openTicket(s.mapLink)"
-                    >
-                      Map
-                    </button>
-                  </div>
-                </div>
-                <div v-else>—</div>
-              </div>
-            </div>
-
-            <div v-if="detailItem?.ticketUrl">
-              <div class="lbl">Ticket</div>
-              <button
-                type="button"
-                class="mt-1 inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                @click="openTicket(detailItem.ticketUrl)"
-              >
-                Open ticket
-              </button>
-            </div>
-
-            <div v-if="detailItem?.purpose" class="sm:col-span-2">
-              <div class="lbl">Purpose</div>
-              <div class="purpose-detail">{{ detailItem?.purpose }}</div>
-            </div>
-
-            <div v-if="detailItem?.notes" class="sm:col-span-2 dark:text-slate-200/80">
-              <div class="lbl">Notes</div>
-              <div class="notes-block">{{ detailItem?.notes }}</div>
-            </div>
-          </div>
-
-          <div class="mt-4 flex justify-end">
-            <button
-              type="button"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="detailOpen = false"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Edit schedule modal -->
-    <transition name="fade">
-      <div v-if="editOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4" @click.self="editOpen = false">
-        <div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex items-center gap-2 text-sm font-semibold">
-              <span>🕒 Edit schedule</span>
-            </div>
-            <button
-              type="button"
-              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="editOpen = false"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div
-            v-if="editError"
-            class="mt-3 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                   dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
-          >
-            {{ editError }}
-          </div>
-
-          <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-            <div class="col-span-2">
-              <label class="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">Trip date</label>
-              <input
-                v-model="editForm.tripDate"
-                type="date"
-                class="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              />
-            </div>
-
-            <div>
-              <label class="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">Start hour</label>
-              <select
-                v-model="editForm.timeStartHour"
-                class="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              >
-                <option v-for="h in HOURS" :key="h" :value="h">{{ h }}</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">Start minute</label>
-              <select
-                v-model="editForm.timeStartMinute"
-                class="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              >
-                <option v-for="m in MINUTES" :key="m" :value="m">{{ m }}</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">End hour</label>
-              <select
-                v-model="editForm.timeEndHour"
-                class="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              >
-                <option v-for="h in HOURS" :key="h" :value="h">{{ h }}</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">End minute</label>
-              <select
-                v-model="editForm.timeEndMinute"
-                class="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              >
-                <option v-for="m in MINUTES" :key="m" :value="m">{{ m }}</option>
-              </select>
-            </div>
-
-            <div class="col-span-2">
-              <label class="mb-1 block text-[11px] font-medium text-slate-700 dark:text-slate-200">Category</label>
-              <select
-                v-model="editForm.category"
-                class="h-8 w-full rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-              >
-                <option value="Car">Car</option>
-                <option value="Messenger">Messenger</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="mt-4 flex justify-end gap-2 text-[11px]">
-            <button
-              type="button"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="editOpen = false"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="rounded-lg border border-sky-500 bg-sky-600 px-3 py-1.5 font-semibold text-white hover:bg-sky-500 disabled:opacity-60
-                     dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500"
-              :disabled="editLoading"
-              @click="saveEdit"
-            >
-              <span v-if="editLoading" class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-white/70 border-t-transparent" />
-              Save
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
-
-    <!-- Assign dialog -->
-    <transition name="fade">
-      <div v-if="assignOpen" class="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/60 px-4" @click.self="assignOpen = false">
-        <div class="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
-          <div class="flex items-start justify-between gap-2">
-            <div class="flex flex-col gap-1">
-              <div class="text-sm font-semibold">Assign to Driver or Messenger</div>
-              <div class="text-[11px] text-slate-500 dark:text-slate-400">Choose who will handle this booking.</div>
-            </div>
-            <button
-              type="button"
-              class="rounded-full border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="assignOpen = false"
-            >
-              ✕
-            </button>
-          </div>
-
-          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
-            <button
-              type="button"
-              class="inline-flex items-center rounded-full border px-3 py-1.5 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-              :class="assignRole === 'DRIVER'
-                ? 'border-sky-500 bg-sky-600 text-white'
-                : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'"
-              :disabled="assignLockedRole === 'MESSENGER'"
-              @click="assignRole = 'DRIVER'"
-            >
-              🚗 <span class="ml-2">Car driver</span>
-            </button>
-
-            <button
-              type="button"
-              class="inline-flex items-center rounded-full border px-3 py-1.5 font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
-              :class="assignRole === 'MESSENGER'
-                ? 'border-sky-500 bg-sky-600 text-white'
-                : 'border-slate-300 bg-white text-slate-700 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100'"
-              :disabled="assignLockedRole === 'DRIVER'"
-              @click="assignRole = 'MESSENGER'"
-            >
-              🏍 <span class="ml-2">Messenger</span>
-            </button>
-          </div>
-
-          <div
-            v-if="assignError"
-            class="mt-3 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
-                   dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
-          >
-            {{ assignError }}
-          </div>
-
-          <div class="mt-3">
-            <div
-              v-if="!people.length"
-              class="rounded-xl border border-dashed border-slate-400 bg-slate-50 px-3 py-4 text-center text-[11px] text-slate-500
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300"
-            >
-              Loading people…
-            </div>
-
-            <div v-else class="grid gap-2 text-xs sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              <button
-                v-for="p in people"
-                :key="p._id"
-                type="button"
-                class="person-card flex w-full flex-col rounded-xl border bg-white px-3 py-3 text-left transition dark:border-slate-600 dark:bg-slate-900"
-                :class="{ selected: selectedLoginId === p.loginId, busy: isBusy(p.loginId) }"
-                :disabled="isBusy(p.loginId)"
-                @click="!isBusy(p.loginId) && (selectedLoginId = p.loginId)"
-              >
-                <div class="flex items-center gap-2">
-                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                    {{ p.name?.substring(0, 2) || 'ID' }}
-                  </div>
-                  <div class="flex-1">
-                    <div class="font-semibold text-slate-900 dark:text-slate-50">{{ p.name }}</div>
-                    <div class="mono text-[11px] text-slate-500 dark:text-slate-400">ID: {{ p.loginId }}</div>
-                    <div v-if="isBusy(p.loginId)" class="mt-1 text-[11px] text-red-500">Busy in this window</div>
-                  </div>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          <div class="mt-4 flex justify-end gap-2 text-[11px]">
-            <button
-              type="button"
-              class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100
-                     dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-              @click="assignOpen = false"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              class="rounded-lg border border-emerald-500 bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-60
-                     dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-              :disabled="!selectedLoginId || assignLoading"
-              @click="submitAssign"
-            >
-              <span v-if="assignLoading" class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-white/70 border-t-transparent" />
-              Assign
-            </button>
-          </div>
-        </div>
-      </div>
-    </transition>
+    <CarBookingConfirmModal
+      v-model:open="unassignConfirmOpen"
+      title="Unassign booking"
+      message="Are you sure you want to remove the assigned person from this booking?"
+      confirm-text="Yes, unassign"
+      confirm-class="border-amber-500 bg-amber-500 text-slate-900 hover:bg-amber-400"
+      :loading="unassignLoading"
+      :error="unassignError"
+      @confirm="confirmUnassign"
+    />
   </div>
 </template>
-
-<style scoped>
-.mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-}
-
-/* booking cards */
-.mobile-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.booking-card {
-  position: relative;
-  border-radius: 16px;
-  padding: 10px 13px 12px;
-  margin-bottom: 4px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background:
-    radial-gradient(circle at 0 0, rgba(59, 130, 246, 0.12), transparent 60%),
-    radial-gradient(circle at 100% 100%, rgba(129, 140, 248, 0.12), transparent 55%),
-    rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.1);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  overflow: hidden;
-}
-
-.booking-card::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 9px;
-  bottom: 9px;
-  width: 3px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #0f719e, #22c55e);
-  opacity: 0.9;
-}
-.booking-card::after {
-  content: "";
-  position: absolute;
-  right: -30px;
-  top: -30px;
-  width: 80px;
-  height: 80px;
-  background: radial-gradient(circle, rgba(59, 130, 246, 0.25), transparent 55%);
-  opacity: 0.7;
-  pointer-events: none;
-}
-
-.bc-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  position: relative;
-  z-index: 1;
-}
-.bc-time {
-  font-weight: 700;
-  font-size: 0.9rem;
-  color: #0f172a;
-}
-.bc-date {
-  margin-bottom: 2px;
-  font-size: 0.78rem;
-  color: #64748b;
-}
-
-.bc-middle {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 4px;
-  position: relative;
-  z-index: 1;
-}
-.bc-requester {
-  flex: 1;
-}
-.bc-req-name {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-.bc-req-meta {
-  font-size: 0.78rem;
-}
-.bc-assignee {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-}
-
-.bc-body {
-  font-size: 0.8rem;
-  margin-top: 4px;
-  position: relative;
-  z-index: 1;
-}
-.bc-itinerary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  font-size: 0.8rem;
-}
-.purpose-text-mobile {
-  font-size: 0.82rem;
-  font-weight: 500;
-  color: #1f2937;
-}
-
-.bc-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-  position: relative;
-  z-index: 1;
-}
-.bc-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.assignee-chip {
-  font-weight: 600;
-}
-
-/* table footer shared */
-.table-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 16px;
-  flex-wrap: wrap;
-}
-.tf-left {
-  min-width: 120px;
-}
-.tf-middle {
-  display: flex;
-  align-items: center;
-}
-.tf-right {
-  display: flex;
-  align-items: center;
-}
-
-.lbl {
-  font-size: 0.78rem;
-  color: #64748b;
-}
-.val {
-  font-weight: 600;
-}
-.purpose-detail {
-  font-weight: 500;
-  font-size: 1.05rem;
-}
-.stops {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.stop {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.notes-block {
-  border: 1px dashed #cbd5e1;
-  background: #f8fafc;
-  padding: 10px 12px;
-  border-radius: 10px;
-  white-space: pre-wrap;
-}
-
-/* person cards */
-.person-card {
-  cursor: pointer;
-  transition: transform 0.06s ease, box-shadow 0.06s ease, border-color 0.06s ease, background-color 0.06s ease;
-}
-.person-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
-}
-.person-card.selected {
-  border-color: #1f2a44;
-  box-shadow: 0 0 0 2px rgba(31, 42, 68, 0.15) inset;
-}
-.person-card.busy {
-  opacity: 0.55;
-  border-color: #ef4444;
-  cursor: not-allowed;
-}
-
-/* fade transition (modals) */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.15s ease-out;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* small screens tweaks */
-@media (max-width: 600px) {
-  .table-footer {
-    padding: 10px 12px;
-    gap: 10px;
-  }
-  .tf-left,
-  .tf-middle,
-  .tf-right {
-    width: 100%;
-  }
-  .tf-right {
-    justify-content: flex-end;
-  }
-}
-</style>

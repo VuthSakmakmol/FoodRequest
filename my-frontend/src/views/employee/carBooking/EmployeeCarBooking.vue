@@ -1,10 +1,10 @@
-<!-- src/employee/carbooking/EmployeeCarBooking.vue -->
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useRouter, useRoute } from 'vue-router'
 import { useToast } from '@/composables/useToast'
+import { CAR_BOOKING_PURPOSES } from '@/constants/carBookingOptions'
 
 const router = useRouter()
 const route = useRoute()
@@ -56,30 +56,8 @@ const LOCATIONS = [
   'Dyeing Company',
   'S E C Mega factory  CO., LTD',
 ]
-const PURPOSES = [
-  'Bring Local Staff',
-  'Pick up Local Staff',
-  'Pick Up K Joe (GM)',
-  'Bring K Joe (GM)',
-  'Bring Guest',
-  'Pick up FM',
-  'Pick up Foreigner',
-  'Bring Foreigner',
-  'Pick up Guest',
-  'Meeting',
-  'Release Document',
-  'Submit payment',
-  'Collect doc back',
-  'Revise Document',
-  'Send the fabric',
-  'Pick  parcel',
-  'Bring binding tape',
-  'Pick up Accessory',
-  'Pay for NSSF',
-  'Withdraw',
-  'Send Document TT',
-  'Pick up SGS inspector'
-]
+
+const PURPOSES = CAR_BOOKING_PURPOSES
 const PASSENGER_OPTIONS = Array.from({ length: 15 }, (_, i) => String(i + 1))
 
 const employees = ref([])
@@ -149,14 +127,12 @@ const form = ref({
   timeStart: ''
 })
 
-/* ✅ Availability from TripDetailSection */
 const capacityNoneLeft = ref(false)
 function onCapacityChange(noneLeft) {
   capacityNoneLeft.value = !!noneLeft
 }
 const capacityExceeded = computed(() => capacityNoneLeft.value)
 
-/* Validation */
 const hasAirport = computed(() =>
   (form.value.stops || []).some(s => s.destination === AIRPORT_DESTINATION)
 )
@@ -177,116 +153,69 @@ function validateForm() {
   if (!f.category) errs.push('Category is required.')
   if (!f.tripDate) errs.push('Date is required.')
   if (!f.stops?.length) errs.push('At least one destination is required.')
+
   f.stops.forEach((s, idx) => {
     if (!s.destination) errs.push(`Destination #${idx + 1} is required.`)
-    if (s.destination === 'Other' && !s.destinationOther)
+    if (s.destination === 'Other' && !s.destinationOther) {
       errs.push(`Destination #${idx + 1}: please enter destination name.`)
+    }
   })
+
   if (!startTime.value) errs.push('Start time is required.')
   if (!endTime.value) errs.push('End time is required.')
-  if (startTime.value && endTime.value && endTime.value <= startTime.value)
+  if (startTime.value && endTime.value && endTime.value <= startTime.value) {
     errs.push('End time must be after start time.')
+  }
+
   if (!f.passengers) errs.push('Number of passengers is required.')
   if (!f.purpose) errs.push('Purpose is required.')
-  if (hasAirport.value && !f.ticketFile) errs.push('Please attach the airplane ticket (required for airport).')
-
-  if (startTime.value && endTime.value && capacityExceeded.value) {
-    const kind = f.category === 'Car' ? 'car' : 'messenger'
-    errs.push(`No ${kind} available for the selected time window.`)
-  }
+  if (capacityExceeded.value) errs.push('No available vehicle/messenger for the selected time.')
+  if (hasAirport.value && !f.ticketFile) errs.push('Airplane ticket is required for Techo International Airport.')
 
   validationErrors.value = errs
-  return errs
-}
-
-function buildOneOffPayload(f) {
-  return {
-    employeeId: f.employeeId,
-    category: f.category,
-    tripDate: f.tripDate,
-    stops: (f.stops || []).map(s => ({
-      destination: s.destination,
-      destinationOther: s.destination === 'Other' ? (s.destinationOther || '') : '',
-      mapLink: s.mapLink || ''
-    })),
-    timeStart: startTime.value || null,
-    timeEnd: endTime.value || null,
-    passengers: Number(f.passengers || 1),
-    customerContact: f.customerContact || '',
-    purpose: f.purpose,
-    notes: f.notes || ''
-  }
-}
-
-function buildRecurringSeriesPayload(f) {
-  return {
-    category: f.category,
-    startDate: f.tripDate,
-    endDate: f.endDate,
-    timeStart: f.timeStart || startTime.value,
-    timeEnd: endTime.value,
-    timezone: 'Asia/Phnom_Penh',
-    skipHolidays: !!f.skipHolidays,
-    passengers: Number(f.passengers || 1),
-    customerContact: f.customerContact || '',
-    stops: (f.stops || []).map(s => ({
-      destination: s.destination,
-      destinationOther: s.destination === 'Other' ? (s.destinationOther || '') : '',
-      mapLink: s.mapLink || ''
-    })),
-    purpose: f.purpose || '',
-    notes: f.notes || '',
-    createdByEmp: {
-      employeeId: String(f.employeeId || ''),
-      name: f.name || '',
-      department: f.department || '',
-      contactNumber: f.contactNumber || ''
-    }
-  }
+  return errs.length === 0
 }
 
 const loading = ref(false)
 
 async function submit() {
-  const errs = validateForm()
-  if (errs.length) {
-    showToast({ type: 'warning', title: 'Please review your form', message: 'Some required information is missing or invalid.' })
+  if (!validateForm()) {
+    showToast({
+      type: 'warning',
+      title: 'Please check the form',
+      message: 'Some required fields are missing or invalid.',
+    })
     return
   }
 
+  loading.value = true
   try {
-    loading.value = true
+    const fd = new FormData()
+    fd.append('employeeId', form.value.employeeId)
+    fd.append('category', form.value.category)
+    fd.append('tripDate', form.value.tripDate)
+    fd.append('timeStart', startTime.value)
+    fd.append('timeEnd', endTime.value)
+    fd.append('passengers', form.value.passengers)
+    fd.append('customerContact', form.value.customerContact || '')
+    fd.append('purpose', form.value.purpose || '')
+    fd.append('notes', form.value.notes || '')
+    fd.append('stops', JSON.stringify(form.value.stops || []))
 
-    if (form.value.recurring) {
-      const seriesPayload = buildRecurringSeriesPayload(form.value)
-      const { data } = await api.post('/transport/recurring', seriesPayload)
-      showToast({
-        type: 'success',
-        title: 'Recurring series created',
-        message: `Created ${data?.created ?? 0}, skipped ${Array.isArray(data?.skipped) ? data.skipped.length : 0}.`,
-      })
-      resetForm({ keepEmployee: true })
-      router.push({ name: 'employee-car-history' })
-      return
+    if (form.value.ticketFile) {
+      fd.append('ticket', form.value.ticketFile)
     }
 
-    const payload = buildOneOffPayload(form.value)
-    const needsTicket = (form.value.stops || []).some(s => s.destination === AIRPORT_DESTINATION)
+    await api.post('/car-bookings', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
 
-    if (needsTicket) {
-      const fd = new FormData()
-      fd.append('data', JSON.stringify(payload))
-      const file = form.value.ticketFile
-      if (!file) throw new Error('Airplane ticket is required.')
-      fd.append('ticket', file)
-      await api.post('/public/transport/car-bookings', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })    
-    } else {
-      await api.post('/public/transport/car-bookings', payload)
-    }
+    showToast({
+      type: 'success',
+      title: 'Submitted',
+      message: 'Your booking request was submitted successfully.',
+    })
 
-    showToast({ type: 'success', title: 'Submitted', message: 'Your car booking has been submitted.' })
     resetForm({ keepEmployee: true })
     router.push({ name: 'employee-car-history' })
   } catch (e) {
@@ -304,6 +233,7 @@ function resetForm({ keepEmployee = false } = {}) {
     dept: form.value.department,
     phone: form.value.contactNumber
   }
+
   form.value = {
     employeeId: keepEmployee ? cur.id : '',
     name: keepEmployee ? cur.name : '',
@@ -312,10 +242,22 @@ function resetForm({ keepEmployee = false } = {}) {
     category: 'Car',
     tripDate: dayjs().format('YYYY-MM-DD'),
     stops: [{ destination: '', destinationOther: '', mapLink: '' }],
-    startHour: '', startMinute: '', endHour: '', endMinute: '',
-    passengers: '1', customerContact: '', purpose: '', notes: '', ticketFile: null,
-    recurring: false, frequency: '', endDate: '', skipHolidays: false, timeStart: ''
+    startHour: '',
+    startMinute: '',
+    endHour: '',
+    endMinute: '',
+    passengers: '1',
+    customerContact: '',
+    purpose: '',
+    notes: '',
+    ticketFile: null,
+    recurring: false,
+    frequency: '',
+    endDate: '',
+    skipHolidays: false,
+    timeStart: ''
   }
+
   capacityNoneLeft.value = false
   validationErrors.value = []
 }
@@ -325,11 +267,17 @@ onMounted(() => {
 
   if (route.query.tripDate) {
     form.value.tripDate = route.query.tripDate
-    showToast({ type: 'info', title: 'Booking date loaded', message: `Date automatically set to ${route.query.tripDate}.` })
+    showToast({
+      type: 'info',
+      title: 'Booking date loaded',
+      message: `Date automatically set to ${route.query.tripDate}.`,
+    })
   }
 })
 
-watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeId', v) })
+watch(() => form.value.employeeId, v => {
+  if (v) localStorage.setItem('employeeId', v)
+})
 </script>
 
 <template>
@@ -351,8 +299,8 @@ watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeI
           class="mb-3 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
                  dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
         >
-          <div class="font-semibold mb-1 text-[11px]">Please check the following:</div>
-          <ul class="list-disc pl-4 space-y-0.5">
+          <div class="mb-1 text-[11px] font-semibold">Please check the following:</div>
+          <ul class="list-disc space-y-0.5 pl-4">
             <li v-for="(e, idx) in validationErrors" :key="idx">{{ e }}</li>
           </ul>
         </div>
@@ -390,54 +338,41 @@ watch(() => form.value.employeeId, v => { if (v) localStorage.setItem('employeeI
               <RecurringBookingSection :form="form" />
             </div>
           </div>
+
+          <div
+            class="slim-toolbar mt-3 flex items-center justify-between gap-2 border-t border-slate-200
+                   bg-gradient-to-r from-indigo-50 via-emerald-50 to-slate-50 px-3 py-2 text-[11px]
+                   dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900"
+          >
+            <div class="text-[11px] text-slate-500 dark:text-slate-400">
+              Please double-check date, time, and destination before submitting.
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100
+                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                @click="resetForm({ keepEmployee: true })"
+              >
+                Reset
+              </button>
+
+              <button
+                type="submit"
+                class="inline-flex items-center rounded-lg border border-emerald-500 bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+                :disabled="loading"
+              >
+                <span
+                  v-if="loading"
+                  class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-white border-t-transparent"
+                />
+                Submit Request
+              </button>
+            </div>
+          </div>
         </form>
-      </div>
-
-      <div
-        class="slim-toolbar flex items-center justify-between gap-2 border-t border-slate-200
-               bg-gradient-to-r from-indigo-50 via-emerald-50 to-slate-50 px-3 py-2 text-[11px]
-               dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900"
-      >
-        <div class="text-[11px] text-slate-500 dark:text-slate-400">
-          Please double-check date, time, and destination before submitting.
-        </div>
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100
-                   disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            :disabled="loading"
-            @click="resetForm()"
-          >
-            ⟳ <span class="ml-1">Reset</span>
-          </button>
-
-          <button
-            type="submit"
-            class="inline-flex items-center rounded-lg border border-sky-500 bg-sky-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-sky-500
-                   disabled:opacity-60 dark:border-sky-500 dark:bg-sky-600 dark:hover:bg-sky-500"
-            :disabled="loading"
-            @click.prevent="submit"
-          >
-            <span
-              v-if="loading"
-              class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-white/70 border-t-transparent"
-            />
-            <span>Submit</span>
-          </button>
-        </div>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.slim-card { border-radius: 14px; }
-.slim-toolbar { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
-.sticky-col { align-self: flex-start; }
-@media (max-width: 600px) {
-  .book-container { padding: 0 !important; }
-  .slim-card { border-radius: 0; border-left: none; border-right: none; }
-  .slim-toolbar { border-radius: 0; padding-left: 8px !important; padding-right: 8px !important; }
-}
-</style>
