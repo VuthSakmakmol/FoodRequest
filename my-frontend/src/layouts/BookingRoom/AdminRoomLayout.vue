@@ -109,7 +109,6 @@ onBeforeUnmount(() => {
       :class="sidebarExpanded ? 'w-64' : 'w-16'"
       style="border-color: rgb(var(--ui-border));"
     >
-      <!-- Top brand -->
       <div
         class="flex items-center justify-between border-b px-2 py-2"
         style="border-color: rgb(var(--ui-border));"
@@ -135,7 +134,6 @@ onBeforeUnmount(() => {
         <div v-if="sidebarExpanded" class="w-9" />
       </div>
 
-      <!-- Nav -->
       <nav class="ui-scrollbar flex-1 overflow-y-auto px-2 py-2">
         <div v-for="g in groups" :key="g.key" class="mb-2">
           <button
@@ -190,7 +188,6 @@ onBeforeUnmount(() => {
             </div>
           </button>
 
-          <!-- Children -->
           <div v-show="open[g.key]" class="mt-1 space-y-1 pl-10">
             <button
               v-for="it in g.children"
@@ -216,7 +213,6 @@ onBeforeUnmount(() => {
         </div>
       </nav>
 
-      <!-- User -->
       <div class="border-t px-2 py-2" style="border-color: rgb(var(--ui-border));">
         <div class="flex items-center gap-2">
           <div class="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-[11px] font-extrabold text-white">
@@ -382,9 +378,9 @@ onBeforeUnmount(() => {
     </transition>
 
     <!-- Main column -->
-    <div class="flex min-w-0 flex-1 flex-col">
+    <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
       <header
-        class="flex items-center justify-between border-b bg-white/70 px-2 py-2 shadow-sm backdrop-blur
+        class="flex items-center justify-between border-b bg-white/70 px-3 py-2 shadow-sm backdrop-blur
                dark:bg-slate-950/60 sm:px-4"
         style="border-color: rgb(var(--ui-border));"
       >
@@ -411,7 +407,7 @@ onBeforeUnmount(() => {
       </header>
 
       <main class="min-h-0 flex-1 overflow-auto">
-        <div class="w-full px-2 py-3 sm:px-4 lg:px-6 2xl:px-10">
+        <div class="h-full w-full p-0">
           <router-view />
         </div>
       </main>

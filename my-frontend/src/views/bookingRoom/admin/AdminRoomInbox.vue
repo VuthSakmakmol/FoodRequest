@@ -65,7 +65,7 @@ function normalizedMaterialCards(items = []) {
         qty,
       }
     })
-    .filter(x => s(x.name))
+    .filter((x) => s(x.name))
 }
 function roomServiceItems(item) {
   const list = []
@@ -117,7 +117,6 @@ function passDateFilter(date, from, to) {
   return d >= start && d <= end
 }
 
-/* ───────────────── UI Helpers ───────────────── */
 function overallStatusClass(v) {
   const st = up(v)
   if (st === 'APPROVED') return 'ui-badge ui-badge-success'
@@ -127,7 +126,6 @@ function overallStatusClass(v) {
   if (st.includes('PENDING')) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
-
 function roomStatusClass(v) {
   const st = up(v)
   if (st === 'APPROVED') return 'ui-badge ui-badge-success'
@@ -136,7 +134,6 @@ function roomStatusClass(v) {
   if (st === 'PENDING') return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
-
 function materialStatusClass(v) {
   const st = up(v)
   if (st === 'APPROVED') return 'ui-badge ui-badge-success'
@@ -145,7 +142,6 @@ function materialStatusClass(v) {
   if (st === 'PENDING') return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
-
 function sectionBadgeUiClass(status) {
   const st = up(status)
   if (st === 'APPROVED') return 'ui-badge ui-badge-success'
@@ -153,7 +149,6 @@ function sectionBadgeUiClass(status) {
   if (st === 'NOT_REQUIRED') return 'ui-badge'
   return 'ui-badge ui-badge-warning'
 }
-
 function typeBadgeUiClass(item) {
   const hasRoom = !!item?.roomRequired
   const hasMaterial = !!item?.materialRequired
@@ -162,7 +157,6 @@ function typeBadgeUiClass(item) {
   if (hasMaterial) return 'ui-badge ui-badge-warning'
   return 'ui-badge'
 }
-
 function bookingTypeLabel(item) {
   const hasRoom = !!item?.roomRequired
   const hasMaterial = !!item?.materialRequired
@@ -171,11 +165,9 @@ function bookingTypeLabel(item) {
   if (hasMaterial) return 'Material Only'
   return '—'
 }
-
 function isPendingRoom(row) {
   return up(row?.roomStatus) === 'PENDING'
 }
-
 function isRowVisibleForScope(row, currentScope) {
   if (!row || !row._id) return false
   if (!row.roomRequired) return false
@@ -202,8 +194,10 @@ const submitting = ref(false)
 const rows = ref([])
 const scope = ref('ALL')
 const q = ref('')
-const dateFrom = ref('')
-const dateTo = ref('')
+
+const todayYmd = dayjs().format('YYYY-MM-DD')
+const dateFrom = ref(todayYmd)
+const dateTo = ref(todayYmd)
 
 const page = ref(1)
 const perPage = ref(10)
@@ -219,7 +213,7 @@ const decisionNote = ref('')
 
 let availabilityRefreshTimer = null
 
-/* ───────────────── Computed ───────────────── */
+/* ───────────────── Derived ───────────────── */
 const processedRows = computed(() => {
   const keyword = s(q.value).toLowerCase()
   let result = arr(rows.value)
@@ -276,11 +270,7 @@ const canSubmitDecision = computed(() => {
   if (submitting.value) return false
   if (!decisionRow.value?._id) return false
   if (!['APPROVED', 'REJECTED'].includes(up(decisionType.value))) return false
-
-  if (up(decisionType.value) === 'REJECTED' && !s(decisionNote.value)) {
-    return false
-  }
-
+  if (up(decisionType.value) === 'REJECTED' && !s(decisionNote.value)) return false
   return true
 })
 
@@ -355,37 +345,31 @@ async function submitDecision() {
 function refreshAll() {
   fetchRows()
 }
-
 function resetSearch() {
   q.value = ''
   scope.value = 'ALL'
-  dateFrom.value = ''
-  dateTo.value = ''
+  dateFrom.value = todayYmd
+  dateTo.value = todayYmd
   page.value = 1
 }
-
 function onScopeChange() {
   page.value = 1
   fetchRows()
 }
-
 function openDetail(row) {
   detailRow.value = row || null
   detailOpen.value = true
 }
-
 function closeDetail() {
   detailOpen.value = false
   detailRow.value = null
 }
-
 function openDecision(row, type) {
   decisionRow.value = row || null
   decisionType.value = up(type) === 'REJECTED' ? 'REJECTED' : 'APPROVED'
   decisionNote.value = ''
   decisionOpen.value = true
 }
-
 function closeDecision(force = false) {
   if (submitting.value && !force) return
   decisionOpen.value = false
@@ -411,7 +395,6 @@ function exportExcel() {
       RoomStatus: s(row.roomStatus),
       MaterialStatus: s(row.materialStatus),
       Materials: row.materialRequired ? materialItemsToText(row.materials) : 'Not Required',
-      OverallStatus: s(row.overallStatus),
       ParticipantEstimate: Number(row.participantEstimate || 0),
       RequirementNote: s(row.requirementNote),
       CancelReason: s(row.cancelReason),
@@ -436,19 +419,17 @@ function exportExcel() {
   }
 }
 
-/* ───────────────── Live row sync ───────────────── */
+/* ───────────────── Realtime Sync ───────────────── */
 function syncDetailRow() {
   if (!detailRow.value?._id) return
   const found = rows.value.find((x) => String(x._id) === String(detailRow.value._id))
   if (found) detailRow.value = found
 }
-
 function syncDecisionRow() {
   if (!decisionRow.value?._id) return
   const found = rows.value.find((x) => String(x._id) === String(decisionRow.value._id))
   if (found) decisionRow.value = found
 }
-
 function upsertRealtimeRow(doc) {
   if (!doc?._id) return
 
@@ -474,12 +455,10 @@ function onReqCreated(doc) {
   if (!doc?.roomRequired) return
   upsertRealtimeRow(doc)
 }
-
 function onReqUpdated(doc) {
   if (!doc?._id) return
   upsertRealtimeRow(doc)
 }
-
 function onAvailabilityChanged() {
   if (!(detailOpen.value || decisionOpen.value)) return
 
@@ -489,7 +468,7 @@ function onAvailabilityChanged() {
   }, 250)
 }
 
-/* ───────────────── Modal UX ───────────────── */
+/* ───────────────── Body Scroll Lock ───────────────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
   const b = document.body
@@ -547,471 +526,454 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="ui-page">
-    <div class="ui-container py-2">
-      <div class="ui-card overflow-hidden">
-        <div class="ui-hero-gradient">
-          <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div
-              class="grid w-full gap-2 md:w-auto md:grid-cols-[150px_220px_140px_140px_auto] md:items-end"
-            >
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Scope</label>
-                <select
-                  v-model="scope"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
-                  @change="onScopeChange"
-                >
-                  <option value="ALL">All Requests</option>
-                  <option value="ACTIONABLE">Actionable</option>
-                </select>
-              </div>
+  <div class="room-inbox-page">
+    <div class="room-inbox-shell">
+      <div class="ui-hero-gradient room-inbox-hero">
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div class="grid w-full gap-2 xl:grid-cols-[140px_1fr_140px_140px_auto] xl:items-end">
+            <div>
+              <label class="mb-1 block text-[11px] font-extrabold text-white/90">Scope</label>
+              <select
+                v-model="scope"
+                class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                @change="onScopeChange"
+              >
+                <option value="ALL">All Requests</option>
+                <option value="ACTIONABLE">Actionable</option>
+              </select>
+            </div>
 
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
-                <div
-                  class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]"
-                >
-                  <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
-                  <input
-                    v-model="q"
-                    type="text"
-                    placeholder="Employee, title, room..."
-                    class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+            <div>
+              <label class="mb-1 block text-[11px] font-extrabold text-white/90">Search</label>
+              <div class="flex items-center rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px]">
+                <i class="fa-solid fa-magnifying-glass mr-2 text-white/80" />
                 <input
-                  v-model="dateFrom"
-                  type="date"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+                  v-model="q"
+                  type="text"
+                  placeholder="Employee, title, room..."
+                  class="w-full bg-transparent text-[11px] text-white outline-none placeholder:text-white/70"
                 />
               </div>
+            </div>
 
-              <div>
-                <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
-                <input
-                  v-model="dateTo"
-                  type="date"
-                  class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
-                />
-              </div>
+            <div>
+              <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date From</label>
+              <input
+                v-model="dateFrom"
+                type="date"
+                class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+              />
+            </div>
 
-              <div class="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
-                  :disabled="loading"
-                  @click="refreshAll"
-                >
-                  <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
-                  Refresh
-                </button>
+            <div>
+              <label class="mb-1 block text-[11px] font-extrabold text-white/90">Date To</label>
+              <input
+                v-model="dateTo"
+                type="date"
+                class="w-full rounded-xl border border-white/25 bg-white/10 px-2.5 py-2 text-[11px] text-white outline-none"
+              />
+            </div>
 
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
-                  @click="exportExcel"
-                >
-                  <i class="fa-solid fa-file-excel text-[11px]" />
-                  Export
-                </button>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
+                :disabled="loading"
+                @click="refreshAll"
+              >
+                <i class="fa-solid fa-rotate text-[11px]" :class="loading ? 'fa-spin' : ''" />
+                Refresh
+              </button>
 
-                <button
-                  type="button"
-                  class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
-                  @click="resetSearch(); fetchRows()"
-                >
-                  <i class="fa-solid fa-broom text-[11px]" />
-                  Clear
-                </button>
-              </div>
+              <button
+                type="button"
+                class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
+                @click="exportExcel"
+              >
+                <i class="fa-solid fa-file-excel text-[11px]" />
+                Export
+              </button>
+
+              <button
+                type="button"
+                class="ui-btn ui-btn-soft !border-white/25 !bg-white/10 !text-white hover:!bg-white/15"
+                @click="resetSearch(); fetchRows()"
+              >
+                <i class="fa-solid fa-broom text-[11px]" />
+                Clear
+              </button>
             </div>
           </div>
         </div>
+      </div>
 
-        <div class="p-3">
-          <div v-if="loading && !processedRows.length" class="space-y-2">
-            <div class="ui-skeleton h-9 w-full" />
-            <div v-for="i in 3" :key="'sk-' + i" class="ui-skeleton h-14 w-full" />
+      <div class="room-inbox-body">
+        <div v-if="loading && !processedRows.length" class="space-y-2 p-3">
+          <div class="ui-skeleton h-9 w-full" />
+          <div v-for="i in 3" :key="'sk-' + i" class="ui-skeleton h-14 w-full" />
+        </div>
+
+        <div v-else>
+          <!-- Mobile -->
+          <div v-if="isMobile" class="space-y-2 p-3">
+            <div
+              v-if="!pagedRows.length"
+              class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400"
+            >
+              No room requests found.
+            </div>
+
+            <div v-for="row in pagedRows" :key="row._id" class="ui-card p-3">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                    {{ fmtDate(row.bookingDate) }} • {{ fmtTime(row.timeStart) }} - {{ fmtTime(row.timeEnd) }}
+                  </div>
+
+                  <div class="mt-1 flex flex-wrap items-center gap-2">
+                    <span :class="typeBadgeUiClass(row)">
+                      {{ bookingTypeLabel(row) }}
+                    </span>
+                    <span :class="overallStatusClass(row.overallStatus)">
+                      {{ row.overallStatus || '—' }}
+                    </span>
+                  </div>
+                </div>
+
+                <button class="ui-btn ui-btn-xs ui-btn-soft" type="button" @click="openDetail(row)">
+                  Detail
+                </button>
+              </div>
+
+              <div class="mt-2 ui-divider" />
+
+              <div class="mt-2 ui-frame p-2">
+                <div class="ui-label !mb-1">Requester</div>
+                <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
+                  {{ row.employee?.name || '—' }}
+                </div>
+                <div class="text-[10px] text-slate-500 dark:text-slate-400">
+                  {{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}
+                </div>
+              </div>
+
+              <div class="mt-2 ui-frame p-2">
+                <div class="ui-label !mb-1">Meeting Title</div>
+                <div class="text-[11px] text-slate-700 dark:text-slate-200">
+                  {{ row.meetingTitle || '—' }}
+                </div>
+              </div>
+
+              <div class="mt-2 grid gap-2">
+                <div class="mini-resource-card">
+                  <div class="mini-resource-head">
+                    <div class="mini-resource-title-wrap">
+                      <span class="mini-resource-icon mini-resource-icon-neutral">
+                        <i class="fa-solid fa-door-open" />
+                      </span>
+                      <div>
+                        <div class="mini-resource-title">Room</div>
+                        <div class="mini-resource-sub">
+                          {{ row.roomRequired ? (row.roomName || 'Unnamed Room') : 'Not Required' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span :class="sectionBadgeUiClass(row.roomStatus)">
+                      {{ row.roomStatus || '—' }}
+                    </span>
+                  </div>
+
+                  <div v-if="row.roomRequired" class="mt-2 service-grid-1">
+                    <span
+                      v-for="service in roomServiceItems(row)"
+                      :key="service.key"
+                      class="mini-chip mini-chip-green mini-chip-block"
+                    >
+                      <i class="fa-solid" :class="service.icon" />
+                      {{ service.label }}
+                    </span>
+
+                    <span
+                      v-if="!roomServiceItems(row).length"
+                      class="mini-chip mini-chip-green mini-chip-block"
+                    >
+                      <i class="fa-solid fa-minus" />
+                      No extra service
+                    </span>
+                  </div>
+
+                  <div class="mt-3 flex flex-wrap justify-end gap-2">
+                    <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(row)">
+                      <i class="fa-solid fa-eye text-[11px]" />
+                      Detail
+                    </button>
+
+                    <button
+                      v-if="isPendingRoom(row)"
+                      type="button"
+                      class="ui-btn ui-btn-primary ui-btn-xs"
+                      @click="openDecision(row, 'APPROVED')"
+                    >
+                      Approve
+                    </button>
+
+                    <button
+                      v-if="isPendingRoom(row)"
+                      type="button"
+                      class="ui-btn ui-btn-rose ui-btn-xs"
+                      @click="openDecision(row, 'REJECTED')"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+
+                <div class="mini-resource-card">
+                  <div class="mini-resource-head">
+                    <div class="mini-resource-title-wrap">
+                      <span class="mini-resource-icon mini-resource-icon-neutral">
+                        <i class="fa-solid fa-paperclip" />
+                      </span>
+                      <div>
+                        <div class="mini-resource-title">Material</div>
+                        <div class="mini-resource-sub">
+                          {{ row.materialRequired ? 'Attached items' : 'Not Required' }}
+                        </div>
+                      </div>
+                    </div>
+
+                    <span :class="sectionBadgeUiClass(row.materialStatus)">
+                      {{ row.materialStatus || '—' }}
+                    </span>
+                  </div>
+
+                  <div v-if="row.materialRequired" class="mt-2 service-grid-1">
+                    <span
+                      v-for="material in normalizedMaterialCards(row.materials)"
+                      :key="material.key"
+                      class="mini-chip mini-chip-green mini-chip-block"
+                    >
+                      <i class="fa-solid fa-paperclip" />
+                      {{ material.name }} x{{ material.qty }}
+                    </span>
+
+                    <span
+                      v-if="!normalizedMaterialCards(row.materials).length"
+                      class="mini-chip mini-chip-green mini-chip-block"
+                    >
+                      <i class="fa-solid fa-minus" />
+                      No material selected
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div v-else>
-            <div v-if="isMobile" class="space-y-2">
-              <div
-                v-if="!pagedRows.length"
-                class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400"
+          <!-- Desktop -->
+          <div v-else class="history-table-shell">
+            <div class="history-table-scroll">
+              <table class="ui-table history-table">
+                <thead>
+                  <tr>
+                    <th class="ui-th col-datetime text-center">Booking Date & Time</th>
+                    <th class="ui-th col-requester text-center">Requester</th>
+                    <th class="ui-th col-title text-center">Meeting Title</th>
+                    <th class="ui-th col-type text-center">Type</th>
+                    <th class="ui-th col-room text-center">Room</th>
+                    <th class="ui-th col-material text-center">Material</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  <tr v-if="!pagedRows.length">
+                    <td colspan="6" class="ui-td py-8 text-center text-slate-500 dark:text-slate-400">
+                      No room requests found.
+                    </td>
+                  </tr>
+
+                  <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover">
+                    <td class="ui-td align-middle text-center">
+                      <div class="flex flex-col items-center justify-center text-center">
+                        <span class="font-semibold text-slate-900 dark:text-slate-100">
+                          {{ fmtDate(row.bookingDate) }}
+                        </span>
+                        <span class="text-[11px] text-slate-500 dark:text-slate-400">
+                          {{ fmtTime(row.timeStart) }} - {{ fmtTime(row.timeEnd) }}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td class="ui-td align-middle text-center">
+                      <div class="flex flex-col items-center justify-center text-center">
+                        <div
+                          class="font-semibold text-slate-900 dark:text-slate-50 break-words"
+                          :title="row.employee?.name || '—'"
+                        >
+                          {{ row.employee?.name || '—' }}
+                        </div>
+                        <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                          {{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td class="ui-td align-middle text-center">
+                      <div class="flex items-center justify-center text-center">
+                        <div
+                          class="font-semibold text-slate-900 dark:text-slate-50 break-words"
+                          :title="row.meetingTitle || '—'"
+                        >
+                          {{ row.meetingTitle || '—' }}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td class="ui-td align-middle text-center">
+                      <div class="flex items-center justify-center">
+                        <span :class="typeBadgeUiClass(row)">
+                          {{ bookingTypeLabel(row) }}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td class="ui-td align-middle text-center">
+                      <div class="flex justify-center">
+                        <div class="resource-cell-card resource-cell-card-centered room-column-card">
+                          <div class="resource-cell-head resource-cell-head-centered">
+                            <div class="resource-cell-main resource-cell-main-centered">
+                              <div class="min-w-0 w-full">
+                                <div class="resource-cell-title text-center">
+                                  {{ row.roomRequired ? (row.roomName || 'Unnamed Room') : 'Not Required' }}
+                                </div>
+                              </div>
+                            </div>
+
+                            <span :class="sectionBadgeUiClass(row.roomStatus)">
+                              {{ row.roomStatus || '—' }}
+                            </span>
+                          </div>
+
+                          <div v-if="row.roomRequired" class="mt-2 service-grid-1">
+                            <span
+                              v-for="service in roomServiceItems(row)"
+                              :key="service.key"
+                              class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                            >
+                              <i class="fa-solid" :class="service.icon" />
+                              {{ service.label }}
+                            </span>
+
+                            <span
+                              v-if="!roomServiceItems(row).length"
+                              class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                            >
+                              <i class="fa-solid fa-minus" />
+                              No extra service
+                            </span>
+                          </div>
+
+                          <div class="room-inline-actions">
+                            <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(row)">
+                              <i class="fa-solid fa-eye text-[11px]" />
+                              Detail
+                            </button>
+
+                            <template v-if="isPendingRoom(row)">
+                              <button
+                                type="button"
+                                class="ui-btn ui-btn-primary ui-btn-xs"
+                                @click="openDecision(row, 'APPROVED')"
+                              >
+                                Approve
+                              </button>
+
+                              <button
+                                type="button"
+                                class="ui-btn ui-btn-rose ui-btn-xs"
+                                @click="openDecision(row, 'REJECTED')"
+                              >
+                                Reject
+                              </button>
+                            </template>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td class="ui-td align-middle text-center">
+                      <div class="flex justify-center">
+                        <div class="resource-cell-card resource-cell-card-centered">
+                          <div class="resource-cell-head resource-cell-head-centered">
+                            <div class="resource-cell-main resource-cell-main-centered">
+                              <div class="min-w-0 w-full">
+                                <div class="resource-cell-title text-center">
+                                  {{ row.materialRequired ? 'Attached Items' : '' }}
+                                </div>
+                              </div>
+                            </div>
+
+                            <span :class="sectionBadgeUiClass(row.materialStatus)">
+                              {{ row.materialStatus || '—' }}
+                            </span>
+                          </div>
+
+                          <div v-if="row.materialRequired" class="mt-2 service-grid-1">
+                            <span
+                              v-for="material in normalizedMaterialCards(row.materials)"
+                              :key="material.key"
+                              class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                            >
+                              <i class="fa-solid fa-paperclip" />
+                              {{ material.name }} x{{ material.qty }}
+                            </span>
+
+                            <span
+                              v-if="!normalizedMaterialCards(row.materials).length"
+                              class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
+                            >
+                              <i class="fa-solid fa-minus" />
+                              No material selected
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div
+            v-if="processedRows.length"
+            class="room-inbox-footer flex flex-col gap-1.5 border-t border-slate-200 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="flex items-center gap-2">
+              <select
+                v-model="perPage"
+                class="ui-select !h-8 !min-h-8 !w-[78px] !py-0 !pl-2.5 !pr-7 !text-[11px] !rounded-full"
               >
-                No room requests found.
-              </div>
-
-              <div v-for="row in pagedRows" :key="row._id" class="ui-card p-3">
-                <div class="flex items-start justify-between gap-2">
-                  <div class="min-w-0">
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400">
-                      {{ fmtDate(row.bookingDate) }} • {{ fmtTime(row.timeStart) }} - {{ fmtTime(row.timeEnd) }}
-                    </div>
-
-                    <div class="mt-1 flex flex-wrap items-center gap-2">
-                      <span :class="typeBadgeUiClass(row)">
-                        {{ bookingTypeLabel(row) }}
-                      </span>
-                      <span :class="overallStatusClass(row.overallStatus)">
-                        {{ row.overallStatus || '—' }}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button class="ui-btn ui-btn-xs ui-btn-soft" type="button" @click="openDetail(row)">
-                    Detail
-                  </button>
-                </div>
-
-                <div class="mt-2 ui-divider" />
-
-                <div class="mt-2 ui-frame p-2">
-                  <div class="ui-label !mb-1">Requester</div>
-                  <div class="text-[11px] font-semibold text-slate-800 dark:text-slate-100">
-                    {{ row.employee?.name || '—' }}
-                  </div>
-                  <div class="text-[10px] text-slate-500 dark:text-slate-400">
-                    {{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}
-                  </div>
-                </div>
-
-                <div class="mt-2 ui-frame p-2">
-                  <div class="ui-label !mb-1">Meeting Title</div>
-                  <div class="text-[11px] text-slate-700 dark:text-slate-200">
-                    {{ row.meetingTitle || '—' }}
-                  </div>
-                </div>
-
-                <div class="mt-2 grid gap-2">
-                  <div class="mini-resource-card">
-                    <div class="mini-resource-head">
-                      <div class="mini-resource-title-wrap">
-                        <span class="mini-resource-icon mini-resource-icon-neutral">
-                          <i class="fa-solid fa-door-open" />
-                        </span>
-                        <div>
-                          <div class="mini-resource-title">Room</div>
-                          <div class="mini-resource-sub">
-                            {{ row.roomRequired ? (row.roomName || 'Unnamed Room') : 'Not Required' }}
-                          </div>
-                        </div>
-                      </div>
-
-                      <span :class="sectionBadgeUiClass(row.roomStatus)">
-                        {{ row.roomStatus || '—' }}
-                      </span>
-                    </div>
-
-                    <div v-if="row.roomRequired" class="mt-2 service-grid-1">
-                      <span
-                        v-for="service in roomServiceItems(row)"
-                        :key="service.key"
-                        class="mini-chip mini-chip-green mini-chip-block"
-                      >
-                        <i class="fa-solid" :class="service.icon" />
-                        {{ service.label }}
-                      </span>
-
-                      <span
-                        v-if="!roomServiceItems(row).length"
-                        class="mini-chip mini-chip-green mini-chip-block"
-                      >
-                        <i class="fa-solid fa-minus" />
-                        No extra service
-                      </span>
-                    </div>
-                  </div>
-
-                  <div class="mini-resource-card">
-                    <div class="mini-resource-head">
-                      <div class="mini-resource-title-wrap">
-                        <span class="mini-resource-icon mini-resource-icon-neutral">
-                          <i class="fa-solid fa-paperclip" />
-                        </span>
-                        <div>
-                          <div class="mini-resource-title">Material</div>
-                          <div class="mini-resource-sub">
-                            {{ row.materialRequired ? 'Attached items' : 'Not Required' }}
-                          </div>
-                        </div>
-                      </div>
-
-                      <span :class="sectionBadgeUiClass(row.materialStatus)">
-                        {{ row.materialStatus || '—' }}
-                      </span>
-                    </div>
-
-                    <div v-if="row.materialRequired" class="mt-2 service-grid-1">
-                      <span
-                        v-for="material in normalizedMaterialCards(row.materials)"
-                        :key="material.key"
-                        class="mini-chip mini-chip-green mini-chip-block"
-                      >
-                        <i class="fa-solid fa-paperclip" />
-                        {{ material.name }} x{{ material.qty }}
-                      </span>
-
-                      <span
-                        v-if="!normalizedMaterialCards(row.materials).length"
-                        class="mini-chip mini-chip-green mini-chip-block"
-                      >
-                        <i class="fa-solid fa-minus" />
-                        No material selected
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="mt-3 flex justify-end gap-2">
-                  <button
-                    v-if="isPendingRoom(row)"
-                    type="button"
-                    class="ui-btn ui-btn-primary ui-btn-xs"
-                    @click="openDecision(row, 'APPROVED')"
-                  >
-                    Approve
-                  </button>
-
-                  <button
-                    v-if="isPendingRoom(row)"
-                    type="button"
-                    class="ui-btn ui-btn-rose ui-btn-xs"
-                    @click="openDecision(row, 'REJECTED')"
-                  >
-                    Reject
-                  </button>
-                </div>
-              </div>
+                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
+              </select>
             </div>
 
-            <div v-else class="history-table-shell">
-              <div class="history-table-scroll">
-                <table class="ui-table history-table">
-                  <thead>
-                    <tr>
-                      <th class="ui-th col-datetime text-center">Booking Date & Time</th>
-                      <th class="ui-th col-requester text-center">Requester</th>
-                      <th class="ui-th col-title text-center">Meeting Title</th>
-                      <th class="ui-th col-type text-center">Type</th>
-                      <th class="ui-th col-room text-center">Room</th>
-                      <th class="ui-th col-material text-center">Material</th>
-                      <th class="ui-th col-status text-center">Overall</th>
-                      <th class="ui-th col-actions text-center">Actions</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                    <tr v-if="!pagedRows.length">
-                      <td colspan="8" class="ui-td py-8 text-center text-slate-500 dark:text-slate-400">
-                        No room requests found.
-                      </td>
-                    </tr>
-
-                    <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover">
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex flex-col items-center justify-center text-center">
-                          <span class="font-semibold text-slate-900 dark:text-slate-100">
-                            {{ fmtDate(row.bookingDate) }}
-                          </span>
-                          <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                            {{ fmtTime(row.timeStart) }} - {{ fmtTime(row.timeEnd) }}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex flex-col items-center justify-center text-center">
-                          <div
-                            class="font-semibold text-slate-900 dark:text-slate-50 break-words"
-                            :title="row.employee?.name || '—'"
-                          >
-                            {{ row.employee?.name || '—' }}
-                          </div>
-                          <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
-                            {{ row.employeeId || '—' }} • {{ row.employee?.department || '—' }}
-                          </div>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex items-center justify-center text-center">
-                          <div
-                            class="font-semibold text-slate-900 dark:text-slate-50 break-words"
-                            :title="row.meetingTitle || '—'"
-                          >
-                            {{ row.meetingTitle || '—' }}
-                          </div>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex items-center justify-center">
-                          <span :class="typeBadgeUiClass(row)">
-                            {{ bookingTypeLabel(row) }}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex justify-center">
-                          <div class="resource-cell-card resource-cell-card-centered">
-                            <div class="resource-cell-head resource-cell-head-centered">
-                              <div class="resource-cell-main resource-cell-main-centered">
-                                <div class="min-w-0 w-full">
-                                  <div class="resource-cell-title text-center">
-                                    {{ row.roomRequired ? (row.roomName || 'Unnamed Room') : 'Not Required' }}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <span :class="sectionBadgeUiClass(row.roomStatus)">
-                                {{ row.roomStatus || '—' }}
-                              </span>
-                            </div>
-
-                            <div v-if="row.roomRequired" class="mt-2 service-grid-1">
-                              <span
-                                v-for="service in roomServiceItems(row)"
-                                :key="service.key"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
-                              >
-                                <i class="fa-solid" :class="service.icon" />
-                                {{ service.label }}
-                              </span>
-
-                              <span
-                                v-if="!roomServiceItems(row).length"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
-                              >
-                                <i class="fa-solid fa-minus" />
-                                No extra service
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex justify-center">
-                          <div class="resource-cell-card resource-cell-card-centered">
-                            <div class="resource-cell-head resource-cell-head-centered">
-                              <div class="resource-cell-main resource-cell-main-centered">
-                                <div class="min-w-0 w-full">
-                                  <div class="resource-cell-title text-center">
-                                    {{ row.materialRequired ? 'Attached Items' : '' }}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <span :class="sectionBadgeUiClass(row.materialStatus)">
-                                {{ row.materialStatus || '—' }}
-                              </span>
-                            </div>
-
-                            <div v-if="row.materialRequired" class="mt-2 service-grid-1">
-                              <span
-                                v-for="material in normalizedMaterialCards(row.materials)"
-                                :key="material.key"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
-                              >
-                                <i class="fa-solid fa-paperclip" />
-                                {{ material.name }} x{{ material.qty }}
-                              </span>
-
-                              <span
-                                v-if="!normalizedMaterialCards(row.materials).length"
-                                class="mini-chip mini-chip-sm mini-chip-green mini-chip-block mini-chip-centered"
-                              >
-                                <i class="fa-solid fa-minus" />
-                                No material selected
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex items-center justify-center">
-                          <span :class="overallStatusClass(row.overallStatus)">
-                            {{ row.overallStatus || '—' }}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td class="ui-td align-middle text-center">
-                        <div class="flex items-center justify-center gap-2">
-                          <button class="ui-btn ui-btn-soft ui-btn-xs" type="button" @click="openDetail(row)">
-                            <i class="fa-solid fa-eye text-[11px]" />
-                          </button>
-
-                          <button
-                            v-if="isPendingRoom(row)"
-                            type="button"
-                            class="ui-btn ui-btn-primary ui-btn-xs"
-                            @click="openDecision(row, 'APPROVED')"
-                          >
-                            Approve
-                          </button>
-
-                          <button
-                            v-if="isPendingRoom(row)"
-                            type="button"
-                            class="ui-btn ui-btn-rose ui-btn-xs"
-                            @click="openDecision(row, 'REJECTED')"
-                          >
-                            Reject
-                          </button>
-
-                          <span
-                            v-if="!isPendingRoom(row)"
-                            class="text-[11px] text-slate-400 dark:text-slate-500"
-                          >
-                            —
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div
-              v-if="processedRows.length"
-              class="mt-3 flex flex-col gap-1.5 border-t border-slate-200 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div class="flex items-center gap-2">
-                <select
-                  v-model="perPage"
-                  class="ui-select !h-8 !min-h-8 !w-[78px] !py-0 !pl-2.5 !pr-7 !text-[11px] !rounded-full"
-                >
-                  <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-                </select>
-              </div>
-
-              <div class="flex items-center justify-end gap-1">
-                <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
-                <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">
-                  Prev
-                </button>
-                <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
-                <button
-                  type="button"
-                  class="ui-pagebtn"
-                  :disabled="page >= pageCount"
-                  @click="page = Math.min(pageCount, page + 1)"
-                >
-                  Next
-                </button>
-                <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
-              </div>
+            <div class="flex items-center justify-end gap-1">
+              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
+              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">
+                Prev
+              </button>
+              <span class="px-2 font-extrabold">Page {{ page }} / {{ pageCount }}</span>
+              <button
+                type="button"
+                class="ui-pagebtn"
+                :disabled="page >= pageCount"
+                @click="page = Math.min(pageCount, page + 1)"
+              >
+                Next
+              </button>
+              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
             </div>
           </div>
         </div>
@@ -1280,6 +1242,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <!-- Decision Modal -->
       <div v-if="decisionOpen && decisionRow" class="ui-modal-backdrop" @click.self="closeDecision">
         <div class="ui-modal ui-modal-md p-0 overflow-hidden">
           <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
@@ -1389,11 +1352,51 @@ onBeforeUnmount(() => {
   max-height: calc(100vh - 16px);
 }
 
+.room-inbox-page {
+  width: 100%;
+  min-height: 100%;
+  padding: 0;
+}
+
+.room-inbox-shell {
+  width: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.88);
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.dark .room-inbox-shell {
+  background: rgba(2, 6, 23, 0.4);
+  border-top-color: rgba(51, 65, 85, 0.9);
+  border-bottom-color: rgba(51, 65, 85, 0.9);
+}
+
+.room-inbox-hero {
+  border-radius: 0;
+  margin: 0;
+  padding: 12px;
+}
+
+.room-inbox-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.room-inbox-footer {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.dark .room-inbox-footer {
+  background: rgba(2, 6, 23, 0.35);
+}
+
 .history-table-shell {
   width: 100%;
   max-width: 100%;
   overflow: hidden;
-  border-radius: 18px;
 }
 
 .history-table-scroll {
@@ -1406,9 +1409,11 @@ onBeforeUnmount(() => {
 }
 
 .history-table {
-  width: max-content;
+  width: 100%;
   min-width: 100%;
   table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
 }
 
 .col-datetime {
@@ -1418,38 +1423,28 @@ onBeforeUnmount(() => {
 }
 
 .col-requester {
-  min-width: 160px;
-  width: 170px;
+  min-width: 180px;
+  width: 190px;
 }
 
 .col-title {
-  min-width: 180px;
+  min-width: 220px;
   width: auto;
 }
 
 .col-type {
-  width: 145px;
+  width: 140px;
   white-space: nowrap;
 }
 
 .col-room {
-  min-width: 210px;
-  width: 220px;
+  min-width: 285px;
+  width: 300px;
 }
 
 .col-material {
   min-width: 220px;
   width: 230px;
-}
-
-.col-status {
-  width: 1%;
-  white-space: nowrap;
-}
-
-.col-actions {
-  width: 1%;
-  white-space: nowrap;
 }
 
 .history-table-scroll::-webkit-scrollbar {
@@ -1568,6 +1563,18 @@ onBeforeUnmount(() => {
   margin-right: auto;
 }
 
+.room-column-card {
+  gap: 10px;
+}
+
+.room-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
 .resource-cell-head {
   display: grid;
   grid-template-columns: 1fr auto;
@@ -1593,26 +1600,6 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.resource-cell-icon {
-  width: 30px;
-  height: 30px;
-  border-radius: 9999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.resource-cell-icon-neutral {
-  background: rgb(241 245 249);
-  color: rgb(71 85 105);
-}
-
-.dark .resource-cell-icon-neutral {
-  background: rgba(51, 65, 85, 0.7);
-  color: rgb(226 232 240);
-}
-
 .resource-cell-title {
   font-size: 12px;
   font-weight: 700;
@@ -1624,16 +1611,6 @@ onBeforeUnmount(() => {
 
 .dark .resource-cell-title {
   color: rgb(241 245 249);
-}
-
-.resource-cell-sub {
-  margin-top: 2px;
-  font-size: 10px;
-  color: rgb(100 116 139);
-}
-
-.dark .resource-cell-sub {
-  color: rgb(148 163 184);
 }
 
 .resource-detail-card {
@@ -1766,15 +1743,19 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1279px) {
-  .col-room,
+  .col-room {
+    min-width: 260px;
+    width: 270px;
+  }
+
   .col-material {
-    min-width: 190px;
+    min-width: 200px;
   }
 }
 
 @media (max-width: 1023px) {
   .history-table {
-    min-width: 1180px;
+    min-width: 1120px;
   }
 }
 </style>
