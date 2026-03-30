@@ -1,23 +1,23 @@
 <script setup>
-defineProps({
-  loading: Boolean,
-  rows: Array,
-  selectedDate: String,
-  focusId: String,
-  updating: Object,
-  nextStatuses: Function,
-  canChangeStatus: Function,
-  canForceComplete: Function,
-  statusBadgeClass: Function,
-  ackBadgeClass: Function,
-  statusButtonClass: Function,
-  prettyStops: Function,
-  assigneeName: Function,
-  responseLabel: Function,
-  paxDisplay: Function,
+const props = defineProps({
+  loading: { type: Boolean, default: false },
+  rows: { type: Array, default: () => [] },
+  selectedDate: { type: String, default: '' },
+  focusId: { type: String, default: '' },
+  updating: { type: Object, default: () => ({}) },
+  nextStatuses: { type: Function, required: true },
+  canChangeStatus: { type: Function, required: true },
+  canForceComplete: { type: Function, required: true },
+  statusBadgeClass: { type: Function, required: true },
+  ackBadgeClass: { type: Function, required: true },
+  statusButtonClass: { type: Function, required: true },
+  prettyStops: { type: Function, required: true },
+  assigneeName: { type: Function, required: true },
+  responseLabel: { type: Function, required: true },
+  paxDisplay: { type: Function, required: true },
 })
 
-defineEmits([
+const emit = defineEmits([
   'open-ticket',
   'edit',
   'assign',
@@ -26,132 +26,226 @@ defineEmits([
   'status',
   'force-complete',
 ])
+
+function isBusy(item) {
+  return !!props.updating?.[item?._id]
+}
+
+function formatTimeRange(item) {
+  return `${item?.timeStart || '--:--'} - ${item?.timeEnd || '--:--'}`
+}
+
+function isFocused(item) {
+  return String(item?._id || '') === String(props.focusId || '')
+}
+
+function assignedText(item) {
+  const name = props.assigneeName(item)
+  return name || 'Unassigned'
+}
 </script>
 
 <template>
-  <div class="mobile-list">
+  <div class="space-y-3">
     <div
       v-if="loading"
-      class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500
-             dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+      class="rounded-2xl border border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
     >
-      Loading bookings…
-    </div>
-
-    <div v-else-if="!rows.length" class="py-4 text-center text-xs text-slate-500 dark:text-slate-400">
-      No bookings<span v-if="selectedDate"> on {{ selectedDate }}</span>.
+      Loading schedule...
     </div>
 
     <div
-      v-for="item in rows"
-      v-else
-      :key="item._id"
-      class="booking-card"
-      :class="{ 'ring-2 ring-amber-400': focusId === String(item._id) }"
+      v-else-if="!rows.length"
+      class="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
     >
-      <div class="bc-top">
-        <div>
-          <div class="bc-date">{{ item.tripDate || selectedDate }}</div>
-          <div class="bc-time mono">{{ item.timeStart }} – {{ item.timeEnd }}</div>
-        </div>
+      No bookings found for {{ selectedDate || 'this date' }}.
+    </div>
 
-        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold" :class="statusBadgeClass(item.status)">
-          {{ item.status }}
-        </span>
-      </div>
+    <article
+      v-for="item in rows"
+      :key="item._id"
+      :class="[
+        'overflow-hidden rounded-2xl border bg-white shadow-sm transition',
+        isFocused(item)
+          ? 'border-sky-400 ring-2 ring-sky-200 dark:border-sky-500 dark:ring-sky-900/40'
+          : 'border-slate-200 dark:border-slate-700',
+        'dark:bg-slate-900',
+      ]"
+    >
+      <!-- top -->
+      <div class="border-b border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {{ item.tripDate || selectedDate || '—' }}
+            </p>
+            <p class="text-base font-bold text-slate-900 dark:text-slate-100">
+              {{ formatTimeRange(item) }}
+            </p>
+          </div>
 
-      <div class="bc-middle">
-        <div class="bc-requester">
-          <div class="bc-req-name">{{ item.employee?.name || '—' }}</div>
-          <div class="bc-req-meta text-[11px] text-slate-500 dark:text-slate-400">
-            {{ item.employee?.department || '—' }} • ID {{ item.employeeId }}
+          <div class="shrink-0">
+            <span
+              :class="[
+                'inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide',
+                statusBadgeClass(item.status),
+              ]"
+            >
+              {{ item.status || '—' }}
+            </span>
           </div>
         </div>
 
-        <div class="bc-assignee">
+        <div class="mt-3 flex flex-wrap gap-2">
           <span
-            v-if="assigneeName(item)"
-            class="assignee-chip inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold"
-            :class="item.category === 'Messenger' ? 'bg-orange-500 text-white' : 'bg-indigo-500 text-white'"
+            class="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
           >
-            {{ assigneeName(item) }}
+            {{ item.category || 'Car' }}
           </span>
+
           <span
-            v-else
-            class="assignee-chip inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-700 dark:text-slate-100"
+            :class="[
+              'inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold',
+              ackBadgeClass(responseLabel(item)),
+            ]"
           >
-            Unassigned
-          </span>
-        </div>
-      </div>
-
-      <div class="bc-body">
-        <div class="lbl">Destination</div>
-        <div class="bc-itinerary">
-          {{ prettyStops(item.stops) }}
-          <button
-            v-if="item.ticketUrl"
-            type="button"
-            class="ml-2 inline-flex items-center rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100
-                   dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-            @click.stop="$emit('open-ticket', item.ticketUrl)"
-          >
-            Ticket
-          </button>
-        </div>
-
-        <div class="lbl mt-2">Purpose</div>
-        <div class="purpose-text-mobile">{{ item.purpose || '—' }}</div>
-
-        <div class="lbl mt-2">Driver / Messenger response</div>
-        <div>
-          <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="ackBadgeClass(responseLabel(item))">
             {{ responseLabel(item) }}
           </span>
+
+          <span
+            class="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            Pax: {{ paxDisplay(item.pax) }}
+          </span>
         </div>
       </div>
 
-      <div class="bc-bottom">
-        <div class="text-[11px] text-slate-600 dark:text-slate-300">
-          Pax: <strong>{{ paxDisplay(item.passengers) }}</strong>
+      <!-- body -->
+      <div class="space-y-3 px-4 py-3">
+        <div>
+          <p class="text-base font-semibold leading-tight text-slate-900 dark:text-slate-100">
+            {{ item.employee?.name || 'Unknown employee' }}
+          </p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+            {{ item.employee?.department || '—' }}<span v-if="item.employeeId"> • ID {{ item.employeeId }}</span>
+          </p>
         </div>
 
-        <div class="bc-actions">
-          <button type="button" class="text-[11px] font-semibold text-sky-700 hover:underline dark:text-sky-300" @click.stop="$emit('edit', item)">
+        <div class="grid grid-cols-1 gap-3">
+          <div>
+            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Destination
+            </p>
+            <p class="mt-1 text-sm text-slate-800 dark:text-slate-100 break-words">
+              {{ prettyStops(item.stops || []) }}
+            </p>
+          </div>
+
+          <div v-if="item.purpose">
+            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Purpose
+            </p>
+            <p class="mt-1 text-sm text-slate-800 dark:text-slate-100 break-words">
+              {{ item.purpose }}
+            </p>
+          </div>
+
+          <div>
+            <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              Driver / Messenger
+            </p>
+            <p class="mt-1 text-sm text-slate-800 dark:text-slate-100">
+              {{ assignedText(item) }}
+            </p>
+          </div>
+        </div>
+
+        <div
+          v-if="item.ticketUrl"
+          class="rounded-xl border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/60"
+        >
+          <button
+            type="button"
+            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            @click="emit('open-ticket', item.ticketUrl)"
+          >
+            Open ticket
+          </button>
+        </div>
+      </div>
+
+      <!-- main actions -->
+      <div class="border-t border-slate-100 px-4 py-3 dark:border-slate-800">
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            @click="emit('edit', item)"
+          >
             Edit
           </button>
 
           <button
-            v-for="s in nextStatuses(item.status)"
-            :key="s"
             type="button"
-            :class="[statusButtonClass(s), 'disabled:opacity-50']"
-            :disabled="!canChangeStatus(item, s) || !!updating[item._id]"
-            @click.stop="String(s).toUpperCase() === 'CANCELLED' ? $emit('cancel', item) : $emit('status', item, s)"
+            class="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200"
+            @click="emit('assign', item)"
           >
-            {{ s }}
-          </button>
-
-          <button
-            v-if="canForceComplete(item)"
-            type="button"
-            class="inline-flex items-center rounded-full border border-green-500 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-100 disabled:opacity-50
-                   dark:border-green-500 dark:bg-green-900/30 dark:text-green-200 dark:hover:bg-green-900/40"
-            :disabled="!!updating[item._id]"
-            @click.stop="$emit('force-complete', item)"
-          >
-            COMPLETE
-          </button>
-
-          <button type="button" class="text-[11px] font-semibold text-emerald-700 hover:underline dark:text-emerald-300" @click.stop="$emit('assign', item)">
             Assign
           </button>
 
-          <button type="button" class="text-[11px] font-semibold text-slate-700 hover:underline dark:text-slate-200" @click.stop="$emit('details', item)">
+          <button
+            type="button"
+            class="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+            @click="emit('details', item)"
+          >
             Details
           </button>
+
+          <button
+            type="button"
+            class="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-700 dark:bg-rose-950/40 dark:text-rose-200"
+            @click="emit('cancel', item)"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <!-- status actions -->
+        <div
+          v-if="nextStatuses(item.status).length"
+          class="mt-3"
+        >
+          <p class="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            Status actions
+          </p>
+
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="next in nextStatuses(item.status)"
+              :key="next"
+              type="button"
+              :disabled="isBusy(item) || !canChangeStatus(item, next)"
+              :class="[
+                statusButtonClass(next),
+                'disabled:cursor-not-allowed disabled:opacity-50',
+              ]"
+              @click="emit('status', item, next)"
+            >
+              {{ next }}
+            </button>
+
+            <button
+              v-if="canForceComplete(item)"
+              type="button"
+              class="inline-flex items-center rounded-full border border-green-500 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700 transition hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-green-700 dark:bg-green-950/40 dark:text-green-200"
+              :disabled="isBusy(item)"
+              @click="emit('force-complete', item)"
+            >
+              Force complete
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </article>
   </div>
 </template>

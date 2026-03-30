@@ -1,20 +1,20 @@
 <script setup>
-defineProps({
-  selectedDate: String,
-  statusFilter: String,
-  categoryFilter: String,
-  qSearch: String,
-  itemsPerPage: Number,
-  exportFrom: String,
-  exportTo: String,
-  loading: Boolean,
-  perPageOptions: {
-    type: Array,
-    default: () => [10, 20, 50],
-  },
+import { computed } from 'vue'
+import dayjs from 'dayjs'
+
+const props = defineProps({
+  selectedDate: { type: String, default: '' },
+  statusFilter: { type: String, default: 'ALL' },
+  categoryFilter: { type: String, default: 'ALL' },
+  qSearch: { type: String, default: '' },
+  itemsPerPage: { type: Number, default: 10 },
+  exportFrom: { type: String, default: '' },
+  exportTo: { type: String, default: '' },
+  loading: { type: Boolean, default: false },
+  perPageOptions: { type: Array, default: () => [10, 20, 50] },
 })
 
-defineEmits([
+const emit = defineEmits([
   'update:selectedDate',
   'update:statusFilter',
   'update:categoryFilter',
@@ -25,116 +25,199 @@ defineEmits([
   'refresh',
   'export',
 ])
+
+const statusOptions = computed(() => [
+  { value: 'ALL', label: 'All statuses' },
+  { value: 'PENDING', label: 'Pending' },
+  { value: 'ACCEPTED', label: 'Accepted' },
+  { value: 'ON_ROAD', label: 'On road' },
+  { value: 'ARRIVING', label: 'Arriving' },
+  { value: 'COMEBACK', label: 'Comeback' },
+  { value: 'DELAYED', label: 'Delayed' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+])
+
+const categoryOptions = computed(() => [
+  { value: 'ALL', label: 'All categories' },
+  { value: 'Car', label: 'Car' },
+  { value: 'Messenger', label: 'Messenger' },
+])
+
+function setTodayRange() {
+  const today = dayjs().format('YYYY-MM-DD')
+  emit('update:selectedDate', today)
+  emit('update:exportFrom', today)
+  emit('update:exportTo', today)
+}
 </script>
 
 <template>
-  <div
-    class="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50
-           px-2 py-2 sm:px-3 dark:border-slate-700 dark:bg-slate-900/80"
-  >
-    <input
-      :value="selectedDate"
-      type="date"
-      class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-             outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-      @input="$emit('update:selectedDate', $event.target.value)"
-    />
+  <div class="border-b border-slate-200 px-2 py-2 dark:border-slate-700 sm:px-3">
+    <div class="space-y-2">
+      <!-- mobile -->
+      <div class="grid grid-cols-2 gap-2 sm:hidden">
+        <input
+          :value="selectedDate"
+          type="date"
+          class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:selectedDate', $event.target.value)"
+        />
 
-    <select
-      :value="statusFilter"
-      class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-             outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-      @change="$emit('update:statusFilter', $event.target.value)"
-    >
-      <option value="ALL">All statuses</option>
-      <option value="PENDING">PENDING</option>
-      <option value="ACCEPTED">ACCEPTED</option>
-      <option value="ON_ROAD">ON_ROAD</option>
-      <option value="ARRIVING">ARRIVING</option>
-      <option value="COMEBACK">COMEBACK</option>
-      <option value="COMPLETED">COMPLETED</option>
-      <option value="DELAYED">DELAYED</option>
-      <option value="CANCELLED">CANCELLED</option>
-    </select>
+        <select
+          :value="statusFilter"
+          class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @change="emit('update:statusFilter', $event.target.value)"
+        >
+          <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
 
-    <select
-      :value="categoryFilter"
-      class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-             outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-      @change="$emit('update:categoryFilter', $event.target.value)"
-    >
-      <option value="ALL">All categories</option>
-      <option value="Car">Car</option>
-      <option value="Messenger">Messenger</option>
-    </select>
+        <select
+          :value="categoryFilter"
+          class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @change="emit('update:categoryFilter', $event.target.value)"
+        >
+          <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
 
-    <input
-      :value="qSearch"
-      type="text"
-      placeholder="Search requester / purpose / destination / assignee / response"
-      class="h-8 w-full max-w-xs flex-1 rounded-lg border border-slate-300 bg-white px-2 text-xs
-             text-slate-900 placeholder-slate-400
-             outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder-slate-500"
-      @input="$emit('update:qSearch', $event.target.value)"
-    />
+        <select
+          :value="itemsPerPage"
+          class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @change="emit('update:itemsPerPage', Number($event.target.value))"
+        >
+          <option v-for="n in perPageOptions" :key="n" :value="n">{{ n }}/page</option>
+        </select>
 
-    <select
-      :value="itemsPerPage"
-      class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-             outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
-             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-      @change="$emit('update:itemsPerPage', Number($event.target.value))"
-    >
-      <option v-for="opt in perPageOptions" :key="opt" :value="opt">{{ opt }}/page</option>
-    </select>
+        <input
+          :value="qSearch"
+          type="text"
+          placeholder="Search request..."
+          class="col-span-2 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:qSearch', $event.target.value)"
+        />
 
-    <button
-      type="button"
-      class="inline-flex h-8 items-center justify-center rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 hover:bg-slate-100
-             dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-      :disabled="loading"
-      @click="$emit('refresh')"
-    >
-      <span
-        v-if="loading"
-        class="mr-1 inline-block h-3 w-3 animate-spin rounded-full border-[2px] border-slate-500 border-t-transparent"
-      />
-      Refresh
-    </button>
+        <input
+          :value="exportFrom"
+          type="date"
+          class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:exportFrom', $event.target.value)"
+        />
 
-    <div class="flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300">
-      <span class="hidden sm:inline">Export:</span>
-      <input
-        :value="exportFrom"
-        type="date"
-        class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-               outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500
-               dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-        @input="$emit('update:exportFrom', $event.target.value)"
-      />
-      <span>→</span>
-      <input
-        :value="exportTo"
-        type="date"
-        class="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs text-slate-900
-               outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500
-               dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
-        @input="$emit('update:exportTo', $event.target.value)"
-      />
+        <input
+          :value="exportTo"
+          type="date"
+          class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-[13px] outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:exportTo', $event.target.value)"
+        />
+
+        <button
+          type="button"
+          class="h-10 rounded-xl border border-slate-300 bg-white px-3 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          :disabled="loading"
+          @click="emit('refresh')"
+        >
+          Refresh
+        </button>
+
+        <button
+          type="button"
+          class="h-10 rounded-xl bg-emerald-600 px-3 text-[13px] font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-60"
+          :disabled="loading"
+          @click="emit('export')"
+        >
+          Export Excel
+        </button>
+      </div>
+
+      <!-- desktop -->
+      <div class="hidden sm:grid sm:grid-cols-12 sm:gap-2">
+        <input
+          :value="selectedDate"
+          type="date"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:selectedDate', $event.target.value)"
+        />
+
+        <select
+          :value="statusFilter"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @change="emit('update:statusFilter', $event.target.value)"
+        >
+          <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+
+        <select
+          :value="categoryFilter"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @change="emit('update:categoryFilter', $event.target.value)"
+        >
+          <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
+
+        <input
+          :value="qSearch"
+          type="text"
+          placeholder="Search request..."
+          class="col-span-3 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:qSearch', $event.target.value)"
+        />
+
+        <select
+          :value="itemsPerPage"
+          class="col-span-1 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @change="emit('update:itemsPerPage', Number($event.target.value))"
+        >
+          <option v-for="n in perPageOptions" :key="n" :value="n">{{ n }}/page</option>
+        </select>
+
+        <button
+          type="button"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          :disabled="loading"
+          @click="emit('refresh')"
+        >
+          Refresh
+        </button>
+
+        <input
+          :value="exportFrom"
+          type="date"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:exportFrom', $event.target.value)"
+        />
+
+        <input
+          :value="exportTo"
+          type="date"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm outline-none transition focus:border-sky-500 dark:border-slate-600 dark:bg-slate-900"
+          @input="emit('update:exportTo', $event.target.value)"
+        />
+
+        <button
+          type="button"
+          class="col-span-2 h-10 rounded-xl bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-60"
+          :disabled="loading"
+          @click="emit('export')"
+        >
+          Export Excel
+        </button>
+
+        <button
+          type="button"
+          class="col-span-2 h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+          @click="setTodayRange"
+        >
+          Today
+        </button>
+      </div>
     </div>
-
-    <button
-      type="button"
-      class="inline-flex h-8 items-center justify-center rounded-lg border border-emerald-500 bg-emerald-600 px-2 text-xs font-semibold text-white hover:bg-emerald-500
-             disabled:opacity-60 dark:border-emerald-500 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-      :disabled="loading"
-      @click="$emit('export')"
-    >
-      Export Excel
-    </button>
   </div>
 </template>

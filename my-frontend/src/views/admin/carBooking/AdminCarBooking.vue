@@ -971,7 +971,7 @@ watch(
         {{ error }}
       </div>
 
-      <div class="px-2 py-2 sm:px-3 sm:py-3">
+      <div class="px-1.5 py-2 sm:px-3 sm:py-3">
         <CarBookingMobileList
           v-if="isMobile"
           :loading="loading"
