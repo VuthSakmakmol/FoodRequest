@@ -43,6 +43,11 @@ const form = ref({
   bookingDate: dayjs().format('YYYY-MM-DD'),
   endDate: dayjs().format('YYYY-MM-DD'),
   recurring: false,
+
+  recurrenceFrequency: 'DAILY',
+  recurrenceInterval: 1,
+  recurrenceWeekDays: [],
+
   skipHoliday: true,
 
   timeStart: '',
@@ -66,6 +71,7 @@ const form = ref({
 
   needCoffeeBreak: false,
   needNameOnTable: false,
+  needWifiPassword: false,
 })
 
 function s(v) {
@@ -153,6 +159,14 @@ function extractBackendMessage(error, fallback = 'Unable to process request.') {
   if (unique.length > 1) return `• ${unique.join('\n• ')}`
   return fallback
 }
+
+const selectedRoomObj = computed(() => {
+  if (!s(form.value.roomId)) return null
+
+  return (Array.isArray(activeRooms.value) ? activeRooms.value : []).find(
+    (x) => s(x?._id) === s(form.value.roomId)
+  ) || null
+})
 
 function syncLegacyTimeParts() {
   const start = s(form.value.timeStart)
@@ -525,8 +539,20 @@ function validateForm() {
 
   if (f.recurring) {
     if (!s(f.endDate)) e.push('End date is required for recurring booking.')
+
     if (s(f.endDate) && dayjs(f.endDate).isBefore(dayjs(f.bookingDate), 'day')) {
       e.push('End date must be the same or after booking date.')
+    }
+
+    if (Number(f.recurrenceInterval || 0) <= 0) {
+      e.push('Repeat every must be greater than 0.')
+    }
+
+    if (
+      s(f.recurrenceFrequency) === 'WEEKLY' &&
+      !(Array.isArray(f.recurrenceWeekDays) && f.recurrenceWeekDays.length)
+    ) {
+      e.push('Please choose at least one weekday for weekly recurring.')
     }
   }
 
@@ -570,14 +596,29 @@ async function submit() {
       employeeId: s(form.value.employeeId),
       bookingDate: s(form.value.bookingDate),
       endDate: form.value.recurring ? s(form.value.endDate) : '',
+
+      recurrenceFrequency: form.value.recurring
+        ? s(form.value.recurrenceFrequency || 'WEEKLY')
+        : '',
+      recurrenceInterval: form.value.recurring
+        ? Math.max(1, Number(form.value.recurrenceInterval || 1))
+        : 1,
+      recurrenceWeekDays: form.value.recurring
+        ? (Array.isArray(form.value.recurrenceWeekDays) ? form.value.recurrenceWeekDays : [])
+        : [],
+
       skipHoliday: !!form.value.skipHoliday,
+
       timeStart: s(form.value.timeStart),
       timeEnd: s(form.value.timeEnd),
+
       meetingTitle: compactText(form.value.meetingTitle),
       participantEstimate: Number(form.value.participantEstimate || 1),
       note: compactText(form.value.note),
+
       needCoffeeBreak: form.value.roomRequired ? !!form.value.needCoffeeBreak : false,
       needNameOnTable: form.value.roomRequired ? !!form.value.needNameOnTable : false,
+      needWifiPassword: form.value.roomRequired ? !!form.value.needWifiPassword : false,
 
       roomRequired: !!form.value.roomRequired,
       roomId: form.value.roomRequired ? (form.value.roomId || null) : null,
@@ -812,6 +853,7 @@ onBeforeUnmount(() => {
             <BookingRoomRecurringSection
               :form="form"
               :holiday-dates="holidayDates"
+              :selected-room="selectedRoomObj"
             />
           </div>
 

@@ -17,6 +17,8 @@ const RECURRING_STATUS = [
   'CANCELLED',
 ]
 
+const RECURRING_FREQUENCY = ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']
+
 const EmployeeSnapshotSchema = new mongoose.Schema(
   {
     employeeId: { type: String, required: true, trim: true },
@@ -55,25 +57,72 @@ const RequestedMaterialSchema = new mongoose.Schema(
   { _id: false }
 )
 
+const RecurrenceRuleSchema = new mongoose.Schema(
+  {
+    frequency: {
+      type: String,
+      enum: RECURRING_FREQUENCY,
+      default: 'WEEKLY',
+      required: true,
+    },
+
+    interval: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+
+    byWeekDays: {
+      type: [String], // MON TUE WED THU FRI SAT SUN
+      default: [],
+    },
+
+    startDate: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    endDate: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    skipHoliday: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { _id: false }
+)
+
 const BookingRoomRecurringSchema = new mongoose.Schema(
   {
     employeeId: { type: String, required: true, trim: true, index: true },
     employee: { type: EmployeeSnapshotSchema, required: true },
 
     bookingDates: {
-      type: [String], // YYYY-MM-DD
+      type: [String], // generated dates YYYY-MM-DD
       default: [],
       index: true,
     },
 
-    timeStart: { type: String, required: true, trim: true }, // HH:mm
-    timeEnd: { type: String, required: true, trim: true },   // HH:mm
+    recurrenceRule: {
+      type: RecurrenceRuleSchema,
+      required: true,
+    },
+
+    timeStart: { type: String, required: true, trim: true },
+    timeEnd: { type: String, required: true, trim: true },
 
     meetingTitle: { type: String, default: '', trim: true },
     purpose: { type: String, default: '', trim: true },
     participantEstimate: { type: Number, default: 1, min: 1 },
     note: { type: String, default: '', trim: true },
     needCoffeeBreak: { type: Boolean, default: false },
+    needNameOnTable: { type: Boolean, default: false },
+    needWifiPassword: { type: Boolean, default: false },
 
     roomRequired: { type: Boolean, default: false, index: true },
 
@@ -190,6 +239,11 @@ function normalizeMaterialItems(items) {
   return normalized
 }
 
+function normalizeWeekDays(list = []) {
+  const allow = new Set(['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'])
+  return [...new Set((Array.isArray(list) ? list : []).map(up).filter((x) => allow.has(x)))]
+}
+
 BookingRoomRecurringSchema.pre('validate', function (next) {
   try {
     this.employeeId = s(this.employeeId)
@@ -218,8 +272,22 @@ BookingRoomRecurringSchema.pre('validate', function (next) {
     this.roomRequired = Boolean(this.roomRequired)
     this.materialRequired = Boolean(this.materialRequired)
 
+    this.needCoffeeBreak = !!this.needCoffeeBreak
+    this.needNameOnTable = !!this.needNameOnTable
+    this.needWifiPassword = !!this.needWifiPassword
+
     normalizeRoomFields(this)
     this.materials = normalizeMaterialItems(this.materials)
+
+    const rr = this.recurrenceRule || {}
+    this.recurrenceRule = {
+    frequency: up(rr.frequency || 'WEEKLY'),
+    interval: Math.max(1, Number(rr.interval || 1)),
+    byWeekDays: normalizeWeekDays(rr.byWeekDays),
+    startDate: s(rr.startDate),
+    endDate: s(rr.endDate),
+    skipHoliday: rr.skipHoliday !== false,
+    }
 
     this.cancelReason = s(this.cancelReason)
     this.requesterLoginId = s(this.requesterLoginId)
@@ -227,6 +295,10 @@ BookingRoomRecurringSchema.pre('validate', function (next) {
 
     if (!this.bookingDates.length) {
       return next(new Error('bookingDates is required.'))
+    }
+
+    if (!this.recurrenceRule.startDate || !this.recurrenceRule.endDate) {
+      return next(new Error('recurrenceRule startDate/endDate is required.'))
     }
 
     if (!this.roomRequired && !this.materialRequired) {

@@ -591,6 +591,181 @@ async function assertMaterialQueueConflict({
   }
 }
 
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+
+function ymdParts(ymd) {
+  const [y, m, d] = s(ymd).split('-').map(Number)
+  return { y, m, d }
+}
+
+function makeLocalDate(ymd) {
+  const { y, m, d } = ymdParts(ymd)
+  return new Date(y, m - 1, d)
+}
+
+function formatYMD(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+function addDaysYMD(ymd, days) {
+  const dt = makeLocalDate(ymd)
+  dt.setDate(dt.getDate() + Number(days || 0))
+  return formatYMD(dt)
+}
+
+function daysInMonth(year, month1to12) {
+  return new Date(year, month1to12, 0).getDate()
+}
+
+function addMonthsYMD(ymd, months) {
+  const { y, m, d } = ymdParts(ymd)
+  const totalMonthIndex = (m - 1) + Number(months || 0)
+  const year = y + Math.floor(totalMonthIndex / 12)
+  const monthIndex = ((totalMonthIndex % 12) + 12) % 12
+  const month = monthIndex + 1
+  const maxDay = daysInMonth(year, month)
+  const day = Math.min(d, maxDay)
+  return `${year}-${pad2(month)}-${pad2(day)}`
+}
+
+function addYearsYMD(ymd, years) {
+  const { y, m, d } = ymdParts(ymd)
+  const year = y + Number(years || 0)
+  const maxDay = daysInMonth(year, m)
+  const day = Math.min(d, maxDay)
+  return `${year}-${pad2(m)}-${pad2(day)}`
+}
+
+function compareYMD(a, b) {
+  return s(a).localeCompare(s(b))
+}
+
+function weekDayCodeFromYMD(ymd) {
+  const map = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
+  const dt = makeLocalDate(ymd)
+  return map[dt.getDay()] || ''
+}
+
+function normalizeRecurringRule(payload = {}) {
+  const frequency = up(payload.recurrenceFrequency || payload?.recurrenceRule?.frequency || 'WEEKLY')
+  const interval = Math.max(
+    1,
+    Number(payload.recurrenceInterval || payload?.recurrenceRule?.interval || 1)
+  )
+
+  const rawDays =
+    payload.recurrenceWeekDays ||
+    payload?.recurrenceRule?.byWeekDays ||
+    []
+
+  const byWeekDays = [...new Set(
+    arr(rawDays)
+      .map(up)
+      .filter((x) => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'].includes(x))
+  )]
+
+  const startDate = s(payload.bookingDate || payload?.recurrenceRule?.startDate)
+  const endDate = s(payload.endDate || payload?.recurrenceRule?.endDate)
+
+  const skipHoliday =
+    payload.skipHoliday !== false &&
+    payload?.recurrenceRule?.skipHoliday !== false
+
+  if (!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(frequency)) {
+    throw createError(400, 'Invalid recurrence frequency.')
+  }
+
+  if (!isValidDate(startDate)) {
+    throw createError(400, 'Invalid bookingDate (YYYY-MM-DD).')
+  }
+
+  if (!isValidDate(endDate)) {
+    throw createError(400, 'Invalid endDate (YYYY-MM-DD).')
+  }
+
+  if (compareYMD(endDate, startDate) < 0) {
+    throw createError(400, 'endDate must be the same or after bookingDate.')
+  }
+
+  return {
+    frequency,
+    interval,
+    byWeekDays,
+    startDate,
+    endDate,
+    skipHoliday,
+  }
+}
+
+function matchesRecurringRule(dateYMD, rule) {
+  if (compareYMD(dateYMD, rule.startDate) < 0) return false
+  if (compareYMD(dateYMD, rule.endDate) > 0) return false
+
+  if (rule.frequency === 'DAILY') {
+    const start = makeLocalDate(rule.startDate)
+    const cur = makeLocalDate(dateYMD)
+    const diffDays = Math.floor((cur - start) / 86400000)
+    return diffDays % rule.interval === 0
+  }
+
+  if (rule.frequency === 'WEEKLY') {
+    const start = makeLocalDate(rule.startDate)
+    const cur = makeLocalDate(dateYMD)
+    const diffDays = Math.floor((cur - start) / 86400000)
+    const diffWeeks = Math.floor(diffDays / 7)
+
+    const pickedDays = rule.byWeekDays.length
+      ? rule.byWeekDays
+      : [weekDayCodeFromYMD(rule.startDate)]
+
+    return diffWeeks % rule.interval === 0 && pickedDays.includes(weekDayCodeFromYMD(dateYMD))
+  }
+
+  if (rule.frequency === 'MONTHLY') {
+    const start = ymdParts(rule.startDate)
+    const cur = ymdParts(dateYMD)
+
+    const monthDiff = ((cur.y - start.y) * 12) + (cur.m - start.m)
+    if (monthDiff < 0) return false
+    if (monthDiff % rule.interval !== 0) return false
+
+    return cur.d === start.d
+  }
+
+  if (rule.frequency === 'YEARLY') {
+    const start = ymdParts(rule.startDate)
+    const cur = ymdParts(dateYMD)
+
+    const yearDiff = cur.y - start.y
+    if (yearDiff < 0) return false
+    if (yearDiff % rule.interval !== 0) return false
+
+    return cur.m === start.m && cur.d === start.d
+  }
+
+  return false
+}
+
+function generateRecurringDates(rule, maxDates = 120) {
+  const dates = []
+  let cursor = rule.startDate
+
+  while (compareYMD(cursor, rule.endDate) <= 0) {
+    if (matchesRecurringRule(cursor, rule)) {
+      dates.push(cursor)
+      if (dates.length > maxDates) {
+        throw createError(400, `Maximum ${maxDates} recurring dates allowed.`)
+      }
+    }
+
+    cursor = addDaysYMD(cursor, 1)
+  }
+
+  return dates
+}
+
 function buildAdminFilter({
   date,
   dateFrom,
@@ -878,114 +1053,123 @@ async function createRecurringBooking(req, res, next) {
     const employeeId = parseEmployeeId(req, payload)
     if (!employeeId) throw createError(400, 'employeeId is required.')
 
-    const bookingDate = s(payload.bookingDate)
-    const endDate = s(payload.endDate)
+    validateBasePayload(payload)
 
-    if (!isValidDate(bookingDate)) {
-      throw createError(400, 'Invalid bookingDate (YYYY-MM-DD).')
-    }
+    const rule = normalizeRecurringRule(payload)
 
-    if (!isValidDate(endDate)) {
-      throw createError(400, 'Invalid endDate (YYYY-MM-DD).')
-    }
-
-    if (endDate < bookingDate) {
-      throw createError(400, 'endDate must be the same or after bookingDate.')
-    }
-
-    const start = new Date(`${bookingDate}T00:00:00`)
-    const end = new Date(`${endDate}T00:00:00`)
-
-    const bookingDates = []
-    const skippedDates = []
-    const cur = new Date(start)
-
-    while (cur <= end) {
-      const y = cur.getFullYear()
-      const m = String(cur.getMonth() + 1).padStart(2, '0')
-      const d = String(cur.getDate()).padStart(2, '0')
-      const oneDate = `${y}-${m}-${d}`
-
-      if (isHoliday(oneDate)) {
-        skippedDates.push({
-          bookingDate: oneDate,
-          reason: 'HOLIDAY_OR_SUNDAY',
-        })
-      } else {
-        bookingDates.push(oneDate)
-      }
-
-      cur.setDate(cur.getDate() + 1)
-    }
-
-    if (!bookingDates.length) {
-      throw createError(400, 'No valid recurring dates generated after skipping Sunday/holidays.')
-    }
-
-    if (bookingDates.length > 31) {
-      throw createError(400, 'Maximum 31 booking dates per recurring request.')
-    }
+    const normalizedBase = await normalizeRequestPayload({
+      ...payload,
+      bookingDate: rule.startDate,
+    })
 
     const employeeSnapshot = await buildEmployeeSnapshot(employeeId)
     const actor = pickIdentityFrom(req)
 
-    const createdDocs = []
+    let roomMaster = null
+    if (normalizedBase.roomRequired) {
+      roomMaster = await BookingRoomResource.findOne({
+        isActive: true,
+        $or: [
+          normalizedBase.roomId ? { _id: normalizedBase.roomId } : null,
+          normalizedBase.roomCode ? { code: up(normalizedBase.roomCode) } : null,
+          normalizedBase.roomName ? { name: s(normalizedBase.roomName) } : null,
+        ].filter(Boolean),
+      }).lean()
+
+      if (!roomMaster) {
+        throw createError(400, 'Selected room does not exist or is inactive.')
+      }
+    }
+
+    const rawDates = generateRecurringDates(rule, 120)
+    if (!rawDates.length) {
+      throw createError(400, 'No recurring dates generated.')
+    }
+
+    const roomMatchedDates = []
+    const skippedDates = []
     const conflicts = []
-    let firstNormalized = null
 
-    for (let i = 0; i < bookingDates.length; i += 1) {
-      const oneDate = bookingDates[i]
-      const rowPayload = {
-        ...payload,
-        bookingDate: oneDate,
+    for (const oneDate of rawDates) {
+      if (normalizedBase.roomRequired && roomMaster) {
+        const allowedByWeek = isRoomAllowedOnDate(roomMaster, oneDate)
+
+        if (!allowedByWeek) {
+          skippedDates.push({
+            bookingDate: oneDate,
+            reason: 'ROOM_WEEKLY_BLOCKED',
+          })
+          continue
+        }
       }
 
-      validateBasePayload(rowPayload)
-      const normalized = await normalizeRequestPayload(rowPayload)
+      if (rule.skipHoliday && isHoliday(oneDate)) {
+        skippedDates.push({
+          bookingDate: oneDate,
+          reason: 'HOLIDAY_OR_SUNDAY',
+        })
+        continue
+      }
 
-      if (!firstNormalized) firstNormalized = normalized
+      roomMatchedDates.push(oneDate)
+    }
 
-      if (normalized.roomRequired) {
-        try {
+    if (!roomMatchedDates.length) {
+      return res.status(400).json({
+        message: 'No valid recurring dates available for this room and date range.',
+        skippedDates,
+        validBookingDates: [],
+        conflicts: [],
+      })
+    }
+
+    const bookingDates = []
+
+    for (const oneDate of roomMatchedDates) {
+      try {
+        if (normalizedBase.roomRequired) {
           await assertRoomQueueConflict({
-            bookingDate: normalized.bookingDate,
-            timeStart: normalized.timeStart,
-            timeEnd: normalized.timeEnd,
-            roomCode: normalized.roomCode,
-          })
-        } catch (err) {
-          conflicts.push({
             bookingDate: oneDate,
-            type: 'ROOM',
-            message: err.message || 'Room conflict.',
+            timeStart: normalizedBase.timeStart,
+            timeEnd: normalizedBase.timeEnd,
+            roomCode: normalizedBase.roomCode,
           })
         }
-      }
 
-      if (normalized.materialRequired) {
-        try {
+        if (normalizedBase.materialRequired) {
           await assertMaterialQueueConflict({
-            bookingDate: normalized.bookingDate,
-            timeStart: normalized.timeStart,
-            timeEnd: normalized.timeEnd,
-            materials: normalized.materials,
-          })
-        } catch (err) {
-          conflicts.push({
             bookingDate: oneDate,
-            type: 'MATERIAL',
-            message: err.message || 'Material conflict.',
+            timeStart: normalizedBase.timeStart,
+            timeEnd: normalizedBase.timeEnd,
+            materials: normalizedBase.materials,
           })
         }
+
+        bookingDates.push(oneDate)
+      } catch (err) {
+        conflicts.push({
+          bookingDate: oneDate,
+          type: 'CONFLICT',
+          message: err.message || 'Conflict found.',
+        })
       }
+    }
+
+    if (!bookingDates.length) {
+      return res.status(409).json({
+        message: 'All recurring dates have conflicts.',
+        skippedDates,
+        validBookingDates: [],
+        conflicts,
+      })
     }
 
     if (conflicts.length) {
       return res.status(409).json({
         message: 'Some selected dates have conflicts.',
-        conflicts,
         skippedDates,
         validBookingDates: bookingDates,
+        conflicts,
       })
     }
 
@@ -995,76 +1179,76 @@ async function createRecurringBooking(req, res, next) {
 
       bookingDates,
 
-      timeStart: firstNormalized.timeStart,
-      timeEnd: firstNormalized.timeEnd,
+      recurrenceRule: {
+        frequency: rule.frequency,
+        interval: rule.interval,
+        byWeekDays: rule.byWeekDays,
+        startDate: rule.startDate,
+        endDate: rule.endDate,
+        skipHoliday: rule.skipHoliday,
+      },
 
-      meetingTitle: firstNormalized.meetingTitle,
-      purpose: firstNormalized.purpose,
-      participantEstimate: firstNormalized.participantEstimate,
-      note: firstNormalized.note,
-      needCoffeeBreak: firstNormalized.needCoffeeBreak,
-      needNameOnTable: firstNormalized.needNameOnTable,
-      needWifiPassword: firstNormalized.needWifiPassword,
+      timeStart: normalizedBase.timeStart,
+      timeEnd: normalizedBase.timeEnd,
 
-      roomRequired: firstNormalized.roomRequired,
-      roomId: firstNormalized.roomId,
-      roomCode: firstNormalized.roomCode,
-      roomName: firstNormalized.roomName,
-      room: firstNormalized.room,
+      meetingTitle: normalizedBase.meetingTitle,
+      purpose: normalizedBase.purpose,
+      participantEstimate: normalizedBase.participantEstimate,
+      note: normalizedBase.note,
 
-      materialRequired: firstNormalized.materialRequired,
-      materials: firstNormalized.materials,
+      needCoffeeBreak: normalizedBase.needCoffeeBreak,
+      needNameOnTable: normalizedBase.needNameOnTable,
+      needWifiPassword: !!payload.needWifiPassword,
+
+      roomRequired: normalizedBase.roomRequired,
+      roomId: normalizedBase.roomId,
+      roomCode: normalizedBase.roomCode,
+      roomName: normalizedBase.roomName,
+      room: normalizedBase.room,
+
+      materialRequired: normalizedBase.materialRequired,
+      materials: normalizedBase.materials,
 
       overallStatus: 'PENDING',
       submittedVia: 'PUBLIC_FORM',
-
       requesterLoginId: actor.loginId,
       createdByLoginId: actor.loginId,
-
-      childBookingIds: [],
-      totalOccurrences: bookingDates.length,
     })
 
-    for (let i = 0; i < bookingDates.length; i += 1) {
-      const oneDate = bookingDates[i]
-      const rowPayload = {
-        ...payload,
-        bookingDate: oneDate,
-      }
+    const createdDocs = []
 
-      const normalized = await normalizeRequestPayload(rowPayload)
-
+    for (const oneDate of bookingDates) {
       const doc = await BookingRoom.create({
         employeeId,
         employee: employeeSnapshot,
 
-        recurringId: recurringDoc._id,
-        isRecurring: true,
-        recurringIndex: i + 1,
+        requesterLoginId: actor.loginId,
+        createdByLoginId: actor.loginId,
 
-        bookingDate: normalized.bookingDate,
-        timeStart: normalized.timeStart,
-        timeEnd: normalized.timeEnd,
+        bookingDate: oneDate,
+        timeStart: normalizedBase.timeStart,
+        timeEnd: normalizedBase.timeEnd,
 
-        meetingTitle: normalized.meetingTitle,
-        purpose: normalized.purpose,
-        participantEstimate: normalized.participantEstimate,
-        note: normalized.note,
-        needCoffeeBreak: normalized.needCoffeeBreak,
-        needNameOnTable: normalized.needNameOnTable,
-        needWifiPassword: normalized.needWifiPassword,
+        meetingTitle: normalizedBase.meetingTitle,
+        purpose: normalizedBase.purpose,
+        participantEstimate: normalizedBase.participantEstimate,
+        note: normalizedBase.note,
 
-        roomRequired: normalized.roomRequired,
-        roomId: normalized.roomId,
-        roomCode: normalized.roomCode,
-        roomName: normalized.roomName,
-        room: normalized.room,
+        needCoffeeBreak: normalizedBase.needCoffeeBreak,
+        needNameOnTable: normalizedBase.needNameOnTable,
+        needWifiPassword: !!payload.needWifiPassword,
 
-        materialRequired: normalized.materialRequired,
-        materials: normalized.materials,
+        roomRequired: normalizedBase.roomRequired,
+        roomId: normalizedBase.roomId,
+        roomCode: normalizedBase.roomCode,
+        roomName: normalizedBase.roomName,
+        room: normalizedBase.room,
 
-        roomStatus: normalized.roomRequired ? 'PENDING' : 'NOT_REQUIRED',
-        materialStatus: normalized.materialRequired ? 'PENDING' : 'NOT_REQUIRED',
+        materialRequired: normalizedBase.materialRequired,
+        materials: normalizedBase.materials,
+
+        roomStatus: normalizedBase.roomRequired ? 'PENDING' : 'NOT_REQUIRED',
+        materialStatus: normalizedBase.materialRequired ? 'PENDING' : 'NOT_REQUIRED',
         overallStatus: 'PENDING',
 
         submittedVia: 'PUBLIC_FORM',
@@ -1082,6 +1266,7 @@ async function createRecurringBooking(req, res, next) {
     for (const doc of createdDocs) {
       emitBookingRoom(req, doc, 'bookingroom:req:created')
       emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
+      await notifySafe('BOOKING_ROOM_CREATED', { bookingId: doc._id })
     }
 
     return res.status(201).json({
@@ -1096,6 +1281,7 @@ async function createRecurringBooking(req, res, next) {
     next(err)
   }
 }
+
 
 async function listSchedulePublic(req, res, next) {
   try {
