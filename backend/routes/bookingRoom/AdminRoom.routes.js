@@ -48,6 +48,12 @@ router.get(
   h(ctrl.listRoomMasters, 'listRoomMasters')
 )
 
+router.get(
+  '/admin/rooms/:id/image',
+  auth.requireRole('ROOM_ADMIN', 'ADMIN', 'ROOT_ADMIN'),
+  h(ctrl.streamRoomImage, 'streamRoomImage')
+)
+
 router.post(
   '/admin/rooms',
   auth.requireRole('ROOM_ADMIN', 'ADMIN', 'ROOT_ADMIN'),

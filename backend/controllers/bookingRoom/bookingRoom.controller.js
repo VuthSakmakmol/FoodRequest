@@ -183,6 +183,33 @@ async function notifySafe(type, payload = {}) {
   }
 }
 
+function normalizeWeeklyAvailability(wa = {}) {
+  return {
+    mon: wa?.mon ?? true,
+    tue: wa?.tue ?? true,
+    wed: wa?.wed ?? true,
+    thu: wa?.thu ?? true,
+    fri: wa?.fri ?? true,
+    sat: wa?.sat ?? true,
+    sun: wa?.sun ?? true,
+  }
+}
+
+function weekdayKeyFromYMD(ymd) {
+  if (!isValidDate(ymd)) return ''
+  const raw = s(ymd)
+  const [year, month, day] = raw.split('-').map(Number)
+  const jsDay = new Date(year, month - 1, day).getDay()
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][jsDay] || ''
+}
+
+function isRoomAllowedOnDate(roomDoc, bookingDate) {
+  const key = weekdayKeyFromYMD(bookingDate)
+  if (!key) return true
+  const wa = normalizeWeeklyAvailability(roomDoc?.weeklyAvailability)
+  return wa[key] !== false
+}
+
 function deriveOverallStatus(doc) {
   const roomRequired = !!doc.roomRequired
   const materialRequired = !!doc.materialRequired
@@ -350,6 +377,10 @@ async function normalizeRequestPayload(payload) {
       throw createError(400, 'Selected room does not exist or is inactive.')
     }
 
+    if (!isRoomAllowedOnDate(roomMaster, payload.bookingDate)) {
+      throw createError(400, `Selected room is not available on ${payload.bookingDate}.`)
+    }
+
     room = {
       roomId: roomMaster._id,
       roomCode: up(roomMaster.code),
@@ -411,8 +442,6 @@ async function normalizeRequestPayload(payload) {
     note: s(payload.note),
     needCoffeeBreak: roomRequired ? !!payload.needCoffeeBreak : false,
     needNameOnTable: roomRequired ? !!payload.needNameOnTable : false,
-    needWifiPassword: roomRequired ? !!payload.needWifiPassword : false,
-
     roomRequired,
     roomId: room.roomId,
     roomCode: room.roomCode,
@@ -694,7 +723,42 @@ async function getAvailability(req, res, next) {
       excludeId: s(excludeId),
 
       rooms: rooms.map((r) => {
-        const blocked = busyRoomCodes.has(up(r.code))
+        const blockedByBooking = busyRoomCodes.has(up(r.code))
+        const allowedByWeek = isRoomAllowedOnDate(r, date)
+
+        let status = 'AVAILABLE'
+        let isAvailable = true
+        let shortNote = 'Open every day'
+
+        const wa = normalizeWeeklyAvailability(r.weeklyAvailability)
+        const labels = {
+          mon: 'Mon',
+          tue: 'Tue',
+          wed: 'Wed',
+          thu: 'Thu',
+          fri: 'Fri',
+          sat: 'Sat',
+          sun: 'Sun',
+        }
+
+        const disabled = Object.keys(labels)
+          .filter((k) => wa[k] === false)
+          .map((k) => labels[k])
+
+        if (disabled.length) {
+          shortNote = `Closed: ${disabled.join(', ')}`
+        }
+
+        if (!allowedByWeek) {
+          isAvailable = false
+          status = 'WEEKLY_CLOSED'
+          const selectedKey = weekdayKeyFromYMD(date)
+          shortNote = `Closed on ${labels[selectedKey] || 'selected day'} every week`
+        } else if (blockedByBooking) {
+          isAvailable = false
+          status = 'UNAVAILABLE'
+          shortNote = 'Already reserved for this time slot'
+        }
 
         return {
           _id: r._id,
@@ -702,8 +766,10 @@ async function getAvailability(req, res, next) {
           name: s(r.name),
           capacity: Number(r.capacity || 0),
           imageUrl: r.hasImage ? `/api/public/booking-room/rooms/${r._id}/image` : '',
-          isAvailable: !blocked,
-          status: blocked ? 'UNAVAILABLE' : 'AVAILABLE',
+          weeklyAvailability: normalizeWeeklyAvailability(r.weeklyAvailability),
+          isAvailable,
+          status,
+          shortNote,
         }
       }),
 
@@ -776,7 +842,6 @@ async function createBooking(req, res, next) {
       note: normalized.note,
       needCoffeeBreak: normalized.needCoffeeBreak,
       needNameOnTable: normalized.needNameOnTable,
-      needWifiPassword: normalized.needWifiPassword,
 
       roomRequired: normalized.roomRequired,
       roomId: normalized.roomId,
@@ -1284,7 +1349,6 @@ async function exportAdminExcel(req, res, next) {
       Note: s(b.note),
       NeedCoffeeBreak: b.needCoffeeBreak ? 'YES' : 'NO',
       NeedNameOnTable: b.needNameOnTable ? 'YES' : 'NO',
-      NeedWifiPassword: b.needWifiPassword ? 'YES' : 'NO',
 
       RoomRequired: b.roomRequired ? 'YES' : 'NO',
       RoomCode: s(b.roomCode),

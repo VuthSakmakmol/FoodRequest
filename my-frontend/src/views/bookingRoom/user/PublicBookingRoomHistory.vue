@@ -1153,9 +1153,9 @@ onBeforeUnmount(() => {
                 <div v-for="item in pagedRows" :key="item._id" class="ui-card p-3">
                   <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
-                      <div class="text-[11px] text-slate-500 dark:text-slate-400">
+                      <!-- <div class="text-[11px] text-slate-500 dark:text-slate-400">
                         {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                      </div>
+                      </div> -->
 
                       <div class="mt-1 flex flex-wrap items-center gap-2">
                         <span :class="typeBadgeUiClass(item)">{{ bookingRoomTypeLabel(item) }}</span>
@@ -1353,9 +1353,9 @@ onBeforeUnmount(() => {
                             >
                               {{ item.meetingTitle || '—' }}
                             </div>
-                            <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                            <!-- <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
                               {{ item.createdAt ? dayjs(item.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
-                            </div>
+                            </div> -->
                           </div>
                         </td>
 

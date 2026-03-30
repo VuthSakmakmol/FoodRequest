@@ -1,3 +1,4 @@
+// backend/controllers/bookingRoom/roomAdmin.controller.js
 const createError = require('http-errors')
 const mongoose = require('mongoose')
 const { Readable } = require('stream')
@@ -53,6 +54,61 @@ function toPositiveInt(v, fallback = 1) {
   const n = Number(v)
   if (!Number.isFinite(n)) return fallback
   return Math.max(1, Math.floor(n))
+}
+
+function toBool(v, fallback = true) {
+  if (v === true || v === 'true' || v === 1 || v === '1') return true
+  if (v === false || v === 'false' || v === 0 || v === '0') return false
+  return fallback
+}
+
+function normalizeWeeklyAvailability(payload = {}, fallback = null) {
+  const base = fallback && typeof fallback === 'object'
+    ? {
+        mon: toBool(fallback.mon, true),
+        tue: toBool(fallback.tue, true),
+        wed: toBool(fallback.wed, true),
+        thu: toBool(fallback.thu, true),
+        fri: toBool(fallback.fri, true),
+        sat: toBool(fallback.sat, true),
+        sun: toBool(fallback.sun, true),
+      }
+    : {
+        mon: true,
+        tue: true,
+        wed: true,
+        thu: true,
+        fri: true,
+        sat: true,
+        sun: true,
+      }
+
+  return {
+    mon: payload.mon != null ? toBool(payload.mon, true) : base.mon,
+    tue: payload.tue != null ? toBool(payload.tue, true) : base.tue,
+    wed: payload.wed != null ? toBool(payload.wed, true) : base.wed,
+    thu: payload.thu != null ? toBool(payload.thu, true) : base.thu,
+    fri: payload.fri != null ? toBool(payload.fri, true) : base.fri,
+    sat: payload.sat != null ? toBool(payload.sat, true) : base.sat,
+    sun: payload.sun != null ? toBool(payload.sun, true) : base.sun,
+  }
+}
+
+function weekdayKeyFromYMD(ymd) {
+  const raw = s(ymd)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return ''
+
+  const [year, month, day] = raw.split('-').map(Number)
+  const jsDay = new Date(year, month - 1, day).getDay()
+
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][jsDay] || ''
+}
+
+function isRoomAllowedOnDate(roomDoc, bookingDate) {
+  const key = weekdayKeyFromYMD(bookingDate)
+  if (!key) return true
+  const wa = roomDoc?.weeklyAvailability || {}
+  return wa[key] !== false
 }
 
 function isValidTime(hhmm) {
@@ -122,7 +178,7 @@ function emitBookingRoom(req, payload, event = 'bookingroom:req:updated') {
     if (!io) return
     broadcastBookingRoomRequest(io, payload, event)
   } catch (e) {
-    console.warn('⚠️ booking room realtime emit failed:', e?.message)
+    console.warn('⚠️ room realtime emit failed:', e?.message)
   }
 }
 
@@ -132,39 +188,78 @@ function emitBookingRoomAvailability(req, payload, event = 'bookingroom:availabi
     if (!io) return
     broadcastBookingRoomAvailability(io, payload, event)
   } catch (e) {
-    console.warn('⚠️ booking room availability realtime emit failed:', e?.message)
+    console.warn('⚠️ room availability realtime emit failed:', e?.message)
   }
 }
 
-function emitBookingRoomMaster(req, payload, event) {
+function emitBookingRoomMaster(req, payload, event = 'bookingroom:room-master:updated') {
   try {
     const io = getIo(req)
-    if (!io || !event) return
+    if (!io) return
     broadcastBookingRoomMaster(io, payload, event)
   } catch (e) {
-    console.warn('⚠️ booking room master realtime emit failed:', e?.message)
+    console.warn('⚠️ room master realtime emit failed:', e?.message)
   }
 }
 
-function emitBookingRoomMastersChanged(req, payload = {}, event = 'bookingroom:masters:changed') {
+function emitBookingRoomMastersChanged(req, payload, event = 'bookingroom:masters:changed') {
   try {
     const io = getIo(req)
     if (!io) return
     broadcastBookingRoomMastersChanged(io, payload, event)
   } catch (e) {
-    console.warn('⚠️ booking room masters changed emit failed:', e?.message)
+    console.warn('⚠️ room masters changed realtime emit failed:', e?.message)
   }
 }
 
-async function notifyRoomDecision(bookingId) {
+function buildRoomImageApiUrl(roomId) {
+  return `/api/booking-room/admin/rooms/${roomId}/image`
+}
+
+function getGridFSBucket() {
+  return new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+    bucketName: ROOM_IMAGE_BUCKET,
+  })
+}
+
+async function uploadRoomImageToGridFS(file, meta = {}) {
+  if (!file?.buffer) return null
+
+  const bucket = getGridFSBucket()
+  const filename = `${s(meta.roomCode || 'ROOM')}_${Date.now()}_${s(file.originalname || 'image')}`
+
+  return await new Promise((resolve, reject) => {
+    const uploadStream = bucket.openUploadStream(filename, {
+      contentType: s(file.mimetype) || 'application/octet-stream',
+      metadata: {
+        roomId: s(meta.roomId),
+        roomCode: s(meta.roomCode),
+        roomName: s(meta.roomName),
+      },
+    })
+
+    Readable.from(file.buffer)
+      .pipe(uploadStream)
+      .on('error', reject)
+      .on('finish', () => {
+        resolve({
+          fileId: uploadStream.id,
+          filename,
+          contentType: s(file.mimetype),
+        })
+      })
+  })
+}
+
+async function deleteRoomImageFromGridFS(fileId) {
   try {
-    if (!notify) return
-    const doc = await BookingRoom.findById(bookingId).lean()
-    if (!doc) return
-    await safeNotify(notify?.notifyRoomDecisionToEmployee, doc)
-    await safeNotify(notify?.notifyCurrentApprover, doc)
+    if (!fileId) return
+    const bucket = getGridFSBucket()
+    const objId =
+      typeof fileId === 'string' ? new mongoose.Types.ObjectId(fileId) : fileId
+    await bucket.delete(objId)
   } catch (e) {
-    console.warn('⚠️ notifyRoomDecision failed:', e?.message)
+    console.warn('⚠️ delete room image failed:', e?.message)
   }
 }
 
@@ -195,138 +290,57 @@ function deriveOverallStatus(doc) {
   return 'PENDING'
 }
 
-async function assertRoomApprovalConflict({
-  bookingDate,
-  timeStart,
-  timeEnd,
-  roomCode,
-  excludeId = null,
-}) {
-  if (!s(roomCode)) return
-
-  if (!isValidTime(timeStart) || !isValidTime(timeEnd)) {
-    throw createError(400, 'Invalid booking time.')
-  }
-
-  const startMin = toMinutes(timeStart)
-  const endMin = toMinutes(timeEnd)
-
-  const query = {
-    bookingDate,
+async function assertRoomApprovalConflict({ bookingDate, timeStart, timeEnd, roomCode, excludeId = null }) {
+  const filter = {
+    bookingDate: s(bookingDate),
     roomRequired: true,
     roomCode: up(roomCode),
     roomStatus: 'APPROVED',
     overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
   }
 
-  if (excludeId) query._id = { $ne: excludeId }
+  if (excludeId) {
+    filter._id = { $ne: excludeId }
+  }
 
-  const rows = await BookingRoom.find(query)
-    .select('timeStart timeEnd roomCode roomName roomStatus overallStatus')
+  const rows = await BookingRoom.find(filter)
+    .select('timeStart timeEnd')
     .lean()
 
-  const conflicted = rows.some((row) =>
-    overlaps(startMin, endMin, toMinutes(row.timeStart), toMinutes(row.timeEnd))
-  )
+  const start = toMinutes(timeStart)
+  const end = toMinutes(timeEnd)
 
-  if (conflicted) {
-    const roomLabel = s(rows[0]?.roomName) || s(roomCode)
-    throw createError(409, `Room "${roomLabel}" is already approved for this time slot.`)
+  for (const row of rows || []) {
+    const rowStart = toMinutes(row.timeStart)
+    const rowEnd = toMinutes(row.timeEnd)
+    if (overlaps(start, end, rowStart, rowEnd)) {
+      throw createError(409, 'Room already approved for the selected time.')
+    }
   }
 }
 
 async function assertRoomMasterCanDeactivate({ roomDoc, excludePast = true }) {
-  if (!roomDoc?._id) return
+  const code = up(roomDoc?.code)
+  if (!code) return
 
-  const query = {
+  const filter = {
     roomRequired: true,
-    roomStatus: 'APPROVED',
-    overallStatus: { $nin: OVERALL_NON_BLOCKING_STATUSES },
-    $or: [{ roomId: roomDoc._id }, { roomCode: up(roomDoc.code) }, { roomName: s(roomDoc.name) }],
+    roomCode: code,
+    roomStatus: { $in: ['PENDING', 'APPROVED'] },
+    overallStatus: { $ne: 'CANCELLED' },
   }
 
   if (excludePast) {
-    query.bookingDate = { $gte: nowPPDate() }
+    filter.bookingDate = { $gte: nowPPDate() }
   }
 
-  const exists = await BookingRoom.findOne(query)
-    .select('_id bookingDate timeStart timeEnd roomName roomCode')
-    .lean()
-
+  const exists = await BookingRoom.exists(filter)
   if (exists) {
-    throw createError(
-      409,
-      `Cannot deactivate room "${s(roomDoc.name) || up(roomDoc.code)}" because it is used by approved booking ${s(exists.bookingDate)} ${s(exists.timeStart)}-${s(exists.timeEnd)}.`
-    )
+    throw createError(409, 'This room still has active or upcoming bookings.')
   }
 }
 
-function getGridFSBucket() {
-  const db = mongoose.connection.db
-  if (!db) {
-    throw createError(500, 'MongoDB connection is not ready.')
-  }
-  return new mongoose.mongo.GridFSBucket(db, { bucketName: ROOM_IMAGE_BUCKET })
-}
-
-function safeRoomImageFilename(originalname) {
-  const raw = s(originalname || 'room-image')
-  const dotIndex = raw.lastIndexOf('.')
-  const ext = dotIndex >= 0 ? raw.slice(dotIndex).toLowerCase() : ''
-  const base = (dotIndex >= 0 ? raw.slice(0, dotIndex) : raw)
-    .replace(/[^a-zA-Z0-9-_]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 80) || 'room-image'
-
-  return `${Date.now()}-${base}${ext}`
-}
-
-async function uploadRoomImageToGridFS(file, meta = {}) {
-  if (!file?.buffer) return null
-
-  const bucket = getGridFSBucket()
-  const filename = safeRoomImageFilename(file.originalname)
-
-  return await new Promise((resolve, reject) => {
-    const uploadStream = bucket.openUploadStream(filename, {
-      contentType: file.mimetype || 'application/octet-stream',
-      metadata: {
-        module: 'booking_room',
-        ...meta,
-      },
-    })
-
-    uploadStream.on('error', reject)
-    uploadStream.on('finish', () => {
-      resolve({
-        fileId: uploadStream.id,
-        filename,
-        contentType: file.mimetype || 'application/octet-stream',
-      })
-    })
-
-    Readable.from(file.buffer).pipe(uploadStream)
-  })
-}
-
-async function deleteRoomImageFromGridFS(fileId) {
-  try {
-    if (!fileId) return
-    const bucket = getGridFSBucket()
-    const objectId =
-      typeof fileId === 'string' ? new mongoose.Types.ObjectId(fileId) : fileId
-    await bucket.delete(objectId)
-  } catch (e) {
-    console.warn('⚠️ failed to delete old room image from GridFS:', e?.message)
-  }
-}
-
-function buildRoomImageApiUrl(roomId) {
-  if (!roomId) return ''
-  return `/api/public/booking-room/rooms/${roomId}/image`
-}
-
-async function listActiveRooms(_req, res, next) {
+async function listActiveRooms(req, res, next) {
   try {
     const rows = await BookingRoomResource.find({ isActive: true })
       .sort({ name: 1 })
@@ -440,7 +454,7 @@ async function roomDecision(req, res, next) {
 
     emitBookingRoom(req, doc, 'bookingroom:req:updated')
     emitBookingRoomAvailability(req, doc, 'bookingroom:availability:changed')
-    await notifyRoomDecision(doc._id)
+    await safeNotify(notify?.notifyRoomDecision, doc._id)
 
     return res.json(doc)
   } catch (err) {
@@ -486,6 +500,7 @@ async function createRoomMaster(req, res, next) {
     const name = s(payload.name)
     const capacity = toPositiveInt(payload.capacity, 1)
     const isActive = payload.isActive !== 'false' && payload.isActive !== false
+    const weeklyAvailability = normalizeWeeklyAvailability(payload)
 
     if (!name) throw createError(400, 'name is required.')
     if (!Number.isFinite(capacity) || capacity < 1) {
@@ -515,6 +530,7 @@ async function createRoomMaster(req, res, next) {
       code,
       name,
       capacity,
+      weeklyAvailability,
       imageFileId: uploaded?.fileId || null,
       imageFilename: uploaded?.filename || '',
       imageContentType: uploaded?.contentType || '',
@@ -578,6 +594,7 @@ async function updateRoomMaster(req, res, next) {
       payload.isActive != null
         ? payload.isActive !== 'false' && payload.isActive !== false
         : !!doc.isActive
+    const nextWeeklyAvailability = normalizeWeeklyAvailability(payload, doc.weeklyAvailability)
 
     if (!nextName) throw createError(400, 'name is required.')
     if (!Number.isFinite(nextCapacity) || nextCapacity < 1) {
@@ -628,6 +645,7 @@ async function updateRoomMaster(req, res, next) {
     doc.code = nextCode
     doc.name = nextName
     doc.capacity = nextCapacity
+    doc.weeklyAvailability = nextWeeklyAvailability
     doc.isActive = nextIsActive
 
     await doc.save()
@@ -785,4 +803,8 @@ module.exports = {
   updateRoomMaster,
   deleteRoomMaster,
   streamRoomImage,
+
+  // optional export for reuse in booking controller later
+  weekdayKeyFromYMD,
+  isRoomAllowedOnDate,
 }

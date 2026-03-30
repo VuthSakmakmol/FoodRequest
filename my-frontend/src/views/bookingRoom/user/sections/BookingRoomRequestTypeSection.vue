@@ -62,6 +62,73 @@ function resolveImage(url) {
   return `${base.replace(/\/+$/, '')}/${raw.replace(/^\/+/, '')}`
 }
 
+const dayOptions = [
+  { key: 'mon', short: 'Mon' },
+  { key: 'tue', short: 'Tue' },
+  { key: 'wed', short: 'Wed' },
+  { key: 'thu', short: 'Thu' },
+  { key: 'fri', short: 'Fri' },
+  { key: 'sat', short: 'Sat' },
+  { key: 'sun', short: 'Sun' },
+]
+
+function normalizeWeeklyAvailability(wa) {
+  return {
+    mon: wa?.mon ?? true,
+    tue: wa?.tue ?? true,
+    wed: wa?.wed ?? true,
+    thu: wa?.thu ?? true,
+    fri: wa?.fri ?? true,
+    sat: wa?.sat ?? true,
+    sun: wa?.sun ?? true,
+  }
+}
+
+function weekdayKeyFromDate(dateStr) {
+  const raw = s(dateStr)
+  if (!raw) return ''
+  const d = new Date(`${raw}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return ''
+  return ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][d.getDay()] || ''
+}
+
+function buildWeeklyAvailabilityNote(weeklyAvailability, dateStr) {
+  const wa = normalizeWeeklyAvailability(weeklyAvailability)
+  const chosenDay = weekdayKeyFromDate(dateStr)
+
+  const labels = {
+    mon: 'Mon',
+    tue: 'Tue',
+    wed: 'Wed',
+    thu: 'Thu',
+    fri: 'Fri',
+    sat: 'Sat',
+    sun: 'Sun',
+  }
+
+  const enabled = Object.keys(labels)
+    .filter((k) => wa[k] !== false)
+    .map((k) => labels[k])
+
+  let weeklySummary = 'Open every day'
+  let shortNote = 'Open every day'
+
+  if (enabled.length === 0) {
+    weeklySummary = 'Closed every day'
+    shortNote = 'Closed every day'
+  } else if (enabled.length !== 7) {
+    weeklySummary = `Open only: ${enabled.join(', ')}`
+    shortNote = `Open only: ${enabled.join(', ')}`
+  }
+
+  return {
+    isAllowed: chosenDay ? wa[chosenDay] !== false : true,
+    shortNote,
+    weeklySummary,
+    status: chosenDay && wa[chosenDay] === false ? 'WEEKLY_CLOSED' : 'AVAILABLE',
+  }
+}
+
 const canShowAvailability = computed(() => {
   const date = s(props.form.bookingDate)
   const timeStart = s(props.form.timeStart)
@@ -77,7 +144,24 @@ const canShowAvailability = computed(() => {
 })
 
 const activeRooms = computed(() =>
-  arr(props.BOOKING_ROOM_NAMES).filter((x) => x && x.isActive !== false)
+  arr(props.BOOKING_ROOM_NAMES)
+    .filter((x) => x && x.isActive !== false)
+    .map((room) => {
+      const weeklyInfo = buildWeeklyAvailabilityNote(room?.weeklyAvailability, props.form.bookingDate)
+      const backendAvailable = room?.isAvailable !== false
+      const finalAvailable = backendAvailable && weeklyInfo.isAllowed
+
+      return {
+        ...room,
+        weeklyAvailability: normalizeWeeklyAvailability(room?.weeklyAvailability),
+        weeklySummary: weeklyInfo.weeklySummary,
+        shortNote: !weeklyInfo.isAllowed
+          ? weeklyInfo.shortNote
+          : s(room?.shortNote) || weeklyInfo.shortNote,
+        status: !weeklyInfo.isAllowed ? 'WEEKLY_CLOSED' : s(room?.status || 'AVAILABLE'),
+        isAvailable: finalAvailable,
+      }
+    })
 )
 
 const activeMaterials = computed(() =>
@@ -113,7 +197,6 @@ function toggleRoomRequired() {
     props.form.roomName = ''
     props.form.needCoffeeBreak = false
     props.form.needNameOnTable = false
-    props.form.needWifiPassword = false
   }
 }
 
@@ -126,13 +209,28 @@ function toggleMaterialRequired() {
 }
 
 function roomAvailabilityLabel(room) {
-  return room?.isAvailable === false ? 'UNAVAILABLE' : 'AVAILABLE'
+  const status = up(room?.status)
+
+  if (status === 'WEEKLY_CLOSED') return 'WEEKLY CLOSED'
+  if (status === 'UNAVAILABLE') return 'UNAVAILABLE'
+  if (room?.isAvailable === false) return 'UNAVAILABLE'
+  return 'AVAILABLE'
 }
 
 function roomAvailabilityClass(room) {
+  const status = up(room?.status)
+
+  if (status === 'WEEKLY_CLOSED') {
+    return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'
+  }
+
   return room?.isAvailable === false
     ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300'
     : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300'
+}
+
+function roomShortNote(room) {
+  return s(room?.shortNote) || 'Open every day'
 }
 
 function materialAvailabilityClass(item) {
@@ -153,7 +251,6 @@ function onSelectRoom(room) {
     props.form.roomName = ''
     props.form.needCoffeeBreak = false
     props.form.needNameOnTable = false
-    props.form.needWifiPassword = false    
     return
   }
 
@@ -162,7 +259,6 @@ function onSelectRoom(room) {
   props.form.roomName = s(room.name)
   props.form.needCoffeeBreak = false
   props.form.needNameOnTable = false
-  props.form.needWifiPassword = false
 }
 
 function toggleMaterial(item) {
@@ -233,7 +329,6 @@ watch(
       props.form.roomName = ''
       props.form.needCoffeeBreak = false
       props.form.needNameOnTable = false
-      props.form.needWifiPassword = false
     }
   },
   { deep: true }
@@ -273,6 +368,7 @@ watch(
       props.form.roomCode = ''
       props.form.roomName = ''
       props.form.needCoffeeBreak = false
+      props.form.needNameOnTable = false
     }
   }
 )
@@ -298,6 +394,7 @@ watch(
     props.form.roomName = ''
     props.form.materials = []
     props.form.needCoffeeBreak = false
+    props.form.needNameOnTable = false
   }
 )
 </script>
@@ -479,7 +576,18 @@ watch(
                           class="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-bold shadow-sm backdrop-blur"
                           :class="roomAvailabilityClass(room)"
                         >
-                          <i v-if="room.isAvailable === false" class="fa-solid fa-lock text-[9px]" />
+                          <i
+                            v-if="up(room.status) === 'WEEKLY_CLOSED'"
+                            class="fa-solid fa-calendar-xmark text-[9px]"
+                          />
+                          <i
+                            v-else-if="room.isAvailable === false"
+                            class="fa-solid fa-lock text-[9px]"
+                          />
+                          <i
+                            v-else
+                            class="fa-solid fa-circle-check text-[9px]"
+                          />
                           {{ roomAvailabilityLabel(room) }}
                         </span>
 
@@ -515,13 +623,36 @@ watch(
                           </span>
                         </div>
 
+                        <div class="mt-3 flex flex-wrap gap-1.5">
+                          <span
+                            v-for="day in dayOptions"
+                            :key="day.key"
+                            class="inline-flex items-center rounded-full px-2 py-1 text-[10px] font-bold ring-1 ring-inset"
+                            :class="normalizeWeeklyAvailability(room.weeklyAvailability)[day.key] !== false
+                              ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/30'
+                              : 'bg-slate-100 text-slate-400 ring-slate-200 dark:bg-slate-800 dark:text-slate-500 dark:ring-slate-700'"
+                          >
+                            {{ day.short }}
+                          </span>
+                        </div>
+
+                        <div
+                          class="mt-1 rounded-xl border px-3 py-2 text-[11px] leading-relaxed"
+                          :class="room.isAvailable === false
+                            ? 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/40 dark:bg-rose-950/20 dark:text-rose-300'
+                            : 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300'"
+                        >
+                          <span class="font-bold">Note:</span>
+                          {{ roomShortNote(room) }}
+                        </div>
+
                         <div
                           v-if="isRoomOn(room)"
-                          class="mt-3 flex flex-wrap gap-2"
+                          class="mt-3 grid grid-cols-1 gap-2"
                         >
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                            class="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition"
                             :class="props.form.needCoffeeBreak
                               ? 'border-amber-500 bg-amber-500 text-white'
                               : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
@@ -533,7 +664,7 @@ watch(
 
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
+                            class="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px] font-semibold transition"
                             :class="props.form.needNameOnTable
                               ? 'border-indigo-500 bg-indigo-500 text-white'
                               : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
@@ -541,18 +672,6 @@ watch(
                           >
                             <i class="fa-solid fa-id-card" />
                             Need Name on Table?
-                          </button>
-
-                          <button
-                            type="button"
-                            class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition"
-                            :class="props.form.needWifiPassword
-                              ? 'border-emerald-500 bg-emerald-500 text-white'
-                              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800'"
-                            @click.stop="props.form.needWifiPassword = !props.form.needWifiPassword"
-                          >
-                            <i class="fa-solid fa-wifi" />
-                            Need Wifi Password?
                           </button>
                         </div>
                       </div>
@@ -709,6 +828,10 @@ watch(
                       <span class="text-[11px] text-slate-600 dark:text-slate-300">
                         {{ Number(item.availableQty ?? item.totalQty ?? 0) }}/{{ Number(item.totalQty || 0) }}
                       </span>
+                    </div>
+
+                    <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      {{ item.shortNote || 'Ready to book' }}
                     </div>
                   </div>
                 </div>

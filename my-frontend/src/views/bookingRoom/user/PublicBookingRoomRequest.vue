@@ -1,6 +1,6 @@
 <!-- src/views/bookingRoom/user/PublicBookingRoomRequest.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import dayjs from 'dayjs'
 import { useRouter } from 'vue-router'
 import api from '@/utils/api'
@@ -31,6 +31,7 @@ const activeMaterials = ref([])
 const holidayDates = ref([])
 
 let availabilityRefreshTimer = null
+let formWatchTimer = null
 
 const form = ref({
   employeeId: '',
@@ -65,7 +66,6 @@ const form = ref({
 
   needCoffeeBreak: false,
   needNameOnTable: false,
-  needWifiPassword: false,
 })
 
 function s(v) {
@@ -97,7 +97,6 @@ function formatLines(list = [], title = 'Please check:') {
 
 function extractBackendMessage(error, fallback = 'Unable to process request.') {
   const data = error?.response?.data || {}
-
   const lines = []
 
   if (Array.isArray(data?.errors)) {
@@ -178,6 +177,19 @@ function syncLegacyTimeParts() {
   }
 }
 
+function clearSelectedRoom() {
+  form.value.roomId = ''
+  form.value.roomCode = ''
+  form.value.roomName = ''
+  form.value.needCoffeeBreak = false
+  form.value.needNameOnTable = false
+  form.value.needWifiPassword = false
+}
+
+function clearSelectedMaterials() {
+  form.value.materials = []
+}
+
 function resetForm({ keepEmployee = true } = {}) {
   const current = selectedEmployee.value
 
@@ -214,7 +226,6 @@ function resetForm({ keepEmployee = true } = {}) {
 
     needCoffeeBreak: false,
     needNameOnTable: false,
-    needWifiPassword: false,    
   }
 
   activeRooms.value = []
@@ -283,6 +294,98 @@ function selectEmployee(emp) {
   }
 }
 
+function normalizeRoomWeeklyAvailability(wa) {
+  return {
+    mon: wa?.mon ?? true,
+    tue: wa?.tue ?? true,
+    wed: wa?.wed ?? true,
+    thu: wa?.thu ?? true,
+    fri: wa?.fri ?? true,
+    sat: wa?.sat ?? true,
+    sun: wa?.sun ?? true,
+  }
+}
+
+function weekdayKeyFromDate(dateStr) {
+  const raw = s(dateStr)
+  if (!raw) return ''
+  const d = dayjs(raw)
+  if (!d.isValid()) return ''
+  const map = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+  return map[d.day()] || ''
+}
+
+function buildWeeklyAvailabilityNote(weeklyAvailability, dateStr) {
+  const wa = normalizeRoomWeeklyAvailability(weeklyAvailability)
+  const chosenDay = weekdayKeyFromDate(dateStr)
+
+  const labels = {
+    mon: 'Mon',
+    tue: 'Tue',
+    wed: 'Wed',
+    thu: 'Thu',
+    fri: 'Fri',
+    sat: 'Sat',
+    sun: 'Sun',
+  }
+
+  const enabled = Object.keys(labels).filter((k) => wa[k] !== false).map((k) => labels[k])
+  const disabled = Object.keys(labels).filter((k) => wa[k] === false).map((k) => labels[k])
+
+  let summary = 'Open every day'
+  if (enabled.length === 0) summary = 'Closed every day'
+  else if (enabled.length !== 7) summary = `Open: ${enabled.join(', ')}`
+
+  if (chosenDay && wa[chosenDay] === false) {
+    return {
+      isAllowed: false,
+      shortNote: `Closed on ${labels[chosenDay]} every week`,
+      weeklySummary: summary,
+    }
+  }
+
+  if (disabled.length) {
+    return {
+      isAllowed: true,
+      shortNote: `Closed: ${disabled.join(', ')}`,
+      weeklySummary: summary,
+    }
+  }
+
+  return {
+    isAllowed: true,
+    shortNote: 'Open every day',
+    weeklySummary: summary,
+  }
+}
+
+function mapRoomRow(x, bookingDate = '') {
+  const weeklyAvailability = normalizeRoomWeeklyAvailability(x?.weeklyAvailability)
+  const weeklyInfo = buildWeeklyAvailabilityNote(weeklyAvailability, bookingDate)
+
+  const backendAvailable = x?.isAvailable !== false
+  const finalAvailable = backendAvailable && weeklyInfo.isAllowed
+
+  let status = s(x?.status || 'AVAILABLE')
+  if (!weeklyInfo.isAllowed) status = 'WEEKLY_CLOSED'
+
+  return {
+    _id: x?._id || '',
+    code: s(x?.code),
+    name: s(x?.name),
+    capacity: Math.max(0, Number(x?.capacity || 0)),
+    imageUrl: s(x?.imageUrl),
+    weeklyAvailability,
+    weeklySummary: weeklyInfo.weeklySummary,
+    shortNote: !weeklyInfo.isAllowed
+      ? weeklyInfo.shortNote
+      : s(x?.shortNote) || weeklyInfo.shortNote,
+    isActive: x?.isActive !== false,
+    isAvailable: finalAvailable,
+    status,
+  }
+}
+
 async function loadActiveMastersOnly({ silent = false } = {}) {
   try {
     if (!silent) loadingAvailability.value = true
@@ -292,16 +395,9 @@ async function loadActiveMastersOnly({ silent = false } = {}) {
       api.get('/public/booking-room/materials/active'),
     ])
 
-    activeRooms.value = (Array.isArray(roomRes?.data) ? roomRes.data : []).map((x) => ({
-      _id: x?._id || '',
-      code: s(x?.code),
-      name: s(x?.name),
-      capacity: Math.max(0, Number(x?.capacity || 0)),
-      imageUrl: s(x?.imageUrl),
-      isActive: x?.isActive !== false,
-      isAvailable: true,
-      status: 'AVAILABLE',
-    }))
+    activeRooms.value = (Array.isArray(roomRes?.data) ? roomRes.data : []).map((x) =>
+      mapRoomRow(x, form.value.bookingDate)
+    )
 
     activeMaterials.value = (Array.isArray(materialRes?.data) ? materialRes.data : []).map((x) => ({
       _id: x?._id || '',
@@ -313,6 +409,7 @@ async function loadActiveMastersOnly({ silent = false } = {}) {
       isActive: x?.isActive !== false,
       isAvailable: Math.max(0, Number(x?.totalQty || 0)) > 0,
       status: Math.max(0, Number(x?.totalQty || 0)) > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
+      shortNote: Math.max(0, Number(x?.totalQty || 0)) > 0 ? 'Ready to book' : 'Out of stock',
     }))
   } catch (e) {
     activeRooms.value = []
@@ -336,6 +433,8 @@ async function loadAvailability({ silent = false } = {}) {
     if (!date) {
       activeRooms.value = []
       activeMaterials.value = []
+      clearSelectedRoom()
+      clearSelectedMaterials()
       return
     }
 
@@ -354,16 +453,9 @@ async function loadAvailability({ silent = false } = {}) {
       },
     })
 
-    activeRooms.value = (Array.isArray(res?.data?.rooms) ? res.data.rooms : []).map((x) => ({
-      _id: x?._id || '',
-      code: s(x?.code),
-      name: s(x?.name),
-      capacity: Math.max(0, Number(x?.capacity || 0)),
-      imageUrl: s(x?.imageUrl),
-      isActive: true,
-      isAvailable: x?.isAvailable !== false,
-      status: s(x?.status || 'AVAILABLE'),
-    }))
+    activeRooms.value = (Array.isArray(res?.data?.rooms) ? res.data.rooms : []).map((x) =>
+      mapRoomRow(x, date)
+    )
 
     activeMaterials.value = (Array.isArray(res?.data?.materials) ? res.data.materials : []).map((x) => ({
       _id: x?._id || '',
@@ -375,6 +467,11 @@ async function loadAvailability({ silent = false } = {}) {
       isActive: true,
       isAvailable: x?.isAvailable !== false,
       status: s(x?.status || 'AVAILABLE'),
+      shortNote:
+        s(x?.shortNote) ||
+        (Math.max(0, Number(x?.availableQty || 0)) > 0
+          ? `Available qty: ${Math.max(0, Number(x?.availableQty || 0))}`
+          : 'No quantity available'),
     }))
   } catch (e) {
     if (!silent) {
@@ -385,9 +482,25 @@ async function loadAvailability({ silent = false } = {}) {
     }
     activeRooms.value = []
     activeMaterials.value = []
+    clearSelectedRoom()
+    clearSelectedMaterials()
   } finally {
     if (!silent) loadingAvailability.value = false
   }
+}
+
+function queueAvailabilityRefresh() {
+  if (availabilityRefreshTimer) clearTimeout(availabilityRefreshTimer)
+  availabilityRefreshTimer = setTimeout(() => {
+    loadAvailability({ silent: true })
+  }, 250)
+}
+
+function queueAvailabilityRefreshFromForm() {
+  if (formWatchTimer) clearTimeout(formWatchTimer)
+  formWatchTimer = setTimeout(() => {
+    loadAvailability({ silent: true })
+  }, 120)
 }
 
 const requestTypeLabel = computed(() => {
@@ -465,7 +578,6 @@ async function submit() {
       note: compactText(form.value.note),
       needCoffeeBreak: form.value.roomRequired ? !!form.value.needCoffeeBreak : false,
       needNameOnTable: form.value.roomRequired ? !!form.value.needNameOnTable : false,
-      needWifiPassword: form.value.roomRequired ? !!form.value.needWifiPassword : false,
 
       roomRequired: !!form.value.roomRequired,
       roomId: form.value.roomRequired ? (form.value.roomId || null) : null,
@@ -513,13 +625,6 @@ async function submit() {
   }
 }
 
-function queueAvailabilityRefresh() {
-  if (availabilityRefreshTimer) clearTimeout(availabilityRefreshTimer)
-  availabilityRefreshTimer = setTimeout(() => {
-    loadAvailability({ silent: true })
-  }, 250)
-}
-
 function onRoomMasterChanged() {
   queueAvailabilityRefresh()
 }
@@ -543,6 +648,58 @@ function onReqCreated() {
 function onReqUpdated() {
   queueAvailabilityRefresh()
 }
+
+watch(
+  [() => form.value.bookingDate, () => form.value.timeStart, () => form.value.timeEnd],
+  () => {
+    queueAvailabilityRefreshFromForm()
+  },
+  { immediate: false }
+)
+
+watch(
+  activeRooms,
+  (rooms) => {
+    if (!form.value.roomRequired || !s(form.value.roomId)) return
+
+    const found = (Array.isArray(rooms) ? rooms : []).find(
+      (x) => s(x?._id) === s(form.value.roomId)
+    )
+
+    if (!found || found.isAvailable === false) {
+      clearSelectedRoom()
+    }
+  },
+  { deep: true }
+)
+
+watch(
+  activeMaterials,
+  (materials) => {
+    if (!form.value.materialRequired || !Array.isArray(form.value.materials)) return
+
+    const next = []
+
+    for (const picked of form.value.materials) {
+      const found = (Array.isArray(materials) ? materials : []).find(
+        (m) => up(m.code) === up(picked?.materialCode)
+      )
+
+      const availableQty = Math.max(0, Number(found?.availableQty ?? found?.totalQty ?? 0))
+      if (!found || availableQty <= 0) continue
+
+      next.push({
+        materialId: s(found._id || picked?.materialId),
+        materialCode: up(found.code || picked?.materialCode),
+        materialName: s(found.name || picked?.materialName),
+        qty: Math.min(Math.max(1, Number(picked?.qty || 1)), availableQty),
+      })
+    }
+
+    form.value.materials = next
+  },
+  { deep: true }
+)
 
 onMounted(async () => {
   await Promise.all([
@@ -576,6 +733,11 @@ onBeforeUnmount(() => {
   if (availabilityRefreshTimer) {
     clearTimeout(availabilityRefreshTimer)
     availabilityRefreshTimer = null
+  }
+
+  if (formWatchTimer) {
+    clearTimeout(formWatchTimer)
+    formWatchTimer = null
   }
 
   socket.off('bookingroom:room-master:created', onRoomMasterChanged)
@@ -646,7 +808,7 @@ onBeforeUnmount(() => {
             />
           </div>
 
-                    <div>
+          <div>
             <BookingRoomRecurringSection
               :form="form"
               :holiday-dates="holidayDates"
