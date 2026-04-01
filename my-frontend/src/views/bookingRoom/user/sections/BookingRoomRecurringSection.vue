@@ -132,7 +132,7 @@ function suggestEndDate() {
   if (!startYMD) return ''
 
   const start = dayjs(startYMD).startOf('day')
-  const freq = s(props.form.recurrenceFrequency || 'WEEKLY')
+  const freq = s(props.form.recurrenceFrequency || 'DAILY')
 
   if (freq === 'DAILY') {
     return start.add(1, 'day').format('YYYY-MM-DD')
@@ -174,7 +174,7 @@ function applySuggestedEndDate(force = false) {
 
 function ensureRecurringDefaults() {
   if (!props.form.recurrenceFrequency) {
-    props.form.recurrenceFrequency = 'WEEKLY'
+    props.form.recurrenceFrequency = 'DAILY'
   }
 
   props.form.recurrenceInterval = 1
@@ -291,7 +291,7 @@ function matchesRule(dateStr) {
 
   const start = dayjs(props.form.bookingDate).startOf('day')
   const cur = dayjs(dateStr).startOf('day')
-  const freq = s(props.form.recurrenceFrequency || 'WEEKLY')
+  const freq = s(props.form.recurrenceFrequency || 'DAILY')
 
   if (cur.isBefore(start, 'day')) return false
 
@@ -365,7 +365,7 @@ const skippedDates = computed(() => {
 })
 
 const summaryText = computed(() => {
-  const freq = s(props.form.recurrenceFrequency || 'WEEKLY')
+  const freq = s(props.form.recurrenceFrequency || 'DAILY')
 
   if (freq === 'DAILY') return 'Step 2: Daily'
   if (freq === 'WEEKLY') {
