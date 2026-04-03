@@ -140,16 +140,38 @@ function compactBalances(balances) {
   for (const k of order) {
     const b = m.get(k)
     if (!b) continue
+
     const used = num(b.used)
     const remaining = num(b.remaining)
-    out.push({ k, used, remaining, pair: `${used}/${remaining}` })
+    const usedOnly = k === 'UL' || k === 'BL'
+
+    out.push({
+      k,
+      used,
+      remaining,
+      usedOnly,
+      pair: usedOnly ? `${used}` : `${used}/${remaining}`,
+    })
   }
   return out
 }
 
-function pairChipClasses(remaining) {
-  const r = num(remaining)
+function pairChipClasses(balance) {
+  const k = up(balance?.k)
+
+  // UL and BL: never red, always normal color
+  if (k === 'UL' || k === 'BL') {
+    return [
+      'ui-badge',
+      'border-slate-200 bg-white text-slate-800',
+      'dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100',
+    ].join(' ')
+  }
+
+  // Other leave types: keep old behavior
+  const r = num(balance?.remaining)
   if (r <= 0) return 'ui-badge ui-badge-danger'
+
   return [
     'ui-badge',
     'border-slate-200 bg-white text-slate-800',
@@ -1148,7 +1170,7 @@ onBeforeUnmount(() => {
                     v-for="b in compactBalances(e.balances)"
                     :key="b.k"
                     class="ui-badge"
-                    :class="pairChipClasses(b.remaining)"
+                    :class="pairChipClasses(b)"
                   >
                     {{ b.k }}: {{ b.pair }}
                   </span>
@@ -1259,7 +1281,7 @@ onBeforeUnmount(() => {
                           v-for="b in compactBalances(e.balances)"
                           :key="b.k"
                           class="ui-badge whitespace-nowrap"
-                          :class="pairChipClasses(b.remaining)"
+                          :class="pairChipClasses(b)"
                         >
                           {{ b.k }}: {{ b.pair }}
                         </span>
