@@ -3,15 +3,21 @@ import { defineStore } from 'pinia'
 import api from '@/utils/api'
 import {
   subscribeRoles,
+  subscribeUserIfNeeded,
+  subscribeEmployeeIfNeeded,
   unsubscribeRoles,
   setSocketAuthToken,
   resetSocketSubscriptions,
 } from '@/utils/socket'
 
+function s(v) {
+  return String(v ?? '').trim()
+}
+
 function normalizeRoles(user) {
   const raw = Array.isArray(user?.roles) ? user.roles : []
   const base = user?.role ? [user.role] : []
-  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase().trim()))].filter(Boolean)
+  return [...new Set([...raw, ...base].map((r) => s(r).toUpperCase()).filter(Boolean))]
 }
 
 function pickPrimaryRole(roles = []) {
@@ -32,13 +38,19 @@ function pickPrimaryRole(roles = []) {
   return roles[0] || ''
 }
 
+function getLoginId(user) {
+  return s(user?.loginId || user?.id)
+}
+
+function getEmployeeId(user) {
+  return s(user?.employeeId || user?.empId)
+}
+
 export const useAuth = defineStore('auth', {
   state: () => ({
     user: JSON.parse(localStorage.getItem('user') || 'null'),
     token: localStorage.getItem('token') || '',
     ready: false,
-
-    // ✅ NEW: prevent double logout / spam click
     isLoggingOut: false,
   }),
 
@@ -59,15 +71,35 @@ export const useAuth = defineStore('auth', {
       localStorage.setItem('primaryRole', primaryRole)
 
       if (primaryRole) localStorage.setItem('role', primaryRole)
+      else localStorage.removeItem('role')
 
-      const loginKey = this.user?.id || this.user?.loginId || ''
-      if (loginKey) localStorage.setItem('loginId', loginKey)
+      const loginId = getLoginId(this.user)
+      const employeeId = getEmployeeId(this.user)
+
+      if (loginId) localStorage.setItem('loginId', loginId)
+      else localStorage.removeItem('loginId')
+
+      if (employeeId) localStorage.setItem('employeeId', employeeId)
+      else localStorage.removeItem('employeeId')
     },
 
     async _applyRealtimeSubscriptions() {
       const roles = normalizeRoles(this.user)
-      if (!roles.length) return
-      await subscribeRoles(roles)
+      const loginId = getLoginId(this.user)
+      const employeeId = getEmployeeId(this.user)
+
+      if (roles.length) {
+        await subscribeRoles(roles)
+      }
+
+      // ✅ core fix: always join own personal rooms centrally
+      if (loginId) {
+        await subscribeUserIfNeeded(loginId)
+      }
+
+      if (employeeId) {
+        await subscribeEmployeeIfNeeded(employeeId)
+      }
     },
 
     async login(loginId, password) {
@@ -82,6 +114,7 @@ export const useAuth = defineStore('auth', {
       this._persistSession()
       await this._applyRealtimeSubscriptions()
 
+      this.ready = true
       return this.user
     },
 
@@ -135,14 +168,12 @@ export const useAuth = defineStore('auth', {
       this.ready = true
     },
 
-    // ✅ FIXED LOGOUT (one time, clears storage immediately, no bounce)
     async logout() {
       if (this.isLoggingOut) return
       this.isLoggingOut = true
 
       const roles = normalizeRoles(this.user)
 
-      // ✅ 1) Clear auth state FIRST (so router guard won't think you're still logged-in)
       this.user = null
       this.token = ''
       this.ready = true
@@ -150,13 +181,11 @@ export const useAuth = defineStore('auth', {
       this._applyTokenHeader('')
       setSocketAuthToken('')
 
-      // ✅ 2) Clear ALL storage (your request)
       try {
         localStorage.clear()
         sessionStorage.clear()
       } catch {}
 
-      // ✅ 3) Then clean sockets (best effort)
       try {
         if (roles.length) await unsubscribeRoles(roles)
       } catch {}

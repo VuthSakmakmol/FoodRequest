@@ -1,27 +1,19 @@
-// models/User.js
+// backend/models/User.js
 const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
 
-/**
- * ✅ Single source of truth for allowed roles
- * Make sure this matches your router + portals + backend checks.
- */
 const ROLES = Object.freeze([
-  // main system
   'ROOT_ADMIN',
   'ADMIN',
   'EMPLOYEE',
 
-  // food/transport portals
   'CHEF',
   'DRIVER',
   'MESSENGER',
 
-  // meeting booking portal
   'ROOM_ADMIN',
   'MATERIAL_ADMIN',
 
-  // leave portal
   'LEAVE_USER',
   'LEAVE_MANAGER',
   'LEAVE_GM',
@@ -29,8 +21,12 @@ const ROLES = Object.freeze([
   'LEAVE_ADMIN',
 ])
 
+function s(v) {
+  return String(v ?? '').trim()
+}
+
 function normRole(v) {
-  return String(v || '').trim().toUpperCase()
+  return s(v).toUpperCase()
 }
 
 function uniq(arr) {
@@ -40,20 +36,20 @@ function uniq(arr) {
 const UserSchema = new mongoose.Schema(
   {
     loginId: { type: String, required: true, unique: true, trim: true, index: true },
+
+    // ✅ NEW: keep employee identity for realtime/business modules
+    employeeId: { type: String, default: '', trim: true, index: true },
+
     name: { type: String, required: true, trim: true },
     passwordHash: { type: String, required: true },
 
-    // ✅ legacy single role (keep for old code)
     role: { type: String, enum: ROLES, default: 'LEAVE_USER' },
-
-    // ✅ multi-role
     roles: { type: [String], enum: ROLES, default: [] },
 
     isActive: { type: Boolean, default: true },
 
-    // Telegram private DM linkage
-    telegramChatId: { type: String, default: '' },
-    telegramUsername: { type: String, default: '' },
+    telegramChatId: { type: String, default: '', trim: true },
+    telegramUsername: { type: String, default: '', trim: true },
 
     passwordChangedAt: { type: Date, default: null },
     passwordVersion: { type: Number, default: 0 },
@@ -63,37 +59,32 @@ const UserSchema = new mongoose.Schema(
 
 UserSchema.index({ telegramChatId: 1 })
 
-/**
- * ✅ Harden roles sync:
- * - always normalize to UPPERCASE
- * - always keep `role` and `roles[]` consistent
- * - never allow empty `roles[]`
- */
 UserSchema.pre('validate', function (next) {
   try {
-    // normalize role
+    this.loginId = s(this.loginId)
+    this.employeeId = s(this.employeeId)
+    this.name = s(this.name)
+    this.telegramChatId = s(this.telegramChatId)
+    this.telegramUsername = s(this.telegramUsername)
+
     const role = normRole(this.role)
 
-    // normalize roles array
     const rolesArrRaw = Array.isArray(this.roles) ? this.roles : []
     const rolesArr = rolesArrRaw
       .map(normRole)
       .filter(Boolean)
       .filter((r) => ROLES.includes(r))
 
-    // If role exists and valid, ensure it exists in roles[]
     if (role && ROLES.includes(role) && !rolesArr.includes(role)) {
       rolesArr.push(role)
     }
 
-    // If role missing but roles[] exists -> set role = first
     if ((!role || !ROLES.includes(role)) && rolesArr.length) {
       this.role = rolesArr[0]
     } else if (role && ROLES.includes(role)) {
       this.role = role
     }
 
-    // If roles[] ended empty -> enforce default from role or LEAVE_USER
     const finalRole =
       normRole(this.role) && ROLES.includes(normRole(this.role))
         ? normRole(this.role)
@@ -113,14 +104,14 @@ UserSchema.pre('validate', function (next) {
 })
 
 UserSchema.methods.setPassword = async function (plain) {
-  const nextPw = String(plain || '')
+  const nextPw = s(plain)
   this.passwordHash = await bcrypt.hash(nextPw, 10)
   this.passwordChangedAt = new Date()
   this.passwordVersion = Number(this.passwordVersion || 0) + 1
 }
 
 UserSchema.methods.verifyPassword = function (plain) {
-  return bcrypt.compare(String(plain || ''), this.passwordHash)
+  return bcrypt.compare(s(plain), this.passwordHash)
 }
 
 UserSchema.statics.ROLES = ROLES

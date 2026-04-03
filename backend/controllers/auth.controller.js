@@ -4,23 +4,23 @@ const bcrypt = require('bcryptjs')
 const User = require('../models/User')
 const EmployeeDirectory = require('../models/EmployeeDirectory')
 
+function s(v) {
+  return String(v ?? '').trim()
+}
+
 function userRoles(user) {
   const arr = Array.isArray(user?.roles) ? user.roles : []
   const one = user?.role ? [user.role] : []
-  return [...new Set([...arr, ...one].map((r) => String(r || '').toUpperCase().trim()).filter(Boolean))]
+  return [...new Set([...arr, ...one].map((r) => s(r).toUpperCase()).filter(Boolean))]
 }
 
-/** ✅ Choose a stable “primary role” for legacy UI + routing */
 function pickPrimaryRole(roles = []) {
   const PRIORITY = [
-    // Leave portal
     'LEAVE_ADMIN',
     'LEAVE_COO',
     'LEAVE_GM',
     'LEAVE_MANAGER',
     'LEAVE_USER',
-
-    // Other portals
     'ROOT_ADMIN',
     'ADMIN',
     'CHEF',
@@ -34,22 +34,38 @@ function pickPrimaryRole(roles = []) {
   return roles[0] || ''
 }
 
-const signToken = (user) => {
+function serializeUser(user) {
   const roles = userRoles(user)
-  const primary = pickPrimaryRole(roles) || String(user?.role || '').toUpperCase()
+  const primary = pickPrimaryRole(roles) || s(user?.role).toUpperCase()
 
-  console.log('[AUTH] signToken roles=', roles, 'primary=', primary)
+  return {
+    id: String(user?._id || user?.loginId || ''),
+    loginId: s(user?.loginId),
+    employeeId: s(user?.employeeId), // ✅ NEW
+    name: s(user?.name),
+    role: primary,
+    roles,
+    isActive: user?.isActive !== false,
+    passwordVersion: Number(user?.passwordVersion || 0),
+    telegramChatId: s(user?.telegramChatId),
+  }
+}
+
+const signToken = (user) => {
+  const safeUser = serializeUser(user)
+
+  console.log('[AUTH] signToken roles=', safeUser.roles, 'primary=', safeUser.role)
 
   return jwt.sign(
     {
       sub: String(user._id),
-      id: String(user.loginId), // legacy
-      loginId: String(user.loginId),
-      name: user.name || '',
-      role: primary,
-      roles,
-
-      passwordVersion: Number(user.passwordVersion || 0),
+      id: String(safeUser.loginId), // legacy
+      loginId: String(safeUser.loginId),
+      employeeId: String(safeUser.employeeId || ''), // ✅ NEW
+      name: safeUser.name,
+      role: safeUser.role,
+      roles: safeUser.roles,
+      passwordVersion: Number(safeUser.passwordVersion || 0),
     },
     process.env.JWT_SECRET || 'dev_secret',
     { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
@@ -59,14 +75,19 @@ const signToken = (user) => {
 // Map portals -> allowed roles
 const PORTAL_ROLES = {
   chef: new Set(['CHEF', 'ADMIN', 'ROOT_ADMIN']),
-  leave: new Set(['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_ADMIN', 'LEAVE_COO', 'ADMIN', 'ROOT_ADMIN']),
-
-  // ✅ add these
+  leave: new Set([
+    'LEAVE_USER',
+    'LEAVE_MANAGER',
+    'LEAVE_GM',
+    'LEAVE_ADMIN',
+    'LEAVE_COO',
+    'ADMIN',
+    'ROOT_ADMIN',
+  ]),
   transport: new Set(['ADMIN', 'ROOT_ADMIN', 'DRIVER', 'MESSENGER']),
-  admin: new Set(['ADMIN', 'ROOT_ADMIN']),  // if your transport admin UI uses portal=admin
-  food: new Set(['ADMIN', 'ROOT_ADMIN', 'EMPLOYEE']), // optional if you have food employee portal
+  admin: new Set(['ADMIN', 'ROOT_ADMIN']),
+  food: new Set(['ADMIN', 'ROOT_ADMIN', 'EMPLOYEE']),
 }
-
 
 exports.login = async (req, res, next) => {
   console.log('\n[AUTH] HIT login', req.method, req.originalUrl)
@@ -101,7 +122,6 @@ exports.login = async (req, res, next) => {
     const roles = userRoles(user)
     console.log('[AUTH] roles=', roles)
 
-    // ✅ portal allow
     if (portal) {
       const allowed = PORTAL_ROLES[portal]
       if (!allowed) {
@@ -116,20 +136,13 @@ exports.login = async (req, res, next) => {
     }
 
     const token = signToken(user)
-    const primary = pickPrimaryRole(roles) || roles[0] || user.role || ''
+    const safeUser = serializeUser(user)
 
-    console.log('[AUTH] ✅ LOGIN OK primary=', primary)
+    console.log('[AUTH] ✅ LOGIN OK primary=', safeUser.role)
 
     return res.json({
       token,
-      user: {
-        id: String(user.loginId),
-        loginId: String(user.loginId),
-        name: user.name,
-        role: primary,
-        roles,
-        passwordVersion: Number(user.passwordVersion || 0),
-      },
+      user: safeUser,
       portal: portal || null,
     })
   } catch (e) {
@@ -141,36 +154,49 @@ exports.login = async (req, res, next) => {
 exports.createUser = async (req, res, next) => {
   console.log('\n[AUTH] HIT createUser', req.method, req.originalUrl)
   try {
-    const { loginId, name, password, role, roles, telegramChatId: bodyChatId } = req.body || {}
+    const {
+      loginId,
+      employeeId,
+      name,
+      password,
+      role,
+      roles,
+      telegramChatId: bodyChatId,
+    } = req.body || {}
 
     if (!loginId || !name || !password) {
       return res.status(400).json({ message: 'loginId, name, password required' })
     }
 
-    const cleanId = String(loginId).trim()
+    const cleanId = s(loginId)
+    const cleanEmployeeId = s(employeeId)
+
     const exists = await User.findOne({ loginId: cleanId })
     if (exists) return res.status(409).json({ message: 'loginId already exists' })
 
     const rolesArr = (Array.isArray(roles) ? roles : roles ? [roles] : role ? [role] : ['LEAVE_USER'])
-      .map((r) => String(r || '').toUpperCase().trim())
+      .map((r) => s(r).toUpperCase())
       .filter(Boolean)
 
     const merged = [...new Set(rolesArr)]
     const mainRole = pickPrimaryRole(merged) || merged[0] || 'LEAVE_USER'
 
-    let telegramChatId = String(bodyChatId || '').trim()
+    let telegramChatId = s(bodyChatId)
+
     if (!telegramChatId) {
-      const emp = await EmployeeDirectory.findOne({ employeeId: cleanId })
+      const lookupEmployeeId = cleanEmployeeId || cleanId
+      const emp = await EmployeeDirectory.findOne({ employeeId: lookupEmployeeId })
         .select('telegramChatId')
         .lean()
-      telegramChatId = String(emp?.telegramChatId || '').trim()
+      telegramChatId = s(emp?.telegramChatId)
     }
 
     const passwordHash = await bcrypt.hash(String(password), 10)
 
     const doc = await User.create({
       loginId: cleanId,
-      name: String(name).trim(),
+      employeeId: cleanEmployeeId, // ✅ NEW
+      name: s(name),
       passwordHash,
       role: mainRole,
       roles: merged,
@@ -178,14 +204,7 @@ exports.createUser = async (req, res, next) => {
       ...(telegramChatId ? { telegramChatId } : {}),
     })
 
-    res.status(201).json({
-      id: doc.loginId,
-      loginId: doc.loginId,
-      name: doc.name,
-      role: doc.role,
-      roles: userRoles(doc),
-      telegramChatId: doc.telegramChatId || '',
-    })
+    return res.status(201).json(serializeUser(doc))
   } catch (e) {
     console.log('[AUTH] ERROR in createUser:', e?.message)
     next(e)
@@ -195,34 +214,29 @@ exports.createUser = async (req, res, next) => {
 exports.me = async (req, res, next) => {
   console.log('\n[AUTH] HIT me', req.method, req.originalUrl, 'user=', req.user?.loginId)
   try {
-    const user = await User.findById(req.user.sub).select('loginId name role roles isActive')
+    const user = await User.findById(req.user.sub).select(
+      'loginId employeeId name role roles isActive passwordVersion telegramChatId'
+    )
+
     if (!user) return res.status(404).json({ message: 'Not found' })
 
-    res.json({
-      id: user.loginId,
-      loginId: user.loginId,
-      name: user.name,
-      role: pickPrimaryRole(userRoles(user)) || user.role,
-      roles: userRoles(user),
-    })
+    return res.json(serializeUser(user))
   } catch (e) {
     console.log('[AUTH] ERROR in me:', e?.message)
     next(e)
   }
 }
 
-// backend/controllers/auth.controller.js
-
 function validatePasswordPolicy(pw) {
-  const s = String(pw || '')
+  const s1 = String(pw || '')
 
   const rules = {
-    minLen: s.length >= 13,
-    upper: /[A-Z]/.test(s),
-    lower: /[a-z]/.test(s),
-    number: /[0-9]/.test(s),
-    symbol: /[^A-Za-z0-9]/.test(s),
-    noSpace: !/\s/.test(s),
+    minLen: s1.length >= 13,
+    upper: /[A-Z]/.test(s1),
+    lower: /[a-z]/.test(s1),
+    number: /[0-9]/.test(s1),
+    symbol: /[^A-Za-z0-9]/.test(s1),
+    noSpace: !/\s/.test(s1),
   }
 
   const ok = Object.values(rules).every(Boolean)
@@ -260,11 +274,9 @@ exports.changePassword = async (req, res, next) => {
       return res.status(400).json({ message: 'New password must be different from old password' })
     }
 
-    // ✅ STRICT POLICY
     const pol = validatePasswordPolicy(newPassword)
     console.log('[AUTH] policy ok?', pol.ok, pol.rules)
     if (!pol.ok) {
-      // Use 422 so frontend can show “policy not met”
       return res.status(422).json({ message: pol.message, policy: pol.rules })
     }
 
