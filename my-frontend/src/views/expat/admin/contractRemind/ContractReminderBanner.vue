@@ -1,6 +1,6 @@
 <!-- src/views/expat/admin/contractRemind/ContractReminderBanner.vue -->
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 
 defineOptions({ name: 'ContractReminderBanner' })
@@ -18,6 +18,10 @@ const props = defineProps({
     type: String,
     default: 'Contract action required',
   },
+  defaultCollapsed: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits([
@@ -25,7 +29,17 @@ const emit = defineEmits([
   'open-list',
   'open-profile',
   'renew',
+  'toggle',
 ])
+
+const collapsed = ref(!!props.defaultCollapsed)
+
+watch(
+  () => props.defaultCollapsed,
+  (v) => {
+    collapsed.value = !!v
+  },
+)
 
 function s(v) {
   return String(v ?? '').trim()
@@ -36,10 +50,6 @@ function num(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback
 }
 
-function isValidYMD(v) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s(v))
-}
-
 function fmtDate(v) {
   if (!v) return '—'
   const d = dayjs(v)
@@ -47,11 +57,13 @@ function fmtDate(v) {
 }
 
 function nextDayYMD(ymd) {
-  const s = String(ymd || '').trim()
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return ''
-  const [y, m, d] = s.split('-').map(Number)
+  const value = String(ymd || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return ''
+
+  const [y, m, d] = value.split('-').map(Number)
   const dt = new Date(Date.UTC(y, m - 1, d))
   dt.setUTCDate(dt.getUTCDate() + 1)
+
   const yy = dt.getUTCFullYear()
   const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
   const dd = String(dt.getUTCDate()).padStart(2, '0')
@@ -124,6 +136,22 @@ const summaryText = computed(() => {
 
 const topThree = computed(() => sortedReminders.value.slice(0, 3))
 
+const nextReminder = computed(() => {
+  return topThree.value[0] || null
+})
+
+const collapsedSummary = computed(() => {
+  if (props.loading) return 'Loading reminders...'
+  if (!count.value) return 'No contract reminders right now.'
+  if (count.value === 1 && nextReminder.value) {
+    return `${nextReminder.value.name || nextReminder.value.employeeId || '1 employee'} · ${daysLeftLabel(nextReminder.value.daysLeft)}`
+  }
+  if (nextReminder.value) {
+    return `${count.value} reminders · nearest: ${nextReminder.value.name || nextReminder.value.employeeId || 'employee'} · ${daysLeftLabel(nextReminder.value.daysLeft)}`
+  }
+  return `${count.value} reminders`
+})
+
 function badgeClass(daysLeft) {
   const n = num(daysLeft, 9999)
   if (n <= 1) {
@@ -153,6 +181,21 @@ function openProfile(item) {
 function renew(item) {
   emit('renew', normalizeReminder(item))
 }
+
+function expandBanner() {
+  collapsed.value = false
+  emit('toggle', false)
+}
+
+function collapseBanner() {
+  collapsed.value = true
+  emit('toggle', true)
+}
+
+function toggleBanner() {
+  collapsed.value = !collapsed.value
+  emit('toggle', collapsed.value)
+}
 </script>
 
 <template>
@@ -167,7 +210,11 @@ function renew(item) {
     />
 
     <div class="relative z-[1] p-3 sm:p-4">
-      <div class="min-w-0">
+      <!-- always visible header / anchor -->
+      <div
+        class="flex flex-col gap-3 rounded-2xl border border-white/50 bg-white/55 p-3 backdrop-blur
+               dark:border-white/10 dark:bg-slate-950/25"
+      >
         <div class="flex items-start gap-3">
           <div
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl
@@ -202,15 +249,58 @@ function renew(item) {
             </div>
 
             <p class="mt-1 text-[11px] leading-5 text-ui-muted">
-              {{ summaryText }}
-              <span v-if="!loading && count > 0" class="font-medium text-ui-fg/90">
+              {{ collapsed ? collapsedSummary : summaryText }}
+              <span v-if="!collapsed && !loading && count > 0" class="font-medium text-ui-fg/90">
                 Please review whether to renew contract or end contract.
               </span>
             </p>
           </div>
+
+          <div class="shrink-0">
+            <button
+              type="button"
+              class="ui-btn ui-btn-ghost ui-btn-sm"
+              :title="collapsed ? 'Show reminder panel' : 'Hide reminder panel'"
+              @click="toggleBanner"
+            >
+              <i
+                class="fa-solid"
+                :class="collapsed ? 'fa-chevron-down' : 'fa-chevron-up'"
+              />
+              {{ collapsed ? 'Show' : 'Hide' }}
+            </button>
+          </div>
         </div>
 
-        <div v-if="loading" class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <!-- collapsed quick actions -->
+        <div
+          v-if="collapsed"
+          class="flex flex-wrap items-center gap-2 border-t border-ui-border/60 pt-3"
+        >
+          <button
+            type="button"
+            class="ui-btn ui-btn-primary ui-btn-sm"
+            @click="expandBanner"
+          >
+            <i class="fa-solid fa-eye text-[11px]" />
+            View reminders
+          </button>
+
+          <button
+            v-if="count > 0"
+            type="button"
+            class="ui-btn ui-btn-ghost ui-btn-sm"
+            @click="$emit('open-list')"
+          >
+            <i class="fa-solid fa-list text-[11px]" />
+            Open list
+          </button>
+        </div>
+      </div>
+
+      <!-- expanded content -->
+      <div v-show="!collapsed" class="mt-3 min-w-0">
+        <div v-if="loading" class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           <div
             v-for="n in 3"
             :key="n"
@@ -225,7 +315,7 @@ function renew(item) {
 
         <div
           v-else-if="count > 0"
-          class="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
+          class="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
         >
           <article
             v-for="item in topThree"
@@ -299,9 +389,32 @@ function renew(item) {
 
         <div
           v-else
-          class="mt-3 rounded-xl border border-dashed border-ui-border/70 bg-white/60 px-4 py-4 text-[12px] text-ui-muted dark:bg-slate-950/30"
+          class="rounded-xl border border-dashed border-ui-border/70 bg-white/60 px-4 py-4 text-[12px] text-ui-muted dark:bg-slate-950/30"
         >
           No contract reminders found. This section will show expiring contracts here.
+        </div>
+
+        <div
+          v-if="count > 0"
+          class="mt-3 flex flex-wrap items-center gap-2 border-t border-ui-border/60 pt-3"
+        >
+          <button
+            type="button"
+            class="ui-btn ui-btn-ghost ui-btn-sm"
+            @click="$emit('open-list')"
+          >
+            <i class="fa-solid fa-list text-[11px]" />
+            Open full list
+          </button>
+
+          <button
+            type="button"
+            class="ui-btn ui-btn-ghost ui-btn-sm"
+            @click="$emit('refresh')"
+          >
+            <i class="fa-solid fa-rotate-right text-[11px]" />
+            Refresh
+          </button>
         </div>
       </div>
     </div>

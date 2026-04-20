@@ -752,21 +752,6 @@ onBeforeUnmount(() => {
             @open-profile="handleOpenReminderProfile"
             @renew="handleRenewReminder"
           />
-
-          <div
-            v-if="showContractReminderBanner"
-            class="flex justify-end -mt-1"
-          >
-            <button
-              type="button"
-              class="ui-btn ui-btn-ghost ui-btn-sm"
-              @click="handleDismissReminderBanner"
-            >
-              <i class="fa-solid fa-eye-slash text-[11px]" />
-              Hide banner for now
-            </button>
-          </div>
-
           <router-view />
         </div>
       </main>
