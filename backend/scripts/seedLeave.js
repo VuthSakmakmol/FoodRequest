@@ -1,5 +1,5 @@
-/* eslint-disable no-console */
 // backend/scripts/seedLeave.js
+/* eslint-disable no-console */
 require('dotenv').config()
 const mongoose = require('mongoose')
 const bcrypt = require('bcryptjs')
@@ -25,27 +25,27 @@ const DEFAULT_USER_PWD =
 const CORE = {
   leaveAdmin: {
     loginId: 'leave_admin',
+    employeeId: 'SYS_LEAVE_ADMIN',
     name: 'Leave Admin',
     role: 'LEAVE_ADMIN',
     password: process.env.LEAVE_ADMIN_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
-    telegramChatId: '7163451169',
+    telegramChatId: '1248659132',
   },
   gm: {
     loginId: 'leave_gm',
-    name: '',
+    employeeId: 'SYS_LEAVE_GM',
+    name: 'Leave GM',
     role: 'LEAVE_GM',
     password: process.env.LEAVE_GM_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
-    // telegramChatId: '1805934121',
-    telegramChatId: '7163451169',
+    telegramChatId: '1805934121',
   },
-
-  // ✅ NEW: COO (final approver)
   coo: {
     loginId: 'leave_coo',
+    employeeId: 'SYS_LEAVE_COO',
     name: 'COO',
     role: 'LEAVE_COO',
     password: process.env.LEAVE_COO_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
-    telegramChatId: '7163451169', 
+    telegramChatId: '7163451169',
   },
 }
 
@@ -65,34 +65,71 @@ async function hashPassword(pwd) {
   return bcrypt.hash(String(pwd || DEFAULT_USER_PWD), 10)
 }
 
-async function upsertUser({ loginId, name, password, role, telegramChatId }) {
-  const cleanLoginId = String(loginId || '').trim()
+function cleanString(v) {
+  return String(v || '').trim()
+}
+
+async function upsertUser({
+  loginId,
+  employeeId,
+  name,
+  password,
+  role,
+  telegramChatId,
+}) {
+  const cleanLoginId = cleanString(loginId)
+  const cleanEmployeeId = cleanString(employeeId)
+
   if (!cleanLoginId) return null
 
   let user = await User.findOne({ loginId: cleanLoginId })
 
   if (!user) {
     const passwordHash = await hashPassword(password)
-    user = await User.create({
+
+    const payload = {
       loginId: cleanLoginId,
-      name: String(name || cleanLoginId),
+      name: cleanString(name) || cleanLoginId,
       passwordHash,
       role,
       isActive: true,
-      ...(telegramChatId ? { telegramChatId: String(telegramChatId) } : {}),
-    })
+    }
+
+    if (cleanEmployeeId) payload.employeeId = cleanEmployeeId
+    if (telegramChatId) payload.telegramChatId = cleanString(telegramChatId)
+
+    user = await User.create(payload)
     console.log(`🆕 Created ${role}: loginId=${cleanLoginId}`)
     return user
   }
 
-  // NOTE: we do NOT overwrite password on upsert (safer)
   let changed = false
-  if (name && user.name !== name) { user.name = name; changed = true }
-  if (role && user.role !== role) { user.role = role; changed = true }
-  if (!user.isActive) { user.isActive = true; changed = true }
 
-  if (telegramChatId && String(user.telegramChatId || '') !== String(telegramChatId)) {
-    user.telegramChatId = String(telegramChatId)
+  if (cleanString(name) && user.name !== cleanString(name)) {
+    user.name = cleanString(name)
+    changed = true
+  }
+
+  if (role && user.role !== role) {
+    user.role = role
+    changed = true
+  }
+
+  if (!user.isActive) {
+    user.isActive = true
+    changed = true
+  }
+
+  if (cleanEmployeeId && cleanString(user.employeeId) !== cleanEmployeeId) {
+    user.employeeId = cleanEmployeeId
+    changed = true
+  }
+
+  if (
+    telegramChatId &&
+    cleanString(user.telegramChatId) !== cleanString(telegramChatId)
+  ) {
+    user.telegramChatId = cleanString(telegramChatId)
     changed = true
   }
 
@@ -106,8 +143,13 @@ async function upsertUser({ loginId, name, password, role, telegramChatId }) {
   return user
 }
 
-async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId, cooLoginId }) {
-  const empId = String(employeeId || '').trim()
+async function ensureLeaveProfile({
+  employeeId,
+  managerLoginId,
+  gmLoginId,
+  cooLoginId,
+}) {
+  const empId = cleanString(employeeId)
   if (!empId) return
 
   const empDir = await EmployeeDirectory.findOne({ employeeId: empId }).lean()
@@ -116,9 +158,9 @@ async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId, cooLo
     return
   }
 
-  // Ensure LEAVE_USER
   await upsertUser({
     loginId: empId,
+    employeeId: empId,
     name: empDir.name || empId,
     password: DEFAULT_USER_PWD,
     role: 'LEAVE_USER',
@@ -132,7 +174,7 @@ async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId, cooLo
       employeeLoginId: empId,
       managerLoginId,
       gmLoginId,
-      cooLoginId, // ✅ add
+      cooLoginId,
       isActive: true,
       name: empDir.name || '',
       department: empDir.department || '',
@@ -142,15 +184,33 @@ async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId, cooLo
       contractDate: '',
       alCarry: 0,
     })
-    console.log(`🆕 Created LeaveProfile: employeeId=${empId} → manager=${managerLoginId}, gm=${gmLoginId}, coo=${cooLoginId}`)
+    console.log(
+      `🆕 Created LeaveProfile: employeeId=${empId} → manager=${managerLoginId}, gm=${gmLoginId}, coo=${cooLoginId}`,
+    )
     return
   }
 
   let changed = false
-  if (String(prof.managerLoginId || '') !== managerLoginId) { prof.managerLoginId = managerLoginId; changed = true }
-  if (String(prof.gmLoginId || '') !== gmLoginId) { prof.gmLoginId = gmLoginId; changed = true }
-  if (String(prof.cooLoginId || '') !== String(cooLoginId || '')) { prof.cooLoginId = cooLoginId; changed = true } // ✅ add
-  if (prof.isActive === false) { prof.isActive = true; changed = true }
+
+  if (cleanString(prof.managerLoginId) !== cleanString(managerLoginId)) {
+    prof.managerLoginId = managerLoginId
+    changed = true
+  }
+
+  if (cleanString(prof.gmLoginId) !== cleanString(gmLoginId)) {
+    prof.gmLoginId = gmLoginId
+    changed = true
+  }
+
+  if (cleanString(prof.cooLoginId) !== cleanString(cooLoginId)) {
+    prof.cooLoginId = cooLoginId
+    changed = true
+  }
+
+  if (prof.isActive === false) {
+    prof.isActive = true
+    changed = true
+  }
 
   if (changed) {
     await prof.save()
@@ -163,13 +223,14 @@ async function ensureLeaveProfile({ employeeId, managerLoginId, gmLoginId, cooLo
 async function seedCore() {
   await upsertUser(CORE.leaveAdmin)
   await upsertUser(CORE.gm)
-  await upsertUser(CORE.coo) // ✅ seed COO
+  await upsertUser(CORE.coo)
 }
 
 async function seedFull() {
   await seedCore()
 
   const gmLoginId = CORE.gm.loginId
+  const cooLoginId = CORE.coo.loginId
 
   if (!Array.isArray(MANAGERS) || MANAGERS.length === 0) {
     console.warn('⚠️ MANAGERS is empty. Full seed will only seed core.')
@@ -177,13 +238,14 @@ async function seedFull() {
   }
 
   for (const mgr of MANAGERS) {
-    const mgrLoginId = String(mgr.loginId || '').trim()
+    const mgrLoginId = cleanString(mgr.loginId)
     if (!mgrLoginId) continue
 
-    // Ensure manager user
     const mgrDir = await EmployeeDirectory.findOne({ employeeId: mgrLoginId }).lean()
+
     await upsertUser({
       loginId: mgrLoginId,
+      employeeId: mgrLoginId,
       name: mgrDir?.name || mgr.name || mgrLoginId,
       password: mgr.password || DEFAULT_USER_PWD,
       role: 'LEAVE_MANAGER',
@@ -196,16 +258,20 @@ async function seedFull() {
         employeeId: empId,
         managerLoginId: mgrLoginId,
         gmLoginId,
+        cooLoginId,
       })
     }
   }
 }
 
 async function run() {
-  const mode = String(process.argv[2] || 'core').toLowerCase() // core | full
+  const mode = cleanString(process.argv[2] || 'core').toLowerCase()
+
   try {
     console.log('🔌 Connecting to MongoDB...')
-    await mongoose.connect(MONGO_URI, { dbName: process.env.MONGO_DB || undefined })
+    await mongoose.connect(MONGO_URI, {
+      dbName: process.env.MONGO_DB || undefined,
+    })
     console.log('✅ MongoDB connected')
 
     if (mode === 'full') await seedFull()

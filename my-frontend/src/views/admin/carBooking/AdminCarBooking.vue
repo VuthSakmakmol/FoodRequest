@@ -26,7 +26,7 @@ const { showToast } = useToast()
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
-  isMobile.value = window.innerWidth < 1024
+  isMobile.value = window.innerWidth < 768
 }
 
 /* base state */
@@ -78,9 +78,9 @@ function openTicket(u) {
 }
 
 function prettyStops(stops = []) {
-  if (!Array.isArray(stops) || !stops.length) return '—'
+  if (!stops.length) return '—'
   return stops
-    .map((s) => (s?.destination === 'Other' ? s?.destinationOther || 'Other' : s?.destination || '—'))
+    .map((s) => (s.destination === 'Other' ? s.destinationOther || 'Other' : s.destination))
     .join(' → ')
 }
 
@@ -101,11 +101,25 @@ function hasAssignee(it) {
 function assignedRoleOf(it) {
   return String(it?.category || '') === 'Messenger' ? 'MESSENGER' : 'DRIVER'
 }
+function assignedLoginIdOf(it) {
+  if (!it?.assignment) return ''
+  return assignedRoleOf(it) === 'MESSENGER'
+    ? (it.assignment.messengerId || '')
+    : (it.assignment.driverId || '')
+}
+function assignedNameOf(it) {
+  if (!it?.assignment) return ''
+  return assignedRoleOf(it) === 'MESSENGER'
+    ? (it.assignment.messengerName || it.assignment.messengerId || '')
+    : (it.assignment.driverName || it.assignment.driverId || '')
+}
+
 function canChangeStatus(item, nextStatus) {
   const s = String(nextStatus || '').toUpperCase()
   if (s === 'CANCELLED') return true
   return hasAssignee(item)
 }
+
 function canForceComplete(item) {
   const st = String(item?.status || '').toUpperCase()
   if (!item?._id) return false
@@ -114,7 +128,7 @@ function canForceComplete(item) {
 }
 
 const STATUS_BADGE_CLASS = {
-  PENDING: 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100',
+  PENDING: 'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900',
   ACCEPTED: 'bg-sky-500 text-white',
   ON_ROAD: 'bg-cyan-500 text-white',
   ARRIVING: 'bg-emerald-500 text-white',
@@ -126,19 +140,19 @@ const STATUS_BADGE_CLASS = {
 function statusBadgeClass(s) {
   return (
     STATUS_BADGE_CLASS[String(s || '').toUpperCase()] ||
-    'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100'
+    'bg-slate-300 text-slate-800 dark:bg-slate-500 dark:text-slate-900'
   )
 }
 
 const ACK_BADGE_CLASS = {
-  PENDING: 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100',
+  PENDING: 'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50',
   ACCEPTED: 'bg-emerald-500 text-white',
   DECLINED: 'bg-red-500 text-white',
 }
 function ackBadgeClass(s) {
   return (
     ACK_BADGE_CLASS[String(s || '').toUpperCase()] ||
-    'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100'
+    'bg-slate-200 text-slate-800 dark:bg-slate-600 dark:text-slate-50'
   )
 }
 
@@ -156,21 +170,21 @@ function paxDisplay(p) {
 }
 
 const STATUS_ACTION_BTN_CLASS = {
-  PENDING: 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700',
-  ACCEPTED: 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100 dark:border-sky-700 dark:bg-sky-950/30 dark:text-sky-300 dark:hover:bg-sky-900/40',
-  ON_ROAD: 'border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 dark:border-cyan-700 dark:bg-cyan-950/30 dark:text-cyan-300 dark:hover:bg-cyan-900/40',
-  ARRIVING: 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300 dark:hover:bg-emerald-900/40',
-  COMEBACK: 'border-indigo-300 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-300 dark:hover:bg-indigo-900/40',
-  COMPLETED: 'border-green-300 bg-green-50 text-green-700 hover:bg-green-100 dark:border-green-700 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-900/40',
-  DELAYED: 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-900/40',
-  CANCELLED: 'border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-700 dark:bg-rose-950/30 dark:text-rose-300 dark:hover:bg-rose-900/40',
+  PENDING: 'border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100',
+  ACCEPTED: 'border-sky-500 bg-sky-50 text-sky-700 hover:bg-sky-100',
+  ON_ROAD: 'border-cyan-500 bg-cyan-50 text-cyan-700 hover:bg-cyan-100',
+  ARRIVING: 'border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+  COMEBACK: 'border-indigo-500 bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
+  COMPLETED: 'border-green-500 bg-green-50 text-green-700 hover:bg-green-100',
+  DELAYED: 'border-amber-500 bg-amber-50 text-amber-700 hover:bg-amber-100',
+  CANCELLED: 'border-rose-500 bg-rose-50 text-rose-700 hover:bg-rose-100',
 }
 function statusButtonClass(s) {
   const base =
-    'inline-flex items-center justify-center rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors'
+    'inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap'
   const variant =
     STATUS_ACTION_BTN_CLASS[String(s || '').toUpperCase()] ||
-    STATUS_ACTION_BTN_CLASS.PENDING
+    'border-slate-400 bg-slate-50 text-slate-700 hover:bg-slate-100'
   return `${base} ${variant}`
 }
 
@@ -231,7 +245,7 @@ async function loadSchedule() {
     const { data } = await api.get('/admin/car-bookings', { params })
     rows.value = (Array.isArray(data) ? data : []).map((x) => ({
       ...x,
-      stops: Array.isArray(x.stops) ? x.stops : [],
+      stops: x.stops || [],
       assignment: x.assignment || {},
     }))
   } catch (e) {
@@ -257,6 +271,7 @@ function onAssigned(p) {
 
   const action = String(p?.action || 'ASSIGN').toUpperCase()
   const role = String(p?.prevRole || '').toUpperCase()
+
   if (!it.assignment) it.assignment = {}
 
   if (action === 'UNASSIGN') {
@@ -840,16 +855,15 @@ function lockBodyScroll(locked) {
   }
 }
 
-function closeTopModal() {
-  if (unassignConfirmOpen.value) return closeUnassignConfirm()
-  if (cancelConfirmOpen.value) return closeCancelConfirm()
-  if (forceConfirmOpen.value) return closeForceConfirm()
-  if (assignOpen.value) return (assignOpen.value = false)
-  if (editOpen.value) return (editOpen.value = false)
-  if (detailOpen.value) return (detailOpen.value = false)
-}
 function onKeyDown(e) {
-  if (e.key === 'Escape') closeTopModal()
+  if (e.key === 'Escape') {
+    if (unassignConfirmOpen.value) return closeUnassignConfirm()
+    if (cancelConfirmOpen.value) return closeCancelConfirm()
+    if (forceConfirmOpen.value) return closeForceConfirm()
+    if (assignOpen.value) return (assignOpen.value = false)
+    if (editOpen.value) return (editOpen.value = false)
+    if (detailOpen.value) return (detailOpen.value = false)
+  }
 }
 
 /* lifecycle */
@@ -857,8 +871,10 @@ watch(isAnyModalOpen, (open) => lockBodyScroll(open), { immediate: true })
 
 onMounted(() => {
   updateIsMobile()
-  if (typeof window !== 'undefined') window.addEventListener('resize', updateIsMobile)
-  if (typeof window !== 'undefined') window.addEventListener('keydown', onKeyDown)
+  if (typeof window !== 'undefined') {
+    window.addEventListener('resize', updateIsMobile, { passive: true })
+    window.addEventListener('keydown', onKeyDown)
+  }
 
   try {
     subscribeRoleIfNeeded({ role: 'ADMIN' })
@@ -891,8 +907,10 @@ onBeforeUnmount(() => {
   socket.off('carBooking:updated', onUpdated)
   socket.off('carBooking:deleted', onDeleted)
 
-  if (typeof window !== 'undefined') window.removeEventListener('resize', updateIsMobile)
-  if (typeof window !== 'undefined') window.removeEventListener('keydown', onKeyDown)
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', updateIsMobile)
+    window.removeEventListener('keydown', onKeyDown)
+  }
   lockBodyScroll(false)
 })
 
@@ -912,113 +930,124 @@ watch(
 </script>
 
 <template>
-  <div class="admin-car-page px-1 py-1 sm:px-0 text-slate-900 dark:text-slate-100">
-    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
+  <div class="admin-car-page overflow-x-hidden px-1 py-1 text-slate-900 dark:text-slate-100 sm:px-0">
+    <div
+      class="car-page-shell w-full max-w-full overflow-x-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"
+    >
       <div
-        class="rounded-t-2xl border-b border-slate-200 bg-gradient-to-r from-[#0f719e] via-[#b3b4df] to-[#ae9aea] px-3 py-3 text-slate-900 dark:border-slate-700 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 dark:text-slate-100"
+        class="rounded-t-2xl border-b border-slate-200 bg-gradient-to-r
+               from-[#0f719e] via-[#b3b4df] to-[#ae9aea]
+               px-3 py-2 text-slate-900
+               dark:border-slate-700 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 dark:text-slate-100"
       >
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div class="min-w-0">
-            <div class="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-800/80 dark:text-slate-200/80">
+        <div class="flex flex-wrap items-center justify-between gap-2 overflow-hidden">
+          <div class="min-w-0 flex flex-col leading-tight">
+            <span
+              class="truncate text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-800/80 dark:text-slate-200/80"
+            >
               Car Booking
-            </div>
-            <div class="truncate text-sm font-semibold sm:text-base">
-              Admin car &amp; messenger schedule
-            </div>
+            </span>
+            <span class="truncate text-sm font-semibold">Admin car &amp; messenger schedule</span>
           </div>
 
-          <div class="grid grid-cols-2 gap-2 text-[11px] sm:flex sm:flex-col sm:items-end">
-            <div class="rounded-xl bg-white/65 px-2 py-1 text-center dark:bg-slate-800/70">
-              Date: {{ selectedDate || '—' }}
-            </div>
-            <div class="rounded-xl bg-white/65 px-2 py-1 text-center dark:bg-slate-800/70">
-              Total: {{ totalItems }}
-            </div>
+          <div
+            class="min-w-0 max-w-full flex flex-col items-end text-[11px] text-slate-900/80 dark:text-slate-100/80"
+          >
+            <span class="truncate">Date: {{ selectedDate || '—' }}</span>
+            <span class="truncate">Total bookings: {{ totalItems }}</span>
           </div>
         </div>
       </div>
 
-      <CarBookingFilters
-        v-model:selectedDate="selectedDate"
-        v-model:statusFilter="statusFilter"
-        v-model:categoryFilter="categoryFilter"
-        v-model:qSearch="qSearch"
-        v-model:itemsPerPage="itemsPerPage"
-        v-model:exportFrom="exportFrom"
-        v-model:exportTo="exportTo"
-        :loading="loading"
-        :per-page-options="PER_PAGE_OPTIONS"
-        @refresh="loadSchedule"
-        @export="exportExcel"
-      />
+      <div class="w-full max-w-full overflow-x-hidden">
+        <CarBookingFilters
+          v-model:selectedDate="selectedDate"
+          v-model:statusFilter="statusFilter"
+          v-model:categoryFilter="categoryFilter"
+          v-model:qSearch="qSearch"
+          v-model:itemsPerPage="itemsPerPage"
+          v-model:exportFrom="exportFrom"
+          v-model:exportTo="exportTo"
+          :loading="loading"
+          :per-page-options="PER_PAGE_OPTIONS"
+          @refresh="loadSchedule"
+          @export="exportExcel"
+        />
+      </div>
 
       <div
         v-if="error"
-        class="mx-3 mt-2 rounded-xl border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700 dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
+        class="mx-3 mt-2 rounded-md border border-rose-500 bg-rose-50 px-3 py-2 text-[11px] text-rose-700
+               dark:border-rose-500/80 dark:bg-rose-950/40 dark:text-rose-100"
       >
         {{ error }}
       </div>
 
-      <div class="px-1.5 py-2 sm:px-3 sm:py-3">
-        <CarBookingMobileList
-          v-if="isMobile"
-          :loading="loading"
-          :rows="visibleRows"
-          :selected-date="selectedDate"
-          :focus-id="focusId"
-          :updating="updating"
-          :next-statuses="nextStatuses"
-          :can-change-status="canChangeStatus"
-          :can-force-complete="canForceComplete"
-          :status-badge-class="statusBadgeClass"
-          :ack-badge-class="ackBadgeClass"
-          :status-button-class="statusButtonClass"
-          :pretty-stops="prettyStops"
-          :assignee-name="assigneeName"
-          :response-label="responseLabel"
-          :pax-display="paxDisplay"
-          @open-ticket="openTicket"
-          @edit="openEditDialog"
-          @assign="openAssignDialog"
-          @details="showDetails"
-          @cancel="requestCancel"
-          @status="updateStatus"
-          @force-complete="requestForceComplete"
-        />
+      <div class="car-page-scroll-space w-full max-w-full overflow-x-hidden px-1.5 py-2 sm:px-3 sm:py-3">
+        <div class="w-full max-w-full overflow-x-hidden">
+          <CarBookingMobileList
+            v-if="isMobile"
+            :loading="loading"
+            :rows="visibleRows"
+            :selected-date="selectedDate"
+            :focus-id="focusId"
+            :updating="updating"
+            :next-statuses="nextStatuses"
+            :can-change-status="canChangeStatus"
+            :can-force-complete="canForceComplete"
+            :status-badge-class="statusBadgeClass"
+            :ack-badge-class="ackBadgeClass"
+            :status-button-class="statusButtonClass"
+            :pretty-stops="prettyStops"
+            :assignee-name="assigneeName"
+            :response-label="responseLabel"
+            :pax-display="paxDisplay"
+            @open-ticket="openTicket"
+            @edit="openEditDialog"
+            @assign="openAssignDialog"
+            @details="showDetails"
+            @cancel="requestCancel"
+            @status="updateStatus"
+            @force-complete="requestForceComplete"
+          />
 
-        <CarBookingDesktopTable
-          v-else
-          :loading="loading"
-          :rows="visibleRows"
-          :selected-date="selectedDate"
-          :focus-id="focusId"
-          :updating="updating"
-          :next-statuses="nextStatuses"
-          :can-change-status="canChangeStatus"
-          :can-force-complete="canForceComplete"
-          :status-badge-class="statusBadgeClass"
-          :ack-badge-class="ackBadgeClass"
-          :status-button-class="statusButtonClass"
-          :category-badge-class="categoryBadgeClass"
-          :pretty-stops="prettyStops"
-          :assignee-name="assigneeName"
-          :response-label="responseLabel"
-          :pax-display="paxDisplay"
-          @open-ticket="openTicket"
-          @edit="openEditDialog"
-          @assign="openAssignDialog"
-          @details="showDetails"
-          @cancel="requestCancel"
-          @status="updateStatus"
-          @force-complete="requestForceComplete"
-        />
+          <CarBookingDesktopTable
+            v-else
+            :loading="loading"
+            :rows="visibleRows"
+            :selected-date="selectedDate"
+            :focus-id="focusId"
+            :updating="updating"
+            :next-statuses="nextStatuses"
+            :can-change-status="canChangeStatus"
+            :can-force-complete="canForceComplete"
+            :status-badge-class="statusBadgeClass"
+            :ack-badge-class="ackBadgeClass"
+            :status-button-class="statusButtonClass"
+            :category-badge-class="categoryBadgeClass"
+            :pretty-stops="prettyStops"
+            :assignee-name="assigneeName"
+            :response-label="responseLabel"
+            :pax-display="paxDisplay"
+            @open-ticket="openTicket"
+            @edit="openEditDialog"
+            @assign="openAssignDialog"
+            @details="showDetails"
+            @cancel="requestCancel"
+            @status="updateStatus"
+            @force-complete="requestForceComplete"
+          />
+        </div>
 
-        <CarBookingPagination
-          :page="page"
-          :page-count="pageCount"
-          @prev="page > 1 && (page = page - 1)"
-          @next="page < pageCount && (page = page + 1)"
-        />
+        <div class="w-full max-w-full overflow-x-hidden">
+          <CarBookingPagination
+            :page="page"
+            :page-count="pageCount"
+            @prev="page > 1 && (page = page - 1)"
+            @next="page < pageCount && (page = page + 1)"
+            @go="page = $event"
+          />
+        </div>
       </div>
     </div>
 
@@ -1087,3 +1116,62 @@ watch(
     />
   </div>
 </template>
+
+<style scoped>
+.admin-car-page {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  padding-bottom: max(22px, env(safe-area-inset-bottom));
+}
+
+.car-page-shell {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.car-page-scroll-space {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  padding-bottom: max(108px, calc(env(safe-area-inset-bottom) + 108px));
+}
+
+:deep(*) {
+  box-sizing: border-box;
+}
+
+:deep(img),
+:deep(video),
+:deep(canvas),
+:deep(svg),
+:deep(table),
+:deep(pre),
+:deep(code) {
+  max-width: 100%;
+}
+
+:deep(.truncate-safe) {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .admin-car-page,
+  .car-page-shell,
+  .car-page-scroll-space {
+    overscroll-behavior-x: none;
+    touch-action: pan-y;
+  }
+}
+
+@media (min-width: 768px) {
+  .car-page-scroll-space {
+    padding-bottom: 24px;
+  }
+}
+</style>
