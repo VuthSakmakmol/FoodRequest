@@ -30,6 +30,7 @@ const CORE = {
     role: 'LEAVE_ADMIN',
     password: process.env.LEAVE_ADMIN_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
     telegramChatId: '1248659132',
+    // telegramChatId: '7163451169',
   },
   gm: {
     loginId: 'leave_gm',
@@ -38,6 +39,7 @@ const CORE = {
     role: 'LEAVE_GM',
     password: process.env.LEAVE_GM_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
     telegramChatId: '1805934121',
+    // telegramChatId: '7163451169',
   },
   coo: {
     loginId: 'leave_coo',
@@ -45,7 +47,7 @@ const CORE = {
     name: 'COO',
     role: 'LEAVE_COO',
     password: process.env.LEAVE_COO_DEFAULT_PASSWORD || DEFAULT_USER_PWD,
-    telegramChatId: '7163451169',
+    telegramChatId: '716345116933',
   },
 }
 

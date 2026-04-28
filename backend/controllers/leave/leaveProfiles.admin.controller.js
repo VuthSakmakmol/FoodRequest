@@ -273,10 +273,39 @@ async function ensureManagerRole(managerLoginId) {
 
 async function ensureUserAccount({ loginId, employeeId, password }) {
   const login = s(loginId)
-  if (!login) throw createError(400, 'loginId is required')
+  const empId = s(employeeId)
 
-  const existing = await User.findOne({ loginId: login })
-  if (existing) return existing
+  if (!login) throw createError(400, 'loginId is required')
+  if (!empId) throw createError(400, 'employeeId is required. User account cannot be saved without employeeId.')
+
+  // 1) Find existing user by loginId first
+  let existing = await User.findOne({ loginId: login })
+
+  // 2) If not found by loginId, try find by employeeId
+  if (!existing) {
+    existing = await User.findOne({ employeeId: empId })
+  }
+
+  // 3) If existing user found, make sure employeeId is saved correctly
+  if (existing) {
+    const existingEmployeeId = s(existing.employeeId)
+
+    // If this login belongs to another employee, block it
+    if (existingEmployeeId && existingEmployeeId !== empId) {
+      throw createError(
+        409,
+        `User loginId ${login} already belongs to employeeId ${existingEmployeeId}`
+      )
+    }
+
+    // Fix old bad data: employeeId was empty before
+    if (!existingEmployeeId) {
+      existing.employeeId = empId
+      await existing.save()
+    }
+
+    return existing
+  }
 
   const pwd = s(password)
   if (!pwd) throw createError(400, 'Password is required to create a new user account.')
@@ -287,17 +316,20 @@ async function ensureUserAccount({ loginId, employeeId, password }) {
   let name = ''
   try {
     const emp = await EmployeeDirectory.findOne(
-      { employeeId: s(employeeId || login) },
+      { employeeId: empId },
       { name: 1, fullName: 1 }
     ).lean()
+
     name = s(emp?.name || emp?.fullName)
   } catch {}
+
   if (!name) name = login
 
   const passwordHash = await bcrypt.hash(pwd, 10)
 
   const user = await User.create({
     loginId: login,
+    employeeId: empId, // ✅ IMPORTANT: never save without employeeId
     name,
     passwordHash,
     role: 'LEAVE_USER',
@@ -1047,19 +1079,52 @@ exports.resetUserPassword = async (req, res) => {
   const employeeId = s(req.params.employeeId)
   const { password } = req.body || {}
 
+  if (!employeeId) throw createError(400, 'employeeId is required')
   if (!password) throw createError(400, 'password is required')
 
-  const prof = await LeaveProfile.findOne({ employeeId }).lean()
+  const prof = await LeaveProfile.findOne({ employeeId })
   if (!prof) throw createError(404, 'Profile not found')
 
-  const loginId = s(prof.employeeLoginId)
+  const loginId = s(prof.employeeLoginId || employeeId)
   if (!loginId) throw createError(400, 'Profile missing employeeLoginId')
 
   const err = validateStrongPassword(password)
   if (err) throw createError(400, err)
 
-  const user = await User.findOne({ loginId })
-  if (!user) throw createError(404, 'User account not found for this profile')
+  // Find user by loginId first, then by employeeId
+  let user = await User.findOne({ loginId })
+  if (!user) {
+    user = await User.findOne({ employeeId })
+  }
+
+  // If user does not exist, create it properly with employeeId
+  if (!user) {
+    user = await ensureUserAccount({
+      loginId,
+      employeeId,
+      password,
+    })
+  }
+
+  // Check if another user already owns this employeeId
+  const owner = await User.findOne({
+    employeeId,
+    _id: { $ne: user._id },
+  }).lean()
+
+  if (owner) {
+    throw createError(
+      409,
+      `employeeId ${employeeId} is already used by another user account: ${s(owner.loginId)}`
+    )
+  }
+
+  // ✅ Fix old bad data: never keep employeeId empty
+  user.employeeId = employeeId
+
+  if (!user.loginId) {
+    user.loginId = loginId
+  }
 
   if (typeof user.setPassword === 'function') {
     await user.setPassword(password)
@@ -1069,11 +1134,20 @@ exports.resetUserPassword = async (req, res) => {
     user.passwordVersion = Number(user.passwordVersion || 0) + 1
   }
 
+  user.isActive = user.isActive === false ? false : true
+
   await user.save()
+
+  // Also fix profile loginId if old profile missed it
+  if (!s(prof.employeeLoginId)) {
+    prof.employeeLoginId = loginId
+    await prof.save()
+  }
 
   return res.json({
     ok: true,
     message: 'Password reset successfully. Existing sessions were invalidated.',
+    employeeId,
     loginId,
     passwordVersion: Number(user.passwordVersion || 0),
   })
