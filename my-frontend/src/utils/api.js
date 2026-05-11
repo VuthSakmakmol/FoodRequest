@@ -4,17 +4,16 @@ import { useAuth } from '@/store/auth'
 import router from '@/router'
 
 const api = axios.create({
-  // e.g. http://localhost:4333/api  (no trailing slash)
   baseURL: (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, ''),
   timeout: 30000,
 })
 
-// ✅ Helper: detect FormData reliably (axios header keys can be lowercase)
 function isFormDataPayload(cfg) {
   if (typeof FormData !== 'undefined' && cfg?.data instanceof FormData) return true
 
   const h = cfg?.headers || {}
   const ct = h['content-type'] || h['Content-Type'] || h.contentType || h.ContentType
+
   return ct && String(ct).toLowerCase().includes('multipart/form-data')
 }
 
@@ -28,6 +27,7 @@ function safeAuth() {
 
 function isPublicPath(pathname) {
   const p = String(pathname || '')
+
   return (
     p === '/' ||
     p.startsWith('/greeting') ||
@@ -38,14 +38,15 @@ function isPublicPath(pathname) {
 
 function pickLoginRouteByPath(pathname) {
   const p = String(pathname || '')
-  // If user was in leave portal → go to leave login
-  if (p.startsWith('/leave')) return { name: 'leave-login' }
-  // otherwise use admin login (or greeting if you prefer)
+
+  if (p.startsWith('/leave')) {
+    return { name: 'leave-login' }
+  }
+
   return { name: 'admin-login' }
 }
 
 api.interceptors.request.use((config) => {
-  // Attach auth token if present
   const auth = safeAuth()
   const token = auth?.token || localStorage.getItem('token')
 
@@ -54,7 +55,7 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
 
-  const method = (config.method || '').toLowerCase()
+  const method = String(config.method || '').toLowerCase()
   const hasBody = ['post', 'put', 'patch'].includes(method)
   const isFD = isFormDataPayload(config)
 
@@ -62,16 +63,12 @@ api.interceptors.request.use((config) => {
     config.headers = config.headers || {}
 
     if (isFD) {
-      // ✅ CRITICAL: do not set multipart manually; let browser add boundary
       delete config.headers['Content-Type']
       delete config.headers['content-type']
       delete config.headers.contentType
       delete config.headers.ContentType
-    } else {
-      // JSON requests only
-      if (!config.headers['Content-Type'] && !config.headers['content-type']) {
-        config.headers['Content-Type'] = 'application/json'
-      }
+    } else if (!config.headers['Content-Type'] && !config.headers['content-type']) {
+      config.headers['Content-Type'] = 'application/json'
     }
   }
 
@@ -81,34 +78,44 @@ api.interceptors.request.use((config) => {
 let handling401 = false
 
 api.interceptors.response.use(
-  (r) => r,
+  (response) => response,
   async (err) => {
     const status = err?.response?.status
+
     if (status === 401) {
-      // Avoid multiple redirects from parallel requests
       if (!handling401) {
         handling401 = true
+
         try {
           const auth = safeAuth()
-          auth?.logout?.()
 
-          const currentPath = router.currentRoute?.value?.path || window.location.pathname || '/'
-          // Don’t redirect if already on public/login pages
+          if (auth?.logout) {
+            await auth.logout()
+          }
+
+          const currentRoute = router.currentRoute?.value
+          const currentPath = currentRoute?.path || window.location.pathname || '/'
+
           if (!isPublicPath(currentPath)) {
             const target = pickLoginRouteByPath(currentPath)
-            // keep "next" so user can return after login if you want
-            await router.push({ ...target, query: { next: router.currentRoute.value?.name || '' } })
+
+            await router.replace({
+              ...target,
+              query: {
+                next: currentRoute?.name || '',
+              },
+            })
           }
         } catch {
-          // ignore
+          // ignore redirect/logout race
         } finally {
-          // small delay prevents redirect loop if requests still failing
           setTimeout(() => {
             handling401 = false
-          }, 300)
+          }, 500)
         }
       }
     }
+
     return Promise.reject(err)
   }
 )

@@ -34,35 +34,104 @@ function pickPrimaryRole(roles = []) {
     'MESSENGER',
     'EMPLOYEE',
   ]
-  for (const p of PRIORITY) if (roles.includes(p)) return p
+
+  for (const p of PRIORITY) {
+    if (roles.includes(p)) return p
+  }
+
   return roles[0] || ''
 }
 
 function getLoginId(user) {
-  return s(user?.loginId || user?.id)
+  return s(user?.loginId || user?.id || user?._id)
 }
 
 function getEmployeeId(user) {
   return s(user?.employeeId || user?.empId)
 }
 
+function looksLikeUser(value) {
+  if (!value || typeof value !== 'object') return false
+
+  return !!(
+    value.loginId ||
+    value.id ||
+    value._id ||
+    value.employeeId ||
+    value.empId ||
+    value.role ||
+    Array.isArray(value.roles)
+  )
+}
+
+function normalizeUserPayload(data) {
+  const candidates = [
+    data?.user,
+    data?.data?.user,
+    data?.profile,
+    data?.data,
+    data,
+  ]
+
+  return candidates.find(looksLikeUser) || null
+}
+
+function normalizeTokenPayload(data) {
+  return s(
+    data?.token ||
+      data?.accessToken ||
+      data?.data?.token ||
+      data?.data?.accessToken
+  )
+}
+
+const AUTH_STORAGE_KEYS = [
+  'token',
+  'user',
+  'roles',
+  'primaryRole',
+  'role',
+  'loginId',
+  'employeeId',
+]
+
+function clearAuthLocalStorage() {
+  for (const key of AUTH_STORAGE_KEYS) {
+    localStorage.removeItem(key)
+  }
+}
+
 export const useAuth = defineStore('auth', {
   state: () => ({
-    user: JSON.parse(localStorage.getItem('user') || 'null'),
+    user: null,
     token: localStorage.getItem('token') || '',
     ready: false,
     isLoggingOut: false,
   }),
 
+  getters: {
+    isAuthenticated: (state) => !!state.token && !!state.user,
+    roles: (state) => normalizeRoles(state.user),
+    primaryRole: (state) => pickPrimaryRole(normalizeRoles(state.user)),
+  },
+
   actions: {
     _applyTokenHeader(token) {
-      if (token) api.defaults.headers.common.Authorization = `Bearer ${token}`
-      else delete api.defaults.headers.common.Authorization
+      if (token) {
+        api.defaults.headers.common.Authorization = `Bearer ${token}`
+      } else {
+        delete api.defaults.headers.common.Authorization
+      }
     },
 
     _persistSession() {
-      localStorage.setItem('token', this.token || '')
-      localStorage.setItem('user', JSON.stringify(this.user || null))
+      if (!this.token || !this.user) {
+        clearAuthLocalStorage()
+        return
+      }
+
+      localStorage.setItem('token', this.token)
+      localStorage.setItem('user', JSON.stringify(this.user))
 
       const roles = normalizeRoles(this.user)
       const primaryRole = pickPrimaryRole(roles)
@@ -84,29 +153,44 @@ export const useAuth = defineStore('auth', {
     },
 
     async _applyRealtimeSubscriptions() {
+      try {
+        resetSocketSubscriptions()
+      } catch {}
+
       const roles = normalizeRoles(this.user)
       const loginId = getLoginId(this.user)
       const employeeId = getEmployeeId(this.user)
 
-      if (roles.length) {
-        await subscribeRoles(roles)
-      }
+      try {
+        if (roles.length) {
+          await subscribeRoles(roles)
+        }
 
-      // ✅ core fix: always join own personal rooms centrally
-      if (loginId) {
-        await subscribeUserIfNeeded(loginId)
-      }
+        if (loginId) {
+          await subscribeUserIfNeeded(loginId)
+        }
 
-      if (employeeId) {
-        await subscribeEmployeeIfNeeded(employeeId)
+        if (employeeId) {
+          await subscribeEmployeeIfNeeded(employeeId)
+        }
+      } catch (e) {
+        console.warn('[auth] realtime subscription failed:', e?.message || e)
       }
     },
 
     async login(loginId, password) {
       const { data } = await api.post('/auth/login', { loginId, password })
 
-      this.user = data.user
-      this.token = data.token
+      const token = normalizeTokenPayload(data)
+      const user = normalizeUserPayload(data)
+
+      if (!token || !user) {
+        throw new Error('Invalid login response.')
+      }
+
+      this.token = token
+      this.user = user
+      this.ready = true
 
       this._applyTokenHeader(this.token)
       setSocketAuthToken(this.token)
@@ -114,7 +198,6 @@ export const useAuth = defineStore('auth', {
       this._persistSession()
       await this._applyRealtimeSubscriptions()
 
-      this.ready = true
       return this.user
     },
 
@@ -122,6 +205,7 @@ export const useAuth = defineStore('auth', {
       if (!this.token) {
         this.user = null
         this.ready = true
+        this._persistSession()
         return null
       }
 
@@ -130,12 +214,19 @@ export const useAuth = defineStore('auth', {
         setSocketAuthToken(this.token)
 
         const { data } = await api.get('/auth/me')
-        this.user = data
+        const user = normalizeUserPayload(data)
+
+        if (!user) {
+          throw new Error('Invalid /auth/me response.')
+        }
+
+        this.user = user
+        this.ready = true
 
         this._persistSession()
         await this._applyRealtimeSubscriptions()
 
-        return data
+        return this.user
       } catch (e) {
         await this.logout()
         throw e
@@ -146,55 +237,63 @@ export const useAuth = defineStore('auth', {
 
     async restore() {
       const storedToken = localStorage.getItem('token') || ''
-      const storedUser = localStorage.getItem('user')
 
-      if (storedToken) {
-        this.token = storedToken
-        this._applyTokenHeader(this.token)
-        setSocketAuthToken(this.token)
+      if (!storedToken) {
+        this.token = ''
+        this.user = null
+        this.ready = true
+        this._applyTokenHeader('')
+        setSocketAuthToken('')
+        clearAuthLocalStorage()
+        return null
       }
 
-      if (storedUser) {
-        try {
-          this.user = JSON.parse(storedUser)
-        } catch {
-          this.user = null
-        }
+      this.token = storedToken
+      this._applyTokenHeader(this.token)
+      setSocketAuthToken(this.token)
+
+      try {
+        // ✅ Important fix:
+        // Never trust old localStorage user after app reopen.
+        // Always ask backend who the current token belongs to.
+        return await this.fetchMe()
+      } catch {
+        return null
+      } finally {
+        this.ready = true
       }
-
-      this._persistSession()
-      await this._applyRealtimeSubscriptions()
-
-      this.ready = true
     },
 
     async logout() {
       if (this.isLoggingOut) return
+
       this.isLoggingOut = true
-
-      const roles = normalizeRoles(this.user)
-
-      this.user = null
-      this.token = ''
-      this.ready = true
-
-      this._applyTokenHeader('')
-      setSocketAuthToken('')
+      const oldRoles = normalizeRoles(this.user)
 
       try {
-        localStorage.clear()
-        sessionStorage.clear()
-      } catch {}
+        this.user = null
+        this.token = ''
+        this.ready = true
 
-      try {
-        if (roles.length) await unsubscribeRoles(roles)
-      } catch {}
+        this._applyTokenHeader('')
+        setSocketAuthToken('')
 
-      try {
-        resetSocketSubscriptions()
-      } catch {}
+        clearAuthLocalStorage()
 
-      this.isLoggingOut = false
+        try {
+          sessionStorage.clear()
+        } catch {}
+
+        try {
+          if (oldRoles.length) await unsubscribeRoles(oldRoles)
+        } catch {}
+
+        try {
+          resetSocketSubscriptions()
+        } catch {}
+      } finally {
+        this.isLoggingOut = false
+      }
     },
   },
 })

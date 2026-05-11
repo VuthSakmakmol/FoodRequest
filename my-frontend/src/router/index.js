@@ -11,7 +11,7 @@ const ChefLayout = () => import('@/layouts/ChefLayout.vue')
 const DriverLayout = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
 
-// ✅ NEW unified leave layout (User + Manager in one sidebar when multi-role)
+// Unified leave layout
 const LeaveExpatUnified = () => import('@/layouts/LeaveExpat/LeaveExpatUnified.vue')
 
 // Leave / Expat layouts
@@ -37,13 +37,13 @@ const EmployeeCarBooking = () => import('@/views/employee/carBooking/EmployeeCar
 const EmployeeCarHistory = () => import('@/views/employee/carBooking/EmployeeCarHistory.vue')
 const CarBookingSchedule = () => import('@/views/employee/carBooking/EmployeeCarCalendar.vue')
 
-// Admin (Food)
+// Admin
 const AdminLogin = () => import('@/views/admin/AdminLogin.vue')
 const AdminFoodRequests = () => import('@/views/admin/foodBooking/AdminFoodBooking.vue')
 const AdminFoodCalendar = () => import('@/views/admin/foodBooking/AdminFoodCalendar.vue')
 const AdminDashboard = () => import('@/views/admin/AdminDashboard.vue')
 
-// Admin (Transportation)
+// Admin Transportation
 const AdminCarBooking = () => import('@/views/admin/carbooking/AdminCarBooking.vue')
 const AdminCarCalendar = () => import('@/views/admin/carbooking/TransportAdminCalendar.vue')
 
@@ -59,7 +59,7 @@ const DriverCarCalendar = () => import('@/views/driver/DriverCarCalendar.vue')
 const MessengerAssignment = () => import('@/views/messenger/MessengerCarBooking.vue')
 const MessengerCarCalendar = () => import('@/views/messenger/MessengerCarCalendar.vue')
 
-// Expat Leave (shared views)
+// Expat Leave
 const ExpatRequestLeave = () => import('@/views/expat/RequestLeave.vue')
 const AdminAddSignature = () => import('@/views/expat/admin/components/AdminAddSignature.vue')
 const ExpatMyRequests = () => import('@/views/expat/MyRequest.vue')
@@ -79,32 +79,13 @@ const AdminBookingRoomRooms = () => import('@/views/bookingRoom/admin/AdminBooki
 const AdminBookingRoomMaterials = () => import('@/views/bookingRoom/admin/AdminBookingRoomMaterials.vue')
 
 /* ─────────────────────────────────────────────
- * Helper for direct
- * ───────────────────────────────────────────── */
-function startLeaveRoute(path, name, targetName) {
-  return {
-    path,
-    name,
-    meta: { public: true, portal: 'leave' },
-    beforeEnter: () => {
-      const auth = useAuth()
-      const roles = normalizeRoles(auth.user)
-
-      if (!auth.token || !roles.length) {
-        return { name: 'leave-login', query: { next: targetName } }
-      }
-      return { name: targetName }
-    },
-  }
-}
-
-/* ─────────────────────────────────────────────
- * Roles helpers (supports user.role + user.roles[])
+ * Role helpers
  * ───────────────────────────────────────────── */
 function normalizeRoles(user) {
   const raw = Array.isArray(user?.roles) ? user.roles : []
   const base = user?.role ? [user.role] : []
-  return [...new Set([...raw, ...base].map(r => String(r || '').toUpperCase()))]
+
+  return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase()).filter(Boolean))]
 }
 
 function pickPrimaryRole(roles = []) {
@@ -132,12 +113,10 @@ function pickPrimaryRole(roles = []) {
   for (const p of PRIORITY) {
     if (roles.includes(p)) return p
   }
+
   return roles[0] || ''
 }
 
-/* ─────────────────────────────────────────────
- * Decide "home" route by role (primary)
- * ───────────────────────────────────────────── */
 function homeByRole(role) {
   switch (String(role || '').toUpperCase()) {
     case 'ADMIN':
@@ -179,15 +158,77 @@ function homeByRole(role) {
   }
 }
 
+/* ─────────────────────────────────────────────
+ * Auth restore helpers
+ * ───────────────────────────────────────────── */
+async function ensureAuthReady(auth) {
+  if (!auth.ready) {
+    try {
+      await auth.restore()
+    } catch {
+      // Bad/expired token should already be cleared by auth.restore/logout.
+    }
+  }
+}
+
+function leaveShortcutTarget(targetName, roles = [], primaryRole = '') {
+  const role = String(primaryRole || '').toUpperCase()
+
+  // Request Leave page needs an employee leave profile.
+  // COO route has no self-request page, so COO should go home.
+  if (targetName === 'leave-user-request') {
+    if (roles.includes('LEAVE_USER')) return { name: 'leave-user-request' }
+    if (roles.includes('LEAVE_MANAGER')) return { name: 'leave-manager-request' }
+    if (roles.includes('LEAVE_GM')) return { name: 'leave-gm-request' }
+    if (roles.includes('LEAVE_ADMIN') || roles.includes('ADMIN')) return { name: 'leave-admin-request' }
+
+    return homeByRole(role)
+  }
+
+  // These are self-service employee pages.
+  if (targetName === 'leave-user-swap-day-new' || targetName === 'leave-user-forget-scan') {
+    if (roles.includes('LEAVE_USER')) return { name: targetName }
+    return homeByRole(role)
+  }
+
+  return { name: targetName }
+}
+
+function startLeaveRoute(path, name, targetName) {
+  return {
+    path,
+    name,
+    meta: { public: true, portal: 'leave' },
+    beforeEnter: async () => {
+      const auth = useAuth()
+
+      await ensureAuthReady(auth)
+
+      const roles = normalizeRoles(auth.user)
+      const primaryRole = pickPrimaryRole(roles)
+
+      if (!auth.token || !roles.length) {
+        return { name: 'leave-login', query: { next: targetName } }
+      }
+
+      return leaveShortcutTarget(targetName, roles, primaryRole)
+    },
+  }
+}
+
+/* ─────────────────────────────────────────────
+ * Router
+ * ───────────────────────────────────────────── */
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     /* ──────────────────────────────
-     * Public landing
+     * Public landing / leave shortcuts
      * ────────────────────────────── */
     startLeaveRoute('/leave/start/request', 'leave-start-request', 'leave-user-request'),
     startLeaveRoute('/leave/start/swap-day', 'leave-start-swap-day', 'leave-user-swap-day-new'),
     startLeaveRoute('/leave/start/forget-scan', 'leave-start-forget-scan', 'leave-user-forget-scan'),
+
     {
       path: '/',
       name: 'greeting',
@@ -237,7 +278,7 @@ const router = createRouter({
     },
 
     /* ──────────────────────────────
-     * Admin area (Food/Transport)
+     * Admin area
      * ────────────────────────────── */
     {
       path: '/admin',
@@ -302,7 +343,7 @@ const router = createRouter({
       path: '/leave/user',
       component: LeaveExpatUnified,
       meta: {
-        requiresRole: ['LEAVE_USER', 'LEAVE_MANAGER', 'LEAVE_GM', 'LEAVE_COO', 'LEAVE_ADMIN', 'ADMIN'],
+        requiresRole: ['LEAVE_USER'],
       },
       children: [
         { path: '', redirect: { name: 'leave-user-request' } },
@@ -338,7 +379,7 @@ const router = createRouter({
           component: () => import('@/views/auth/ChangePassword.vue'),
           meta: { title: 'Change Password' },
         },
-      ]
+      ],
     },
 
     /* ──────────────────────────────
@@ -363,8 +404,8 @@ const router = createRouter({
           path: 'forget-scan-inbox',
           name: 'leave-manager-forget-scan-inbox',
           component: () => import('@/views/expat/manager/forgetScan/ManagerForgetScanInbox.vue'),
-          meta: { title: 'Manager Forget Scan Inbox' }
-        }
+          meta: { title: 'Manager Forget Scan Inbox' },
+        },
       ],
     },
 
@@ -415,8 +456,8 @@ const router = createRouter({
           path: 'forget-scan-inbox',
           name: 'leave-coo-forget-scan-inbox',
           component: () => import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue'),
-          meta: { title: 'COO Forget Scan Inbox' }
-        }
+          meta: { title: 'COO Forget Scan Inbox' },
+        },
       ],
     },
 
@@ -507,21 +548,23 @@ const router = createRouter({
         {
           path: 'forget-scan/coo-inbox',
           name: 'leave-admin-forget-scan-coo-inbox',
-          component: () => import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue'),
+          component: () => import('@/views/expat/coo/ForgetScan/CooForgetScanInbox.vue').catch(() =>
+            import('@/views/expat/coo/forgetScan/CooForgetScanInbox.vue')
+          ),
           meta: { title: 'COO Forget Scan Inbox (Admin View)' },
         },
         {
           path: 'forgetscan/report',
           name: 'admin-forget-scan-report',
           component: () => import('@/views/expat/admin/forgetScan/AdminForgetScanReport.vue'),
-          meta: { title: 'Forget scan Report for Admin' }
+          meta: { title: 'Forget scan Report for Admin' },
         },
         {
           path: 'data/central',
           name: 'leave-admin-central-data',
           component: CentralData,
-          meta: { title: 'Central Data' }
-        }
+          meta: { title: 'Central Data' },
+        },
       ],
     },
 
@@ -574,7 +617,7 @@ const router = createRouter({
     },
 
     /* ──────────────────────────────
-     * 404 → greeting
+     * 404
      * ────────────────────────────── */
     {
       path: '/:pathMatch(.*)*',
@@ -585,22 +628,27 @@ const router = createRouter({
 })
 
 /* ─────────────────────────────────────────────
- * Global guard (supports multi-role users)
+ * Global guard
  * ───────────────────────────────────────────── */
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const auth = useAuth()
+
+  // Important:
+  // On refresh/reopen, verify token with backend before trusting localStorage user.
+  await ensureAuthReady(auth)
 
   const roles = normalizeRoles(auth.user)
   const primaryRole = pickPrimaryRole(roles)
 
   const isPublic = to.meta?.public === true
   const requiredRoles = Array.isArray(to.meta?.requiresRole) ? to.meta.requiresRole : null
-  const requiredUpper = requiredRoles ? requiredRoles.map(r => String(r || '').toUpperCase()) : null
+  const requiredUpper = requiredRoles ? requiredRoles.map((r) => String(r || '').toUpperCase()) : null
 
   const isEmployeeArea = to.path.startsWith('/employee')
 
-  // Logged in & visiting greeting/login pages -> send to role home
+  // Logged in and visiting greeting/login pages -> send to role home
   if (
+    auth.token &&
     roles.length &&
     (to.name === 'greeting' || to.name === 'admin-login' || to.name === 'leave-login')
   ) {
@@ -609,7 +657,9 @@ router.beforeEach((to) => {
     return true
   }
 
-  // Employee area special rules
+  // Employee area:
+  // Allow public employee request pages if no login.
+  // If logged in as a system role, redirect to their own home.
   if (isEmployeeArea) {
     if (!auth.token || !roles.length) return true
     if (roles.includes('EMPLOYEE')) return true
@@ -624,14 +674,23 @@ router.beforeEach((to) => {
 
   // Require login
   if (!auth.token || !roles.length) {
-    if (to.name !== 'greeting') return { name: 'greeting' }
-    return true
+    if (to.path.startsWith('/leave')) {
+      return {
+        name: 'leave-login',
+        query: {
+          next: to.name || '',
+        },
+      }
+    }
+
+    return { name: 'greeting' }
   }
 
   // Role restriction
-  if (requiredUpper && !roles.some(r => requiredUpper.includes(String(r).toUpperCase()))) {
+  if (requiredUpper && !roles.some((r) => requiredUpper.includes(String(r || '').toUpperCase()))) {
     const target = homeByRole(primaryRole)
     if (target.name !== to.name) return target
+    return true
   }
 
   return true

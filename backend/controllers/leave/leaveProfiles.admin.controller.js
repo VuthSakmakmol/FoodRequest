@@ -557,7 +557,17 @@ exports.getProfilesGrouped = async (req, res) => {
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
   const safePage = Math.min(page, totalPages)
   const start = (safePage - 1) * pageSize
-  const pageRows = filtered.slice(start, start + pageSize)
+  const stalePageRows = filtered.slice(start, start + pageSize)
+
+  const pageRows = await Promise.all(
+    stalePageRows.map(async (p) => {
+      try {
+        return await buildProfileResponseByEmployeeId(p.employeeId)
+      } catch {
+        return p
+      }
+    })
+  )
 
   async function lookupManager(loginId) {
     const key = s(loginId)

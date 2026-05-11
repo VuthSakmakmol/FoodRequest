@@ -36,7 +36,8 @@ const LeaveRequest = require('../../models/leave/LeaveRequest')
 const LeaveProfile = require('../../models/leave/LeaveProfile')
 const EmployeeDirectory = require('../../models/EmployeeDirectory')
 
-const { computeBalances, validateAndNormalizeRequest } = require('../../utils/leave.rules')
+const { validateAndNormalizeRequest } = require('../../utils/leave.rules')
+const { recalculateOneProfile } = require('../../services/leave/leave.recalculate.service')
 const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/leave.realtime')
 
 // Optional Telegram notify service (best-effort)
@@ -226,44 +227,30 @@ async function attachEmployeeInfoToOne(doc) {
 }
 
 /**
- * Recalc balances for profile and emit
+ * Recalc balances for profile and emit.
+ *
+ * Important:
+ * - LeaveRequest is the source of truth.
+ * - LeaveProfile.balances is only cached display data.
+ * - Use shared service so profile page, admin page, and approval flow calculate the same way.
  */
 async function recalcAndEmitProfile(req, employeeId) {
   try {
     const empId = s(employeeId)
-    if (!empId) return
+    if (!empId) return null
 
-    const prof = await LeaveProfile.findOne({ employeeId: empId })
-    if (!prof) return
+    const saved = await recalculateOneProfile(empId, {
+      save: true,
+      log: false,
+    })
 
-    const approved = await LeaveRequest.find({ employeeId: empId, status: 'APPROVED' })
-      .sort({ startDate: 1 })
-      .lean()
+    if (!saved) return null
 
-    const snap = computeBalances(prof.toObject ? prof.toObject() : prof, approved, new Date())
-
-    const nextBalances = Array.isArray(snap?.balances) ? snap.balances : []
-    const nextAsOf = s(snap?.meta?.asOfYMD || prof.balancesAsOf || '')
-    const nextEnd = snap?.meta?.contractYear?.endDate ? s(snap.meta.contractYear.endDate) : s(prof.contractEndDate)
-
-    let changed = false
-    if (JSON.stringify(prof.balances || []) !== JSON.stringify(nextBalances)) {
-      prof.balances = nextBalances
-      changed = true
-    }
-    if (nextAsOf && s(prof.balancesAsOf) !== nextAsOf) {
-      prof.balancesAsOf = nextAsOf
-      changed = true
-    }
-    if (nextEnd && s(prof.contractEndDate) !== nextEnd) {
-      prof.contractEndDate = nextEnd
-      changed = true
-    }
-
-    if (changed) await prof.save()
-    emitProfile(req, prof, 'leave:profile:updated')
+    emitProfile(req, saved, 'leave:profile:updated')
+    return saved
   } catch (e) {
     console.warn('⚠️ recalcAndEmitProfile failed:', e?.message)
+    return null
   }
 }
 

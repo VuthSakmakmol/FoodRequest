@@ -1,10 +1,11 @@
-/* eslint-disable no-console */
 // backend/utils/leave.rules.js
+/* eslint-disable no-console */
+
 const dayjs = require('dayjs')
 const customParseFormat = require('dayjs/plugin/customParseFormat')
+
 dayjs.extend(customParseFormat)
 
-// ✅ Contract helpers (single source of truth)
 const {
   isValidYMD: isValidYMD2,
   pickActiveContract,
@@ -13,6 +14,7 @@ const {
 } = require('./leave/leave.contracts')
 
 let externalIsHoliday = null
+
 try {
   // eslint-disable-next-line global-require
   externalIsHoliday =
@@ -22,66 +24,12 @@ try {
 }
 
 /* ───────────────── helpers ───────────────── */
-function isValidYMD(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim())
+function s(v) {
+  return String(v ?? '').trim()
 }
 
-function parseYMD(ymd) {
-  if (!isValidYMD(ymd)) return null
-  const d = dayjs(ymd, 'YYYY-MM-DD', true)
-  return d.isValid() ? d : null
-}
-
-function envHolidaySet() {
-  const raw = String(process.env.HOLIDAYS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-  return new Set(raw)
-}
-
-function isSunday(ymd) {
-  const d = parseYMD(ymd)
-  if (!d) return false
-  return d.day() === 0
-}
-
-function isHolidayYMD(ymd) {
-  if (!isValidYMD(ymd)) return false
-  if (typeof externalIsHoliday === 'function') {
-    try {
-      return !!externalIsHoliday(ymd)
-    } catch (_) {}
-  }
-  return envHolidaySet().has(ymd)
-}
-
-function isWorkingDay(ymd) {
-  if (isSunday(ymd)) return false
-  if (isHolidayYMD(ymd)) return false
-  return true
-}
-
-function enumerateDates(startYMD, endYMD) {
-  const s = parseYMD(startYMD)
-  const e = parseYMD(endYMD)
-  if (!s || !e) return []
-  if (e.isBefore(s)) return []
-  const out = []
-  let cur = s
-  while (cur.isBefore(e) || cur.isSame(e, 'day')) {
-    out.push(cur.format('YYYY-MM-DD'))
-    cur = cur.add(1, 'day')
-  }
-  return out
-}
-
-function enumerateWorkingDates(startYMD, endYMD) {
-  return enumerateDates(startYMD, endYMD).filter(isWorkingDay)
-}
-
-function toYMD(d) {
-  return dayjs(d).format('YYYY-MM-DD')
+function up(v) {
+  return s(v).toUpperCase()
 }
 
 function num(v) {
@@ -89,23 +37,102 @@ function num(v) {
   return Number.isFinite(n) ? n : 0
 }
 
-function up(v) {
-  return String(v ?? '').trim().toUpperCase()
+function isValidYMD(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(s(value))
 }
 
-/* ───────────────── service years / AL cap ───────────────── */
+function parseYMD(ymd) {
+  if (!isValidYMD(ymd)) return null
+
+  const d = dayjs(s(ymd), 'YYYY-MM-DD', true)
+  return d.isValid() ? d : null
+}
+
+function toDateFromYMD(ymd) {
+  const d = parseYMD(ymd)
+  return d ? d.toDate() : null
+}
+
+function toYMD(date = new Date()) {
+  const d = dayjs(date)
+  return d.isValid() ? d.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD')
+}
+
+function envHolidaySet() {
+  const raw = String(process.env.HOLIDAYS || '')
+    .split(',')
+    .map((x) => s(x))
+    .filter(Boolean)
+
+  return new Set(raw)
+}
+
+function isSunday(ymd) {
+  const d = parseYMD(ymd)
+  if (!d) return false
+
+  return d.day() === 0
+}
+
+function isHolidayYMD(ymd) {
+  if (!isValidYMD(ymd)) return false
+
+  if (typeof externalIsHoliday === 'function') {
+    try {
+      return !!externalIsHoliday(s(ymd))
+    } catch (_) {}
+  }
+
+  return envHolidaySet().has(s(ymd))
+}
+
+function isWorkingDay(ymd) {
+  if (!isValidYMD(ymd)) return false
+  if (isSunday(ymd)) return false
+  if (isHolidayYMD(ymd)) return false
+
+  return true
+}
+
+function enumerateDates(startYMD, endYMD) {
+  const start = parseYMD(startYMD)
+  const end = parseYMD(endYMD)
+
+  if (!start || !end) return []
+  if (end.isBefore(start, 'day')) return []
+
+  const out = []
+  let cur = start
+
+  while (cur.isBefore(end, 'day') || cur.isSame(end, 'day')) {
+    out.push(cur.format('YYYY-MM-DD'))
+    cur = cur.add(1, 'day')
+  }
+
+  return out
+}
+
+function enumerateWorkingDates(startYMD, endYMD) {
+  return enumerateDates(startYMD, endYMD).filter(isWorkingDay)
+}
+
+/* ───────────────── service years / AL entitlement ───────────────── */
 
 function serviceYearsFromJoin(joinYMD, asOfDate = new Date()) {
-  const jd = joinYMD ? dayjs(joinYMD, 'YYYY-MM-DD', true) : null
-  if (!jd || !jd.isValid()) return 0
+  const join = parseYMD(joinYMD)
+  if (!join) return 0
 
-  const n = dayjs(asOfDate)
-  let years = n.year() - jd.year()
+  const asOf = dayjs(asOfDate)
+  if (!asOf.isValid()) return 0
 
-  const annivThisYear = jd.year(n.year())
-  if (annivThisYear.isAfter(n, 'day')) years -= 1
+  let years = asOf.year() - join.year()
 
-  return years < 0 ? 0 : years
+  const anniversaryThisYear = join.year(asOf.year())
+  if (anniversaryThisYear.isAfter(asOf, 'day')) {
+    years -= 1
+  }
+
+  return Math.max(0, years)
 }
 
 /**
@@ -116,45 +143,61 @@ function serviceYearsFromJoin(joinYMD, asOfDate = new Date()) {
  * 9-11 years => 21
  */
 function computeALByServiceYears(joinYMD, asOfDate = new Date()) {
-  const yrs = serviceYearsFromJoin(joinYMD, asOfDate)
-  const bumps = Math.floor(yrs / 3)
+  const years = serviceYearsFromJoin(joinYMD, asOfDate)
+  const bumps = Math.floor(years / 3)
+
   return 18 + bumps
 }
 
-/* ───────────────── contract-year window (ACTIVE CONTRACT) ───────────────── */
+/* ───────────────── contract-year window ───────────────── */
 
 function computeContractYearPeriod(profile, now = new Date(), opts = {}) {
   const asOfYMD =
-    opts?.asOfYMD && isValidYMD(opts.asOfYMD) ? String(opts.asOfYMD).trim() : null
+    opts?.asOfYMD && isValidYMD(opts.asOfYMD)
+      ? s(opts.asOfYMD)
+      : toYMD(now)
 
   const active = pickActiveContract(profile, {
     contractId: opts?.contractId ?? null,
     contractNo: opts?.contractNo ?? null,
     asOf: asOfYMD,
-    contractDate: isValidYMD(profile?.contractDate)
-      ? String(profile.contractDate).trim()
-      : null,
+    contractDate: isValidYMD(profile?.contractDate) ? s(profile.contractDate) : null,
   })
 
   if (active && isValidYMD2(active.startDate)) {
-    const startYMD = String(active.startDate).trim()
+    const startYMD = s(active.startDate)
     const endYMD = isValidYMD2(active.endDate)
-      ? String(active.endDate).trim()
+      ? s(active.endDate)
       : endFromStartYMD(startYMD)
-    return { startYMD, endYMD, activeContract: active }
+
+    return {
+      startYMD,
+      endYMD,
+      activeContract: active,
+    }
   }
 
   const n = dayjs(now)
-  const s = dayjs(`${n.year()}-01-01`, 'YYYY-MM-DD', true)
-  const e = dayjs(`${n.year()}-12-31`, 'YYYY-MM-DD', true)
+  const year = n.isValid() ? n.year() : dayjs().year()
+
   return {
-    startYMD: s.format('YYYY-MM-DD'),
-    endYMD: e.format('YYYY-MM-DD'),
+    startYMD: `${year}-01-01`,
+    endYMD: `${year}-12-31`,
     activeContract: null,
   }
 }
 
 /* ───────────────── request validator ───────────────── */
+
+function normalizeHalf(value) {
+  const raw = up(value)
+
+  if (!raw) return null
+  if (raw === 'AM' || raw === 'MORNING') return 'AM'
+  if (raw === 'PM' || raw === 'AFTERNOON') return 'PM'
+
+  return null
+}
 
 function validateAndNormalizeRequest({
   leaveTypeCode,
@@ -165,45 +208,60 @@ function validateAndNormalizeRequest({
   startHalf = null,
   endHalf = null,
 }) {
-  const code = String(leaveTypeCode || '').trim().toUpperCase()
-  const s = String(startDate || '').trim()
-  const e = String(endDate || '').trim()
+  const code = up(leaveTypeCode)
+  const start = s(startDate)
+  const end = s(endDate)
 
-  const normalizeHalf = (v) => {
-    const x = v ? String(v).trim().toUpperCase() : ''
-    if (!x) return null
-    if (x === 'AM' || x === 'MORNING') return 'AM'
-    if (x === 'PM' || x === 'AFTERNOON') return 'PM'
-    return null
+  if (!code) {
+    return { ok: false, message: 'leaveTypeCode is required' }
   }
 
-  if (!code) return { ok: false, message: 'leaveTypeCode is required' }
-  if (!isValidYMD(s)) return { ok: false, message: 'startDate must be YYYY-MM-DD' }
-  if (!isValidYMD(e)) return { ok: false, message: 'endDate must be YYYY-MM-DD' }
-
-  const sd = parseYMD(s)
-  const ed = parseYMD(e)
-  if (!sd || !ed) return { ok: false, message: 'Invalid date format' }
-  if (ed.isBefore(sd)) return { ok: false, message: 'endDate must be >= startDate' }
-
-  if (!isWorkingDay(s)) {
-    return { ok: false, message: 'startDate must be a working day (Mon–Sat, not holiday).' }
+  if (!isValidYMD(start)) {
+    return { ok: false, message: 'startDate must be YYYY-MM-DD' }
   }
-  if (!isWorkingDay(e)) {
-    return { ok: false, message: 'endDate must be a working day (Mon–Sat, not holiday).' }
+
+  if (!isValidYMD(end)) {
+    return { ok: false, message: 'endDate must be YYYY-MM-DD' }
+  }
+
+  const startDay = parseYMD(start)
+  const endDay = parseYMD(end)
+
+  if (!startDay || !endDay) {
+    return { ok: false, message: 'Invalid date format' }
+  }
+
+  if (endDay.isBefore(startDay, 'day')) {
+    return { ok: false, message: 'endDate must be >= startDate' }
+  }
+
+  if (!isWorkingDay(start)) {
+    return {
+      ok: false,
+      message: 'startDate must be a working day (Mon–Sat, not holiday).',
+    }
+  }
+
+  if (!isWorkingDay(end)) {
+    return {
+      ok: false,
+      message: 'endDate must be a working day (Mon–Sat, not holiday).',
+    }
   }
 
   if (code === 'MA') {
     if (isHalfDay || startHalf || endHalf) {
       return { ok: false, message: 'MA does not support half-day.' }
     }
-    const endFixed = sd.add(89, 'day').format('YYYY-MM-DD')
+
+    const fixedEnd = startDay.add(89, 'day').format('YYYY-MM-DD')
+
     return {
       ok: true,
       normalized: {
         leaveTypeCode: code,
-        startDate: s,
-        endDate: endFixed,
+        startDate: start,
+        endDate: fixedEnd,
         totalDays: 90,
         isHalfDay: false,
         dayPart: null,
@@ -214,21 +272,25 @@ function validateAndNormalizeRequest({
     }
   }
 
-  const isSingleDay = s === e
+  const isSingleDay = start === end
   const legacyHalf = !!isHalfDay
-  const dp = legacyHalf ? normalizeHalf(dayPart) : null
+  const legacyDayPart = legacyHalf ? normalizeHalf(dayPart) : null
+
   if (legacyHalf) {
-    if (!dp) return { ok: false, message: 'Half-day requires dayPart AM or PM.' }
+    if (!legacyDayPart) {
+      return { ok: false, message: 'Half-day requires dayPart AM or PM.' }
+    }
+
     return {
       ok: true,
       normalized: {
         leaveTypeCode: code,
-        startDate: s,
-        endDate: s,
+        startDate: start,
+        endDate: start,
         totalDays: 0.5,
         isHalfDay: true,
-        dayPart: dp,
-        startHalf: dp,
+        dayPart: legacyDayPart,
+        startHalf: legacyDayPart,
         endHalf: null,
         mode: 'HALF_DAY_SINGLE',
       },
@@ -247,8 +309,8 @@ function validateAndNormalizeRequest({
         ok: true,
         normalized: {
           leaveTypeCode: code,
-          startDate: s,
-          endDate: s,
+          startDate: start,
+          endDate: start,
           totalDays: 0.5,
           isHalfDay: true,
           dayPart: sh,
@@ -263,8 +325,8 @@ function validateAndNormalizeRequest({
       ok: true,
       normalized: {
         leaveTypeCode: code,
-        startDate: s,
-        endDate: s,
+        startDate: start,
+        endDate: start,
         totalDays: 1,
         isHalfDay: false,
         dayPart: null,
@@ -275,15 +337,17 @@ function validateAndNormalizeRequest({
     }
   }
 
-  const workingDates = enumerateWorkingDates(s, e)
+  const workingDates = enumerateWorkingDates(start, end)
   const workingCount = workingDates.length
+
   if (workingCount <= 0) {
     return { ok: false, message: 'Invalid date range (no working days).' }
   }
 
   let totalDays = workingCount
-  if (sh && isWorkingDay(s)) totalDays -= 0.5
-  if (eh && isWorkingDay(e)) totalDays -= 0.5
+
+  if (sh && isWorkingDay(start)) totalDays -= 0.5
+  if (eh && isWorkingDay(end)) totalDays -= 0.5
 
   totalDays = Math.max(0.5, Math.round(totalDays * 2) / 2)
 
@@ -291,8 +355,8 @@ function validateAndNormalizeRequest({
     ok: true,
     normalized: {
       leaveTypeCode: code,
-      startDate: s,
-      endDate: e,
+      startDate: start,
+      endDate: end,
       totalDays,
       isHalfDay: false,
       dayPart: null,
@@ -303,47 +367,59 @@ function validateAndNormalizeRequest({
   }
 }
 
-function applyCarry(ent, used, carry) {
-  const c = num(carry)
-  const baseRemaining = num(ent) - num(used)
-  const remaining = baseRemaining + c
-  const usedDisplay = num(used) + (c < 0 ? Math.abs(c) : 0)
-  return { remaining, usedDisplay }
+/* ───────────────── balance calculator ───────────────── */
+
+function requestIsApprovedInPeriod(request, startYMD, endYMD) {
+  const status = up(request?.status || 'APPROVED')
+  if (status && status !== 'APPROVED') return false
+
+  const requestStart = s(request?.startDate)
+  if (!isValidYMD(requestStart)) return false
+
+  return requestStart >= startYMD && requestStart <= endYMD
+}
+
+function sumDaysByType(code, docs = []) {
+  const target = up(code)
+
+  return (Array.isArray(docs) ? docs : [])
+    .filter((r) => up(r?.leaveTypeCode) === target)
+    .reduce((acc, r) => acc + num(r?.totalDays), 0)
 }
 
 function computeBalances(profile, approvedRequests = [], now = new Date(), opts = {}) {
   const asOfYMD =
-    opts?.asOfYMD && isValidYMD(opts.asOfYMD) ? String(opts.asOfYMD).trim() : toYMD(now)
+    opts?.asOfYMD && isValidYMD(opts.asOfYMD)
+      ? s(opts.asOfYMD)
+      : toYMD(now)
 
-  const { startYMD, endYMD, activeContract } = computeContractYearPeriod(profile, now, {
-    asOfYMD,
-    contractId: opts?.contractId ?? null,
-    contractNo: opts?.contractNo ?? null,
-  })
+  const asOfDate = toDateFromYMD(asOfYMD) || now || new Date()
 
-  const approvedInPeriod = (approvedRequests || []).filter((r) => {
-    const s = String(r.startDate || '')
-    return s >= startYMD && s <= endYMD
-  })
+  const { startYMD, endYMD, activeContract } = computeContractYearPeriod(
+    profile,
+    asOfDate,
+    {
+      asOfYMD,
+      contractId: opts?.contractId ?? null,
+      contractNo: opts?.contractNo ?? null,
+    }
+  )
 
-  const sumDays = (code, docs) =>
-    (docs || [])
-      .filter((r) => String(r.leaveTypeCode || '').toUpperCase() === code)
-      .reduce((acc, r) => acc + Number(r.totalDays || 0), 0)
+  const approvedInPeriod = (Array.isArray(approvedRequests) ? approvedRequests : []).filter(
+    (r) => requestIsApprovedInPeriod(r, startYMD, endYMD)
+  )
 
-  const usedAL = sumDays('AL', approvedInPeriod)
-  const usedSP = sumDays('SP', approvedInPeriod)
-  const usedMC = sumDays('MC', approvedInPeriod)
-  const usedMA = sumDays('MA', approvedInPeriod)
-  const usedUL = sumDays('UL', approvedInPeriod)
-  const usedBL = sumDays('BL', approvedInPeriod)
+  const usedAL = sumDaysByType('AL', approvedInPeriod)
+  const usedSP = sumDaysByType('SP', approvedInPeriod)
+  const usedMC = sumDaysByType('MC', approvedInPeriod)
+  const usedMA = sumDaysByType('MA', approvedInPeriod)
+  const usedUL = sumDaysByType('UL', approvedInPeriod)
+  const usedBL = sumDaysByType('BL', approvedInPeriod)
 
-  const AL_ENT = computeALByServiceYears(profile?.joinDate, now)
+  const AL_ENT = computeALByServiceYears(profile?.joinDate, asOfDate)
   const SP_ENT = 7
   const MC_ENT = 90
   const MA_ENT = 90
-  const UL_ENT = 0
-  const BL_ENT = 0
 
   const carryRaw = getActiveCarry(profile, {
     contractId: opts?.contractId ?? null,
@@ -353,20 +429,24 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
   })
 
   const carry = {
-    AL: num(carryRaw.AL),
-    SP: num(carryRaw.SP),
-    MC: num(carryRaw.MC),
-    MA: num(carryRaw.MA),
-    UL: num(carryRaw.UL),
-    BL: num(carryRaw.BL),
+    AL: num(carryRaw?.AL),
+    SP: num(carryRaw?.SP),
+    MC: num(carryRaw?.MC),
+    MA: num(carryRaw?.MA),
+    UL: num(carryRaw?.UL),
+    BL: num(carryRaw?.BL),
   }
 
   /*
-    ✅ RAW balances only here.
-    Do not add carry here.
-    Carry is applied later only for frontend response display.
+    RAW balance rule:
+    - Do not apply carry here.
+    - Carry is applied only in response display:
+      decorateProfileForResponse() / applyCarryToBalancesForDisplay()
   */
+
   const totalSPUsed = usedSP
+
+  // SP borrows from AL, so AL used includes SP.
   const totalALUsed = usedAL + usedSP
 
   const spRemaining = Math.max(0, SP_ENT - totalSPUsed)
@@ -374,20 +454,52 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
 
   const mcRemaining = MC_ENT - usedMC
   const maRemaining = MA_ENT - usedMA
-  const ulRemaining = 0
 
   return {
     balances: [
-      { leaveTypeCode: 'AL', yearlyEntitlement: AL_ENT, used: totalALUsed, remaining: alRemaining },
-      { leaveTypeCode: 'SP', yearlyEntitlement: SP_ENT, used: totalSPUsed, remaining: spRemaining },
-      { leaveTypeCode: 'MC', yearlyEntitlement: MC_ENT, used: usedMC, remaining: mcRemaining },
-      { leaveTypeCode: 'MA', yearlyEntitlement: MA_ENT, used: usedMA, remaining: maRemaining },
-      { leaveTypeCode: 'UL', yearlyEntitlement: 0, used: usedUL, remaining: ulRemaining },
-      { leaveTypeCode: 'BL', yearlyEntitlement: 0, used: usedBL, remaining: 0 },
+      {
+        leaveTypeCode: 'AL',
+        yearlyEntitlement: AL_ENT,
+        used: totalALUsed,
+        remaining: alRemaining,
+      },
+      {
+        leaveTypeCode: 'SP',
+        yearlyEntitlement: SP_ENT,
+        used: totalSPUsed,
+        remaining: spRemaining,
+      },
+      {
+        leaveTypeCode: 'MC',
+        yearlyEntitlement: MC_ENT,
+        used: usedMC,
+        remaining: mcRemaining,
+      },
+      {
+        leaveTypeCode: 'MA',
+        yearlyEntitlement: MA_ENT,
+        used: usedMA,
+        remaining: maRemaining,
+      },
+      {
+        leaveTypeCode: 'UL',
+        yearlyEntitlement: 0,
+        used: usedUL,
+        remaining: 0,
+      },
+      {
+        leaveTypeCode: 'BL',
+        yearlyEntitlement: 0,
+        used: usedBL,
+        remaining: 0,
+      },
     ],
     meta: {
       asOfYMD,
-      contractYear: { startDate: startYMD, endDate: endYMD },
+      contractYear: {
+        startDate: startYMD,
+        endDate: endYMD,
+      },
       activeContract: activeContract
         ? {
             contractNo: activeContract.contractNo,
@@ -395,10 +507,11 @@ function computeBalances(profile, approvedRequests = [], now = new Date(), opts 
             endDate: activeContract.endDate,
           }
         : null,
-      contractDate: isValidYMD(profile?.contractDate) ? String(profile.contractDate) : null,
-      joinDate: isValidYMD(profile?.joinDate) ? String(profile.joinDate) : null,
-      serviceYears: serviceYearsFromJoin(profile?.joinDate, now),
+      contractDate: isValidYMD(profile?.contractDate) ? s(profile.contractDate) : null,
+      joinDate: isValidYMD(profile?.joinDate) ? s(profile.joinDate) : null,
+      serviceYears: serviceYearsFromJoin(profile?.joinDate, asOfDate),
       carry,
+      approvedCount: approvedInPeriod.length,
     },
   }
 }
