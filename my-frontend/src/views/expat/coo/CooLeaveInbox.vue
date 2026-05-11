@@ -13,17 +13,22 @@ defineOptions({ name: 'CooLeaveInbox' })
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ✅ roles helper */
+/* ───────── roles / actor ───────── */
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const base = auth.user?.role ? [auth.user.role] : []
   return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
 
-/* ✅ only actual COO can decide */
 const canCooDecide = computed(() => {
   return roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER')
 })
+
+function myActorIds() {
+  const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
+  const employeeId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
+  return [...new Set([loginId, employeeId].filter(Boolean))]
+}
 
 /* ───────── responsive flag ───────── */
 const isMobile = ref(false)
@@ -53,17 +58,42 @@ let refreshTimer = null
 let searchTimer = null
 const offHandlers = []
 
+/* ───────── selection / bulk approve ───────── */
+const selectedIds = ref([])
+const bulkApproveOpen = ref(false)
+const bulkApproveBusy = ref(false)
+const bulkApproveNote = ref('')
+
+/* ───────── reject decision ───────── */
+const deciding = ref(false)
+const decideRow = ref(null)
+const decideAction = ref('')
+const rejectNote = ref('')
+
+const decisionOpen = computed(() => !!decideAction.value || bulkApproveOpen.value)
+
 /* ───────── helpers ───────── */
 function s(v) {
   return String(v ?? '').trim()
 }
+
 function up(v) {
   return s(v).toUpperCase()
 }
 
+function fmtDateTime(v) {
+  if (!v) return '—'
+  return dayjs(v).format('DD/MM/YYYY HH:mm')
+}
+
+function fmtYmd(v) {
+  if (!v) return '—'
+  return dayjs(v).format('DD/MM/YYYY')
+}
+
 function formatRange(row) {
-  const a = row?.startDate ? dayjs(row.startDate).format('DD-MM-YYYY') : ''
-  const b = row?.endDate ? dayjs(row.endDate).format('DD-MM-YYYY') : ''
+  const a = row?.startDate ? dayjs(row.startDate).format('DD/MM/YYYY') : ''
+  const b = row?.endDate ? dayjs(row.endDate).format('DD/MM/YYYY') : ''
   if (!a && !b) return '—'
   if (a === b) return a
   return `${a} → ${b}`
@@ -150,6 +180,7 @@ function clearFilters() {
   fromDate.value = ''
   toDate.value = ''
   statusFilter.value = 'PENDING_COO'
+  clearSelection()
 }
 
 function dedupeById(list) {
@@ -160,6 +191,49 @@ function dedupeById(list) {
     map.set(id, item)
   }
   return Array.from(map.values())
+}
+
+/* ───────── decision permission ───────── */
+function canDecideRow(row) {
+  if (!canCooDecide.value) return false
+  if (up(row?.status) !== 'PENDING_COO') return false
+
+  const assigned = s(row?.cooLoginId)
+
+  if (!assigned) return false
+  return myActorIds().includes(assigned)
+}
+
+/* ───────── selection helpers ───────── */
+function rowKey(row) {
+  return s(row?._id)
+}
+
+function isSelected(row) {
+  const id = rowKey(row)
+  if (!id) return false
+  return selectedIds.value.includes(id)
+}
+
+function setSelectedIds(ids = []) {
+  selectedIds.value = [...new Set((ids || []).map(s).filter(Boolean))]
+}
+
+function toggleRowSelection(row) {
+  if (!canDecideRow(row)) return
+
+  const id = rowKey(row)
+  if (!id) return
+
+  if (selectedIds.value.includes(id)) {
+    setSelectedIds(selectedIds.value.filter((x) => x !== id))
+  } else {
+    setSelectedIds([...selectedIds.value, id])
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = []
 }
 
 /* ───────── backend pagination fetch ───────── */
@@ -204,9 +278,7 @@ async function fetchInbox({ reset = false, silent = false } = {}) {
 
     hasMore.value = !!payload.hasMore
 
-    if (normalized.length > 0 && payload.hasMore) {
-      page.value += 1
-    } else if (normalized.length > 0 && !payload.hasMore) {
+    if (normalized.length > 0) {
       page.value += 1
     }
   } catch (e) {
@@ -226,6 +298,7 @@ async function fetchInbox({ reset = false, silent = false } = {}) {
 
 async function resetAndFetch({ silent = false } = {}) {
   await fetchInbox({ reset: true, silent })
+  pruneSelection()
   await nextTick()
   setupInfiniteScroll()
 }
@@ -246,10 +319,52 @@ const filteredRows = computed(() => {
 
 const filteredCount = computed(() => filteredRows.value.length)
 
+const selectableRows = computed(() => filteredRows.value.filter((r) => canDecideRow(r)))
+
+const selectedRows = computed(() => {
+  const ids = new Set(selectedIds.value)
+  return filteredRows.value.filter((r) => ids.has(rowKey(r)) && canDecideRow(r))
+})
+
+const selectedCount = computed(() => selectedRows.value.length)
+
+const allVisibleSelected = computed(() => {
+  if (!selectableRows.value.length) return false
+  return selectableRows.value.every((r) => isSelected(r))
+})
+
+const someVisibleSelected = computed(() => {
+  if (!selectableRows.value.length) return false
+  return selectableRows.value.some((r) => isSelected(r))
+})
+
+function toggleSelectVisible() {
+  const visibleIds = selectableRows.value.map(rowKey).filter(Boolean)
+
+  if (!visibleIds.length) return
+
+  if (allVisibleSelected.value) {
+    const visibleSet = new Set(visibleIds)
+    setSelectedIds(selectedIds.value.filter((id) => !visibleSet.has(id)))
+    return
+  }
+
+  setSelectedIds([...selectedIds.value, ...visibleIds])
+}
+
+function pruneSelection() {
+  const validIds = new Set(filteredRows.value.filter((r) => canDecideRow(r)).map(rowKey).filter(Boolean))
+  setSelectedIds(selectedIds.value.filter((id) => validIds.has(id)))
+}
+
+watch(filteredRows, () => {
+  pruneSelection()
+})
+
 /* ───────── export all from backend ───────── */
 function safeSheetName(name, fallback = 'Inbox') {
   let x = String(name || '').trim() || fallback
-  x = x.replace(/[\\\/\?\*\[\]\:]/g, ' ')
+  x = x.replace(/[\\/?*[\]:]/g, ' ')
   x = x.replace(/\s+/g, ' ').trim()
   if (!x) x = fallback
   if (x.length > 31) x = x.slice(0, 31).trim()
@@ -258,14 +373,14 @@ function safeSheetName(name, fallback = 'Inbox') {
 
 function buildExportRows(list) {
   return (list || []).map((r) => ({
-    RequestedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+    RequestedAt: r.createdAt ? dayjs(r.createdAt).format('DD/MM/YYYY HH:mm') : '',
     EmployeeId: r.employeeId || '',
     EmployeeName: r.employeeName || '',
     Department: r.department || '',
     LeaveType: r.leaveTypeCode || '',
     ApprovalMode: modeLabel(r.approvalMode),
-    LeaveStart: r.startDate ? dayjs(r.startDate).format('YYYY-MM-DD') : '',
-    LeaveEnd: r.endDate ? dayjs(r.endDate).format('YYYY-MM-DD') : '',
+    LeaveStart: r.startDate ? dayjs(r.startDate).format('DD/MM/YYYY') : '',
+    LeaveEnd: r.endDate ? dayjs(r.endDate).format('DD/MM/YYYY') : '',
     TotalDays: Number(r.totalDays || 0),
     Status: r.status || '',
     RejectBy: up(r.status) === 'REJECTED' ? rejectedByLabel(r) : '',
@@ -325,25 +440,11 @@ async function exportExcel() {
   }
 }
 
-/* ───────── approve / reject ───────── */
-const deciding = ref(false)
-const decideRow = ref(null)
-const decideAction = ref('')
-const rejectNote = ref('')
-
-const decisionOpen = computed(() => !!decideAction.value)
-
-const canDecideRow = (row) => canCooDecide.value && up(row?.status) === 'PENDING_COO'
-
-function openApprove(row) {
-  if (!row?._id) return
-  decideRow.value = row
-  decideAction.value = 'APPROVE'
-  rejectNote.value = ''
-}
-
+/* ───────── reject decision ───────── */
 function openReject(row) {
   if (!row?._id) return
+  if (!canDecideRow(row)) return
+
   decideRow.value = row
   decideAction.value = 'REJECT'
   rejectNote.value = ''
@@ -359,10 +460,9 @@ function closeDecisionModal(force = false) {
 async function confirmDecision() {
   if (!decideRow.value?._id || !decideAction.value) return
 
-  const action = decideAction.value === 'APPROVE' ? 'APPROVE' : 'REJECT'
-  const comment = action === 'REJECT' ? rejectNote.value.trim() : ''
+  const comment = rejectNote.value.trim()
 
-  if (action === 'REJECT' && !comment) {
+  if (!comment) {
     showToast({
       type: 'warning',
       title: 'Reject reason required',
@@ -373,14 +473,15 @@ async function confirmDecision() {
 
   try {
     deciding.value = true
+
     await api.post(`/leave/requests/${decideRow.value._id}/coo-decision`, {
-      action,
-      ...(action === 'REJECT' ? { comment } : {}),
+      action: 'REJECT',
+      comment,
     })
 
     showToast({
       type: 'success',
-      title: action === 'APPROVE' ? 'Approved' : 'Rejected',
+      title: 'Rejected',
       message: 'COO decision saved.',
     })
 
@@ -394,6 +495,96 @@ async function confirmDecision() {
       message: e?.response?.data?.message || 'Unable to update request. Please try again.',
     })
   } finally {
+    deciding.value = false
+  }
+}
+
+/* ───────── bulk approve ───────── */
+function openBulkApprove() {
+  if (!selectedCount.value) {
+    showToast({
+      type: 'info',
+      title: 'Select first',
+      message: 'Please select at least one pending COO request first.',
+    })
+    return
+  }
+
+  bulkApproveNote.value = ''
+  bulkApproveOpen.value = true
+}
+
+function closeBulkApprove(force = false) {
+  if (!force && bulkApproveBusy.value) return
+  bulkApproveOpen.value = false
+  bulkApproveNote.value = ''
+}
+
+async function confirmBulkApprove() {
+  const targets = [...selectedRows.value]
+
+  if (!targets.length) {
+    showToast({
+      type: 'warning',
+      title: 'No selection',
+      message: 'No selected request can be approved.',
+    })
+    closeBulkApprove(true)
+    return
+  }
+
+  bulkApproveBusy.value = true
+  deciding.value = true
+
+  let successCount = 0
+  let failCount = 0
+  const comment = s(bulkApproveNote.value)
+
+  try {
+    for (const row of targets) {
+      try {
+        if (!canDecideRow(row)) {
+          failCount += 1
+          continue
+        }
+
+        await api.post(`/leave/requests/${row._id}/coo-decision`, {
+          action: 'APPROVE',
+          comment,
+        })
+
+        successCount += 1
+      } catch (e) {
+        failCount += 1
+        console.error('bulk approve item failed', row?._id, e)
+      }
+    }
+
+    if (successCount && !failCount) {
+      showToast({
+        type: 'success',
+        title: 'Approved',
+        message: `Approved ${successCount} request(s).`,
+      })
+    } else if (successCount && failCount) {
+      showToast({
+        type: 'warning',
+        title: 'Partially approved',
+        message: `Approved ${successCount}, failed ${failCount}. Please refresh and check remaining items.`,
+      })
+    } else {
+      showToast({
+        type: 'error',
+        title: 'Approve failed',
+        message: 'No request was approved.',
+      })
+    }
+
+    closeBulkApprove(true)
+    clearSelection()
+    await resetAndFetch({ silent: true })
+  } finally {
+    bulkApproveBusy.value = false
     deciding.value = false
   }
 }
@@ -460,12 +651,14 @@ function closePreview() {
 
 async function openPreview(item) {
   if (!item?.url) return
+
   try {
     const res = await api.request({
       url: item.url,
       method: 'GET',
       responseType: 'blob',
     })
+
     const blobUrl = URL.createObjectURL(res.data)
     previewUrl.value = blobUrl
     previewType.value = String(item.contentType || '')
@@ -483,12 +676,14 @@ async function openPreview(item) {
 
 async function downloadAttachment(it) {
   if (!it?.url) return
+
   try {
     const res = await api.request({
       url: it.url,
       method: 'GET',
       responseType: 'blob',
     })
+
     const url = URL.createObjectURL(res.data)
     const a = document.createElement('a')
     a.href = url
@@ -496,6 +691,7 @@ async function downloadAttachment(it) {
     document.body.appendChild(a)
     a.click()
     a.remove()
+
     setTimeout(() => URL.revokeObjectURL(url), 2000)
   } catch (e) {
     console.error('downloadAttachment error', e)
@@ -505,6 +701,7 @@ async function downloadAttachment(it) {
 
 async function openAttachments(row) {
   if (!row?._id) return
+
   attOpen.value = true
   attReq.value = row
   attItems.value = []
@@ -513,6 +710,7 @@ async function openAttachments(row) {
 
   try {
     attLoading.value = true
+
     const res = await api.get(`/leave/requests/${row._id}/attachments`)
     const items = Array.isArray(res?.data?.items) ? res.data.items : Array.isArray(res?.data) ? res.data : []
 
@@ -541,6 +739,7 @@ async function openAttachments(row) {
 
 function closeAttachments() {
   if (attLoading.value) return
+
   closePreview()
   attOpen.value = false
   attReq.value = null
@@ -551,6 +750,7 @@ function closeAttachments() {
 /* ───────── realtime ───────── */
 function triggerRealtimeRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer)
+
   refreshTimer = setTimeout(() => {
     resetAndFetch({ silent: true })
   }, 180)
@@ -591,6 +791,7 @@ function setupInfiniteScroll() {
       const first = entries?.[0]
       if (!first?.isIntersecting) return
       if (loading.value || loadingMore.value || !hasMore.value) return
+
       await fetchInbox()
     },
     {
@@ -617,6 +818,7 @@ function onKeydown(e) {
   if (e.key !== 'Escape') return
   if (previewOpen.value) return closePreview()
   if (attOpen.value) return closeAttachments()
+  if (bulkApproveOpen.value) return closeBulkApprove()
   if (decisionOpen.value) return closeDecisionModal()
 }
 
@@ -641,10 +843,12 @@ watch(
 /* ───────── lifecycle ───────── */
 onMounted(async () => {
   updateIsMobile()
+
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateIsMobile)
     window.addEventListener('keydown', onKeydown)
   }
+
   await resetAndFetch()
   setupRealtime()
 })
@@ -654,14 +858,18 @@ onBeforeUnmount(() => {
     window.removeEventListener('resize', updateIsMobile)
     window.removeEventListener('keydown', onKeydown)
   }
+
   if (refreshTimer) clearTimeout(refreshTimer)
   if (searchTimer) clearTimeout(searchTimer)
+
   destroyInfiniteScroll()
+
   offHandlers.forEach((off) => {
     try {
       off && off()
     } catch {}
   })
+
   closePreview()
   closeAttachments()
   lockBodyScroll(false)
@@ -676,9 +884,12 @@ onBeforeUnmount(() => {
           <!-- Desktop -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex min-w-[240px] flex-col gap-1">
-              <p class="text-[15px] font-extrabold">COO Inbox</p>
+
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-success">
+                  Selected: {{ selectedCount }}
+                </span>
               </div>
             </div>
 
@@ -734,6 +945,7 @@ onBeforeUnmount(() => {
                   <label class="text-[10px] font-extrabold text-white/90">Requested from</label>
                   <input v-model="fromDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
                 </div>
+
                 <div class="ui-field w-[126px]">
                   <label class="text-[10px] font-extrabold text-white/90">Requested to</label>
                   <input v-model="toDate" type="date" class="ui-date h-[34px] min-h-0 text-[12px]" />
@@ -741,6 +953,27 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center gap-1.5">
+                <button
+                  v-if="selectedCount"
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-emerald md:h-[34px] md:px-2 md:text-[11px]"
+                  :disabled="loading || loadingMore || deciding"
+                  @click="openBulkApprove"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve Selected ({{ selectedCount }})
+                </button>
+
+                <button
+                  v-if="selectedCount"
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]"
+                  :disabled="loading || loadingMore || deciding"
+                  @click="clearSelection"
+                >
+                  Clear Selection
+                </button>
+
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
@@ -767,10 +1000,13 @@ onBeforeUnmount(() => {
           <!-- Mobile -->
           <div v-else class="space-y-3">
             <div>
-              <p class="text-[15px] font-extrabold">COO Inbox</p>
+
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Loaded: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Visible: {{ filteredCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-success">
+                  Selected: {{ selectedCount }}
+                </span>
               </div>
             </div>
 
@@ -817,13 +1053,35 @@ onBeforeUnmount(() => {
                   <label class="text-[11px] font-extrabold text-white/90">Requested from</label>
                   <input v-model="fromDate" type="date" class="ui-date" />
                 </div>
+
                 <div class="ui-field">
                   <label class="text-[11px] font-extrabold text-white/90">Requested to</label>
                   <input v-model="toDate" type="date" class="ui-date" />
                 </div>
               </div>
 
-              <div class="flex items-center justify-between">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  v-if="selectedCount"
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-emerald"
+                  :disabled="loading || loadingMore || deciding"
+                  @click="openBulkApprove"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve Selected ({{ selectedCount }})
+                </button>
+
+                <button
+                  v-if="selectedCount"
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost"
+                  :disabled="loading || loadingMore || deciding"
+                  @click="clearSelection"
+                >
+                  Clear Selection
+                </button>
+
                 <button
                   type="button"
                   class="ui-btn ui-btn-sm ui-btn-indigo"
@@ -862,7 +1120,7 @@ onBeforeUnmount(() => {
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
                     Requested:
                     <span class="font-semibold text-slate-900 dark:text-slate-50">
-                      {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                      {{ fmtDateTime(row.createdAt) }}
                     </span>
                   </div>
 
@@ -878,11 +1136,13 @@ onBeforeUnmount(() => {
 
                 <div class="space-y-1 text-right text-[11px]">
                   <span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span>
+
                   <div>
                     <span :class="modeChipClasses(row.approvalMode)">
                       {{ modeLabel(row.approvalMode) }}
                     </span>
                   </div>
+
                   <div>
                     <span
                       class="inline-flex items-center justify-center rounded-full px-2.5 py-0.5 text-[11px] font-extrabold"
@@ -891,6 +1151,20 @@ onBeforeUnmount(() => {
                       {{ row.status }}
                     </span>
                   </div>
+
+                  <label
+                    v-if="canDecideRow(row)"
+                    class="mt-2 flex items-center justify-end gap-2 text-[11px] font-extrabold text-slate-700 dark:text-slate-200"
+                  >
+                    <input
+                      type="checkbox"
+                      class="coo-check"
+                      :checked="isSelected(row)"
+                      :disabled="loading || loadingMore || deciding"
+                      @change="toggleRowSelection(row)"
+                    />
+                    Select
+                  </label>
                 </div>
               </div>
 
@@ -923,9 +1197,9 @@ onBeforeUnmount(() => {
                 <span v-else class="text-[11px] text-slate-400">—</span>
 
                 <div v-if="canDecideRow(row)" class="flex items-center justify-end gap-2">
-                  <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
-                    <i class="fa-solid fa-circle-check text-[11px]" />
-                  </button>
+                  <span v-if="isSelected(row)" class="ui-badge ui-badge-success">Selected for approval</span>
+                  <span v-else class="text-[11px] text-slate-400">Select to approve</span>
+
                   <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
                     <i class="fa-solid fa-circle-xmark text-[11px]" />
                   </button>
@@ -945,8 +1219,9 @@ onBeforeUnmount(() => {
 
           <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table w-full min-w-[1340px] text-left">
+            <table class="ui-table w-full min-w-[1400px] text-left">
               <colgroup>
+                <col class="w-[54px]" />
                 <col class="w-[150px]" />
                 <col class="w-[260px]" />
                 <col class="w-[92px]" />
@@ -954,13 +1229,24 @@ onBeforeUnmount(() => {
                 <col class="w-[130px]" />
                 <col class="w-[80px]" />
                 <col class="w-[170px]" />
-                <col class="w-[110px]" />
+                <col class="w-[130px]" />
                 <col class="w-[96px]" />
                 <col />
               </colgroup>
 
               <thead>
                 <tr>
+                  <th class="ui-th text-center">
+                    <input
+                      type="checkbox"
+                      class="coo-check"
+                      :checked="allVisibleSelected"
+                      :indeterminate.prop="someVisibleSelected && !allVisibleSelected"
+                      :disabled="!selectableRows.length || loading || loadingMore || deciding"
+                      title="Select all approvable loaded rows"
+                      @change="toggleSelectVisible"
+                    />
+                  </th>
                   <th class="ui-th text-left">Requested at</th>
                   <th class="ui-th text-left">Employee</th>
                   <th class="ui-th text-left">Type</th>
@@ -968,7 +1254,7 @@ onBeforeUnmount(() => {
                   <th class="ui-th text-left">Mode</th>
                   <th class="ui-th text-right">Days</th>
                   <th class="ui-th">Status</th>
-                  <th class="ui-th text-center">Actions</th>
+                  <th class="ui-th text-center">Action</th>
                   <th class="ui-th text-center">Files</th>
                   <th class="ui-th text-left">Reason</th>
                 </tr>
@@ -976,14 +1262,27 @@ onBeforeUnmount(() => {
 
               <tbody>
                 <tr v-if="!loading && !filteredRows.length">
-                  <td colspan="10" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                  <td colspan="11" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No leave requests in your COO queue.
                   </td>
                 </tr>
 
                 <tr v-for="row in filteredRows" :key="row._id" class="ui-tr-hover">
+                  <td class="ui-td align-top text-center">
+                    <input
+                      v-if="canDecideRow(row)"
+                      type="checkbox"
+                      class="coo-check"
+                      :checked="isSelected(row)"
+                      :disabled="loading || loadingMore || deciding"
+                      title="Select for bulk approval"
+                      @change="toggleRowSelection(row)"
+                    />
+                    <span v-else class="text-[11px] text-slate-400">—</span>
+                  </td>
+
                   <td class="ui-td whitespace-nowrap align-top text-left">
-                    {{ row.createdAt ? dayjs(row.createdAt).format('YYYY-MM-DD HH:mm') : '—' }}
+                    {{ fmtDateTime(row.createdAt) }}
                   </td>
 
                   <td class="ui-td align-top text-left">
@@ -1017,13 +1316,14 @@ onBeforeUnmount(() => {
 
                   <td class="ui-td align-top text-center">
                     <div v-if="canDecideRow(row)" class="flex items-center justify-center gap-2">
-                      <button type="button" class="ui-btn ui-btn-xs ui-btn-emerald" :disabled="loading || deciding" @click="openApprove(row)">
-                        <i class="fa-solid fa-circle-check text-[11px]" />
-                      </button>
+                      <span v-if="isSelected(row)" class="ui-badge ui-badge-success text-[10px]">Selected</span>
+                      <span v-else class="text-[10px] text-slate-400">Select first</span>
+
                       <button type="button" class="ui-btn ui-btn-xs ui-btn-rose" :disabled="loading || deciding" @click="openReject(row)">
                         <i class="fa-solid fa-circle-xmark text-[11px]" />
                       </button>
                     </div>
+
                     <span v-else class="text-[11px] text-slate-400">—</span>
                   </td>
 
@@ -1058,6 +1358,14 @@ onBeforeUnmount(() => {
             </table>
 
             <div
+              v-if="selectedCount"
+              class="border-t border-slate-200 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300"
+            >
+              <span class="ui-badge ui-badge-success">{{ selectedCount }} selected</span>
+              <span class="ml-2">Use the Approve Selected button in the header.</span>
+            </div>
+
+            <div
               v-if="loadingMore"
               class="border-t border-slate-200 px-3 py-2 text-center text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-300"
             >
@@ -1070,17 +1378,19 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Decision modal -->
-    <div v-if="decisionOpen" class="fixed inset-0 z-[60]">
+    <!-- Reject modal -->
+    <div v-if="decideAction" class="fixed inset-0 z-[60]">
       <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeDecisionModal()" />
       <div class="absolute inset-0 flex items-center justify-center p-3">
         <div class="ui-card w-full max-w-lg p-4">
           <div class="flex items-start justify-between gap-3">
             <div>
               <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
-                {{ decideAction === 'APPROVE' ? 'Approve request' : 'Reject request' }}
+                Reject request
               </p>
-              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">This will update the request status immediately.</p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                This reason will be visible in request history.
+              </p>
               <p v-if="decideRow" class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
                 <span class="font-mono">{{ decideRow.employeeId }}</span>
                 <span class="mx-1 opacity-60">•</span>
@@ -1089,13 +1399,14 @@ onBeforeUnmount(() => {
                 <span class="ui-badge ui-badge-info">{{ decideRow.leaveTypeCode }}</span>
               </p>
             </div>
+
             <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
               <i class="fa-solid fa-xmark" />
             </button>
           </div>
 
           <div class="mt-3 space-y-2">
-            <div v-if="decideAction === 'REJECT'" class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+            <div class="rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
               <label class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Reject reason</label>
               <textarea
                 v-model="rejectNote"
@@ -1103,22 +1414,70 @@ onBeforeUnmount(() => {
                 class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-900 outline-none placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
                 placeholder="Example: Not enough coverage during that period..."
               />
-              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Required. This reason will be visible in request history.</p>
+              <p class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">Required.</p>
             </div>
 
             <div class="flex items-center justify-end gap-2 pt-1">
-              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">Cancel</button>
-
-              <button v-if="decideAction === 'APPROVE'" type="button" class="ui-btn ui-btn-sm ui-btn-emerald" @click="confirmDecision" :disabled="deciding">
-                <i class="fa-solid fa-circle-check text-[11px]" />
-                {{ deciding ? 'Approving...' : 'Approve' }}
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeDecisionModal()" :disabled="deciding">
+                Cancel
               </button>
 
-              <button v-else type="button" class="ui-btn ui-btn-sm ui-btn-rose" @click="confirmDecision" :disabled="deciding">
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-rose" @click="confirmDecision" :disabled="deciding">
                 <i class="fa-solid fa-circle-xmark text-[11px]" />
                 {{ deciding ? 'Rejecting...' : 'Reject' }}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk approve modal -->
+    <div v-if="bulkApproveOpen" class="fixed inset-0 z-[60]">
+      <div class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm" @click="closeBulkApprove()" />
+      <div class="absolute inset-0 flex items-center justify-center p-3">
+        <div class="ui-card w-full max-w-lg p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-[12px] font-extrabold text-slate-900 dark:text-slate-50">
+                Approve selected requests?
+              </p>
+              <p class="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                You selected <span class="font-extrabold">{{ selectedCount }}</span> pending COO request(s).
+              </p>
+            </div>
+
+            <button type="button" class="ui-btn ui-btn-xs ui-btn-ghost" @click="closeBulkApprove()" :disabled="bulkApproveBusy">
+              <i class="fa-solid fa-xmark" />
+            </button>
+          </div>
+
+          
+
+          <div class="mt-3 rounded-xl border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900">
+            <label class="text-[11px] font-extrabold text-slate-700 dark:text-slate-200">Approval note</label>
+            <textarea
+              v-model="bulkApproveNote"
+              rows="3"
+              class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-900 outline-none placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+              placeholder="Optional note..."
+            />
+          </div>
+
+          <div class="mt-4 flex items-center justify-end gap-2">
+            <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeBulkApprove()" :disabled="bulkApproveBusy">
+              Cancel
+            </button>
+
+            <button
+              type="button"
+              class="ui-btn ui-btn-sm ui-btn-emerald"
+              @click="confirmBulkApprove"
+              :disabled="bulkApproveBusy || !selectedCount"
+            >
+              <i class="fa-solid fa-circle-check text-[11px]" />
+              {{ bulkApproveBusy ? 'Approving...' : `Approve ${selectedCount} Selected` }}
+            </button>
           </div>
         </div>
       </div>
@@ -1160,7 +1519,9 @@ onBeforeUnmount(() => {
               {{ attError }}
             </div>
 
-            <div v-else-if="!attItems.length" class="py-8 text-center text-[11px] text-slate-500 dark:text-slate-400">No attachments.</div>
+            <div v-else-if="!attItems.length" class="py-8 text-center text-[11px] text-slate-500 dark:text-slate-400">
+              No attachments.
+            </div>
 
             <div v-else class="ui-frame">
               <div class="divide-y divide-slate-200/70 dark:divide-slate-700/70">
@@ -1173,7 +1534,7 @@ onBeforeUnmount(() => {
                       <p class="truncate text-[12px] font-extrabold text-slate-900 dark:text-slate-50">{{ it.filename || 'Attachment' }}</p>
                       <p class="text-[11px] text-slate-500 dark:text-slate-400">
                         {{ niceBytes(it.size) }}
-                        <span v-if="it.uploadedAt"> · {{ dayjs(it.uploadedAt).format('YYYY-MM-DD HH:mm') }}</span>
+                        <span v-if="it.uploadedAt"> · {{ fmtDateTime(it.uploadedAt) }}</span>
                       </p>
                     </div>
                   </div>
@@ -1194,7 +1555,9 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-3 flex justify-end">
-              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">Close</button>
+              <button type="button" class="ui-btn ui-btn-sm ui-btn-ghost" @click="closeAttachments" :disabled="attLoading">
+                Close
+              </button>
             </div>
           </div>
         </div>
@@ -1249,8 +1612,22 @@ onBeforeUnmount(() => {
   overflow: hidden;
   line-height: 1.35;
 }
+
 .ui-icon-btn {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;
+}
+
+.coo-check {
+  width: 15px;
+  height: 15px;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  accent-color: rgb(var(--ui-success));
+}
+
+.coo-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 </style>

@@ -1,28 +1,10 @@
-<!-- src/views/expat/coo/forgetScan/CooForgetScanInbox.vue
-  ✅ SAME STYLE as your ManagerSwapDayInbox / ManagerForgetScanInbox
-  ✅ Default filter = PENDING_COO
-  ✅ Fetch scope=ALL then filter locally
-  ✅ Approve/Reject only when status=PENDING_COO AND user has COO role AND row assigned to this COO
-  ✅ Export Excel (xlsx)
-  ✅ No SweetAlert2 / no window alert
-  ✅ Uses /leave/forget-scan/coo/inbox?scope=ALL
-     and /leave/forget-scan/:id/coo-decision
-  ✅ Realtime hooks: forgetscan:req:created / forgetscan:req:updated (debounced refresh)
-  ✅ UPDATED for NEW ForgetScan schema:
-     - forgotTypes: ['FORGET_IN','FORGET_OUT'] (array)
-     - forgotKey: FORGET_IN / FORGET_OUT / FORGET_IN_OUT
-  ✅ FIXED: Type badge duplication (show ONE badge only)
-  ✅ Modal UX: ESC closes top-most, backdrop closes, body scroll lock
-  ✅ NEW: Approval Mode shown in mobile / desktop / detail / export
-  ✅ NEW: fromDate / toDate filter pattern
--->
+<!-- src/views/expat/coo/forgetScan/CooForgetScanInbox.vue -->
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import dayjs from 'dayjs'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
-
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 import * as XLSX from 'xlsx'
 
@@ -31,77 +13,63 @@ defineOptions({ name: 'CooForgetScanInbox' })
 const { showToast } = useToast()
 const auth = useAuth()
 
-/* ✅ roles helper (supports user.role + user.roles[]) */
 const roles = computed(() => {
   const raw = Array.isArray(auth.user?.roles) ? auth.user.roles : []
   const base = auth.user?.role ? [auth.user.role] : []
   return [...new Set([...raw, ...base].map((r) => String(r || '').toUpperCase().trim()))].filter(Boolean)
 })
 
-/* ✅ only actual COO can decide (no admin bypass) */
 const canCooDecide = computed(() =>
   roles.value.includes('LEAVE_COO') || roles.value.includes('COO') || roles.value.includes('LEAVE_COO_APPROVER')
 )
 
-/* ✅ mismatch-safe actor IDs: loginId + employeeId */
 function myActorIds() {
   const loginId = String(auth.user?.loginId || auth.user?.id || auth.user?.sub || '').trim()
   const employeeId = String(auth.user?.employeeId || auth.user?.empId || '').trim()
   return [...new Set([loginId, employeeId].filter(Boolean))]
 }
 
-/* ───────── responsive flag ───────── */
+/* ───────────────── responsive ───────────────── */
 const isMobile = ref(false)
 function updateIsMobile() {
   if (typeof window === 'undefined') return
   isMobile.value = window.innerWidth < 768
 }
 
-/* ───────────────── STATE ───────────────── */
+/* ───────────────── state ───────────────── */
 const loading = ref(false)
-const deciding = ref(false)
+const loadingMore = ref(false)
 const rows = ref([])
+const hasMore = ref(true)
+const page = ref(1)
+const limit = ref(20)
 
 const search = ref('')
 const statusFilter = ref('ALL')
 const fromDate = ref('')
 const toDate = ref('')
 
-/* pagination */
-const page = ref(1)
-const perPage = ref(20)
-const perPageOptions = [20, 50, 100, 'All']
+const bottomSentinel = ref(null)
+let bottomObserver = null
+let refreshTimer = null
+let searchTimer = null
 
-/* view modal */
 const viewOpen = ref(false)
 const viewItem = ref(null)
 
-/* decision modal */
-const confirmOpen = ref(false)
-const confirmBusy = ref(false)
-const confirmType = ref('') // 'APPROVE' | 'REJECT'
-const confirmTarget = ref(null)
-const decisionNote = ref('')
+const rejectOpen = ref(false)
+const rejectBusy = ref(false)
+const rejectTarget = ref(null)
+const rejectNote = ref('')
 
-/* export */
+const bulkApproveOpen = ref(false)
+const bulkApproveBusy = ref(false)
+const bulkApproveNote = ref('')
+
 const exporting = ref(false)
+const selectedIds = ref([])
 
-/* modal flags for UX */
-const decisionOpen = computed(() => confirmOpen.value)
-
-/* ───────────────── COLUMN WIDTH CONFIG (DESKTOP TABLE) ───────────────── */
-const COL_WIDTH = {
-  created: '140px',
-  employee: '250px',
-  forgotDate: '140px',
-  forgotType: '200px',
-  mode: '150px',
-  status: '150px',
-  actions: '92px',
-  reason: 'auto',
-}
-
-/* ───────────────── CONSTANTS ───────────────── */
+/* ───────────────── constants ───────────────── */
 const STATUS_LABEL = {
   ALL: 'All',
   PENDING_MANAGER: 'Pending (Mgr)',
@@ -121,18 +89,19 @@ const TYPE_LABEL = {
 function s(v) {
   return String(v ?? '').trim()
 }
+
 function up(v) {
   return s(v).toUpperCase()
 }
 
 function fmtDateTime(v) {
   if (!v) return '—'
-  return dayjs(v).format('YYYY-MM-DD HH:mm')
+  return dayjs(v).format('DD/MM/YYYY HH:mm')
 }
 
 function fmtYmd(v) {
   if (!v) return '—'
-  return dayjs(v).format('YYYY-MM-DD')
+  return dayjs(v).format('DD/MM/YYYY')
 }
 
 function statusBadgeUiClass(x) {
@@ -168,10 +137,11 @@ function modeLabel(mode) {
   return m || '—'
 }
 
-/* ───────────────── Type (no-duplicate) ───────────────── */
+/* ───────────────── type helpers ───────────────── */
 function getTypesArray(row) {
   const arr = Array.isArray(row?.forgotTypes) ? row.forgotTypes : []
   if (arr.length) return arr.map((x) => up(x)).filter(Boolean)
+
   const legacy = up(row?.forgotType)
   return legacy ? [legacy] : []
 }
@@ -179,9 +149,11 @@ function getTypesArray(row) {
 function getTypeKey(row) {
   const key = up(row?.forgotKey)
   if (key) return key
+
   const arr = getTypesArray(row)
   const hasIn = arr.includes('FORGET_IN')
   const hasOut = arr.includes('FORGET_OUT')
+
   if (hasIn && hasOut) return 'FORGET_IN_OUT'
   if (hasIn) return 'FORGET_IN'
   if (hasOut) return 'FORGET_OUT'
@@ -198,26 +170,26 @@ function getTypeBadges(row) {
 
   const t = types[0] || key
   if (!t) return []
+
   return [{ key: t, label: TYPE_LABEL[t] || t, cls: typeBadgeUiClass(t) }]
 }
 
-/** ✅ COO can decide ONLY when:
- *  - has COO role
- *  - pending at COO
- *  - row assigned to this COO (cooLoginId matches myActorIds)
- */
+/* ───────────────── permission ───────────────── */
 function canDecide(row) {
   if (!canCooDecide.value) return false
   if (up(row?.status) !== 'PENDING_COO') return false
-  const assigned = String(row?.cooLoginId || '').trim()
+
+  const assigned = s(row?.cooLoginId)
   if (!assigned) return false
+
   return myActorIds().includes(assigned)
 }
 
-/* brief reason helpers */
+/* ───────────────── text helpers ───────────────── */
 function compactText(v) {
   return String(v || '').replace(/\s+/g, ' ').trim()
 }
+
 function briefReason(v, max = 70) {
   const t = compactText(v)
   if (!t) return '—'
@@ -225,7 +197,6 @@ function briefReason(v, max = 70) {
   return t.slice(0, max).trimEnd() + '…'
 }
 
-/* rejected reason helpers */
 function getRejectedReason(row) {
   const r = row || {}
 
@@ -244,8 +215,8 @@ function getRejectedReason(row) {
   const steps = Array.isArray(r.approvals) ? r.approvals : []
   const rejectedStep = steps.find((x) => up(x?.status) === 'REJECTED')
   const note = compactText(rejectedStep?.note)
-  if (note) return note
 
+  if (note) return note
   return '—'
 }
 
@@ -257,17 +228,71 @@ function isWithinDateRange(forgotDate) {
   return true
 }
 
-/* ───────────────── FETCH ───────────────── */
-async function fetchInbox(silent = false) {
-  try {
-    if (!silent) loading.value = true
+function dedupeById(list = []) {
+  const map = new Map()
+  for (const item of list) {
+    const id = s(item?._id)
+    if (!id) continue
+    map.set(id, item)
+  }
+  return Array.from(map.values())
+}
 
-    const params = { scope: 'ALL' }
-    if (fromDate.value) params.fromDate = fromDate.value
-    if (toDate.value) params.toDate = toDate.value
+/* ───────────────── fetch lazy ───────────────── */
+async function fetchInbox({ reset = false, silent = false } = {}) {
+  try {
+    if (loading.value || loadingMore.value) return
+    if (!reset && !hasMore.value) return
+
+    if (reset) {
+      if (!silent) loading.value = true
+      rows.value = []
+      page.value = 1
+      hasMore.value = true
+    } else {
+      loadingMore.value = true
+    }
+
+    const params = {
+      scope: 'ALL',
+      page: page.value,
+      limit: limit.value,
+      keyword: search.value || '',
+      search: search.value || '',
+      status: statusFilter.value || 'ALL',
+      fromDate: fromDate.value || '',
+      toDate: toDate.value || '',
+    }
 
     const res = await api.get('/leave/forget-scan/coo/inbox', { params })
-    rows.value = Array.isArray(res.data) ? res.data : []
+    const payload = res?.data
+
+    const items = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : []
+
+    const normalized = items.map((r) => ({
+      ...r,
+      approvals: Array.isArray(r.approvals) ? r.approvals : [],
+    }))
+
+    if (reset) {
+      rows.value = normalized
+    } else {
+      rows.value = dedupeById([...rows.value, ...normalized])
+    }
+
+    if (Array.isArray(payload)) {
+      hasMore.value = false
+    } else {
+      hasMore.value = !!payload?.hasMore
+    }
+
+    if (normalized.length > 0) page.value += 1
+
+    pruneSelection()
   } catch (e) {
     console.error('fetchInbox error', e)
     if (!silent) {
@@ -277,11 +302,18 @@ async function fetchInbox(silent = false) {
       })
     }
   } finally {
-    if (!silent) loading.value = false
+    loading.value = false
+    loadingMore.value = false
   }
 }
 
-/* ───────────────── FILTER ───────────────── */
+async function resetAndFetch({ silent = false } = {}) {
+  await fetchInbox({ reset: true, silent })
+  await nextTick()
+  setupInfiniteScroll()
+}
+
+/* ───────────────── filter ───────────────── */
 const filteredRows = computed(() => {
   let list = [...rows.value]
 
@@ -315,6 +347,7 @@ const filteredRows = computed(() => {
       ]
         .map((x) => String(x || '').toLowerCase())
         .join(' ')
+
       return hay.includes(q)
     })
   }
@@ -326,143 +359,244 @@ const filteredRows = computed(() => {
 const totalCount = computed(() => rows.value.length)
 const filteredCount = computed(() => filteredRows.value.length)
 
-const pageCount = computed(() => {
-  if (perPage.value === 'All') return 1
-  const per = Number(perPage.value || 20)
-  return Math.ceil(filteredRows.value.length / per) || 1
-})
-
-const pagedRows = computed(() => {
-  if (perPage.value === 'All') return filteredRows.value
-  const per = Number(perPage.value || 20)
-  const start = (page.value - 1) * per
-  return filteredRows.value.slice(start, start + per)
-})
-
-watch(
-  () => [search.value, statusFilter.value, perPage.value, fromDate.value, toDate.value],
-  () => (page.value = 1)
-)
-
-watch(
-  () => pageCount.value,
-  (n) => {
-    if (page.value > n) page.value = n
-    if (page.value < 1) page.value = 1
-  }
-)
-
-watch(
-  () => [fromDate.value, toDate.value],
-  () => {
-    fetchInbox(true)
-  }
-)
-
-/* clear filters */
-function clearFilters() {
-  search.value = ''
-  statusFilter.value = 'ALL'
-  fromDate.value = ''
-  toDate.value = ''
-  perPage.value = 20
-  page.value = 1
+/* ───────────────── selection ───────────────── */
+function rowKey(row) {
+  return s(row?._id)
 }
 
-/* ───────────────── DETAILS VIEW ───────────────── */
+function isSelected(row) {
+  const id = rowKey(row)
+  if (!id) return false
+  return selectedIds.value.includes(id)
+}
+
+function setSelectedIds(ids = []) {
+  selectedIds.value = [...new Set((ids || []).map(s).filter(Boolean))]
+}
+
+function toggleRowSelection(row) {
+  if (!canDecide(row)) return
+
+  const id = rowKey(row)
+  if (!id) return
+
+  if (selectedIds.value.includes(id)) {
+    setSelectedIds(selectedIds.value.filter((x) => x !== id))
+  } else {
+    setSelectedIds([...selectedIds.value, id])
+  }
+}
+
+function clearSelection() {
+  selectedIds.value = []
+}
+
+const selectableRows = computed(() => filteredRows.value.filter((r) => canDecide(r)))
+
+const selectedRows = computed(() => {
+  const ids = new Set(selectedIds.value)
+  return filteredRows.value.filter((r) => ids.has(rowKey(r)) && canDecide(r))
+})
+
+const selectedCount = computed(() => selectedRows.value.length)
+
+const allVisibleSelected = computed(() => {
+  if (!selectableRows.value.length) return false
+  return selectableRows.value.every((r) => isSelected(r))
+})
+
+const someVisibleSelected = computed(() => {
+  if (!selectableRows.value.length) return false
+  return selectableRows.value.some((r) => isSelected(r))
+})
+
+function toggleSelectVisible() {
+  const ids = selectableRows.value.map(rowKey).filter(Boolean)
+
+  if (!ids.length) return
+
+  if (allVisibleSelected.value) {
+    const visibleSet = new Set(ids)
+    setSelectedIds(selectedIds.value.filter((id) => !visibleSet.has(id)))
+    return
+  }
+
+  setSelectedIds([...selectedIds.value, ...ids])
+}
+
+function pruneSelection() {
+  const validIds = new Set(filteredRows.value.filter((r) => canDecide(r)).map(rowKey).filter(Boolean))
+  setSelectedIds(selectedIds.value.filter((id) => validIds.has(id)))
+}
+
+watch(filteredRows, () => {
+  pruneSelection()
+})
+
+/* ───────────────── details ───────────────── */
 function openView(row) {
   viewItem.value = row
   viewOpen.value = true
 }
+
 function closeView() {
   viewOpen.value = false
   viewItem.value = null
 }
 
-/* keep viewItem synced */
 watch(
   () => rows.value,
   (list) => {
+    pruneSelection()
+
     if (!viewOpen.value || !viewItem.value?._id) return
+
     const found = (list || []).find((x) => String(x._id) === String(viewItem.value._id))
     if (found) viewItem.value = found
   }
 )
 
-/* ───────────────── DECISION ───────────────── */
-function openApprove(row) {
-  if (!canDecide(row)) return
-  confirmType.value = 'APPROVE'
-  confirmTarget.value = row
-  decisionNote.value = ''
-  confirmOpen.value = true
-}
+/* ───────────────── reject ───────────────── */
 function openReject(row) {
   if (!canDecide(row)) return
-  confirmType.value = 'REJECT'
-  confirmTarget.value = row
-  decisionNote.value = ''
-  confirmOpen.value = true
-}
-function closeConfirm(force = false) {
-  if (confirmBusy.value && !force) return
-  confirmOpen.value = false
-  confirmType.value = ''
-  confirmTarget.value = null
-  decisionNote.value = ''
+
+  rejectTarget.value = row
+  rejectNote.value = ''
+  rejectOpen.value = true
 }
 
-async function confirmDecision() {
-  const row = confirmTarget.value
+function closeReject(force = false) {
+  if (rejectBusy.value && !force) return
+
+  rejectOpen.value = false
+  rejectTarget.value = null
+  rejectNote.value = ''
+}
+
+async function confirmReject() {
+  const row = rejectTarget.value
   if (!row?._id) return
 
-  const action = confirmType.value === 'APPROVE' ? 'APPROVE' : 'REJECT'
-  const note = decisionNote.value?.trim?.() || ''
+  const note = rejectNote.value?.trim?.() || ''
 
-  if (action === 'REJECT' && !note) {
+  if (!note) {
     showToast({ type: 'warning', message: 'Reject requires a reason.' })
     return
   }
 
-  confirmBusy.value = true
-  deciding.value = true
+  rejectBusy.value = true
 
   try {
     await api.post(`/leave/forget-scan/${row._id}/coo-decision`, {
-      action,
+      action: 'REJECT',
       note,
+      comment: note,
+      reason: note,
     })
 
-    showToast({
-      type: 'success',
-      message: action === 'APPROVE' ? 'Approved.' : 'Rejected.',
-    })
+    showToast({ type: 'success', message: 'Rejected.' })
 
-    closeConfirm(true)
+    closeReject(true)
     closeView()
 
-    await fetchInbox(true)
+    await resetAndFetch({ silent: true })
   } catch (e) {
-    console.error('confirmDecision error', e)
+    console.error('confirmReject error', e)
     showToast({ type: 'error', message: e?.response?.data?.message || 'Decision failed' })
   } finally {
-    confirmBusy.value = false
-    deciding.value = false
+    rejectBusy.value = false
   }
 }
 
-/* ───────────────── EXPORT EXCEL ───────────────── */
+/* ───────────────── bulk approve ───────────────── */
+function openBulkApprove() {
+  if (!selectedCount.value) {
+    showToast({ type: 'info', message: 'Please select at least one pending COO request first.' })
+    return
+  }
+
+  bulkApproveNote.value = ''
+  bulkApproveOpen.value = true
+}
+
+function closeBulkApprove(force = false) {
+  if (bulkApproveBusy.value && !force) return
+
+  bulkApproveOpen.value = false
+  bulkApproveNote.value = ''
+}
+
+async function confirmBulkApprove() {
+  const targets = [...selectedRows.value]
+
+  if (!targets.length) {
+    showToast({ type: 'warning', message: 'No selected request can be approved.' })
+    closeBulkApprove(true)
+    return
+  }
+
+  bulkApproveBusy.value = true
+
+  let successCount = 0
+  let failCount = 0
+  const note = s(bulkApproveNote.value)
+
+  try {
+    for (const row of targets) {
+      try {
+        if (!canDecide(row)) {
+          failCount += 1
+          continue
+        }
+
+        await api.post(`/leave/forget-scan/${row._id}/coo-decision`, {
+          action: 'APPROVE',
+          note,
+          comment: note,
+          reason: note,
+        })
+
+        successCount += 1
+      } catch (e) {
+        failCount += 1
+        console.error('bulk approve item failed', row?._id, e)
+      }
+    }
+
+    if (successCount && !failCount) {
+      showToast({ type: 'success', message: `Approved ${successCount} request(s).` })
+    } else if (successCount && failCount) {
+      showToast({
+        type: 'warning',
+        message: `Approved ${successCount}, failed ${failCount}. Please refresh and check remaining items.`,
+      })
+    } else {
+      showToast({ type: 'error', message: 'No request was approved.' })
+    }
+
+    closeBulkApprove(true)
+    clearSelection()
+    closeView()
+
+    await resetAndFetch({ silent: true })
+  } finally {
+    bulkApproveBusy.value = false
+  }
+}
+
+/* ───────────────── export ───────────────── */
 function buildExcelRows(list) {
   return (list || []).map((r, idx) => {
     const key = getTypeKey(r)
     const types = getTypesArray(r)
+
     return {
       No: idx + 1,
-      CreatedAt: r.createdAt ? dayjs(r.createdAt).format('YYYY-MM-DD HH:mm') : '',
+      CreatedAt: r.createdAt ? dayjs(r.createdAt).format('DD/MM/YYYY HH:mm') : '',
       EmployeeID: r.employeeId || '',
       EmployeeName: r.employeeName || r.name || '',
       Department: r.department || '',
-      ForgotDate: r.forgotDate || '',
+      ForgotDate: r.forgotDate ? dayjs(r.forgotDate).format('DD/MM/YYYY') : '',
       ForgotKey: key || r.forgotKey || '',
       ForgotTypes: types.map((t) => TYPE_LABEL[t] || t).join(', '),
       ApprovalMode: modeLabel(r.approvalMode),
@@ -480,7 +614,29 @@ async function exportExcel() {
   try {
     exporting.value = true
 
-    const data = buildExcelRows(filteredRows.value)
+    const params = {
+      scope: 'ALL',
+      exportAll: 1,
+      page: 1,
+      limit: 100000,
+      keyword: search.value || '',
+      search: search.value || '',
+      status: statusFilter.value || 'ALL',
+      fromDate: fromDate.value || '',
+      toDate: toDate.value || '',
+    }
+
+    const res = await api.get('/leave/forget-scan/coo/inbox', { params })
+    const payload = res?.data
+
+    const list = Array.isArray(payload)
+      ? payload
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : filteredRows.value
+
+    const data = buildExcelRows(list)
+
     if (!data.length) {
       showToast({ type: 'warning', message: 'No data to export.' })
       return
@@ -488,6 +644,7 @@ async function exportExcel() {
 
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
+
     XLSX.utils.book_append_sheet(wb, ws, 'CooInbox')
 
     const filename = `ForgetScan_COO_Inbox_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`
@@ -502,39 +659,104 @@ async function exportExcel() {
   }
 }
 
-/* ───────────────── REALTIME (debounced refresh) ───────────────── */
-let refreshTimer = null
+/* ───────────────── realtime ───────────────── */
 function triggerRealtimeRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer)
-  refreshTimer = setTimeout(() => fetchInbox(true), 180)
+  refreshTimer = setTimeout(() => resetAndFetch({ silent: true }), 180)
 }
 
-/* ───────────────── modal UX: body scroll lock + ESC ───────────────── */
+function onReqCreated() {
+  triggerRealtimeRefresh()
+}
+
+function onReqUpdated() {
+  triggerRealtimeRefresh()
+}
+
+/* ───────────────── lazy scroll ───────────────── */
+function destroyInfiniteScroll() {
+  try {
+    if (bottomObserver) {
+      bottomObserver.disconnect()
+      bottomObserver = null
+    }
+  } catch {}
+}
+
+function setupInfiniteScroll() {
+  destroyInfiniteScroll()
+
+  if (typeof window === 'undefined') return
+  if (!bottomSentinel.value) return
+
+  bottomObserver = new IntersectionObserver(
+    async (entries) => {
+      const first = entries?.[0]
+      if (!first?.isIntersecting) return
+      if (loading.value || loadingMore.value || !hasMore.value) return
+
+      await fetchInbox()
+    },
+    {
+      root: null,
+      rootMargin: '220px 0px 220px 0px',
+      threshold: 0.01,
+    }
+  )
+
+  bottomObserver.observe(bottomSentinel.value)
+}
+
+/* ───────────────── filters ───────────────── */
+function clearFilters() {
+  search.value = ''
+  statusFilter.value = 'ALL'
+  fromDate.value = ''
+  toDate.value = ''
+  clearSelection()
+  resetAndFetch()
+}
+
+watch(
+  () => [statusFilter.value, fromDate.value, toDate.value],
+  () => {
+    clearSelection()
+    resetAndFetch()
+  }
+)
+
+watch(
+  () => search.value,
+  () => {
+    if (searchTimer) clearTimeout(searchTimer)
+    searchTimer = setTimeout(() => {
+      clearSelection()
+      resetAndFetch()
+    }, 300)
+  }
+)
+
+/* ───────────────── modal UX ───────────────── */
 function lockBodyScroll(on) {
   if (typeof document === 'undefined') return
   document.body.classList.toggle('overflow-hidden', !!on)
 }
 
-watch([viewOpen, decisionOpen], ([v, d]) => {
-  lockBodyScroll(!!(v || d))
+watch([viewOpen, rejectOpen, bulkApproveOpen], ([v, r, b]) => {
+  lockBodyScroll(!!(v || r || b))
 })
 
 function onKeydown(e) {
   if (e.key !== 'Escape') return
-  if (confirmOpen.value) return closeConfirm()
+  if (bulkApproveOpen.value) return closeBulkApprove()
+  if (rejectOpen.value) return closeReject()
   if (viewOpen.value) return closeView()
 }
 
-/* lifecycle */
-function onReqCreated() {
-  triggerRealtimeRefresh()
-}
-function onReqUpdated() {
-  triggerRealtimeRefresh()
-}
-
+/* ───────────────── lifecycle ───────────────── */
 onMounted(async () => {
   updateIsMobile()
+
   if (typeof window !== 'undefined') {
     window.addEventListener('resize', updateIsMobile)
     window.addEventListener('keydown', onKeydown)
@@ -551,7 +773,7 @@ onMounted(async () => {
     if (loginId) await subscribeUserIfNeeded(loginId)
   } catch {}
 
-  await fetchInbox(true)
+  await resetAndFetch({ silent: true })
 
   socket.on('forgetscan:req:created', onReqCreated)
   socket.on('forgetscan:req:updated', onReqUpdated)
@@ -564,6 +786,9 @@ onBeforeUnmount(() => {
   }
 
   if (refreshTimer) clearTimeout(refreshTimer)
+  if (searchTimer) clearTimeout(searchTimer)
+
+  destroyInfiniteScroll()
 
   socket.off('forgetscan:req:created', onReqCreated)
   socket.off('forgetscan:req:updated', onReqUpdated)
@@ -576,15 +801,14 @@ onBeforeUnmount(() => {
   <div class="ui-page min-h-screen w-full">
     <div class="w-full">
       <div class="ui-card rounded-none border-x-0 border-t-0 overflow-hidden">
-        <!-- HERO -->
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
           <div v-if="!isMobile" class="flex flex-wrap items-end justify-between gap-4">
             <div class="flex flex-col gap-1 min-w-[240px]">
-              <div class="text-[15px] font-extrabold">COO Inbox · Forget Scan</div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Loaded: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-success">Selected: {{ selectedCount }}</span>
               </div>
             </div>
 
@@ -603,7 +827,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="w-[170px]">
+              <div class="w-[190px]">
                 <div class="ui-field">
                   <label class="text-[10px] font-extrabold text-white/90">Search</label>
                   <div class="flex h-[34px] items-center gap-1.5 rounded-xl border border-white/25 bg-white/10 px-2">
@@ -631,7 +855,33 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="flex items-center gap-1.5">
-                <button class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]" type="button" :disabled="loading" @click="fetchInbox()">
+                <button
+                  v-if="selectedCount"
+                  class="ui-btn ui-btn-sm ui-btn-emerald md:h-[34px] md:px-2 md:text-[11px]"
+                  type="button"
+                  :disabled="loading || loadingMore || bulkApproveBusy"
+                  @click="openBulkApprove"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve Selected ({{ selectedCount }})
+                </button>
+
+                <button
+                  v-if="selectedCount"
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]"
+                  type="button"
+                  :disabled="loading || loadingMore || bulkApproveBusy"
+                  @click="clearSelection"
+                >
+                  Clear Selection
+                </button>
+
+                <button
+                  class="ui-btn ui-btn-sm ui-btn-indigo md:h-[34px] md:px-2 md:text-[11px]"
+                  type="button"
+                  :disabled="loading"
+                  @click="resetAndFetch()"
+                >
                   <i class="fa-solid fa-rotate-right text-[11px]" />
                   Refresh
                 </button>
@@ -647,7 +897,12 @@ onBeforeUnmount(() => {
                   Export
                 </button>
 
-                <button class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]" type="button" :disabled="loading" @click="clearFilters">
+                <button
+                  class="ui-btn ui-btn-sm ui-btn-ghost md:h-[34px] md:px-2 md:text-[11px]"
+                  type="button"
+                  :disabled="loading"
+                  @click="clearFilters"
+                >
                   Clear
                 </button>
               </div>
@@ -657,10 +912,10 @@ onBeforeUnmount(() => {
           <!-- Mobile header -->
           <div v-else class="space-y-3">
             <div>
-              <div class="text-[15px] font-extrabold">COO Inbox · Forget Scan</div>
               <div class="mt-2 flex flex-wrap items-center gap-2">
-                <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
+                <span class="ui-badge ui-badge-info">Loaded: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-success">Selected: {{ selectedCount }}</span>
               </div>
             </div>
 
@@ -699,7 +954,28 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  v-if="selectedCount"
+                  class="ui-btn ui-btn-sm ui-btn-emerald"
+                  type="button"
+                  :disabled="loading || loadingMore || bulkApproveBusy"
+                  @click="openBulkApprove"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve Selected ({{ selectedCount }})
+                </button>
+
+                <button
+                  v-if="selectedCount"
+                  class="ui-btn ui-btn-sm ui-btn-ghost"
+                  type="button"
+                  :disabled="loading || loadingMore || bulkApproveBusy"
+                  @click="clearSelection"
+                >
+                  Clear Selection
+                </button>
+
                 <button class="ui-btn ui-btn-sm ui-btn-indigo" type="button" :disabled="loading || exporting" @click="exportExcel">
                   <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
                   <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" />
@@ -714,17 +990,16 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- BODY -->
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
           <div v-if="loading && !filteredRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
-          <!-- MOBILE CARDS -->
+          <!-- Mobile cards -->
           <div v-if="isMobile" class="space-y-2">
-            <div v-if="!pagedRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
+            <div v-if="!filteredRows.length && !loading" class="ui-frame p-4 text-center text-[12px] text-slate-500 dark:text-slate-400">
               No items found.
             </div>
 
-            <article v-for="row in pagedRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
+            <article v-for="row in filteredRows" :key="row._id" class="ui-card p-3 cursor-pointer" @click="openView(row)">
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0 space-y-1">
                   <div class="text-[11px] text-slate-500 dark:text-slate-400">
@@ -746,7 +1021,7 @@ onBeforeUnmount(() => {
 
                   <div class="text-[11px] text-slate-600 dark:text-slate-300">
                     Forgot:
-                    <span class="font-extrabold">{{ row.forgotDate || '—' }}</span>
+                    <span class="font-extrabold">{{ fmtYmd(row.forgotDate) }}</span>
                     •
                     <span v-for="b in getTypeBadges(row)" :key="row._id + '-mb-' + b.key" :class="b.cls">
                       {{ b.label }}
@@ -754,37 +1029,41 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="shrink-0 text-right space-y-1">
+                <div class="shrink-0 text-right space-y-2" @click.stop>
                   <span :class="statusBadgeUiClass(row.status)">
                     {{ STATUS_LABEL[row.status] || row.status }}
                   </span>
+
+                  <label
+                    v-if="canDecide(row)"
+                    class="mt-2 flex items-center justify-end gap-2 text-[11px] font-extrabold text-slate-700 dark:text-slate-200"
+                  >
+                    <input
+                      type="checkbox"
+                      class="coo-check"
+                      :checked="isSelected(row)"
+                      :disabled="loading || loadingMore || bulkApproveBusy"
+                      @change="toggleRowSelection(row)"
+                    />
+                    Select
+                  </label>
                 </div>
               </div>
 
               <div class="mt-2 ui-frame p-2 text-[11px] text-slate-600 dark:text-slate-300">
                 <div class="font-extrabold text-slate-700 dark:text-slate-200">Reason</div>
-                <div class="mt-0.5">
-                  {{ briefReason(row.reason, 140) }}
-                </div>
+                <div class="mt-0.5">{{ briefReason(row.reason, 140) }}</div>
               </div>
 
               <div class="mt-3 flex items-center justify-end gap-2" @click.stop>
                 <template v-if="canDecide(row)">
-                  <button
-                    type="button"
-                    class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
-                    :disabled="loading || deciding"
-                    @click="openApprove(row)"
-                    title="Approve"
-                    aria-label="Approve"
-                  >
-                    <i class="fa-solid fa-circle-check text-[12px]" />
-                  </button>
+                  <span v-if="isSelected(row)" class="ui-badge ui-badge-success">Selected for approval</span>
+                  <span v-else class="text-[11px] text-slate-400">Select to approve</span>
 
                   <button
                     type="button"
                     class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
-                    :disabled="loading || deciding"
+                    :disabled="loading || rejectBusy"
                     @click="openReject(row)"
                     title="Reject"
                     aria-label="Reject"
@@ -796,24 +1075,50 @@ onBeforeUnmount(() => {
                 <span v-else class="text-[11px] text-slate-400">—</span>
               </div>
             </article>
+
+            <div
+              v-if="loadingMore"
+              class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
+            >
+              Loading more...
+            </div>
+
+            <div v-if="!hasMore && rows.length" class="py-2 text-center text-[11px] text-slate-400">
+              End of list
+            </div>
+
+            <div ref="bottomSentinel" class="h-2 w-full" />
           </div>
 
-          <!-- DESKTOP TABLE -->
+          <!-- Desktop table -->
           <div v-else class="ui-table-wrap">
-            <table class="ui-table table-fixed w-full min-w-[1240px]">
+            <table class="ui-table table-fixed w-full min-w-[1290px]">
               <colgroup>
-                <col :style="{ width: COL_WIDTH.created }" />
-                <col :style="{ width: COL_WIDTH.employee }" />
-                <col :style="{ width: COL_WIDTH.forgotDate }" />
-                <col :style="{ width: COL_WIDTH.forgotType }" />
-                <col :style="{ width: COL_WIDTH.mode }" />
-                <col :style="{ width: COL_WIDTH.status }" />
-                <col :style="{ width: COL_WIDTH.actions }" />
-                <col :style="{ width: COL_WIDTH.reason }" />
+                <col style="width: 54px" />
+                <col style="width: 140px" />
+                <col style="width: 250px" />
+                <col style="width: 140px" />
+                <col style="width: 200px" />
+                <col style="width: 150px" />
+                <col style="width: 150px" />
+                <col style="width: 130px" />
+                <col />
               </colgroup>
 
               <thead>
                 <tr>
+                  <th class="ui-th text-center">
+                    <input
+                      type="checkbox"
+                      class="coo-check"
+                      :checked="allVisibleSelected"
+                      :indeterminate.prop="someVisibleSelected && !allVisibleSelected"
+                      :disabled="!selectableRows.length || loading || loadingMore || bulkApproveBusy"
+                      title="Select all approvable loaded rows"
+                      @click.stop
+                      @change="toggleSelectVisible"
+                    />
+                  </th>
                   <th class="ui-th">Created</th>
                   <th class="ui-th">Employee</th>
                   <th class="ui-th">Forgot Date</th>
@@ -826,13 +1131,26 @@ onBeforeUnmount(() => {
               </thead>
 
               <tbody>
-                <tr v-if="!loading && !pagedRows.length">
-                  <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">
+                <tr v-if="!loading && !filteredRows.length">
+                  <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">
                     No items found.
                   </td>
                 </tr>
 
-                <tr v-for="row in pagedRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
+                <tr v-for="row in filteredRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
+                  <td class="ui-td text-center" @click.stop>
+                    <input
+                      v-if="canDecide(row)"
+                      type="checkbox"
+                      class="coo-check"
+                      :checked="isSelected(row)"
+                      :disabled="loading || loadingMore || bulkApproveBusy"
+                      title="Select for bulk approval"
+                      @change="toggleRowSelection(row)"
+                    />
+                    <span v-else class="text-[11px] text-slate-400">—</span>
+                  </td>
+
                   <td class="ui-td">
                     <div class="truncate">{{ fmtDateTime(row.createdAt) }}</div>
                   </td>
@@ -847,7 +1165,7 @@ onBeforeUnmount(() => {
                   </td>
 
                   <td class="ui-td">
-                    <div class="truncate">{{ row.forgotDate || '—' }}</div>
+                    <div class="truncate">{{ fmtYmd(row.forgotDate) }}</div>
                   </td>
 
                   <td class="ui-td text-center">
@@ -874,21 +1192,13 @@ onBeforeUnmount(() => {
                   <td class="ui-td text-center" @click.stop>
                     <div class="flex items-center justify-center gap-1">
                       <template v-if="canDecide(row)">
-                        <button
-                          type="button"
-                          class="ui-btn ui-btn-xs ui-btn-emerald ui-icon-btn"
-                          :disabled="loading || deciding"
-                          @click="openApprove(row)"
-                          title="Approve"
-                          aria-label="Approve"
-                        >
-                          <i class="fa-solid fa-circle-check text-[12px]" />
-                        </button>
+                        <span v-if="isSelected(row)" class="ui-badge ui-badge-success text-[10px]">Selected</span>
+                        <span v-else class="text-[10px] text-slate-400">Select first</span>
 
                         <button
                           type="button"
                           class="ui-btn ui-btn-xs ui-btn-rose ui-icon-btn"
-                          :disabled="loading || deciding"
+                          :disabled="loading || rejectBusy"
                           @click="openReject(row)"
                           title="Reject"
                           aria-label="Reject"
@@ -909,36 +1219,26 @@ onBeforeUnmount(() => {
                 </tr>
               </tbody>
             </table>
-          </div>
 
-          <!-- Pagination -->
-          <div
-            class="mt-3 flex flex-col gap-2 ui-divider pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between"
-          >
-            <div class="flex items-center gap-2">
-              <select v-model="perPage" class="ui-select !w-auto !py-1.5 !text-[11px]">
-                <option v-for="opt in perPageOptions" :key="'per-' + opt" :value="opt">{{ opt }}</option>
-              </select>
-              <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                Page {{ page }} / {{ pageCount }}
-              </span>
+            <div
+              v-if="loadingMore"
+              class="border-t border-slate-200 px-3 py-2 text-center text-[11px] text-slate-500 dark:border-slate-700 dark:text-slate-300"
+            >
+              Loading more...
             </div>
 
-            <div class="flex items-center justify-end gap-1">
-              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = 1">«</button>
-              <button type="button" class="ui-pagebtn" :disabled="page <= 1" @click="page = Math.max(1, page - 1)">Prev</button>
-              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = Math.min(pageCount, page + 1)">
-                Next
-              </button>
-              <button type="button" class="ui-pagebtn" :disabled="page >= pageCount" @click="page = pageCount">»</button>
+            <div v-if="!hasMore && rows.length" class="border-t border-slate-200 px-3 py-2 text-center text-[11px] text-slate-400 dark:border-slate-700">
+              End of list
             </div>
+
+            <div ref="bottomSentinel" class="h-2 w-full" />
           </div>
         </div>
       </div>
     </div>
 
     <!-- DETAILS MODAL -->
-    <div v-if="viewOpen" class="ui-modal-backdrop">
+    <div v-if="viewOpen" class="ui-modal-backdrop" @click.self="closeView">
       <div class="ui-modal p-0 overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
           <div class="min-w-0">
@@ -948,12 +1248,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="flex items-center gap-2">
-            <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
-              <i class="fa-solid fa-xmark text-[11px]" />
-              Close
-            </button>
-          </div>
+          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
+            <i class="fa-solid fa-xmark text-[11px]" />
+            Close
+          </button>
         </div>
 
         <div class="p-4 space-y-3">
@@ -1017,94 +1315,118 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="ui-card p-3">
-            <div class="ui-section-title">Approvals</div>
-            <div class="mt-2 grid gap-2">
-              <div
-                v-for="(st, idx) in (Array.isArray(viewItem?.approvals) ? viewItem.approvals : [])"
-                :key="'ap-' + idx"
-                class="ui-frame p-2 flex items-center justify-between text-[11px]"
-              >
-                <div class="font-extrabold text-slate-700 dark:text-slate-200">
-                  {{ st.level }} · {{ st.loginId }}
-                </div>
-                <div class="flex items-center gap-2">
-                  <span
-                    class="ui-badge"
-                    :class="up(st.status)==='APPROVED' ? 'ui-badge-success' : (up(st.status)==='REJECTED' ? 'ui-badge-danger' : 'ui-badge-warning')"
-                  >
-                    {{ st.status }}
-                  </span>
-                  <span class="text-slate-500 dark:text-slate-400">{{ st.actedAt ? fmtDateTime(st.actedAt) : '—' }}</span>
-                </div>
-              </div>
-
-              <div v-if="!(Array.isArray(viewItem?.approvals) && viewItem.approvals.length)" class="text-[11px] text-slate-500">
-                —
-              </div>
-            </div>
-          </div>
-
-          <div class="flex justify-end gap-2 pt-1">
+          <div class="flex flex-wrap justify-end gap-2 pt-1">
             <button class="ui-btn ui-btn-ghost" type="button" @click="closeView">Close</button>
 
             <template v-if="canDecide(viewItem)">
-              <button class="ui-btn ui-btn-rose" type="button" @click="openReject(viewItem)">Reject</button>
-              <button class="ui-btn ui-btn-emerald" type="button" @click="openApprove(viewItem)">Approve</button>
+              <button
+                class="ui-btn ui-btn-soft"
+                type="button"
+                :disabled="loading || loadingMore || bulkApproveBusy"
+                @click="toggleRowSelection(viewItem)"
+              >
+                <i class="fa-solid fa-check-square text-[11px]" />
+                {{ isSelected(viewItem) ? 'Unselect from Approval' : 'Select for Approval' }}
+              </button>
+
+              <button class="ui-btn ui-btn-rose" type="button" :disabled="loading || rejectBusy" @click="openReject(viewItem)">
+                Reject
+              </button>
             </template>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- CONFIRM DECISION MODAL -->
-    <div v-if="confirmOpen" class="ui-modal-backdrop">
+    <!-- REJECT MODAL -->
+    <div v-if="rejectOpen" class="ui-modal-backdrop">
       <div class="ui-modal p-4">
         <div class="flex items-start gap-3">
           <div
             class="grid h-10 w-10 place-items-center rounded-2xl border"
-            :style="
-              confirmType === 'APPROVE'
-                ? 'border-color: rgb(var(--ui-success) / 0.25); background: rgb(var(--ui-success) / 0.10); color: rgb(var(--ui-success));'
-                : 'border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.10); color: rgb(var(--ui-danger));'
-            "
+            style="border-color: rgb(var(--ui-danger) / 0.25); background: rgb(var(--ui-danger) / 0.10); color: rgb(var(--ui-danger));"
           >
-            <i :class="confirmType === 'APPROVE' ? 'fa-solid fa-check' : 'fa-solid fa-xmark'" />
+            <i class="fa-solid fa-xmark" />
           </div>
 
           <div class="flex-1">
             <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">
-              {{ confirmType === 'APPROVE' ? 'Approve this request?' : 'Reject this request?' }}
+              Reject this request?
             </div>
             <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
               Employee:
-              <span class="font-extrabold">{{ confirmTarget?.employeeName || confirmTarget?.name || '—' }}</span>
-              <span class="ml-1 text-slate-500">({{ confirmTarget?.employeeId || '—' }})</span>
+              <span class="font-extrabold">{{ rejectTarget?.employeeName || rejectTarget?.name || '—' }}</span>
+              <span class="ml-1 text-slate-500">({{ rejectTarget?.employeeId || '—' }})</span>
             </div>
           </div>
         </div>
 
         <div class="mt-3 ui-field">
           <textarea
-            v-model="decisionNote"
+            v-model="rejectNote"
             rows="3"
             class="ui-textarea"
-            :placeholder="confirmType === 'REJECT' ? 'Please type the reason for rejection...' : 'Add a short note for the employee (optional)...'"
+            placeholder="Please type the reason for rejection..."
           />
         </div>
 
         <div class="mt-4 flex justify-end gap-2">
-          <button type="button" class="ui-btn ui-btn-ghost" :disabled="confirmBusy" @click="closeConfirm()">Close</button>
+          <button type="button" class="ui-btn ui-btn-ghost" :disabled="rejectBusy" @click="closeReject()">Close</button>
 
           <button
             type="button"
-            class="ui-btn"
-            :class="confirmType === 'APPROVE' ? 'ui-btn-emerald' : 'ui-btn-rose'"
-            :disabled="confirmBusy"
-            @click="confirmDecision"
+            class="ui-btn ui-btn-rose"
+            :disabled="rejectBusy"
+            @click="confirmReject"
           >
-            <i v-if="confirmBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
-            {{ confirmType === 'APPROVE' ? 'Approve' : 'Reject' }}
+            <i v-if="rejectBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
+            Reject
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BULK APPROVE MODAL -->
+    <div v-if="bulkApproveOpen" class="ui-modal-backdrop">
+      <div class="ui-modal p-4">
+        <div class="flex items-start gap-3">
+          <div
+            class="grid h-10 w-10 place-items-center rounded-2xl border"
+            style="border-color: rgb(var(--ui-success) / 0.25); background: rgb(var(--ui-success) / 0.10); color: rgb(var(--ui-success));"
+          >
+            <i class="fa-solid fa-check" />
+          </div>
+
+          <div class="flex-1">
+            <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">
+              Approve selected requests?
+            </div>
+            <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+              You selected <span class="font-extrabold">{{ selectedCount }}</span> pending COO request(s).
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 ui-field">
+          <textarea
+            v-model="bulkApproveNote"
+            rows="3"
+            class="ui-textarea"
+            placeholder="Add a short note for employees (optional)..."
+          />
+        </div>
+
+        <div class="mt-4 flex justify-end gap-2">
+          <button type="button" class="ui-btn ui-btn-ghost" :disabled="bulkApproveBusy" @click="closeBulkApprove()">Close</button>
+
+          <button
+            type="button"
+            class="ui-btn ui-btn-emerald"
+            :disabled="bulkApproveBusy || !selectedCount"
+            @click="confirmBulkApprove"
+          >
+            <i v-if="bulkApproveBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
+            Approve {{ selectedCount }} Selected
           </button>
         </div>
       </div>
@@ -1117,11 +1439,25 @@ onBeforeUnmount(() => {
   padding-left: 0.55rem !important;
   padding-right: 0.55rem !important;
 }
+
 .reason-cell {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.35;
+}
+
+.coo-check {
+  width: 15px;
+  height: 15px;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  accent-color: rgb(var(--ui-success));
+}
+
+.coo-check:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 </style>

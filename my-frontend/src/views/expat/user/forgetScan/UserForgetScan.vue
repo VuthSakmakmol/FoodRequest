@@ -550,7 +550,6 @@ onBeforeUnmount(() => {
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div class="text-sm font-extrabold">Forget Scan</div>
 
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[minmax(220px,1fr)_minmax(160px,200px)_minmax(170px,1fr)_minmax(170px,1fr)_auto] md:items-end">
               <div class="min-w-0">

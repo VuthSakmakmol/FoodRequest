@@ -318,9 +318,7 @@ onBeforeUnmount(() => {
       <div class="ui-card overflow-hidden">
         <div class="ui-hero-gradient">
           <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-            <div>
-              <div class="text-sm font-extrabold">Swap Working Day</div>
-            </div>
+
 
             <div class="grid w-full gap-2 md:w-auto md:grid-cols-[minmax(220px,1fr)_minmax(160px,200px)_minmax(170px,1fr)_minmax(170px,1fr)_auto] md:items-end">
               <div class="min-w-0">
