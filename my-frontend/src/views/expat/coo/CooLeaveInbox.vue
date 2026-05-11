@@ -925,21 +925,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="w-[145px]">
-                <div class="ui-field">
-                  <label class="text-[10px] font-extrabold text-white/90">Employee ID</label>
-                  <div class="flex h-[34px] items-center gap-1.5 rounded-xl border border-white/25 bg-white/10 px-2">
-                    <i class="fa-solid fa-id-badge text-[11px] text-white/80" />
-                    <input
-                      v-model="employeeFilter"
-                      type="text"
-                      placeholder="Employee ID"
-                      class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/65"
-                    />
-                  </div>
-                </div>
-              </div>
-
               <div class="flex items-end gap-1.5">
                 <div class="ui-field w-[126px]">
                   <label class="text-[10px] font-extrabold text-white/90">Requested from</label>
@@ -1033,19 +1018,6 @@ onBeforeUnmount(() => {
                   <option value="REJECTED">REJECTED</option>
                   <option value="PENDING_GM_VIEW">PENDING_GM_VIEW</option>
                 </select>
-              </div>
-
-              <div class="ui-field">
-                <label class="text-[11px] font-extrabold text-white/90">Employee ID</label>
-                <div class="flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2">
-                  <i class="fa-solid fa-id-badge text-[12px] text-white/80" />
-                  <input
-                    v-model="employeeFilter"
-                    type="text"
-                    placeholder="Ex: 51820386"
-                    class="w-full bg-transparent text-[12px] text-white outline-none placeholder:text-white/70"
-                  />
-                </div>
               </div>
 
               <div class="grid grid-cols-2 gap-2">
