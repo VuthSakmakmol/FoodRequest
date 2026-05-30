@@ -887,9 +887,10 @@ onBeforeUnmount(() => {
 
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
-                <span v-if="selectedCount" class="ui-badge ui-badge-success">
-                  Selected: {{ selectedCount }}
-                </span>
+                  <span v-if="selectedCount" class="ui-badge ui-badge-success">
+                    Selected:
+                    <span class="text-[14px] font-black">{{ selectedCount }}</span>
+                  </span>
               </div>
             </div>
 
@@ -941,12 +942,12 @@ onBeforeUnmount(() => {
                 <button
                   v-if="selectedCount"
                   type="button"
-                  class="ui-btn ui-btn-sm ui-btn-emerald md:h-[34px] md:px-2 md:text-[11px]"
+                  class="ui-btn ui-btn-sm coo-approve-btn md:h-[34px] md:px-2 md:text-[11px]"
                   :disabled="loading || loadingMore || deciding"
                   @click="openBulkApprove"
                 >
-                  <i class="fa-solid fa-circle-check text-[11px]" />
-                  Approve Selected ({{ selectedCount }})
+                Approve Selected
+                <span class="ml-1 text-[14px] font-black">({{ selectedCount }})</span>
                 </button>
 
                 <button
@@ -1036,7 +1037,7 @@ onBeforeUnmount(() => {
                 <button
                   v-if="selectedCount"
                   type="button"
-                  class="ui-btn ui-btn-sm ui-btn-emerald"
+                  class="ui-btn ui-btn-sm coo-approve-btn"
                   :disabled="loading || loadingMore || deciding"
                   @click="openBulkApprove"
                 >
@@ -1073,6 +1074,40 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
+          <div v-if="isMobile && selectedCount" class="mobile-approval-sticky">
+            <div class="mobile-approval-sticky__inner">
+              <div class="min-w-0">
+                <p class="text-[11px] font-extrabold text-emerald-900 dark:text-emerald-50">
+                  <span class="text-[18px] font-black">{{ selectedCount }}</span>
+                  selected
+                </p>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm coo-approve-btn mobile-approval-sticky__button"
+                  :disabled="loading || loadingMore || deciding"
+                  @click="openBulkApprove"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve
+                </button>
+
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost mobile-approval-sticky__clear"
+                  :disabled="loading || loadingMore || deciding"
+                  @click="clearSelection"
+                  aria-label="Clear selection"
+                  title="Clear selection"
+                >
+                  <i class="fa-solid fa-xmark text-[11px]" />
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div
             v-if="loading && !filteredRows.length"
             class="mb-2 rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-[11px] text-orange-700 dark:border-orange-700/70 dark:bg-orange-950/40 dark:text-orange-100"
@@ -1443,7 +1478,7 @@ onBeforeUnmount(() => {
 
             <button
               type="button"
-              class="ui-btn ui-btn-sm ui-btn-emerald"
+              class="ui-btn ui-btn-sm coo-approve-btn"
               @click="confirmBulkApprove"
               :disabled="bulkApproveBusy || !selectedCount"
             >
@@ -1601,5 +1636,71 @@ onBeforeUnmount(() => {
 .coo-check:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.coo-approve-btn {
+  border-color: rgb(16 185 129) !important;
+  background: linear-gradient(135deg, rgb(16 185 129), rgb(5 150 105)) !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.28) !important;
+}
+
+.coo-approve-btn:hover:not(:disabled) {
+  border-color: rgb(5 150 105) !important;
+  background: linear-gradient(135deg, rgb(5 150 105), rgb(4 120 87)) !important;
+  transform: translateY(-1px);
+}
+
+.coo-approve-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.mobile-approval-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 45;
+  margin: -0.75rem -0.5rem 0.75rem;
+  padding: 0.5rem;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(248, 250, 252, 0.84));
+  backdrop-filter: blur(14px);
+}
+
+.dark .mobile-approval-sticky {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.84));
+}
+
+.mobile-approval-sticky__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: 1rem;
+  background: rgba(236, 253, 245, 0.96);
+  padding: 0.65rem 0.7rem;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+}
+
+.dark .mobile-approval-sticky__inner {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: rgba(6, 78, 59, 0.82);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+.mobile-approval-sticky__button {
+  min-height: 36px;
+  padding-left: 0.85rem !important;
+  padding-right: 0.85rem !important;
+  white-space: nowrap;
+}
+
+.mobile-approval-sticky__clear {
+  min-height: 36px;
+  min-width: 36px;
+  padding-left: 0.65rem !important;
+  padding-right: 0.65rem !important;
 }
 </style>

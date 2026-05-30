@@ -858,7 +858,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div
-            class="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 text-[11px] dark:border-slate-800"
+            class="flex items-center justify-between gap-3 border-t border-slate-200 pt-3 pb-3 text-[11px] dark:border-slate-800"
           >
             <div class="text-slate-500 dark:text-slate-400">
               Please review requester, booking detail, and request type before submitting.

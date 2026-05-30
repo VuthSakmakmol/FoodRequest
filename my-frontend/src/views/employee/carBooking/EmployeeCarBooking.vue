@@ -520,7 +520,7 @@ watch(
       <div
         class="slim-toolbar flex items-center justify-between gap-2 border-t border-slate-200
                bg-gradient-to-r from-indigo-50 via-emerald-50 to-slate-50 px-3 py-2 text-[11px]
-               dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900"
+               dark:border-slate-700 dark:from-slate-900 dark:via-slate-900 dark:to-slate-900 pb-[120px]"
       >
         <div class="text-[11px] text-slate-500 dark:text-slate-400">
           Please double-check date, time, and destination before submitting.

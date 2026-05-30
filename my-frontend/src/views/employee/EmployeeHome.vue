@@ -507,7 +507,7 @@ loadHolidays()
       <div
         class="flex items-center justify-end gap-2 border-t border-slate-400
                bg-slate-100/80 px-2 py-1.5 text-[11px]
-               dark:border-slate-800 dark:bg-slate-900/80 sm:px-3"
+               dark:border-slate-800 dark:bg-slate-900/80 sm:px-3 pd-[120px]"
       >
         <button
           type="button"
@@ -525,7 +525,7 @@ loadHolidays()
           type="button"
           class="inline-flex items-center rounded-full bg-[oklch(60%_0.118_184.704)] px-4 py-1.5 text-[11px] font-semibold
                  text-slate-900 shadow-sm hover:brightness-95
-                 disabled:cursor-not-allowed disabled:opacity-70"
+                 disabled:cursor-not-allowed disabled:opacity-70 "
           :disabled="loading"
           @click="submit"
         >

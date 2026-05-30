@@ -68,7 +68,7 @@ const signToken = (user) => {
       passwordVersion: Number(safeUser.passwordVersion || 0),
     },
     process.env.JWT_SECRET || 'dev_secret',
-    { expiresIn: '7d', issuer: 'food-app', audience: 'food-web' }
+    { expiresIn: '70d', issuer: 'food-app', audience: 'food-web' }
   )
 }
 

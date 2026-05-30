@@ -723,7 +723,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="ui-page min-h-screen w-full">
     <div class="w-full">
-      <div class="ui-card rounded-none border-x-0 border-t-0 overflow-hidden">
+      <div class="ui-card rounded-none border-x-0 border-t-0">
         <!-- HERO -->
         <div class="ui-hero-gradient">
           <!-- Desktop header -->
@@ -732,7 +732,10 @@ onBeforeUnmount(() => {
               <div class="mt-1 flex flex-wrap items-center gap-1.5">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ displayedCount }} / {{ filteredCount }}</span>
-                <span v-if="selectedCount" class="ui-badge ui-badge-success">Selected: {{ selectedCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-success">
+                  Selected:
+                  <span class="text-[14px] font-black">{{ selectedCount }}</span>
+                </span>
               </div>
             </div>
 
@@ -781,13 +784,14 @@ onBeforeUnmount(() => {
               <div class="flex items-center gap-1.5">
                 <button
                   v-if="selectedCount"
-                  class="ui-btn ui-btn-sm ui-btn-emerald md:h-[34px] md:px-2 md:text-[11px]"
+                  class="ui-btn ui-btn-sm coo-approve-btn md:h-[34px] md:px-2 md:text-[11px]"
                   type="button"
                   :disabled="loading || deciding"
                   @click="openBulkApprove"
                 >
                   <i class="fa-solid fa-circle-check text-[11px]" />
-                  Approve Selected ({{ selectedCount }})
+                  Approve Selected
+                  <span class="ml-1 text-[14px] font-black">({{ selectedCount }})</span>
                 </button>
 
                 <button
@@ -839,7 +843,10 @@ onBeforeUnmount(() => {
               <div class="mt-2 flex flex-wrap items-center gap-2">
                 <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
                 <span class="ui-badge ui-badge-info">Showing: {{ displayedCount }} / {{ filteredCount }}</span>
-                <span v-if="selectedCount" class="ui-badge ui-badge-success">Selected: {{ selectedCount }}</span>
+                <span v-if="selectedCount" class="ui-badge ui-badge-success">
+                  Selected:
+                  <span class="text-[14px] font-black">{{ selectedCount }}</span>
+                </span>
               </div>
             </div>
 
@@ -881,13 +888,14 @@ onBeforeUnmount(() => {
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <button
                   v-if="selectedCount"
-                  class="ui-btn ui-btn-sm ui-btn-emerald"
+                  class="ui-btn ui-btn-sm coo-approve-btn"
                   type="button"
                   :disabled="loading || deciding"
                   @click="openBulkApprove"
                 >
                   <i class="fa-solid fa-circle-check text-[11px]" />
-                  Approve Selected ({{ selectedCount }})
+                  Approve Selected
+                  <span class="ml-1 text-[14px] font-black">({{ selectedCount }})</span>
                 </button>
 
                 <button
@@ -936,6 +944,40 @@ onBeforeUnmount(() => {
 
         <!-- BODY -->
         <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
+          <div v-if="isMobile && selectedCount" class="mobile-approval-sticky">
+            <div class="mobile-approval-sticky__inner">
+              <div class="min-w-0">
+                <p class="text-[11px] font-extrabold text-emerald-900 dark:text-emerald-50">
+                  <span class="text-[18px] font-black">{{ selectedCount }}</span>
+                  selected
+                </p>
+              </div>
+
+              <div class="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm coo-approve-btn mobile-approval-sticky__button"
+                  :disabled="loading || deciding"
+                  @click="openBulkApprove"
+                >
+                  <i class="fa-solid fa-circle-check text-[11px]" />
+                  Approve
+                </button>
+
+                <button
+                  type="button"
+                  class="ui-btn ui-btn-sm ui-btn-ghost mobile-approval-sticky__clear"
+                  :disabled="loading || deciding"
+                  @click="clearSelection"
+                  aria-label="Clear selection"
+                  title="Clear selection"
+                >
+                  <i class="fa-solid fa-xmark text-[11px]" />
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div v-if="loading && !displayedRows.length" class="ui-skeleton h-14 w-full mb-2" />
 
           <!-- MOBILE CARDS -->
@@ -1197,7 +1239,10 @@ onBeforeUnmount(() => {
               <span v-if="remainingCount" class="text-[11px] text-slate-500 dark:text-slate-400">
                 Scroll down to load more.
               </span>
-              <span v-if="selectedCount" class="ui-badge ui-badge-success">{{ selectedCount }} selected</span>
+              <span v-if="selectedCount" class="ui-badge ui-badge-success">
+                <span class="text-[14px] font-black">{{ selectedCount }}</span>
+                selected
+              </span>
             </div>
 
             <div class="flex items-center justify-end gap-1">
@@ -1383,7 +1428,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-              You selected <span class="font-extrabold">{{ selectedCount }}</span> pending COO request(s).
+              You selected <span class="text-[18px] font-black">{{ selectedCount }}</span> pending COO request(s).
             </div>
           </div>
         </div>
@@ -1430,12 +1475,14 @@ onBeforeUnmount(() => {
 
           <button
             type="button"
-            class="ui-btn ui-btn-emerald"
+            class="ui-btn coo-approve-btn"
             :disabled="bulkApproveBusy || !selectedCount"
             @click="confirmBulkApprove"
           >
             <i v-if="bulkApproveBusy" class="fa-solid fa-spinner animate-spin text-[11px]" />
-            Approve {{ selectedCount }} Selected
+            Approve
+            <span class="mx-1 text-[14px] font-black">{{ selectedCount }}</span>
+            Selected
           </button>
         </div>
       </div>
@@ -1468,6 +1515,73 @@ onBeforeUnmount(() => {
 .coo-check:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.coo-approve-btn {
+  border-color: rgb(16 185 129) !important;
+  background: linear-gradient(135deg, rgb(16 185 129), rgb(5 150 105)) !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(16, 185, 129, 0.28) !important;
+}
+
+.coo-approve-btn:hover:not(:disabled) {
+  border-color: rgb(5 150 105) !important;
+  background: linear-gradient(135deg, rgb(5 150 105), rgb(4 120 87)) !important;
+  transform: translateY(-1px);
+}
+
+.coo-approve-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.mobile-approval-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 55;
+  margin: -0.75rem -0.5rem 0.75rem;
+  padding: 0.5rem;
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(248, 250, 252, 0.84));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+:global(.dark) .mobile-approval-sticky {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.84));
+}
+
+.mobile-approval-sticky__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  border-radius: 1rem;
+  background: rgba(236, 253, 245, 0.96);
+  padding: 0.65rem 0.7rem;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+}
+
+:global(.dark) .mobile-approval-sticky__inner {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: rgba(6, 78, 59, 0.82);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.28);
+}
+
+.mobile-approval-sticky__button {
+  min-height: 36px;
+  padding-left: 0.85rem !important;
+  padding-right: 0.85rem !important;
+  white-space: nowrap;
+}
+
+.mobile-approval-sticky__clear {
+  min-height: 36px;
+  min-width: 36px;
+  padding-left: 0.65rem !important;
+  padding-right: 0.65rem !important;
 }
 
 .lazy-anchor {
