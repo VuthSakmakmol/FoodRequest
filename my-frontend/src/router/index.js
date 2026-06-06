@@ -12,12 +12,10 @@ const DriverLayout = () => import('@/layouts/DriverLayout.vue')
 const MessengerLayout = () => import('@/layouts/MessengerLayout.vue')
 
 // Unified leave layout
-const LeaveExpatUnified = () => import('@/layouts/LeaveExpat/LeaveExpatUnified.vue')
-
-// Leave / Expat layouts
-const AdminLeaveExpat = () => import('@/layouts/LeaveExpat/AdminLeaveExpat.vue')
-const GMLeaveExpat = () => import('@/layouts/LeaveExpat/GMLeaveExpat.vue')
-const COOLeaveExpat = () => import('@/layouts/LeaveExpat/COOLeaveExpat.vue')
+const LeaveExpatUnified = () => import('@/layouts/leaveExpat/LeaveExpatUnified.vue')
+const AdminLeaveExpat = () => import('@/layouts/leaveExpat/AdminLeaveExpat.vue')
+const GMLeaveExpat = () => import('@/layouts/leaveExpat/GMLeaveExpat.vue')
+const COOLeaveExpat = () => import('@/layouts/leaveExpat/COOLeaveExpat.vue')
 
 // Booking Room layouts
 const AdminRoomLayout = () => import('@/layouts/BookingRoom/AdminRoomLayout.vue')

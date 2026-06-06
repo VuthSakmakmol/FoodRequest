@@ -5,10 +5,11 @@ import {
   subscribeRoles,
   subscribeUserIfNeeded,
   subscribeEmployeeIfNeeded,
-  unsubscribeRoles,
   setSocketAuthToken,
   resetSocketSubscriptions,
 } from '@/utils/socket'
+
+let restorePromise = null
 
 function s(v) {
   return String(v ?? '').trim()
@@ -152,30 +153,27 @@ export const useAuth = defineStore('auth', {
       else localStorage.removeItem('employeeId')
     },
 
-    async _applyRealtimeSubscriptions() {
+    _applyRealtimeSubscriptions() {
       try {
         resetSocketSubscriptions()
       } catch {}
 
+      const tokenAtStart = this.token
       const roles = normalizeRoles(this.user)
       const loginId = getLoginId(this.user)
       const employeeId = getEmployeeId(this.user)
 
-      try {
-        if (roles.length) {
-          await subscribeRoles(roles)
-        }
+      void Promise.resolve()
+        .then(async () => {
+          if (!tokenAtStart || this.token !== tokenAtStart) return
 
-        if (loginId) {
-          await subscribeUserIfNeeded(loginId)
-        }
-
-        if (employeeId) {
-          await subscribeEmployeeIfNeeded(employeeId)
-        }
-      } catch (e) {
-        console.warn('[auth] realtime subscription failed:', e?.message || e)
-      }
+          if (roles.length) await subscribeRoles(roles)
+          if (loginId) await subscribeUserIfNeeded(loginId)
+          if (employeeId) await subscribeEmployeeIfNeeded(employeeId)
+        })
+        .catch((e) => {
+          console.warn('[auth] realtime subscription skipped:', e?.message || e)
+        })
     },
 
     async login(loginId, password) {
@@ -194,9 +192,8 @@ export const useAuth = defineStore('auth', {
 
       this._applyTokenHeader(this.token)
       setSocketAuthToken(this.token)
-
       this._persistSession()
-      await this._applyRealtimeSubscriptions()
+      this._applyRealtimeSubscriptions()
 
       return this.user
     },
@@ -205,6 +202,8 @@ export const useAuth = defineStore('auth', {
       if (!this.token) {
         this.user = null
         this.ready = true
+        this._applyTokenHeader('')
+        setSocketAuthToken('')
         this._persistSession()
         return null
       }
@@ -224,7 +223,7 @@ export const useAuth = defineStore('auth', {
         this.ready = true
 
         this._persistSession()
-        await this._applyRealtimeSubscriptions()
+        this._applyRealtimeSubscriptions()
 
         return this.user
       } catch (e) {
@@ -235,7 +234,7 @@ export const useAuth = defineStore('auth', {
       }
     },
 
-    async restore() {
+    async _restoreInternal() {
       const storedToken = localStorage.getItem('token') || ''
 
       if (!storedToken) {
@@ -253,9 +252,6 @@ export const useAuth = defineStore('auth', {
       setSocketAuthToken(this.token)
 
       try {
-        // ✅ Important fix:
-        // Never trust old localStorage user after app reopen.
-        // Always ask backend who the current token belongs to.
         return await this.fetchMe()
       } catch {
         return null
@@ -264,11 +260,20 @@ export const useAuth = defineStore('auth', {
       }
     },
 
+    async restore() {
+      if (restorePromise) return restorePromise
+
+      restorePromise = this._restoreInternal().finally(() => {
+        restorePromise = null
+      })
+
+      return restorePromise
+    },
+
     async logout() {
       if (this.isLoggingOut) return
 
       this.isLoggingOut = true
-      const oldRoles = normalizeRoles(this.user)
 
       try {
         this.user = null
@@ -277,15 +282,10 @@ export const useAuth = defineStore('auth', {
 
         this._applyTokenHeader('')
         setSocketAuthToken('')
-
         clearAuthLocalStorage()
 
         try {
           sessionStorage.clear()
-        } catch {}
-
-        try {
-          if (oldRoles.length) await unsubscribeRoles(oldRoles)
         } catch {}
 
         try {
