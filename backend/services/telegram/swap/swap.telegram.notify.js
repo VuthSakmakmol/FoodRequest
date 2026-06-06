@@ -1,10 +1,16 @@
 /* eslint-disable no-console */
 // backend/services/telegram/swap/swap.telegram.notify.js
+//
+// ✅ Employee gets submit + decision + cancel DMs
+// ✅ Current approver gets DM
+// ✅ Leave Admin watcher gets submitted/progress/final approved/rejected/cancelled
+// ✅ Leave Admin watcher gets every important update immediately with normal Telegram notification
 
 const EmployeeDirectory = require('../../../models/EmployeeDirectory')
 const msg = require('./swap.telegram.messages')
 const rec = require('./swap.telegram.recipients')
 const { sendSwapDM } = require('./swap.telegram.service')
+const adminWatcher = require('../adminWatcher')
 
 const DEBUG = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
 function log(...args) {
@@ -25,15 +31,44 @@ async function getEmployeeName(employeeId) {
   return emp?.name || emp?.fullName || ''
 }
 
+function adminEventForDecision(doc) {
+  const st = up(doc?.status)
+  if (st === 'APPROVED') return { event: 'APPROVED_FINAL', silent: false }
+  if (st === 'REJECTED') return { event: 'REJECTED', silent: false }
+  if (st === 'CANCELLED' || st === 'CANCELED') return { event: 'CANCELLED', silent: false }
+  if (st === 'PENDING_MANAGER' || st === 'PENDING_GM' || st === 'PENDING_COO') {
+    return { event: 'STEP_APPROVED', silent: false }
+  }
+  return { event: 'UPDATED', silent: false }
+}
+
+async function notifyAdminWatcher(event, doc, actorLabel = '', silent = false) {
+  try {
+    await adminWatcher.notifyLeaveAdminWatcher({
+      module: 'SWAP',
+      event,
+      doc,
+      actorLabel,
+      silent,
+    })
+  } catch (err) {
+    console.warn('[swap.notify] admin watcher failed:', err?.response?.data || err?.message)
+  }
+}
+
 /* ─────────────────────────────
- * Employee submit confirmation
+ * Employee submit confirmation + leave admin watcher
  * ───────────────────────────── */
 async function notifySwapRequestCreated(doc) {
   try {
     if (!doc) return
     const chatId = await rec.resolveEmployeeChatId(doc)
-    if (!chatId) return log('skip employee submitted (no chatId)', doc.employeeId)
-    await sendSwapDM(chatId, msg.employeeSubmitted(doc))
+    if (chatId) {
+      await sendSwapDM(chatId, msg.employeeSubmitted(doc))
+    } else {
+      log('skip employee submitted (no chatId)', doc.employeeId)
+    }
+    await notifyAdminWatcher('SUBMITTED', doc, doc?.requesterLoginId || 'Employee', false)
   } catch (err) {
     console.error('[swap.notify] notifySwapRequestCreated error:', err.message)
   }
@@ -42,40 +77,40 @@ async function notifySwapRequestCreated(doc) {
 /* ─────────────────────────────
  * Approver inbox DMs
  * ───────────────────────────── */
-async function notifySwapToManager(doc) {
+async function notifySwapToManager(doc, opts = {}) {
   try {
     if (!doc) return
     const chatId = await rec.resolveManagerChatId(doc)
     if (!chatId) return log('skip manager (no chatId)', doc.managerLoginId)
 
     const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendSwapDM(chatId, msg.managerNewSwap(doc, employeeName))
+    await sendSwapDM(chatId, msg.managerNewSwap(doc, employeeName), opts)
   } catch (err) {
     console.error('[swap.notify] notifySwapToManager error:', err.message)
   }
 }
 
-async function notifySwapToGm(doc) {
+async function notifySwapToGm(doc, opts = {}) {
   try {
     if (!doc) return
     const chatId = await rec.resolveGmChatId(doc)
     if (!chatId) return log('skip gm (no chatId)', doc.gmLoginId)
 
     const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendSwapDM(chatId, msg.gmNewSwap(doc, employeeName))
+    await sendSwapDM(chatId, msg.gmNewSwap(doc, employeeName), opts)
   } catch (err) {
     console.error('[swap.notify] notifySwapToGm error:', err.message)
   }
 }
 
-async function notifySwapToCoo(doc) {
+async function notifySwapToCoo(doc, opts = {}) {
   try {
     if (!doc) return
     const chatId = await rec.resolveCooChatId(doc)
     if (!chatId) return log('skip coo (no chatId)', doc.cooLoginId)
 
     const employeeName = (await getEmployeeName(doc.employeeId)) || doc.employeeName || doc.employeeId
-    await sendSwapDM(chatId, msg.cooNewSwap(doc, employeeName))
+    await sendSwapDM(chatId, msg.cooNewSwap(doc, employeeName), opts)
   } catch (err) {
     console.error('[swap.notify] notifySwapToCoo error:', err.message)
   }
@@ -85,8 +120,8 @@ async function notifySwapToCoo(doc) {
  * Notify current approver based on STATUS (queue-style)
  *
  * ✅ AND add FYI read-only logic:
- * - PENDING_MANAGER + MANAGER_ONLY => send GM FYI
- * - PENDING_GM + GM_ONLY          => send COO FYI
+ * - PENDING_MANAGER + MANAGER_ONLY => send GM FYI silently
+ * - PENDING_GM + GM_ONLY          => send COO FYI silently
  */
 async function notifyCurrentApprover(doc) {
   try {
@@ -112,12 +147,12 @@ async function notifyCurrentApprover(doc) {
     // 2) FYI (read-only) mirror from Leave
     // MANAGER_ONLY -> GM gets FYI while manager is final approver
     if (st === 'PENDING_MANAGER' && mode === 'MANAGER_ONLY') {
-      await notifySwapToGm(doc) // gmNewSwap() will render FYI wording
+      await notifySwapToGm(doc, { disable_notification: true }) // gmNewSwap() will render FYI wording
     }
 
     // GM_ONLY -> COO gets FYI while GM is final approver
     if (st === 'PENDING_GM' && mode === 'GM_ONLY') {
-      await notifySwapToCoo(doc) // cooNewSwap() will render FYI wording
+      await notifySwapToCoo(doc, { disable_notification: true }) // cooNewSwap() will render FYI wording
     }
   } catch (err) {
     console.error('[swap.notify] notifyCurrentApprover error:', err.message)
@@ -125,14 +160,17 @@ async function notifyCurrentApprover(doc) {
 }
 
 /* ─────────────────────────────
- * Decision → Employee
+ * Decision → Employee + leave admin watcher
  * ───────────────────────────── */
 async function notifyManagerDecisionToEmployee(doc) {
   try {
     if (!doc) return
     const chatId = await rec.resolveEmployeeChatId(doc)
-    if (!chatId) return
-    await sendSwapDM(chatId, msg.employeeDecision(doc, 'Manager'))
+    if (chatId) {
+      await sendSwapDM(chatId, msg.employeeDecision(doc, 'Manager'))
+    }
+    const adminEvent = adminEventForDecision(doc)
+    await notifyAdminWatcher(adminEvent.event, doc, 'Manager', adminEvent.silent)
   } catch (err) {
     console.error('[swap.notify] notifyManagerDecisionToEmployee error:', err.message)
   }
@@ -142,8 +180,11 @@ async function notifyGmDecisionToEmployee(doc) {
   try {
     if (!doc) return
     const chatId = await rec.resolveEmployeeChatId(doc)
-    if (!chatId) return
-    await sendSwapDM(chatId, msg.employeeDecision(doc, 'GM'))
+    if (chatId) {
+      await sendSwapDM(chatId, msg.employeeDecision(doc, 'GM'))
+    }
+    const adminEvent = adminEventForDecision(doc)
+    await notifyAdminWatcher(adminEvent.event, doc, 'GM', adminEvent.silent)
   } catch (err) {
     console.error('[swap.notify] notifyGmDecisionToEmployee error:', err.message)
   }
@@ -153,21 +194,26 @@ async function notifyCooDecisionToEmployee(doc) {
   try {
     if (!doc) return
     const chatId = await rec.resolveEmployeeChatId(doc)
-    if (!chatId) return
-    await sendSwapDM(chatId, msg.employeeDecision(doc, 'COO'))
+    if (chatId) {
+      await sendSwapDM(chatId, msg.employeeDecision(doc, 'COO'))
+    }
+    const adminEvent = adminEventForDecision(doc)
+    await notifyAdminWatcher(adminEvent.event, doc, 'COO', adminEvent.silent)
   } catch (err) {
     console.error('[swap.notify] notifyCooDecisionToEmployee error:', err.message)
   }
 }
 
-/* Cancel notice (optional) */
+/* Cancel notice */
 async function notifySwapCancelledToEmployee(doc) {
   try {
     if (!doc) return
     const chatId = await rec.resolveEmployeeChatId(doc)
-    if (!chatId) return
     const pseudo = { ...doc, status: 'CANCELLED' }
-    await sendSwapDM(chatId, msg.employeeDecision(pseudo, 'System'))
+    if (chatId) {
+      await sendSwapDM(chatId, msg.employeeDecision(pseudo, 'System'))
+    }
+    await notifyAdminWatcher('CANCELLED', pseudo, doc?.cancelledBy || 'System', false)
   } catch (err) {
     console.error('[swap.notify] notifySwapCancelledToEmployee error:', err.message)
   }

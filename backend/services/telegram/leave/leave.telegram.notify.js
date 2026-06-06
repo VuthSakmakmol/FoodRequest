@@ -1,9 +1,10 @@
 /* eslint-disable no-console */
 // backend/services/telegram/leave/leave.telegram.notify.js
 //
-// ✅ NO admin DMs anymore (leave_admin/admin/root_admin receive NOTHING)
 // ✅ Employee gets submit + decision + cancel DMs
 // ✅ Current approver gets DM
+// ✅ Leave Admin watcher gets submitted/progress/final approved/rejected/cancelled
+// ✅ Leave Admin watcher gets every important update immediately with normal Telegram notification
 // ✅ FYI read-only:
 //    - MANAGER_ONLY: GM gets FYI even though not involved
 //    - GM_ONLY: COO gets FYI even though not involved
@@ -12,6 +13,7 @@ const EmployeeDirectory = require('../../../models/EmployeeDirectory')
 const rec = require('./leave.telegram.recipients')
 const msg = require('./leave.telegram.messages')
 const { sendLeaveDM } = require('./leave.telegram.service')
+const adminWatcher = require('../adminWatcher')
 
 const DEBUG = String(process.env.TELEGRAM_DEBUG || 'false').toLowerCase() === 'true'
 function log(...args) {
@@ -31,11 +33,38 @@ async function getEmployeeName(employeeId) {
   return emp?.name || emp?.fullName || ''
 }
 
-/* Create: employee confirm */
+function adminEventForDecision(doc) {
+  const st = up(doc?.status)
+  if (st === 'APPROVED') return { event: 'APPROVED_FINAL', silent: false }
+  if (st === 'REJECTED') return { event: 'REJECTED', silent: false }
+  if (st === 'CANCELLED' || st === 'CANCELED') return { event: 'CANCELLED', silent: false }
+  if (st === 'PENDING_MANAGER' || st === 'PENDING_GM' || st === 'PENDING_COO') {
+    return { event: 'STEP_APPROVED', silent: false }
+  }
+  return { event: 'UPDATED', silent: false }
+}
+
+async function notifyAdminWatcher(event, doc, actorLabel = '', silent = false) {
+  try {
+    await adminWatcher.notifyLeaveAdminWatcher({
+      module: 'LEAVE',
+      event,
+      doc,
+      actorLabel,
+      silent,
+    })
+  } catch (err) {
+    console.warn('[leave.notify] admin watcher failed:', err?.response?.data || err?.message)
+  }
+}
+
+/* Create: employee confirm + leave admin watcher */
 async function notifyCreatedToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
-  if (!chatId) return
-  await sendLeaveDM(chatId, msg.employeeSubmitted(doc))
+  if (chatId) {
+    await sendLeaveDM(chatId, msg.employeeSubmitted(doc))
+  }
+  await notifyAdminWatcher('SUBMITTED', doc, doc?.requesterLoginId || 'Employee', false)
 }
 
 /* Current approver: based on status + mode (includes FYI rules) */
@@ -70,7 +99,7 @@ async function notifyCurrentApprover(doc) {
       // (optional safety) fallback to fixed loginId if doc.gmLoginId empty
       const gmChatId = await rec.resolveGmChatId({ ...doc, gmLoginId: doc?.gmLoginId || 'leave_gm' })
       if (gmChatId) {
-        await sendLeaveDM(gmChatId, msg.gmNew(doc, employeeName)) // gmNew() will show FYI
+        await sendLeaveDM(gmChatId, msg.gmNew(doc, employeeName), { disable_notification: true }) // FYI should be quiet
         log('sent GM FYI DM', { requestId: String(doc?._id || ''), gmChatId })
       } else {
         log('skip GM FYI DM (no chatId)', { requestId: String(doc?._id || ''), gmLoginId: String(doc?.gmLoginId || '') })
@@ -95,7 +124,7 @@ async function notifyCurrentApprover(doc) {
       // (optional safety) fallback to fixed loginId if doc.cooLoginId empty
       const cooChatId = await rec.resolveCooChatId({ ...doc, cooLoginId: doc?.cooLoginId || 'leave_coo' })
       if (cooChatId) {
-        await sendLeaveDM(cooChatId, msg.cooNew(doc, employeeName)) // cooNew() will show FYI
+        await sendLeaveDM(cooChatId, msg.cooNew(doc, employeeName), { disable_notification: true }) // FYI should be quiet
         log('sent COO FYI DM', { requestId: String(doc?._id || ''), cooChatId })
       } else {
         log('skip COO FYI DM (no chatId)', { requestId: String(doc?._id || ''), cooLoginId: String(doc?.cooLoginId || '') })
@@ -120,29 +149,40 @@ async function notifyCurrentApprover(doc) {
   log('notifyCurrentApprover: no action for status', { requestId: String(doc?._id || ''), status: st, mode })
 }
 
-/* Decisions: employee only (NO admin DMs) */
+/* Decisions: employee + leave admin watcher */
 async function notifyManagerDecisionToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
-  if (!chatId) return
-  await sendLeaveDM(chatId, msg.employeeDecision(doc, 'Manager'))
+  if (chatId) {
+    await sendLeaveDM(chatId, msg.employeeDecision(doc, 'Manager'))
+  }
+  const adminEvent = adminEventForDecision(doc)
+  await notifyAdminWatcher(adminEvent.event, doc, 'Manager', adminEvent.silent)
 }
 async function notifyGmDecisionToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
-  if (!chatId) return
-  await sendLeaveDM(chatId, msg.employeeDecision(doc, 'GM'))
+  if (chatId) {
+    await sendLeaveDM(chatId, msg.employeeDecision(doc, 'GM'))
+  }
+  const adminEvent = adminEventForDecision(doc)
+  await notifyAdminWatcher(adminEvent.event, doc, 'GM', adminEvent.silent)
 }
 async function notifyCooDecisionToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
-  if (!chatId) return
-  await sendLeaveDM(chatId, msg.employeeDecision(doc, 'COO'))
+  if (chatId) {
+    await sendLeaveDM(chatId, msg.employeeDecision(doc, 'COO'))
+  }
+  const adminEvent = adminEventForDecision(doc)
+  await notifyAdminWatcher(adminEvent.event, doc, 'COO', adminEvent.silent)
 }
 
-/* Cancel: employee */
+/* Cancel: employee + leave admin watcher */
 async function notifyCancelledToEmployee(doc) {
   const chatId = await rec.resolveEmployeeChatId(doc)
-  if (!chatId) return
   const pseudo = { ...doc, status: 'CANCELLED' }
-  await sendLeaveDM(chatId, msg.employeeDecision(pseudo, 'System'))
+  if (chatId) {
+    await sendLeaveDM(chatId, msg.employeeDecision(pseudo, 'System'))
+  }
+  await notifyAdminWatcher('CANCELLED', pseudo, doc?.cancelledBy || 'System', false)
 }
 
 module.exports = {

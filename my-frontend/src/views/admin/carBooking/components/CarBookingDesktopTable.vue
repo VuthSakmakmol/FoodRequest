@@ -39,7 +39,7 @@ defineEmits([
           <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Requester</th>
           <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Destination</th>
           <th class="border border-slate-300 px-2 py-2 text-center font-semibold dark:border-slate-700">Pax</th>
-          <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Purpose</th>
+          <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Purpose / Note</th>
           <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Assigned</th>
           <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Driver / Messenger Resp.</th>
           <th class="border border-slate-300 px-2 py-2 text-left font-semibold dark:border-slate-700">Status</th>
@@ -99,7 +99,15 @@ defineEmits([
             </td>
 
             <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">
-              <div class="text-[12px]">{{ item.purpose || '—' }}</div>
+              <div class="text-[12px] font-medium text-slate-800 dark:text-slate-100">
+                {{ item.purpose || '—' }}
+              </div>
+              <div
+                v-if="item.notes"
+                class="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] leading-snug text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100"
+              >
+                <span class="font-semibold">Note:</span> {{ item.notes }}
+              </div>
             </td>
 
             <td class="border border-slate-300 px-2 py-2 align-top dark:border-slate-700">

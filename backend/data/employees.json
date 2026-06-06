@@ -91,6 +91,15 @@
   },
     {
     "employeeId": "51410014",
+    "name": "Nirut Sappaso",
+    "department": "Management Office",
+    "position": "Factory Manager",
+    "contactNumber": "012345678",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "51410014",
     "name": "Boonkiat Jungsaisawangphan",
     "department": "Management Office",
     "position": "CoE Manager",

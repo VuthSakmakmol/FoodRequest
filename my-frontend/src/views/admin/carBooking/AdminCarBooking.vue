@@ -202,6 +202,7 @@ const filtered = computed(() => {
         r.employee?.department,
         r.employeeId,
         r.purpose,
+        r.notes,
         prettyStops(r.stops),
         assigneeName(r),
         r.assignment?.driverAck,
@@ -598,6 +599,7 @@ const editForm = ref({
   timeEndMinute: '',
   category: 'Car',
   purpose: '',
+  notes: '',
 })
 const editLoading = ref(false)
 const editError = ref('')
@@ -618,6 +620,7 @@ function openEditDialog(item) {
     timeEndMinute: em,
     category: item.category || 'Car',
     purpose: item.purpose || '',
+    notes: item.notes || '',
   }
 
   editOpen.value = true
@@ -644,6 +647,7 @@ async function saveEdit() {
     timeEnd,
     category: editForm.value.category,
     purpose: editForm.value.purpose,
+    notes: editForm.value.notes || '',
   }
 
   const scheduleChanged =
@@ -665,6 +669,7 @@ async function saveEdit() {
       it.timeEnd = payload.timeEnd
       it.category = payload.category
       it.purpose = payload.purpose
+      it.notes = payload.notes
     }
 
     if (needReopen) {

@@ -29,6 +29,14 @@ defineEmits(['update:open', 'open-ticket', 'unassign'])
           <div class="sm:col-span-2"><strong>Requester:</strong> {{ item.employee?.name || '—' }}</div>
           <div class="sm:col-span-2"><strong>Destination:</strong> {{ prettyStops(item.stops || []) }}</div>
           <div class="sm:col-span-2"><strong>Purpose:</strong> {{ item.purpose || '—' }}</div>
+          <div class="sm:col-span-2">
+            <strong>Note:</strong>
+            <div
+              class="mt-1 whitespace-pre-line break-words rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              {{ item.notes || '—' }}
+            </div>
+          </div>
           <div><strong>Assigned:</strong> {{ assigneeName(item) || 'Unassigned' }}</div>
           <div><strong>Response:</strong>
             <span class="ml-2 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="ackBadgeClass(responseLabel(item))">

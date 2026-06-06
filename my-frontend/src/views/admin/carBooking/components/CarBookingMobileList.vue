@@ -115,7 +115,7 @@ function assignedText(item) {
           <span
             class="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
           >
-            Pax: {{ paxDisplay(item.pax) }}
+            Pax: {{ paxDisplay(item.passengers) }}
           </span>
         </div>
       </div>
@@ -147,6 +147,15 @@ function assignedText(item) {
             </p>
             <p class="mt-1 text-sm text-slate-800 dark:text-slate-100 break-words">
               {{ item.purpose }}
+            </p>
+          </div>
+
+          <div v-if="item.notes" class="rounded-xl border border-amber-200 bg-amber-50 p-2 dark:border-amber-700/60 dark:bg-amber-950/30">
+            <p class="text-[11px] font-bold uppercase tracking-wide text-amber-700 dark:text-amber-200">
+              Note
+            </p>
+            <p class="mt-1 whitespace-pre-line break-words text-sm text-amber-900 dark:text-amber-100">
+              {{ item.notes }}
             </p>
           </div>
 

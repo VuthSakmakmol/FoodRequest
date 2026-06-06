@@ -224,6 +224,19 @@ function selectPurpose(p) {
                 Choose from list or type custom purpose.
               </p>
             </div>
+
+            <div class="sm:col-span-2">
+              <label class="mb-1 block text-[11px] font-medium">Note / Special Instructions</label>
+              <textarea
+                :value="form.notes"
+                rows="3"
+                placeholder="Show requester note or add special instructions..."
+                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900
+                       outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500
+                       dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
+                @input="patchForm('notes', $event.target.value)"
+              />
+            </div>
           </div>
         </div>
 
