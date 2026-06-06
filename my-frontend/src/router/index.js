@@ -67,6 +67,7 @@ const ManagerLeaveInbox = () => import('@/views/expat/ManagerLeaveInbox.vue')
 const GmLeaveInbox = () => import('@/views/expat/GmLeaveInbox.vue')
 const AdminLeaveProfileEdit = () => import('@/views/expat/admin/profiles/AdminLeaveProfileEdit.vue')
 const AdminLeaveReport = () => import('@/views/expat/admin/components/AdminLeaveReport.vue')
+const AdminLeaveRequestsReport = () => import('@/views/expat/admin/components/AdminLeaveRequestsReport.vue')
 const CentralData = () => import('@/views/expat/admin/data/CentralData.vue')
 const CooLeaveInbox = () => import('@/views/expat/coo/CooLeaveInbox.vue')
 
@@ -471,6 +472,12 @@ const router = createRouter({
 
         { path: 'types', name: 'leave-admin-types', component: AdminLeaveTypes },
         { path: 'profiles', name: 'leave-admin-profiles', component: AdminExpatProfiles },
+        {
+          path: 'requests',
+          name: 'leave-admin-requests-report',
+          component: AdminLeaveRequestsReport,
+          meta: { title: 'Leave Requests' },
+        },
 
         { path: 'manager-inbox', name: 'leave-admin-manager-inbox', component: ManagerLeaveInbox },
         { path: 'gm-inbox', name: 'leave-admin-gm-inbox', component: GmLeaveInbox },

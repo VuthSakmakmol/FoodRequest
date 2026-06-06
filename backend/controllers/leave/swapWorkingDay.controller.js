@@ -410,6 +410,15 @@ function emitSwap(req, payload, event = 'swap:req:updated') {
   }
 }
 
+function emitSwapDeleted(req, docOrPlain, event = 'swap:req:deleted') {
+  try {
+    const raw = typeof docOrPlain?.toObject === 'function' ? docOrPlain.toObject() : (docOrPlain || {})
+    emitSwap(req, { ...raw, _id: String(raw._id || raw.id || ''), deleted: true }, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitSwapDeleted(${event}) failed:`, e?.message)
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────
    CREATE (LEAVE_USER)
 ───────────────────────────────────────────────────────────── */
@@ -1048,6 +1057,38 @@ exports.adminList = async (req, res, next) => {
 
     const rows = await SwapWorkingDayRequest.find(q).sort({ createdAt: -1 }).limit(limit).lean()
     return res.json(await attachEmployeeInfo(rows || []))
+  } catch (e) {
+    next(e)
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN HARD DELETE
+   DELETE /api/leave/swap-working-day/admin/:id
+───────────────────────────────────────────────────────────── */
+exports.adminDelete = async (req, res, next) => {
+  try {
+    if (!isAdminViewer(req)) throw createError(403, 'Forbidden')
+
+    const id = s(req.params?.id)
+    const actor = actorLoginId(req) || 'admin'
+
+    const doc = await SwapWorkingDayRequest.findById(id)
+    if (!doc) throw createError(404, 'Swap Working Day request not found')
+
+    const raw = doc.toObject()
+    await SwapWorkingDayRequest.deleteOne({ _id: doc._id })
+
+    emitSwapDeleted(req, { ...raw, deletedBy: actor, deletedAt: new Date() }, 'swap:req:deleted')
+
+    return res.json({
+      ok: true,
+      deleted: true,
+      id: String(raw._id || id),
+      employeeId: s(raw.employeeId),
+      message: 'Swap Working Day request deleted.',
+    })
   } catch (e) {
     next(e)
   }

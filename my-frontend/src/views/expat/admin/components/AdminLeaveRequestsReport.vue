@@ -1,23 +1,23 @@
-<!-- src/views/expat/admin/forgetScan/AdminForgetScanReport.vue -->
+<!-- src/views/expat/admin/components/AdminLeaveRequestsReport.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import dayjs from 'dayjs'
-import * as XLSX from 'xlsx'
 import api from '@/utils/api'
 import { useToast } from '@/composables/useToast'
 import { useAuth } from '@/store/auth'
 import socket, { subscribeRoleIfNeeded, subscribeEmployeeIfNeeded, subscribeUserIfNeeded } from '@/utils/socket'
 
-defineOptions({ name: 'AdminForgetScanReport' })
+defineOptions({ name: 'AdminLeaveRequestsReport' })
 
 const { showToast } = useToast()
 const auth = useAuth()
 
 const loading = ref(false)
-const exporting = ref(false)
 const rows = ref([])
+const total = ref(0)
 const search = ref('')
 const statusFilter = ref('ALL')
+const leaveTypeFilter = ref('ALL')
 const employeeIdFilter = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
@@ -42,21 +42,6 @@ const STATUS_LABEL = {
   CANCELLED: 'Cancelled',
 }
 
-const TYPE_LABEL = {
-  FORGET_IN: 'Forget In',
-  FORGET_OUT: 'Forget Out',
-  FORGET_IN_OUT: 'Forget In + Out',
-}
-
-const MODE_LABEL = {
-  MANAGER_AND_GM: 'Manager + GM',
-  MANAGER_AND_COO: 'Manager + COO',
-  GM_AND_COO: 'GM + COO',
-  MANAGER_ONLY: 'Manager only',
-  GM_ONLY: 'GM only',
-  COO_ONLY: 'COO only',
-}
-
 function s(v) {
   return String(v ?? '').trim()
 }
@@ -76,10 +61,13 @@ function fmtYmd(v) {
 function compactText(v) {
   return String(v || '').replace(/\s+/g, ' ').trim()
 }
-function briefText(v, max = 90) {
+function briefText(v, max = 100) {
   const t = compactText(v)
   if (!t) return '—'
   return t.length > max ? `${t.slice(0, max).trimEnd()}…` : t
+}
+function statusLabel(v) {
+  return STATUS_LABEL[up(v)] || up(v) || '—'
 }
 function statusBadgeUiClass(x) {
   const st = up(x)
@@ -91,27 +79,32 @@ function statusBadgeUiClass(x) {
 }
 function modeLabel(v) {
   const m = up(v)
-  return MODE_LABEL[m] || m || '—'
-}
-function typeLabel(rowOrType) {
-  const raw = typeof rowOrType === 'object'
-    ? (rowOrType?.forgotKey || (Array.isArray(rowOrType?.forgotTypes) ? rowOrType.forgotTypes.join('_') : rowOrType?.forgotType))
-    : rowOrType
-  const t = up(raw)
-  if (t === 'FORGET_IN_FORGET_OUT') return 'Forget In + Out'
-  return TYPE_LABEL[t] || t || '—'
+  if (m === 'MANAGER_AND_GM') return 'Manager + GM'
+  if (m === 'MANAGER_AND_COO') return 'Manager + COO'
+  if (m === 'GM_AND_COO') return 'GM + COO'
+  if (m === 'MANAGER_ONLY') return 'Manager only'
+  if (m === 'GM_ONLY') return 'GM only'
+  if (m === 'COO_ONLY') return 'COO only'
+  return m || '—'
 }
 
 const pendingCount = computed(() => rows.value.filter((r) => up(r.status).includes('PENDING')).length)
 const approvedCount = computed(() => rows.value.filter((r) => up(r.status) === 'APPROVED').length)
 const rejectedCount = computed(() => rows.value.filter((r) => up(r.status) === 'REJECTED').length)
-const totalCount = computed(() => rows.value.length)
+const cancelledCount = computed(() => rows.value.filter((r) => up(r.status) === 'CANCELLED').length)
+
+const leaveTypeOptions = computed(() => {
+  const set = new Set(rows.value.map((r) => up(r.leaveTypeCode)).filter(Boolean))
+  return ['ALL', ...Array.from(set).sort()]
+})
 
 function buildQuery() {
   const limit = Math.min(Math.max(Number(perPage.value || 50), 1), 200)
   return {
-    status: statusFilter.value !== 'ALL' ? up(statusFilter.value) : undefined,
+    q: s(search.value) || undefined,
     employeeId: s(employeeIdFilter.value) || undefined,
+    status: statusFilter.value !== 'ALL' ? up(statusFilter.value) : undefined,
+    leaveTypeCode: leaveTypeFilter.value !== 'ALL' ? up(leaveTypeFilter.value) : undefined,
     from: s(dateFrom.value) || undefined,
     to: s(dateTo.value) || undefined,
     limit,
@@ -122,47 +115,21 @@ function buildQuery() {
 async function fetchRows() {
   try {
     loading.value = true
-    const res = await api.get('/leave/forget-scan/admin', { params: buildQuery() })
-    rows.value = Array.isArray(res.data) ? res.data : []
+    const res = await api.get('/leave/requests/admin', { params: buildQuery() })
+    const data = res?.data || {}
+    rows.value = Array.isArray(data.items) ? data.items : Array.isArray(data) ? data : []
+    total.value = Number(data.total ?? rows.value.length) || rows.value.length
   } catch (e) {
-    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load forget scan report.' })
+    showToast({ type: 'error', message: e?.response?.data?.message || 'Failed to load leave requests.' })
   } finally {
     loading.value = false
   }
 }
 
-const filteredRows = computed(() => {
-  let list = [...rows.value]
-  const q = s(search.value).toLowerCase()
-  if (q) {
-    list = list.filter((r) => [
-      r.employeeId,
-      r.employeeName,
-      r.name,
-      r.department,
-      r.reason,
-      r.status,
-      r.approvalMode,
-      r.forgotDate,
-      typeLabel(r),
-      r.requesterLoginId,
-      r.managerLoginId,
-      r.gmLoginId,
-      r.cooLoginId,
-      r.managerComment,
-      r.gmComment,
-      r.cooComment,
-    ].map((x) => String(x || '').toLowerCase()).join(' ').includes(q))
-  }
-  list.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
-  return list
-})
-
-const filteredCount = computed(() => filteredRows.value.length)
 const canPrev = computed(() => page.value > 1)
-const canNext = computed(() => rows.value.length === Number(perPage.value || 50))
+const canNext = computed(() => page.value * Number(perPage.value || 50) < total.value)
 
-watch([statusFilter, employeeIdFilter, dateFrom, dateTo, perPage], () => {
+watch([search, statusFilter, leaveTypeFilter, employeeIdFilter, dateFrom, dateTo, perPage], () => {
   page.value = 1
   fetchRows()
 })
@@ -171,6 +138,7 @@ watch(page, () => fetchRows())
 function clearFilters() {
   search.value = ''
   statusFilter.value = 'ALL'
+  leaveTypeFilter.value = 'ALL'
   employeeIdFilter.value = ''
   dateFrom.value = ''
   dateTo.value = ''
@@ -203,6 +171,7 @@ function removeRowById(id) {
   const sid = String(id || '')
   rows.value = rows.value.filter((r) => String(r._id) !== sid)
   if (viewItem.value?._id && String(viewItem.value._id) === sid) closeView()
+  if (total.value > 0) total.value -= 1
 }
 
 function isDeleteRouteProblem(e) {
@@ -229,53 +198,19 @@ async function confirmDelete() {
   if (!id) return
   try {
     deleting.value = true
-    await adminDeleteWithFallback('/leave/forget-scan/admin', id)
+    await adminDeleteWithFallback('/leave/requests/admin', id)
     removeRowById(id)
     resetDeleteDialog()
-    showToast({ type: 'success', title: 'Deleted', message: 'Forget Scan request deleted.' })
+    showToast({
+      type: 'success',
+      title: 'Deleted',
+      message: 'Leave request deleted. Employee leave balance was recalculated.',
+    })
+    await fetchRows()
   } catch (e) {
-    showToast({ type: 'error', title: 'Delete failed', message: e?.response?.data?.message || 'Failed to delete forget scan request.' })
+    showToast({ type: 'error', title: 'Delete failed', message: e?.response?.data?.message || 'Failed to delete leave request.' })
   } finally {
     deleting.value = false
-  }
-}
-
-function excelRows(list) {
-  return (list || []).map((r, idx) => ({
-    No: idx + 1,
-    CreatedAt: fmtDateTime(r.createdAt),
-    EmployeeID: s(r.employeeId),
-    EmployeeName: s(r.employeeName || r.name),
-    Department: s(r.department),
-    ForgotDate: s(r.forgotDate),
-    ForgotType: typeLabel(r),
-    ApprovalMode: modeLabel(r.approvalMode),
-    Status: up(r.status),
-    Reason: compactText(r.reason),
-    RequesterLoginId: s(r.requesterLoginId),
-    ManagerLoginId: s(r.managerLoginId),
-    ManagerComment: s(r.managerComment),
-    GmLoginId: s(r.gmLoginId),
-    GmComment: s(r.gmComment),
-    CooLoginId: s(r.cooLoginId),
-    CooComment: s(r.cooComment),
-    UpdatedAt: fmtDateTime(r.updatedAt),
-    CancelledBy: s(r.cancelledBy),
-    CancelledAt: fmtDateTime(r.cancelledAt),
-  }))
-}
-async function exportExcel() {
-  try {
-    exporting.value = true
-    const ws = XLSX.utils.json_to_sheet(excelRows(filteredRows.value))
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'ForgetScanReport')
-    XLSX.writeFile(wb, `ForgetScanReport_${dayjs().format('YYYYMMDD_HHmm')}.xlsx`)
-    showToast({ type: 'success', message: 'Excel exported.' })
-  } catch (e) {
-    showToast({ type: 'error', message: e?.message || 'Export failed.' })
-  } finally {
-    exporting.value = false
   }
 }
 
@@ -283,7 +218,7 @@ function upsertRow(doc) {
   if (!doc?._id) return
   if (doc.deleted) return removeRowById(doc._id)
   const id = String(doc._id)
-  const idx = rows.value.findIndex((x) => String(x._id) === id)
+  const idx = rows.value.findIndex((r) => String(r._id) === id)
   if (idx >= 0) rows.value[idx] = { ...rows.value[idx], ...doc }
   else rows.value.unshift(doc)
   if (viewItem.value?._id && String(viewItem.value._id) === id) viewItem.value = { ...viewItem.value, ...doc }
@@ -302,15 +237,15 @@ onMounted(async () => {
   } catch {}
 
   await fetchRows()
-  socket.on('forgetscan:req:created', upsertRow)
-  socket.on('forgetscan:req:updated', upsertRow)
-  socket.on('forgetscan:req:deleted', onDeleted)
+  socket.on('leave:req:created', upsertRow)
+  socket.on('leave:req:updated', upsertRow)
+  socket.on('leave:req:deleted', onDeleted)
 })
 
 onBeforeUnmount(() => {
-  socket.off('forgetscan:req:created', upsertRow)
-  socket.off('forgetscan:req:updated', upsertRow)
-  socket.off('forgetscan:req:deleted', onDeleted)
+  socket.off('leave:req:created', upsertRow)
+  socket.off('leave:req:updated', upsertRow)
+  socket.off('leave:req:deleted', onDeleted)
 })
 </script>
 
@@ -321,28 +256,26 @@ onBeforeUnmount(() => {
         <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <div class="text-[16px] font-extrabold text-white">Forget Scan Report</div>
+              <div class="text-[16px] font-extrabold text-white">Leave Requests</div>
               <span class="rounded-full bg-white/15 px-2.5 py-1 text-[10px] font-extrabold text-white ring-1 ring-inset ring-white/20">Admin</span>
             </div>
             <div class="mt-3 flex flex-wrap items-center gap-2">
-              <span class="ui-badge ui-badge-info">Total: {{ totalCount }}</span>
-              <span class="ui-badge ui-badge-info">Showing: {{ filteredCount }}</span>
+              <span class="ui-badge ui-badge-info">Total: {{ total }}</span>
               <span class="ui-badge ui-badge-warning">Pending: {{ pendingCount }}</span>
               <span class="ui-badge ui-badge-success">Approved: {{ approvedCount }}</span>
               <span class="ui-badge ui-badge-danger">Rejected: {{ rejectedCount }}</span>
+              <span class="ui-badge">Cancelled: {{ cancelledCount }}</span>
             </div>
           </div>
 
           <div class="flex flex-wrap items-center gap-2">
             <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading" @click="fetchRows">
-              <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''" /> Refresh
-            </button>
-            <button class="ui-btn ui-btn-sm ui-btn-soft" type="button" :disabled="loading || exporting" @click="exportExcel">
-              <i v-if="!exporting" class="fa-solid fa-file-excel text-[11px]" />
-              <i v-else class="fa-solid fa-spinner animate-spin text-[11px]" /> Export
+              <i class="fa-solid fa-rotate-right text-[11px]" :class="loading ? 'fa-spin' : ''" />
+              Refresh
             </button>
             <button class="ui-btn ui-btn-sm ui-btn-ghost" type="button" :disabled="loading" @click="clearFilters">
-              <i class="fa-solid fa-broom text-[11px]" /> Clear
+              <i class="fa-solid fa-broom text-[11px]" />
+              Clear
             </button>
           </div>
         </div>
@@ -351,7 +284,7 @@ onBeforeUnmount(() => {
           <div class="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-12">
             <div class="xl:col-span-3">
               <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Search</label>
-              <input v-model="search" type="text" placeholder="Employee / ID / reason" class="filter-input" />
+              <input v-model="search" class="filter-input" type="text" placeholder="Name / ID / reason / approver" />
             </div>
             <div class="xl:col-span-2">
               <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Status</label>
@@ -360,16 +293,22 @@ onBeforeUnmount(() => {
               </select>
             </div>
             <div class="xl:col-span-2">
+              <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Type</label>
+              <select v-model="leaveTypeFilter" class="filter-select">
+                <option v-for="opt in leaveTypeOptions" :key="opt" :value="opt">{{ opt === 'ALL' ? 'All' : opt }}</option>
+              </select>
+            </div>
+            <div class="xl:col-span-2">
               <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Employee ID</label>
-              <input v-model="employeeIdFilter" type="text" placeholder="Employee ID" class="filter-input" />
+              <input v-model="employeeIdFilter" class="filter-input" type="text" placeholder="Employee ID" />
             </div>
-            <div class="xl:col-span-2">
-              <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Date from</label>
-              <input v-model="dateFrom" type="date" class="filter-input" />
+            <div class="xl:col-span-1">
+              <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">From</label>
+              <input v-model="dateFrom" class="filter-input" type="date" />
             </div>
-            <div class="xl:col-span-2">
-              <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Date to</label>
-              <input v-model="dateTo" type="date" class="filter-input" />
+            <div class="xl:col-span-1">
+              <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">To</label>
+              <input v-model="dateTo" class="filter-input" type="date" />
             </div>
             <div class="xl:col-span-1">
               <label class="mb-1 block text-[10px] font-bold uppercase tracking-[0.18em] text-white/80">Rows</label>
@@ -383,24 +322,27 @@ onBeforeUnmount(() => {
 
       <div class="px-2 pb-3 pt-3 sm:px-4 lg:px-6">
         <div v-if="loading && !rows.length" class="ui-skeleton mb-2 h-14 w-full" />
+
         <div class="ui-table-wrap">
           <table class="ui-table table-fixed w-full min-w-[1280px]">
             <colgroup>
               <col style="width:150px" />
               <col style="width:250px" />
+              <col style="width:105px" />
+              <col style="width:190px" />
+              <col style="width:85px" />
               <col style="width:150px" />
-              <col style="width:135px" />
-              <col style="width:160px" />
-              <col style="width:140px" />
+              <col style="width:150px" />
               <col style="width:auto" />
-              <col style="width:140px" />
+              <col style="width:150px" />
             </colgroup>
             <thead>
               <tr>
                 <th class="ui-th">Created</th>
                 <th class="ui-th">Employee</th>
-                <th class="ui-th">Forgot Date</th>
                 <th class="ui-th">Type</th>
+                <th class="ui-th">Leave Date</th>
+                <th class="ui-th">Days</th>
                 <th class="ui-th">Mode</th>
                 <th class="ui-th">Status</th>
                 <th class="ui-th">Reason</th>
@@ -408,23 +350,25 @@ onBeforeUnmount(() => {
               </tr>
             </thead>
             <tbody>
-              <tr v-if="!loading && !filteredRows.length">
-                <td colspan="8" class="ui-td py-8 text-slate-500 dark:text-slate-400">No items found.</td>
+              <tr v-if="!loading && !rows.length">
+                <td colspan="9" class="ui-td py-8 text-slate-500 dark:text-slate-400">No leave requests found.</td>
               </tr>
-              <tr v-for="row in filteredRows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
+              <tr v-for="row in rows" :key="row._id" class="ui-tr-hover cursor-pointer" @click="openView(row)">
                 <td class="ui-td whitespace-nowrap">{{ fmtDateTime(row.createdAt) }}</td>
                 <td class="ui-td">
                   <div class="truncate font-extrabold text-slate-900 dark:text-slate-50">{{ row.employeeName || row.name || row.employeeId || '—' }}</div>
                   <div class="truncate text-[10px] text-slate-500 dark:text-slate-400">ID: {{ row.employeeId || '—' }} <span v-if="row.department">· {{ row.department }}</span></div>
                 </td>
-                <td class="ui-td whitespace-nowrap">{{ fmtYmd(row.forgotDate) }}</td>
-                <td class="ui-td"><div class="truncate">{{ typeLabel(row) }}</div></td>
+                <td class="ui-td"><span class="ui-badge ui-badge-info">{{ row.leaveTypeCode || '—' }}</span></td>
+                <td class="ui-td whitespace-nowrap">{{ fmtYmd(row.startDate) }} → {{ fmtYmd(row.endDate) }}</td>
+                <td class="ui-td font-extrabold tabular-nums">{{ Number(row.totalDays || 0).toLocaleString() }}</td>
                 <td class="ui-td"><div class="truncate">{{ modeLabel(row.approvalMode) }}</div></td>
-                <td class="ui-td"><span :class="statusBadgeUiClass(row.status)">{{ STATUS_LABEL[row.status] || row.status }}</span></td>
-                <td class="ui-td"><p class="reason-cell" :title="compactText(row.reason)">{{ briefText(row.reason, 120) }}</p></td>
+                <td class="ui-td"><span :class="statusBadgeUiClass(row.status)">{{ statusLabel(row.status) }}</span></td>
+                <td class="ui-td"><p class="reason-cell" :title="compactText(row.reason)">{{ briefText(row.reason, 130) }}</p></td>
                 <td class="ui-td text-center">
                   <button class="ui-btn ui-btn-rose ui-btn-xs" type="button" @click.stop="openDelete(row)">
-                    <i class="fa-solid fa-trash text-[11px]" /> Delete
+                    <i class="fa-solid fa-trash text-[11px]" />
+                    Delete
                   </button>
                 </td>
               </tr>
@@ -433,7 +377,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="ui-divider mt-3 flex flex-col gap-2 pt-3 text-[11px] text-slate-600 dark:text-slate-300 sm:flex-row sm:items-center sm:justify-between">
-          <div>Page {{ page }} · Showing {{ filteredRows.length }}</div>
+          <div>Page {{ page }} · Showing {{ rows.length }} of {{ total }}</div>
           <div class="flex items-center justify-end gap-1">
             <button type="button" class="ui-pagebtn" :disabled="!canPrev" @click="page = 1">«</button>
             <button type="button" class="ui-pagebtn" :disabled="!canPrev" @click="page = Math.max(1, page - 1)">Prev</button>
@@ -447,18 +391,35 @@ onBeforeUnmount(() => {
       <div class="ui-modal overflow-hidden p-0">
         <div class="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
           <div class="min-w-0">
-            <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Forget Scan Details</div>
+            <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Leave Request Details</div>
             <div class="truncate text-[11px] text-slate-500 dark:text-slate-400">{{ viewItem?.employeeName || viewItem?.name || '—' }} · {{ fmtDateTime(viewItem?.createdAt) }}</div>
           </div>
-          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView"><i class="fa-solid fa-xmark text-[11px]" /> Close</button>
+          <button class="ui-btn ui-btn-ghost ui-btn-xs" type="button" @click="closeView">
+            <i class="fa-solid fa-xmark text-[11px]" /> Close
+          </button>
         </div>
         <div class="space-y-3 p-4">
-          <div class="grid gap-3 md:grid-cols-3">
-            <div class="ui-card p-3"><div class="ui-section-title">Forgot Date</div><div class="mt-1 text-[12px]">{{ fmtYmd(viewItem?.forgotDate) }}</div></div>
-            <div class="ui-card p-3"><div class="ui-section-title">Type</div><div class="mt-1 text-[12px]">{{ typeLabel(viewItem) }}</div></div>
-            <div class="ui-card p-3"><div class="ui-section-title">Status</div><div class="mt-1"><span :class="statusBadgeUiClass(viewItem?.status)">{{ STATUS_LABEL[viewItem?.status] || viewItem?.status }}</span></div></div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Employee</div>
+              <div class="mt-1 text-[12px] font-extrabold text-slate-900 dark:text-slate-50">{{ viewItem?.employeeName || viewItem?.name || '—' }}</div>
+              <div class="text-[11px] text-slate-500 dark:text-slate-400">ID: {{ viewItem?.employeeId || '—' }}</div>
+            </div>
+            <div class="ui-card p-3">
+              <div class="ui-section-title">Status</div>
+              <div class="mt-1"><span :class="statusBadgeUiClass(viewItem?.status)">{{ statusLabel(viewItem?.status) }}</span></div>
+              <div class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">{{ modeLabel(viewItem?.approvalMode) }}</div>
+            </div>
           </div>
-          <div class="ui-card p-3"><div class="ui-section-title">Reason</div><div class="mt-1 whitespace-pre-wrap text-[12px]">{{ viewItem?.reason || '—' }}</div></div>
+          <div class="grid gap-3 md:grid-cols-3">
+            <div class="ui-frame p-3"><div class="ui-label">Leave Type</div><div class="font-extrabold">{{ viewItem?.leaveTypeCode || '—' }}</div></div>
+            <div class="ui-frame p-3"><div class="ui-label">Date</div><div>{{ fmtYmd(viewItem?.startDate) }} → {{ fmtYmd(viewItem?.endDate) }}</div></div>
+            <div class="ui-frame p-3"><div class="ui-label">Days</div><div class="font-extrabold">{{ Number(viewItem?.totalDays || 0).toLocaleString() }}</div></div>
+          </div>
+          <div class="ui-card p-3">
+            <div class="ui-section-title">Reason</div>
+            <div class="mt-1 whitespace-pre-wrap text-[12px] text-slate-700 dark:text-slate-200">{{ viewItem?.reason || '—' }}</div>
+          </div>
           <div class="flex justify-end gap-2 pt-1">
             <button class="ui-btn ui-btn-ghost" type="button" @click="closeView">Close</button>
             <button class="ui-btn ui-btn-rose" type="button" @click="openDelete(viewItem)">Delete</button>
@@ -469,14 +430,23 @@ onBeforeUnmount(() => {
 
     <div v-if="deleteOpen" class="ui-modal-backdrop">
       <div class="ui-modal p-4">
-        <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Delete this forget scan request?</div>
-        <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
-          This permanently removes the record for <span class="font-extrabold">{{ deleteItem?.employeeName || deleteItem?.employeeId || '—' }}</span>.
+        <div class="flex items-start gap-3">
+          <div class="grid h-10 w-10 place-items-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-600 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-300">
+            <i class="fa-solid fa-triangle-exclamation" />
+          </div>
+          <div class="flex-1">
+            <div class="text-sm font-extrabold text-slate-900 dark:text-slate-50">Delete this leave request?</div>
+            <div class="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+              This permanently removes the request and recalculates leave remaining for employee
+              <span class="font-extrabold">{{ deleteItem?.employeeName || deleteItem?.employeeId || '—' }}</span>.
+            </div>
+          </div>
         </div>
         <div class="mt-4 flex justify-end gap-2">
           <button class="ui-btn ui-btn-ghost" type="button" :disabled="deleting" @click="closeDelete">Close</button>
           <button class="ui-btn ui-btn-rose" type="button" :disabled="deleting" @click="confirmDelete">
-            <i v-if="deleting" class="fa-solid fa-spinner animate-spin text-[11px]" /> Delete
+            <i v-if="deleting" class="fa-solid fa-spinner animate-spin text-[11px]" />
+            Delete and Recalculate
           </button>
         </div>
       </div>

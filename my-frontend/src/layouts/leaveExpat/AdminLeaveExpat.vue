@@ -45,6 +45,7 @@ const groups = [
     icon: 'fa-solid fa-clipboard-check',
     children: [
       { label: 'Expat Profiles', icon: 'fa-solid fa-user-group', to: { name: 'leave-admin-profiles' } },
+      { label: 'Leave Requests', icon: 'fa-solid fa-calendar-xmark', to: { name: 'leave-admin-requests-report' } },
     ],
   },
   {

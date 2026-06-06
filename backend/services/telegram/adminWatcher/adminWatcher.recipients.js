@@ -62,3 +62,11 @@ async function resolveLeaveAdminWatcherChatIds() {
 module.exports = {
   resolveLeaveAdminWatcherChatIds,
 }
+
+
+// Planing under GM + COO"
+// pattern under COO 
+// FM under GM + COO
+// GM under COO
+// QE under GM
+// QA under GM

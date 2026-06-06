@@ -90,10 +90,55 @@
     "isActive": true
   },
     {
-    "employeeId": "51410014",
+    "employeeId": "52610004",
     "name": "Nirut Sappaso",
     "department": "Management Office",
     "position": "Factory Manager",
+    "contactNumber": "012345678",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52610005",
+    "name": "Alfredo Genil Fajardo",
+    "department": "Management Office",
+    "position": "Pattern officer",
+    "contactNumber": "012345678",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52610007",
+    "name": "Lovella Penalosa Mondonedo ",
+    "department": "Management Office",
+    "position": "QA Manager- Downstream",
+    "contactNumber": "012345678",
+    "telegramChatId": "",
+    "isActive": true
+  },
+      {
+    "employeeId": "52610008",
+    "name": "Jonah Luz Atinar Buladaco",
+    "department": "Management Office",
+    "position": "QE",
+    "contactNumber": "012345678",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52610009",
+    "name": "Anna Theresa Dionco Endangan",
+    "department": "Management Office",
+    "position": "Planning Manager",
+    "contactNumber": "012345678",
+    "telegramChatId": "",
+    "isActive": true
+  },
+    {
+    "employeeId": "52610006",
+    "name": "Dhanushka Tharindu Gunasekara Senarath Pathirannehelage",
+    "department": "Management Office",
+    "position": "General Manager",
     "contactNumber": "012345678",
     "telegramChatId": "",
     "isActive": true
@@ -249,15 +294,6 @@
     "position": "QC Supervisor",
     "contactNumber": "085806945",
     "telegramChatId": "1566429942",
-    "isActive": true
-  },
-    {
-    "employeeId": "52310006",
-    "name": "Chatchanop Naksorn",
-    "department": "Management Production",
-    "position": "General Manager",
-    "contactNumber": "",
-    "telegramChatId": "1805934121",
     "isActive": true
   },
     {

@@ -39,6 +39,7 @@ const EmployeeDirectory = require('../../models/EmployeeDirectory')
 const { validateAndNormalizeRequest } = require('../../utils/leave.rules')
 const { recalculateOneProfile } = require('../../services/leave/leave.recalculate.service')
 const { broadcastLeaveRequest, broadcastLeaveProfile } = require('../../utils/leave.realtime')
+const { deleteFile } = require('../../utils/gridfs')
 
 // Optional Telegram notify service (best-effort)
 let notify = null
@@ -251,6 +252,27 @@ async function recalcAndEmitProfile(req, employeeId) {
   } catch (e) {
     console.warn('⚠️ recalcAndEmitProfile failed:', e?.message)
     return null
+  }
+}
+
+
+async function deleteLeaveAttachmentsBestEffort(doc) {
+  const attachments = Array.isArray(doc?.attachments) ? doc.attachments : []
+  for (const att of attachments) {
+    try {
+      if (att?.fileId) await deleteFile(att.fileId, 'leave_evidence')
+    } catch (e) {
+      console.warn('⚠️ delete leave attachment failed:', e?.message)
+    }
+  }
+}
+
+function emitDeletedReq(req, docOrPlain, event = 'leave:req:deleted') {
+  try {
+    const raw = typeof docOrPlain?.toObject === 'function' ? docOrPlain.toObject() : (docOrPlain || {})
+    emitReq(req, { ...raw, _id: String(raw._id || raw.id || ''), deleted: true }, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitDeletedReq(${event}) failed:`, e?.message)
   }
 }
 
@@ -516,6 +538,109 @@ async function assertNoDuplicateDateHalf({ employeeId, normalized, excludeId = n
 
   if (hasSlotConflict(occupied, desiredSlots)) {
     throw createError(409, 'You already requested leave for this day/half. Please select another day or half.')
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN LIST
+   GET /api/leave/requests/admin
+───────────────────────────────────────────────────────────── */
+exports.adminList = async (req, res, next) => {
+  try {
+    if (!isAdminViewer(req)) throw createError(403, 'Forbidden')
+
+    const employeeId = s(req.query?.employeeId)
+    const status = up(req.query?.status)
+    const leaveTypeCode = up(req.query?.leaveTypeCode)
+    const from = s(req.query?.from)
+    const to = s(req.query?.to)
+    const keyword = s(req.query?.q || req.query?.keyword)
+
+    const limitRaw = Number(req.query?.limit || 200)
+    const skipRaw = Number(req.query?.skip || 0)
+    const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 1000)) : 200
+    const skip = Number.isFinite(skipRaw) ? Math.max(0, skipRaw) : 0
+
+    const q = {}
+    if (employeeId) q.employeeId = buildEmpIdIn(employeeId)
+    if (status && status !== 'ALL') q.status = status
+    if (leaveTypeCode && leaveTypeCode !== 'ALL') q.leaveTypeCode = leaveTypeCode
+
+    if (from || to) {
+      // overlap: request end >= from AND request start <= to
+      if (from) q.endDate = { ...(q.endDate || {}), $gte: from }
+      if (to) q.startDate = { ...(q.startDate || {}), $lte: to }
+    }
+
+    if (keyword) {
+      const rx = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      q.$or = [
+        { employeeId: rx },
+        { requesterLoginId: rx },
+        { leaveTypeCode: rx },
+        { reason: rx },
+        { status: rx },
+        { approvalMode: rx },
+        { managerLoginId: rx },
+        { gmLoginId: rx },
+        { cooLoginId: rx },
+      ]
+    }
+
+    const [rows, total] = await Promise.all([
+      LeaveRequest.find(q).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean(),
+      LeaveRequest.countDocuments(q),
+    ])
+
+    return res.json({
+      items: await attachEmployeeInfo(rows || []),
+      total,
+      limit,
+      skip,
+      hasMore: skip + limit < total,
+    })
+  } catch (e) {
+    next(e)
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN HARD DELETE
+   DELETE /api/leave/requests/admin/:id
+
+   Important: after deleting a leave request, recalculate profile balance
+   because LeaveRequest is the source of truth for used leave.
+───────────────────────────────────────────────────────────── */
+exports.adminDelete = async (req, res, next) => {
+  try {
+    if (!isAdminViewer(req)) throw createError(403, 'Forbidden')
+
+    const id = s(req.params?.id)
+    const actor = actorLoginId(req) || 'admin'
+
+    const doc = await LeaveRequest.findById(id)
+    if (!doc) throw createError(404, 'Request not found')
+
+    const raw = doc.toObject()
+    const employeeId = s(raw.employeeId)
+
+    await LeaveRequest.deleteOne({ _id: doc._id })
+    await deleteLeaveAttachmentsBestEffort(raw)
+
+    const profile = await recalcAndEmitProfile(req, employeeId)
+    emitDeletedReq(req, { ...raw, deletedBy: actor, deletedAt: new Date() }, 'leave:req:deleted')
+
+    return res.json({
+      ok: true,
+      deleted: true,
+      id: String(raw._id || id),
+      employeeId,
+      profile,
+      message: 'Leave request deleted and leave balance recalculated.',
+    })
+  } catch (e) {
+    next(e)
   }
 }
 

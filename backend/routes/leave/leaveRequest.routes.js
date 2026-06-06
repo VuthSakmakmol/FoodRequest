@@ -10,6 +10,12 @@ const att = require('../../controllers/leave/leaveRequest.attachments.controller
 // ✅ everyone must be authenticated
 router.use(requireAuth)
 
+/* ───────────────── admin hard-delete/report ───────────────── */
+router.get('/admin', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminList)
+router.delete('/admin/:id', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminDelete)
+// POST fallback is kept because some reverse proxies / browsers are stricter with DELETE.
+router.post('/admin/:id/delete', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminDelete)
+
 /* ───────────────── upload config ───────────────── */
 function fileFilter(_req, file, cb) {
   const ok = [

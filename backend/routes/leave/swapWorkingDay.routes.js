@@ -48,6 +48,12 @@ router.post('/swap-working-day/:id/coo-decision', requireRole('LEAVE_COO'), swap
    ADMIN (VIEW)
 ───────────────────────────────────────────── */
 router.get('/swap-working-day/admin', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), swapCtrl.adminList)
+router.delete('/swap-working-day/admin/:id', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), swapCtrl.adminDelete)
+// POST fallback is kept because some reverse proxies / browsers are stricter with DELETE.
+router.post('/swap-working-day/admin/:id/delete', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), swapCtrl.adminDelete)
+// Backward-compatible short alias.
+router.delete('/swap-day/admin/:id', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), swapCtrl.adminDelete)
+router.post('/swap-day/admin/:id/delete', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), swapCtrl.adminDelete)
 
 /* ─────────────────────────────────────────────
    GET ONE (LAST)

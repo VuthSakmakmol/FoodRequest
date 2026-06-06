@@ -107,6 +107,9 @@ router.post('/forget-scan/coo/bulk-decision', requireRole('LEAVE_COO'), ctrl.coo
 /* ───────────────── Admin viewer ───────────────── */
 
 router.get('/forget-scan/admin', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminList)
+router.delete('/forget-scan/admin/:id', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminDelete)
+// POST fallback is kept because some reverse proxies / browsers are stricter with DELETE.
+router.post('/forget-scan/admin/:id/delete', requireRole('LEAVE_ADMIN', 'ADMIN', 'ROOT_ADMIN'), ctrl.adminDelete)
 
 /* ───────────────── Detail (viewer) ─────────────────
    owner / assigned approver / admin viewer can view.

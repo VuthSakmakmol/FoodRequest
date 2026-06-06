@@ -72,6 +72,15 @@ function emitForget(req, payload, event = 'forgetscan:req:updated') {
   }
 }
 
+function emitForgetDeleted(req, docOrPlain, event = 'forgetscan:req:deleted') {
+  try {
+    const raw = typeof docOrPlain?.toObject === 'function' ? docOrPlain.toObject() : (docOrPlain || {})
+    emitForget(req, { ...raw, _id: String(raw._id || raw.id || ''), deleted: true }, event)
+  } catch (e) {
+    console.warn(`⚠️ realtime emitForgetDeleted(${event}) failed:`, e?.message)
+  }
+}
+
 /* ───────────────── helpers ───────────────── */
 function s(v) {
   return String(v ?? '').trim()
@@ -953,7 +962,9 @@ exports.adminList = async (req, res, next) => {
     const to = s(req.query?.to)
 
     const limitRaw = Number(req.query?.limit || 200)
+    const skipRaw = Number(req.query?.skip || 0)
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 1000)) : 200
+    const skip = Number.isFinite(skipRaw) ? Math.max(0, skipRaw) : 0
 
     const q = {}
     if (employeeId) q.employeeId = employeeId
@@ -965,8 +976,40 @@ exports.adminList = async (req, res, next) => {
       if (isValidYMD(to)) q.forgotDate.$lte = to
     }
 
-    const rows = await ExpatForgetScanRequest.find(q).sort({ createdAt: -1 }).limit(limit).lean()
+    const rows = await ExpatForgetScanRequest.find(q).sort({ createdAt: -1, _id: -1 }).skip(skip).limit(limit).lean()
     return res.json(await attachEmployeeInfo(rows || []))
+  } catch (e) {
+    next(e)
+  }
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN HARD DELETE
+   DELETE /api/leave/forget-scan/admin/:id
+───────────────────────────────────────────────────────────── */
+exports.adminDelete = async (req, res, next) => {
+  try {
+    if (!isAdminViewer(req)) throw createError(403, 'Forbidden')
+
+    const id = s(req.params?.id)
+    const actor = actorLoginId(req) || 'admin'
+
+    const doc = await ExpatForgetScanRequest.findById(id)
+    if (!doc) throw createError(404, 'Forget Scan request not found')
+
+    const raw = doc.toObject()
+    await ExpatForgetScanRequest.deleteOne({ _id: doc._id })
+
+    emitForgetDeleted(req, { ...raw, deletedBy: actor, deletedAt: new Date() }, 'forgetscan:req:deleted')
+
+    return res.json({
+      ok: true,
+      deleted: true,
+      id: String(raw._id || id),
+      employeeId: s(raw.employeeId),
+      message: 'Forget Scan request deleted.',
+    })
   } catch (e) {
     next(e)
   }
