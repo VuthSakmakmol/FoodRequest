@@ -66,11 +66,11 @@ const groups = [
   },
   {
     key: 'central-data',
-    header: 'Central Report',
+    header: 'Report',
     icon: 'fa-solid fa-database',
     children: [
       {
-        label: 'Central Data',
+        label: 'Report Data',
         icon: 'fa-solid fa-table',
         to: { name: 'leave-admin-central-data' },
       },

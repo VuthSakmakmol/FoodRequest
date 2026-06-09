@@ -408,13 +408,9 @@ onBeforeUnmount(() => {
                   <tr>
                     <th class="ui-th w-[80px]">No</th>
                     <th class="ui-th w-[160px]">Module</th>
-                    <th class="ui-th w-[180px]">Request ID</th>
                     <th class="ui-th w-[120px]">Emp ID</th>
                     <th class="ui-th w-[220px] text-left">Employee Name</th>
-                    <th class="ui-th w-[180px] text-left">Department</th>
-                    <th class="ui-th w-[180px]">Approval Mode</th>
                     <th class="ui-th w-[180px]">Status</th>
-                    <th class="ui-th w-[120px]">Stage</th>
                     <th class="ui-th w-[120px]">Date From</th>
                     <th class="ui-th w-[120px]">Date To</th>
                     <th class="ui-th w-[360px] text-left">Summary</th>
@@ -424,6 +420,8 @@ onBeforeUnmount(() => {
                     <th class="ui-th w-[180px]">Manager Decision At</th>
                     <th class="ui-th w-[180px]">GM Decision At</th>
                     <th class="ui-th w-[180px]">COO Decision At</th>
+                    <th class="ui-th w-[180px] text-left">Department</th>
+                    <th class="ui-th w-[180px]">Approval Mode</th>
                   </tr>
                 </thead>
 
@@ -458,11 +456,6 @@ onBeforeUnmount(() => {
                         {{ r.module || '—' }}
                       </span>
                     </td>
-
-                    <td class="ui-td whitespace-nowrap font-medium">
-                      {{ r.requestId || '—' }}
-                    </td>
-
                     <td class="ui-td whitespace-nowrap font-medium">
                       {{ r.employeeId || '—' }}
                     </td>
@@ -473,23 +466,9 @@ onBeforeUnmount(() => {
                       </div>
                     </td>
 
-                    <td class="ui-td text-left">
-                      {{ r.department || '—' }}
-                    </td>
-
-                    <td class="ui-td whitespace-nowrap text-xs font-semibold">
-                      {{ r.approvalMode || '—' }}
-                    </td>
-
                     <td class="ui-td">
                       <span :class="statusBadgeClass(r.status)">
                         {{ r.status || '—' }}
-                      </span>
-                    </td>
-
-                    <td class="ui-td">
-                      <span :class="stageBadgeClass(r.stage)">
-                        {{ r.stage || '—' }}
                       </span>
                     </td>
 
@@ -531,6 +510,14 @@ onBeforeUnmount(() => {
 
                     <td class="ui-td whitespace-nowrap">
                       {{ fmtDT(r.cooDecisionAt) }}
+                    </td>
+
+                    <td class="ui-td text-left">
+                      {{ r.department || '—' }}
+                    </td>
+
+                    <td class="ui-td whitespace-nowrap text-xs font-semibold">
+                      {{ r.approvalMode || '—' }}
                     </td>
                   </tr>
                 </tbody>
